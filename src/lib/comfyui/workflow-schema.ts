@@ -9,6 +9,7 @@ import type {
 } from './types'
 
 const PLACEHOLDER_PATTERN = /\$\{([^{}]+)\}/g
+const NUMERIC_LINK_INDEX = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
 const BLOCKED_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor'])
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9_-]+$/
 const VARIABLE_TYPES = new Set<ComfyVariableType>([
@@ -246,15 +247,17 @@ function validateNode(
     if (!nodeIds.has(linkedNodeId)) {
       issues.push(formatIssue(path, `Link references unknown node "${linkedNodeId}".`))
     }
-    if (!Number.isInteger(outputIndex) || outputIndex < 0) {
+    if (typeof outputIndex !== 'number' || !Number.isInteger(outputIndex) || outputIndex < 0) {
       issues.push(formatIssue(path, 'Link output index must be a nonnegative integer.'))
     }
   }, `${nodeId}.inputs`)
 }
 
-function isPotentialLink(value: unknown): value is [string, number] {
-  return Array.isArray(value) && value.length === 2 && typeof value[0] === 'string'
-    && typeof value[1] === 'number'
+function isPotentialLink(value: unknown): value is [string, unknown] {
+  if (!Array.isArray(value) || value.length !== 2
+    || typeof value[0] !== 'string' || value[0].length === 0) return false
+  return typeof value[1] === 'number'
+    || (typeof value[1] === 'string' && NUMERIC_LINK_INDEX.test(value[1]))
 }
 
 function isUiFormat(value: unknown): boolean {
