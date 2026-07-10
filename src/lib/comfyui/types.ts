@@ -1,0 +1,183 @@
+export const COMFY_REQUEST_STATUS = {
+  WAITING_CAPACITY: 'waiting_capacity',
+  BLOCKED_NO_COMPATIBLE_INSTANCE: 'blocked_no_compatible_instance',
+  LEASED: 'leased',
+  UPLOADING: 'uploading',
+  SUBMITTED: 'submitted',
+  RUNNING: 'running',
+  TRANSFERRING: 'transferring',
+  RECONCILING: 'reconciling',
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+  CANCELED: 'canceled',
+} as const
+
+export type ComfyRequestStatus =
+  (typeof COMFY_REQUEST_STATUS)[keyof typeof COMFY_REQUEST_STATUS]
+
+export type ComfyMediaType = 'image' | 'video'
+
+export type ComfyAuthType = 'none' | 'bearer' | 'basic'
+
+export type ComfyConnectionAuth =
+  | { type: 'none' }
+  | { type: 'bearer'; token: string }
+  | { type: 'basic'; username: string; password: string }
+
+export const COMFY_HEALTH_STATE = {
+  ONLINE_IDLE: 'online_idle',
+  ONLINE_BUSY_OWNED: 'online_busy_owned',
+  ONLINE_BUSY_EXTERNAL: 'online_busy_external',
+  OFFLINE: 'offline',
+  AUTH_FAILED: 'auth_failed',
+  WORKFLOW_INCOMPATIBLE: 'workflow_incompatible',
+} as const
+
+export type ComfyHealthState =
+  (typeof COMFY_HEALTH_STATE)[keyof typeof COMFY_HEALTH_STATE]
+
+export interface ComfyDeviceSummary {
+  name?: string
+  type?: string
+  vramTotalBytes?: number
+  vramFreeBytes?: number
+}
+
+export interface ComfyHealthSummary {
+  state: ComfyHealthState
+  checkedAt: string
+  code?: string
+  message?: string
+  version?: string
+  devices?: ComfyDeviceSummary[]
+  runningCount: number
+  pendingCount: number
+}
+
+export interface ComfyQueueSnapshot {
+  running: unknown[]
+  pending: unknown[]
+}
+
+export interface ComfySystemStats {
+  system?: Record<string, unknown>
+  devices?: Array<Record<string, unknown>>
+}
+
+export interface ComfyApiWorkflowNode {
+  class_type: string
+  inputs: Record<string, unknown>
+  _meta?: Record<string, unknown>
+}
+
+export type ComfyApiWorkflow = Record<string, ComfyApiWorkflowNode>
+
+export type ComfyVariableType =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'image_ref'
+  | 'image_ref_list'
+  | 'video_ref'
+
+export interface ComfyMediaRef {
+  storageKey: string
+  mimeType?: string
+  filename?: string
+}
+
+export type ComfyVariableValue = string | number | boolean | ComfyMediaRef | ComfyMediaRef[]
+
+export interface ComfyVariableDefinition {
+  name: string
+  type: ComfyVariableType
+  required: boolean
+  defaultValue?: ComfyVariableValue
+}
+
+export type ComfyBindingTransform = 'filename' | 'image_ref' | 'filename_list'
+
+export interface ComfyInputBinding {
+  nodeId: string
+  inputPath: string
+  variable: string
+  valueType: ComfyVariableType
+  transform?: ComfyBindingTransform
+}
+
+export interface ComfyOutputBinding {
+  name: string
+  nodeId: string
+  fieldPath: string
+  mediaType: ComfyMediaType
+  primary: boolean
+}
+
+export interface ComfyWorkflowRequirements {
+  nodeClasses: string[]
+  models: Array<{ nodeId: string; folder: string; value: string }>
+}
+
+export interface ComfyUploadedFile {
+  name: string
+  subfolder: string
+  type: string
+}
+
+export interface ComfyUploadInput {
+  filename: string
+  contentType: string
+  bytes: Uint8Array
+  overwrite?: boolean
+}
+
+export interface ComfyOutputRef {
+  name: string
+  nodeId: string
+  mediaType: ComfyMediaType
+  primary: boolean
+  filename: string
+  subfolder: string
+  type: string
+}
+
+export interface ComfyStoredOutputRef extends ComfyOutputRef {
+  storageKey: string
+  url: string
+  mediaId?: string
+}
+
+export interface ComfyGenerationResultRefs {
+  primary: ComfyStoredOutputRef
+  outputs: ComfyStoredOutputRef[]
+}
+
+export type ComfyExecutionEvent =
+  | { type: 'executing'; promptId: string; nodeId: string | null }
+  | { type: 'progress'; promptId: string; nodeId?: string; value: number; max: number }
+  | { type: 'executed'; promptId: string; nodeId: string; output?: unknown }
+  | {
+      type: 'execution_error'
+      promptId: string
+      nodeId?: string
+      message: string
+      nodeErrors?: unknown
+    }
+
+export interface ComfyGenerationRequestSnapshot {
+  id: string
+  invocationKey: string
+  userId: string
+  projectId: string
+  taskId: string
+  mediaType: ComfyMediaType
+  workflowId: string
+  workflowVersionId: string
+  variables: Record<string, ComfyVariableValue>
+  status: ComfyRequestStatus
+  connectionId?: string
+  leaseId?: string
+  promptId?: string
+  clientId?: string
+  outputs?: ComfyOutputRef[]
+}
