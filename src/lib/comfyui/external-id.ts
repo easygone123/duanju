@@ -1,7 +1,9 @@
 import { COMFY_ERROR_CODE, ComfyError } from './errors'
 import type { ComfyMediaType } from './types'
 
-const COMFY_EXTERNAL_ID_PATTERN = /^COMFY:(IMAGE|VIDEO):([^:]+)$/
+// The final lookahead is a strict end-of-input assertion; JavaScript's `$` also matches
+// immediately before a trailing newline, which is not valid in an external ID token.
+const COMFY_REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*(?![\s\S])/
 
 export interface ParsedComfyExternalId {
   mediaType: ComfyMediaType
@@ -9,7 +11,10 @@ export interface ParsedComfyExternalId {
 }
 
 export function formatComfyExternalId(mediaType: ComfyMediaType, requestId: string): string {
-  if ((mediaType !== 'image' && mediaType !== 'video') || !requestId || requestId.includes(':')) {
+  if (
+    (mediaType !== 'image' && mediaType !== 'video') ||
+    !COMFY_REQUEST_ID_PATTERN.test(requestId)
+  ) {
     throw invalidExternalId(requestId)
   }
 
@@ -17,14 +22,19 @@ export function formatComfyExternalId(mediaType: ComfyMediaType, requestId: stri
 }
 
 export function parseComfyExternalId(externalId: string): ParsedComfyExternalId {
-  const match = COMFY_EXTERNAL_ID_PATTERN.exec(externalId)
-  if (!match) {
+  const [prefix, mediaTypeToken, requestId, ...extraSegments] = externalId.split(':')
+  if (
+    prefix !== 'COMFY' ||
+    (mediaTypeToken !== 'IMAGE' && mediaTypeToken !== 'VIDEO') ||
+    !COMFY_REQUEST_ID_PATTERN.test(requestId ?? '') ||
+    extraSegments.length > 0
+  ) {
     throw invalidExternalId(externalId)
   }
 
   return {
-    mediaType: match[1].toLowerCase() as ComfyMediaType,
-    requestId: match[2],
+    mediaType: mediaTypeToken.toLowerCase() as ComfyMediaType,
+    requestId,
   }
 }
 

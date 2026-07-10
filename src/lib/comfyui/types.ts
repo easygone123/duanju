@@ -173,11 +173,11 @@ export interface ComfyGenerationRequestSnapshot {
   mediaType: ComfyMediaType
   workflowId: string
   workflowVersionId: string
-  variables: Record<string, ComfyVariableValue>
+  variableSnapshot: Record<string, ComfyVariableValue>
   status: ComfyRequestStatus
   connectionId?: string
   leaseId?: string
   promptId?: string
   clientId?: string
-  outputs?: ComfyOutputRef[]
+  outputRefs?: ComfyOutputRef[]
 }
