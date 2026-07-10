@@ -242,7 +242,7 @@ function validateNode(
   }
 
   visitValues(value.inputs, (nestedValue, path) => {
-    if (!isPotentialLink(nestedValue)) return
+    if (!isPotentialLink(nestedValue, nodeIds)) return
     const [linkedNodeId, outputIndex] = nestedValue
     if (!nodeIds.has(linkedNodeId)) {
       issues.push(formatIssue(path, `Link references unknown node "${linkedNodeId}".`))
@@ -253,11 +253,13 @@ function validateNode(
   }, `${nodeId}.inputs`)
 }
 
-function isPotentialLink(value: unknown): value is [string, unknown] {
+function isPotentialLink(value: unknown, nodeIds: Set<string>): value is [string, unknown] {
   if (!Array.isArray(value) || value.length !== 2
     || typeof value[0] !== 'string' || value[0].length === 0) return false
   return typeof value[1] === 'number'
-    || (typeof value[1] === 'string' && NUMERIC_LINK_INDEX.test(value[1]))
+    || (nodeIds.has(value[0])
+      && typeof value[1] === 'string'
+      && NUMERIC_LINK_INDEX.test(value[1]))
 }
 
 function isUiFormat(value: unknown): boolean {

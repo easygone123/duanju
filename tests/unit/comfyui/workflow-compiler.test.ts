@@ -81,7 +81,7 @@ describe('ComfyUI workflow compiler', () => {
 
   it.each([
     ['numeric string output index', ['1', '0']],
-    ['missing node with numeric string output index', ['missing', '0']],
+    ['missing node with numeric output index', ['missing', 0]],
     ['negative output index', ['1', -1]],
     ['fractional output index', ['1', 0.5]],
   ])('rejects malformed link tuples: %s', (_case, link) => {
@@ -101,7 +101,7 @@ describe('ComfyUI workflow compiler', () => {
     ]))
   })
 
-  it('accepts valid links and nonnumeric two-string input arrays', () => {
+  it('accepts valid links and ambiguous two-string input arrays', () => {
     expect(validateComfyApiWorkflow({
       '1': { class_type: 'Source', inputs: {} },
       sink: {
@@ -109,6 +109,9 @@ describe('ComfyUI workflow compiler', () => {
         inputs: {
           images: ['1', 0],
           filenames: ['image-a.png', 'image-b.png'],
+          draftVersion: ['draft', '2'],
+          dimensions: ['1920', '1080'],
+          unknownReference: ['missing', '0'],
         },
       },
     })).toEqual({
@@ -118,6 +121,9 @@ describe('ComfyUI workflow compiler', () => {
         inputs: {
           images: ['1', 0],
           filenames: ['image-a.png', 'image-b.png'],
+          draftVersion: ['draft', '2'],
+          dimensions: ['1920', '1080'],
+          unknownReference: ['missing', '0'],
         },
       },
     })
