@@ -72,6 +72,19 @@ export interface ComfyApiWorkflowNode {
 
 export type ComfyApiWorkflow = Record<string, ComfyApiWorkflowNode>
 
+export interface WorkflowValidationIssue {
+  code: string
+  message: string
+  path?: string
+}
+
+export interface WorkflowContractInput {
+  graph: unknown
+  variableDefinitions: ComfyVariableDefinition[]
+  bindings: ComfyInputBinding[]
+  outputs: ComfyOutputBinding[]
+}
+
 export type ComfyVariableType =
   | 'string'
   | 'number'
@@ -88,11 +101,14 @@ export interface ComfyMediaRef {
 
 export type ComfyVariableValue = string | number | boolean | ComfyMediaRef | ComfyMediaRef[]
 
+export type ComfyMissingValuePolicy = 'preserve_original'
+
 export interface ComfyVariableDefinition {
   name: string
   type: ComfyVariableType
   required: boolean
   defaultValue?: ComfyVariableValue
+  missingValuePolicy?: ComfyMissingValuePolicy
 }
 
 export type ComfyBindingTransform = 'filename' | 'image_ref' | 'filename_list'
@@ -103,6 +119,15 @@ export interface ComfyInputBinding {
   variable: string
   valueType: ComfyVariableType
   transform?: ComfyBindingTransform
+  missingValuePolicy?: ComfyMissingValuePolicy
+}
+
+export interface RenderWorkflowInput {
+  graph: ComfyApiWorkflow
+  variables: Record<string, ComfyVariableValue | undefined>
+  variableDefinitions: ComfyVariableDefinition[]
+  bindings: ComfyInputBinding[]
+  uploads: Record<string, ComfyUploadedFile | ComfyUploadedFile[] | undefined>
 }
 
 export interface ComfyOutputBinding {
@@ -115,7 +140,7 @@ export interface ComfyOutputBinding {
 
 export interface ComfyWorkflowRequirements {
   nodeClasses: string[]
-  models: Array<{ nodeId: string; folder: string; value: string }>
+  candidateLoaderInputs: Array<{ nodeId: string; inputName: string; value: string }>
 }
 
 export interface ComfyUploadedFile {
