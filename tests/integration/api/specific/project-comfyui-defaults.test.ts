@@ -153,6 +153,22 @@ describe('api specific - project ComfyUI defaults', () => {
       .rejects.toThrow('MODEL_KEY_INVALID')
   })
 
+  it('central image payload builder snapshots the pinned Comfy version', async () => {
+    const { buildImageBillingPayload, getProjectModelConfig } = await import('@/lib/config-service')
+    const projectModelConfig = await getProjectModelConfig('project-1', 'user-1')
+    const payload = await buildImageBillingPayload({
+      projectId: 'project-1', userId: 'user-1',
+      imageModel: projectModelConfig.storyboardModel,
+      projectModelConfig,
+      basePayload: { candidateCount: 2 },
+    })
+    expect(payload).toMatchObject({
+      imageModel: 'comfyui::image-workflow',
+      comfyWorkflowVersionId: 'image-version-1',
+      candidateCount: 2,
+    })
+  })
+
   it.each([
     ['null body', null],
     ['array body', []],

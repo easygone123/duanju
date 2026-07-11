@@ -307,6 +307,7 @@ async function submitProjectAssetGenerateTask(input: AssetGenerateInput) {
       projectId,
       userId: input.access.userId,
       imageModel,
+      projectModelConfig,
       basePayload: payloadBase,
     })
   } catch (error) {
@@ -494,6 +495,7 @@ async function submitProjectAssetModifyTask(input: AssetModifyInput) {
       projectId,
       userId: input.access.userId,
       imageModel: projectModelConfig.editModel,
+      projectModelConfig,
       basePayload: payload,
     })
   } catch (error) {

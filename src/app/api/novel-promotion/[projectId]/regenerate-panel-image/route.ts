@@ -7,8 +7,7 @@ import { TASK_TYPE } from '@/lib/task/types'
 import { buildDefaultTaskBillingInfo } from '@/lib/billing'
 import { hasPanelImageOutput } from '@/lib/task/has-output'
 import { withTaskUiPayload } from '@/lib/task/ui-payload'
-import { getProjectModelConfig } from '@/lib/config-service'
-import { resolveProjectModelCapabilityGenerationOptions } from '@/lib/config-service'
+import { buildImageBillingPayload, getProjectModelConfig } from '@/lib/config-service'
 import { resolveModelSelection } from '@/lib/api-config'
 
 const DEFAULT_CANDIDATE_COUNT = 1
@@ -50,19 +49,13 @@ export const POST = apiHandler(async (
       message})
   }
 
-  const capabilityOptions = await resolveProjectModelCapabilityGenerationOptions({
+  const billingPayload = await buildImageBillingPayload({
     projectId,
     userId: session.user.id,
-    modelType: 'image',
-    modelKey: projectModelConfig.storyboardModel})
-  const billingPayload = {
-    ...body,
-    candidateCount,
     imageModel: projectModelConfig.storyboardModel,
-    ...(projectModelConfig.comfyImageWorkflowVersionId
-      ? { comfyWorkflowVersionId: projectModelConfig.comfyImageWorkflowVersionId }
-      : {}),
-    ...(Object.keys(capabilityOptions).length > 0 ? { generationOptions: capabilityOptions } : {})}
+    projectModelConfig,
+    basePayload: { ...body, candidateCount },
+  })
 
   const hasOutputAtStart = await hasPanelImageOutput(panelId)
 

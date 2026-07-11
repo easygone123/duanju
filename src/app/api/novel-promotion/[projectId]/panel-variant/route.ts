@@ -130,6 +130,7 @@ export const POST = apiHandler(async (
       projectId,
       userId: session.user.id,
       imageModel,
+      projectModelConfig,
       basePayload: { ...body, newPanelId: createdPanelId },
     })
   } catch (error) {

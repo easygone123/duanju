@@ -328,18 +328,21 @@ export async function buildImageBillingPayload(input: {
   projectId: string
   userId: string
   imageModel: string | null
+  projectModelConfig?: ProjectModelConfig
   basePayload: Record<string, unknown>
 }): Promise<Record<string, unknown>> {
   const { projectId, userId, imageModel, basePayload } = input
   if (!imageModel) return basePayload
 
   let capabilityOptions: Record<string, CapabilityValue> = {}
+  const projectModelConfig = input.projectModelConfig
+    ?? await getProjectModelConfig(projectId, userId)
   try {
-    capabilityOptions = await resolveProjectModelCapabilityGenerationOptions({
-      projectId,
-      userId,
+    capabilityOptions = resolveModelCapabilityGenerationOptions({
       modelType: 'image',
       modelKey: imageModel,
+      capabilityDefaults: projectModelConfig.capabilityDefaults,
+      capabilityOverrides: projectModelConfig.capabilityOverrides,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Image model capability not configured'
@@ -349,6 +352,10 @@ export async function buildImageBillingPayload(input: {
   return {
     ...basePayload,
     imageModel,
+    ...(parseModelKeyStrict(imageModel)?.provider === 'comfyui'
+      && projectModelConfig.comfyImageWorkflowVersionId
+      ? { comfyWorkflowVersionId: projectModelConfig.comfyImageWorkflowVersionId }
+      : {}),
     ...(Object.keys(capabilityOptions).length > 0 ? { generationOptions: capabilityOptions } : {}),
   }
 }
