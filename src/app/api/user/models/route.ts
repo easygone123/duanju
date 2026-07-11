@@ -175,9 +175,15 @@ export const GET = apiHandler(async () => {
       select: { customModels: true, customProviders: true },
     }),
     prisma.comfyWorkflow.findMany({
-      where: { userId, status: 'published' },
+      where: {
+        userId,
+        status: 'published',
+        currentVersionId: { not: null },
+        currentVersion: { is: { publishedAt: { not: null } } },
+      },
       select: { id: true, name: true, mediaType: true },
       orderBy: [{ mediaType: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+      take: 500,
     }),
   ])
 
@@ -213,6 +219,7 @@ export const GET = apiHandler(async () => {
     if (!modelKey) continue
 
     const provider = toProvider(model)
+    if (provider === 'comfyui') continue
     if (!provider || !providerIdsWithApiKey.has(provider)) continue
     const modelId = toModelId(model)
     const option: UserModelOption = {

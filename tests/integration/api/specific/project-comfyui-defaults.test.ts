@@ -30,14 +30,21 @@ const prismaMock = vi.hoisted(() => ({
   projectComfyBinding: {
     findUnique: vi.fn(async (): Promise<{
       imageWorkflowId: string | null
+      imageWorkflowVersionId?: string | null
       videoWorkflowId: string | null
+      videoWorkflowVersionId?: string | null
     } | null> => ({
-      imageWorkflowId: 'image-workflow', videoWorkflowId: 'video-workflow',
+      imageWorkflowId: 'image-workflow', imageWorkflowVersionId: 'image-version-1',
+      videoWorkflowId: 'video-workflow', videoWorkflowVersionId: 'video-version-1',
     })),
   },
 }))
 
-const bindingMock = vi.hoisted(() => ({ bindProjectDefaultWorkflow: vi.fn(async () => ({})) }))
+const bindingMock = vi.hoisted(() => ({
+  updateProjectWithComfyDefaults: vi.fn(async (input: { projectData: Record<string, unknown> }) => ({
+    novelPromotionProject: { id: 'np-1', ...input.projectData },
+  })),
+}))
 const mediaAttachMock = vi.hoisted(() => ({ attachMediaFieldsToProject: vi.fn(async (value: unknown) => value) }))
 
 vi.mock('@/lib/api-auth', () => authMock)
@@ -81,15 +88,11 @@ describe('api specific - project ComfyUI defaults', () => {
     }), { params: Promise.resolve({ projectId: 'project-1' }) })
 
     expect(response.status).toBe(200)
-    expect(bindingMock.bindProjectDefaultWorkflow).toHaveBeenNthCalledWith(
-      1, 'user-1', 'project-1', 'image', 'image-workflow',
-    )
-    expect(bindingMock.bindProjectDefaultWorkflow).toHaveBeenNthCalledWith(
-      2, 'user-1', 'project-1', 'video', 'video-workflow',
-    )
-    expect(prismaMock.novelPromotionProject.update).toHaveBeenCalledWith({
-      where: { projectId: 'project-1' }, data: {},
+    expect(bindingMock.updateProjectWithComfyDefaults).toHaveBeenCalledWith({
+      userId: 'user-1', projectId: 'project-1', projectData: {},
+      imageWorkflowId: 'image-workflow', videoWorkflowId: 'video-workflow',
     })
+    expect(prismaMock.novelPromotionProject.update).not.toHaveBeenCalled()
   })
 
   it('clears a Comfy binding without overwriting the specialized provider model', async () => {
@@ -100,12 +103,10 @@ describe('api specific - project ComfyUI defaults', () => {
     }), { params: Promise.resolve({ projectId: 'project-1' }) })
 
     expect(response.status).toBe(200)
-    expect(bindingMock.bindProjectDefaultWorkflow).toHaveBeenCalledWith(
-      'user-1', 'project-1', 'image', null,
-    )
-    expect(prismaMock.novelPromotionProject.update).toHaveBeenCalledWith({
-      where: { projectId: 'project-1' }, data: {},
+    expect(bindingMock.updateProjectWithComfyDefaults).toHaveBeenCalledWith({
+      userId: 'user-1', projectId: 'project-1', projectData: {}, imageWorkflowId: null,
     })
+    expect(prismaMock.novelPromotionProject.update).not.toHaveBeenCalled()
   })
 
   it('resolves strict precedence task override then Comfy binding then project model then user default', async () => {
@@ -116,6 +117,8 @@ describe('api specific - project ComfyUI defaults', () => {
     })
     expect(taskConfig.storyboardModel).toBe('task::image')
     expect(taskConfig.videoModel).toBe('task::video')
+    expect(taskConfig.comfyImageWorkflowVersionId).toBeNull()
+    expect(taskConfig.comfyVideoWorkflowVersionId).toBeNull()
 
     const bindingConfig = await getProjectModelConfig('project-1', 'user-1')
     expect(bindingConfig.characterModel).toBe('comfyui::image-workflow')
@@ -123,6 +126,8 @@ describe('api specific - project ComfyUI defaults', () => {
     expect(bindingConfig.storyboardModel).toBe('comfyui::image-workflow')
     expect(bindingConfig.editModel).toBe('comfyui::image-workflow')
     expect(bindingConfig.videoModel).toBe('comfyui::video-workflow')
+    expect(bindingConfig.comfyImageWorkflowVersionId).toBe('image-version-1')
+    expect(bindingConfig.comfyVideoWorkflowVersionId).toBe('video-version-1')
 
     prismaMock.projectComfyBinding.findUnique.mockResolvedValueOnce({
       imageWorkflowId: null, videoWorkflowId: null,
@@ -146,5 +151,22 @@ describe('api specific - project ComfyUI defaults', () => {
     const { getProjectModelConfig } = await import('@/lib/config-service')
     await expect(getProjectModelConfig('project-1', 'user-1', { imageModel: 'legacy-model-id' }))
       .rejects.toThrow('MODEL_KEY_INVALID')
+  })
+
+  it.each([
+    ['null body', null],
+    ['array body', []],
+    ['unknown field', { surprise: true }],
+    ['oversized workflow id', { comfyImageWorkflowId: `w${'x'.repeat(191)}` }],
+    ['malformed workflow id', { comfyVideoWorkflowId: 'bad:id' }],
+  ])('rejects %s before any database write or audit', async (_case, requestBody) => {
+    const route = await import('@/app/api/novel-promotion/[projectId]/route')
+    const response = await route.PATCH(buildMockRequest({
+      path: '/api/novel-promotion/project-1', method: 'PATCH', body: requestBody,
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(400)
+    expect(bindingMock.updateProjectWithComfyDefaults).not.toHaveBeenCalled()
+    expect(prismaMock.novelPromotionProject.update).not.toHaveBeenCalled()
   })
 })

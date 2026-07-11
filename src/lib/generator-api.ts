@@ -76,6 +76,7 @@ export async function generateImage(
         return submitComfyImageGeneration({
             userId,
             workflowId: selection.modelId,
+            workflowVersionId: comfy.workflowVersionId,
             prompt,
             context: comfy.context,
             variables: {
@@ -228,6 +229,7 @@ export async function generateVideo(
         return submitComfyVideoGeneration({
             userId,
             workflowId: selection.modelId,
+            workflowVersionId: comfy.workflowVersionId,
             prompt: options?.prompt,
             context: comfy.context,
             variables: {

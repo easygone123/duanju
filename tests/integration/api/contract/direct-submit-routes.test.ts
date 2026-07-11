@@ -41,12 +41,15 @@ const configServiceMock = vi.hoisted(() => ({
     ...input.basePayload,
     generationOptions: { resolution: '1024x1024' },
   })),
-  getProjectModelConfig: vi.fn(async () => ({
+  getProjectModelConfig: vi.fn(async (_projectId: string, _userId: string, overrides?: { videoModel?: string }) => ({
     characterModel: 'img::character',
     locationModel: 'img::location',
     editModel: 'img::edit',
     storyboardModel: 'img::storyboard',
     analysisModel: 'llm::analysis',
+    videoModel: overrides?.videoModel ?? 'video::model',
+    comfyImageWorkflowVersionId: null,
+    comfyVideoWorkflowVersionId: null,
   })),
   buildImageBillingPayload: vi.fn(async (input: { basePayload: Record<string, unknown> }) => ({
     ...input.basePayload,

@@ -33,7 +33,10 @@ export const POST = apiHandler(async (
     throw new ApiError('INVALID_PARAMS')
   }
 
-  const projectModelConfig = await getProjectModelConfig(projectId, session.user.id)
+  const requestedImageModel = typeof body?.imageModel === 'string' ? body.imageModel : undefined
+  const projectModelConfig = await getProjectModelConfig(projectId, session.user.id, {
+    imageModel: requestedImageModel,
+  })
   if (!projectModelConfig.storyboardModel) {
     throw new ApiError('INVALID_PARAMS', {
       code: 'STORYBOARD_MODEL_NOT_CONFIGURED'})
@@ -56,6 +59,9 @@ export const POST = apiHandler(async (
     ...body,
     candidateCount,
     imageModel: projectModelConfig.storyboardModel,
+    ...(projectModelConfig.comfyImageWorkflowVersionId
+      ? { comfyWorkflowVersionId: projectModelConfig.comfyImageWorkflowVersionId }
+      : {}),
     ...(Object.keys(capabilityOptions).length > 0 ? { generationOptions: capabilityOptions } : {})}
 
   const hasOutputAtStart = await hasPanelImageOutput(panelId)

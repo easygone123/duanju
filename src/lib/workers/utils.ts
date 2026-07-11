@@ -84,6 +84,7 @@ export async function buildComfyProviderInvocation(
     taskId: string
     modelKey: string
     invocationKey: string
+    workflowVersionId?: string
     inputImages?: string[]
     firstFrame?: string
     lastFrame?: string
@@ -113,6 +114,7 @@ export async function buildComfyProviderInvocation(
       taskId: input.taskId,
       invocationKey: input.invocationKey,
     },
+    ...(input.workflowVersionId ? { workflowVersionId: input.workflowVersionId } : {}),
     ...(inputImages ? { inputImages } : {}),
     ...(firstFrame ? { firstFrame } : {}),
     ...(lastFrame ? { lastFrame } : {}),
@@ -295,6 +297,7 @@ export async function resolveImageSourceFromGeneration(
     userId: string
     modelId: string
     invocationKey: string
+    comfyWorkflowVersionId?: string
     prompt: string
     options?: {
       referenceImages?: string[]
@@ -366,6 +369,7 @@ export async function resolveImageSourceFromGeneration(
     taskId: job.data.taskId,
     modelKey: params.modelId,
     invocationKey: params.invocationKey,
+    workflowVersionId: params.comfyWorkflowVersionId,
     inputImages: params.comfyReferenceImages ?? params.options?.referenceImages,
   })
 
@@ -561,6 +565,7 @@ export async function resolveVideoSourceFromGeneration(
     userId: string
     modelId: string
     invocationKey: string
+    comfyWorkflowVersionId?: string
     imageUrl: string
     comfyFirstFrameSource?: string
     comfyLastFrameSource?: string
@@ -651,6 +656,7 @@ export async function resolveVideoSourceFromGeneration(
     taskId: job.data.taskId,
     modelKey: params.modelId,
     invocationKey: params.invocationKey,
+    workflowVersionId: params.comfyWorkflowVersionId,
     firstFrame: params.comfyFirstFrameSource ?? params.imageUrl,
     lastFrame: params.comfyLastFrameSource ?? params.options?.lastFrameImageUrl,
   })

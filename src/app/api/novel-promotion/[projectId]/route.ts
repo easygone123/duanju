@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { logProjectAction } from '@/lib/logging/semantic'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { isArtStyleValue } from '@/lib/constants'
 import { attachMediaFieldsToProject } from '@/lib/media/attach'
-import { bindProjectDefaultWorkflow } from '@/lib/comfyui/workflow-service'
+import { updateProjectWithComfyDefaults } from '@/lib/comfyui/workflow-service'
 import {
   parseModelKeyStrict,
   type CapabilitySelections,
@@ -37,6 +38,26 @@ const MODEL_FIELD_TO_TYPE: Record<typeof MODEL_FIELDS[number], UnifiedModelType>
 }
 
 const CAPABILITY_MODEL_TYPES: readonly UnifiedModelType[] = ['image', 'video', 'llm', 'audio', 'lipsync']
+const MODEL_KEY_INPUT = z.string().trim().min(1).max(512).nullable()
+const COMFY_WORKFLOW_ID_INPUT = z.string().trim().min(1).max(191)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/).nullable()
+const PROJECT_PATCH_SCHEMA = z.object({
+  analysisModel: MODEL_KEY_INPUT.optional(),
+  characterModel: MODEL_KEY_INPUT.optional(),
+  locationModel: MODEL_KEY_INPUT.optional(),
+  storyboardModel: MODEL_KEY_INPUT.optional(),
+  editModel: MODEL_KEY_INPUT.optional(),
+  videoModel: MODEL_KEY_INPUT.optional(),
+  audioModel: MODEL_KEY_INPUT.optional(),
+  videoRatio: z.string().max(64).optional(),
+  artStyle: z.string().max(64).optional(),
+  ttsRate: z.string().max(64).optional(),
+  lipSyncEnabled: z.boolean().optional(),
+  lipSyncMode: z.string().max(64).optional(),
+  capabilityOverrides: z.unknown().optional(),
+  comfyImageWorkflowId: COMFY_WORKFLOW_ID_INPUT.optional(),
+  comfyVideoWorkflowId: COMFY_WORKFLOW_ID_INPUT.optional(),
+}).strict()
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -285,7 +306,11 @@ export const PATCH = apiHandler(async (
   const session = authResult.session
   const project = authResult.project
 
-  const body = await request.json()
+  const parsedBody = PROJECT_PATCH_SCHEMA.safeParse(await request.json())
+  if (!parsedBody.success) {
+    throw new ApiError('INVALID_PARAMS', { code: 'PROJECT_CONFIG_INVALID' })
+  }
+  const body = parsedBody.data
 
   const currentProjectConfig = await prisma.novelPromotionProject.findUnique({
     where: { projectId },
@@ -300,26 +325,6 @@ export const PATCH = apiHandler(async (
     }})
   if (!currentProjectConfig) {
     throw new ApiError('NOT_FOUND')
-  }
-
-  const comfyBindings = [
-    ['comfyImageWorkflowId', 'image'],
-    ['comfyVideoWorkflowId', 'video'],
-  ] as const
-  const normalizedComfyBindings: Array<{
-    mediaType: 'image' | 'video'
-    workflowId: string | null
-  }> = []
-  for (const [field, mediaType] of comfyBindings) {
-    if (body[field] === undefined) continue
-    const workflowId = body[field]
-    if (workflowId !== null && (typeof workflowId !== 'string' || !workflowId.trim())) {
-      throw new ApiError('INVALID_PARAMS', { code: 'COMFY_WORKFLOW_ID_INVALID', field })
-    }
-    normalizedComfyBindings.push({
-      mediaType,
-      workflowId: typeof workflowId === 'string' ? workflowId.trim() : null,
-    })
   }
 
   const allowedProjectFields = [
@@ -353,18 +358,19 @@ export const PATCH = apiHandler(async (
     updateData[field] = body[field]
   }
 
-  for (const binding of normalizedComfyBindings) {
-    await bindProjectDefaultWorkflow(
-      session.user.id,
-      projectId,
-      binding.mediaType,
-      binding.workflowId,
-    )
+  const atomicUpdateInput = {
+    userId: session.user.id,
+    projectId,
+    projectData: updateData,
+    ...(Object.hasOwn(body, 'comfyImageWorkflowId')
+      ? { imageWorkflowId: body.comfyImageWorkflowId ?? null }
+      : {}),
+    ...(Object.hasOwn(body, 'comfyVideoWorkflowId')
+      ? { videoWorkflowId: body.comfyVideoWorkflowId ?? null }
+      : {}),
   }
-
-  const updatedNovelPromotionData = await prisma.novelPromotionProject.update({
-    where: { projectId },
-    data: updateData})
+  const atomicResult = await updateProjectWithComfyDefaults(atomicUpdateInput)
+  const updatedNovelPromotionData = atomicResult.novelPromotionProject
 
   const novelPromotionDataWithSignedUrls = await attachMediaFieldsToProject(updatedNovelPromotionData)
 
@@ -378,7 +384,7 @@ export const PATCH = apiHandler(async (
     session.user.name,
     projectId,
     project.name,
-    JSON.stringify({ changes: body }),
+    JSON.stringify({ changes: parsedBody.data }),
   )
 
   return NextResponse.json({ project: fullProject })

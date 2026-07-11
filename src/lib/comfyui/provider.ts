@@ -20,6 +20,7 @@ export interface ComfyGenerationContext {
 
 export interface ComfyProviderInvocation {
   context: ComfyGenerationContext
+  workflowVersionId?: string
   variables?: Record<string, ComfyVariableValue>
   inputImages?: ComfyMediaRef[]
   firstFrame?: ComfyMediaRef
@@ -29,6 +30,7 @@ export interface ComfyProviderInvocation {
 interface SubmitComfyGenerationInput {
   userId: string
   workflowId: string
+  workflowVersionId?: string
   prompt?: string
   context: ComfyGenerationContext
   variables?: Record<string, ComfyVariableValue>
@@ -85,6 +87,7 @@ async function submitComfyGeneration(
     taskId: input.context.taskId,
     mediaType,
     workflowId: input.workflowId,
+    ...(input.workflowVersionId ? { workflowVersionId: input.workflowVersionId } : {}),
     variables,
   })
   if (typeof request.id !== 'string' || !request.id) throw new ApiError('CONFLICT')

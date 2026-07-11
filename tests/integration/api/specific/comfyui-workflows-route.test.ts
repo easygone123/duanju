@@ -15,6 +15,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   comfyConnection: { findFirst: vi.fn() },
   project: { findFirst: vi.fn() },
+  novelPromotionProject: { findUnique: vi.fn(), update: vi.fn() },
   projectComfyBinding: { count: vi.fn(), upsert: vi.fn() },
 }))
 
@@ -271,9 +272,46 @@ describe('ComfyUI workflow library', () => {
     expect(prismaMock.$transaction).toHaveBeenCalled()
     expect(prismaMock.projectComfyBinding.upsert).toHaveBeenCalledWith(expect.objectContaining({
       where: { projectId_userId: { projectId: 'project-1', userId: 'user-1' } },
-      create: expect.objectContaining({ imageWorkflowId: 'workflow-1' }),
-      update: { imageWorkflowId: 'workflow-1' },
+      create: expect.objectContaining({
+        imageWorkflowId: 'workflow-1', imageWorkflowVersionId: 'version-1',
+      }),
+      update: { imageWorkflowId: 'workflow-1', imageWorkflowVersionId: 'version-1' },
     }))
+  })
+
+  it('updates both pinned defaults and project fields in one serializable transaction', async () => {
+    prismaMock.project.findFirst.mockResolvedValue({ id: 'project-1', userId: 'user-1' })
+    prismaMock.novelPromotionProject.findUnique.mockResolvedValue({ projectId: 'project-1' })
+    prismaMock.novelPromotionProject.update.mockResolvedValue({ projectId: 'project-1', artStyle: 'realistic' })
+    prismaMock.comfyWorkflow.findFirst
+      .mockResolvedValueOnce(workflow({
+        status: 'published', mediaType: 'image', currentVersionId: 'image-v1',
+        currentVersion: version({ id: 'image-v1', publishedAt: new Date(),
+          lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' } }),
+      }))
+      .mockResolvedValueOnce(workflow({
+        id: 'workflow-video', status: 'published', mediaType: 'video', currentVersionId: 'video-v1',
+        currentVersion: version({ id: 'video-v1', workflowId: 'workflow-video', publishedAt: new Date(),
+          lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' } }),
+      }))
+    prismaMock.projectComfyBinding.upsert.mockResolvedValue({ projectId: 'project-1' })
+
+    const { updateProjectWithComfyDefaults } = await import('@/lib/comfyui/workflow-service')
+    await updateProjectWithComfyDefaults({
+      userId: 'user-1', projectId: 'project-1', projectData: { artStyle: 'realistic' },
+      imageWorkflowId: 'workflow-1', videoWorkflowId: 'workflow-video',
+    })
+
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
+    expect(prismaMock.projectComfyBinding.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        imageWorkflowId: 'workflow-1', imageWorkflowVersionId: 'image-v1',
+        videoWorkflowId: 'workflow-video', videoWorkflowVersionId: 'video-v1',
+      }),
+    }))
+    expect(prismaMock.novelPromotionProject.update).toHaveBeenCalledWith({
+      where: { projectId: 'project-1' }, data: { artStyle: 'realistic' },
+    })
   })
 
   it('rejects publication of an invalid version with validation details', async () => {

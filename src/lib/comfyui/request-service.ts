@@ -44,6 +44,7 @@ export interface CreateComfyGenerationRequestInput {
   taskId: string
   mediaType: ComfyMediaType
   workflowId: string
+  workflowVersionId?: string
   variables: Record<string, ComfyVariableValue>
 }
 
@@ -53,6 +54,11 @@ interface RequestCreateOperations {
     id: string
     userId: string
     mediaType: ComfyMediaType
+  }): Promise<Record<string, unknown> | null>
+  findPublishedVersion?(input: {
+    id: string
+    workflowId: string
+    requireSuccessfulTest: boolean
   }): Promise<Record<string, unknown> | null>
   create(data: Record<string, unknown>): Promise<Record<string, unknown>>
   resolveOwnedMedia?(input: OwnedComfyMediaInput): Promise<boolean>
@@ -70,6 +76,12 @@ const defaultCreateOperations: RequestCreateOperations = {
     where: { id, userId, mediaType, status: 'published' },
     include: { currentVersion: true },
   }),
+  findPublishedVersion: ({ id, workflowId, requireSuccessfulTest }) => prisma.comfyWorkflowVersion.findFirst({
+    where: {
+      id, workflowId, publishedAt: { not: null },
+      ...(requireSuccessfulTest ? { lastSuccessfulTestAt: { not: null } } : {}),
+    },
+  }),
   create: (data) => prisma.comfyGenerationRequest.create({
     data: data as Prisma.ComfyGenerationRequestUncheckedCreateInput,
   }),
@@ -85,6 +97,12 @@ const defaultCreateDependencies: RequestCreateDependencies = {
     findPublishedWorkflow: ({ id, userId, mediaType }) => tx.comfyWorkflow.findFirst({
       where: { id, userId, mediaType, status: 'published' },
       include: { currentVersion: true },
+    }),
+    findPublishedVersion: ({ id, workflowId, requireSuccessfulTest }) => tx.comfyWorkflowVersion.findFirst({
+      where: {
+        id, workflowId, publishedAt: { not: null },
+        ...(requireSuccessfulTest ? { lastSuccessfulTestAt: { not: null } } : {}),
+      },
     }),
     create: (data) => tx.comfyGenerationRequest.create({
       data: data as Prisma.ComfyGenerationRequestUncheckedCreateInput,
@@ -107,13 +125,25 @@ export async function createComfyGenerationRequest(
         id: input.workflowId, userId: input.userId, mediaType: input.mediaType,
       })
       const currentVersion = workflow?.currentVersion
-      if (!workflow || workflow.currentVersionId === null || !isRecord(currentVersion)
-        || currentVersion.id !== workflow.currentVersionId
-        || currentVersion.workflowId !== workflow.id || !currentVersion.publishedAt) {
+      if (!isRecord(workflow) || typeof workflow.id !== 'string') {
+        throw new ApiError('NOT_FOUND')
+      }
+      const selectedVersion = input.workflowVersionId
+        ? await client.findPublishedVersion?.({
+          id: input.workflowVersionId,
+          workflowId: workflow.id,
+          requireSuccessfulTest: true,
+        })
+        : currentVersion
+      if (!isRecord(selectedVersion)
+        || selectedVersion.workflowId !== workflow.id || !selectedVersion.publishedAt
+        || (input.workflowVersionId
+          ? selectedVersion.id !== input.workflowVersionId || !selectedVersion.lastSuccessfulTestAt
+          : workflow.currentVersionId === null || selectedVersion.id !== workflow.currentVersionId)) {
         throw new ApiError('NOT_FOUND')
       }
       const variableSnapshot = await sanitizeVariableSnapshot(
-        input.variables, currentVersion.variableDefinitions, input.userId, input.projectId,
+        input.variables, selectedVersion.variableDefinitions, input.userId, input.projectId,
         client.resolveOwnedMedia,
       )
       return client.create({
@@ -123,7 +153,7 @@ export async function createComfyGenerationRequest(
         taskId: input.taskId,
         mediaType: input.mediaType,
         workflowId: workflow.id,
-        workflowVersionId: currentVersion.id,
+        workflowVersionId: selectedVersion.id,
         variableSnapshot,
         status: COMFY_REQUEST_STATUS.WAITING_CAPACITY,
       })

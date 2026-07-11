@@ -14,7 +14,7 @@ import {
   resolveBuiltinCapabilitiesByModelKey,
 } from '@/lib/model-capabilities/lookup'
 import { resolveBuiltinPricing } from '@/lib/model-pricing/lookup'
-import { resolveProjectModelCapabilityGenerationOptions } from '@/lib/config-service'
+import { getProjectModelConfig, resolveProjectModelCapabilityGenerationOptions } from '@/lib/config-service'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -196,6 +196,19 @@ export const POST = apiHandler(async (
   const { session } = authResult
 
   const body = await request.json()
+  const requestedVideoModel = isRecord(body) ? resolveVideoModelKeyFromPayload(body) : null
+  const projectModels = await getProjectModelConfig(projectId, session.user.id, {
+    videoModel: requestedVideoModel,
+  })
+  if (!isRecord(body) || !projectModels.videoModel) {
+    throw new ApiError('INVALID_PARAMS', { code: 'VIDEO_MODEL_REQUIRED', field: 'videoModel' })
+  }
+  if (!requestedVideoModel) body.videoModel = projectModels.videoModel
+  if (!requestedVideoModel && projectModels.comfyVideoWorkflowVersionId) {
+    body.comfyWorkflowVersionId = projectModels.comfyVideoWorkflowVersionId
+  } else {
+    delete body.comfyWorkflowVersionId
+  }
   requireVideoModelKeyFromPayload(body)
   const locale = resolveRequiredTaskLocale(request, body)
   const isBatch = body?.all === true
@@ -208,7 +221,7 @@ export const POST = apiHandler(async (
   })
 
   if (isBatch) {
-    const episodeId = body?.episodeId
+    const episodeId = typeof body.episodeId === 'string' ? body.episodeId : ''
     if (!episodeId) {
       throw new ApiError('INVALID_PARAMS')
     }

@@ -4,6 +4,7 @@ import { apiHandler, ApiError } from '@/lib/api-errors'
 import { TASK_TYPE } from '@/lib/task/types'
 import { maybeSubmitLLMTask } from '@/lib/llm-observe/route-task'
 import { normalizeImageGenerationCount } from '@/lib/image-generation/count'
+import { getProjectModelConfig } from '@/lib/config-service'
 
 function parseReferenceImages(body: Record<string, unknown>): string[] {
   const list = Array.isArray(body.referenceImageUrls)
@@ -34,6 +35,17 @@ export const POST = apiHandler(async (
   }
   const count = normalizeImageGenerationCount('reference-to-character', body.count)
   body.count = count
+
+  const projectModels = await getProjectModelConfig(projectId, session.user.id, {
+    imageModel: typeof body.imageModel === 'string' ? body.imageModel : undefined,
+  })
+  if (!projectModels.characterModel) throw new ApiError('INVALID_PARAMS')
+  body.imageModel = projectModels.characterModel
+  if (projectModels.comfyImageWorkflowVersionId) {
+    body.comfyWorkflowVersionId = projectModels.comfyImageWorkflowVersionId
+  } else {
+    delete body.comfyWorkflowVersionId
+  }
 
   const isBackgroundJob = body.isBackgroundJob === true || body.isBackgroundJob === 1 || body.isBackgroundJob === '1'
   const characterId = typeof body.characterId === 'string' ? body.characterId : ''

@@ -246,6 +246,9 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     const source = await resolveImageSourceFromGeneration(job, {
       userId: job.data.userId,
       modelId: modelKey,
+      comfyWorkflowVersionId: typeof payload.comfyWorkflowVersionId === 'string'
+        ? payload.comfyWorkflowVersionId
+        : undefined,
       invocationKey: `${job.data.taskId}:panel:${panel.id}:candidate:${i}`,
       prompt,
       comfyReferenceImages: refs,

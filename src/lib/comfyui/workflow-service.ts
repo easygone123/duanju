@@ -197,6 +197,7 @@ async function assertWorkflowCanBeProjectDefaultInTransaction(
   })
   if (!workflow) throw new ApiError('NOT_FOUND')
   if (!workflow.currentVersion
+    || !workflow.currentVersion.publishedAt
     || !workflow.currentVersion.lastSuccessfulTestAt
     || workflow.currentVersion.lastTestConnection?.userId !== userId) {
     throw new ApiError('CONFLICT')
@@ -213,16 +214,74 @@ export async function bindProjectDefaultWorkflow(
   return prisma.$transaction(async (tx) => {
     const project = await tx.project.findFirst({ where: { id: projectId, userId } })
     if (!project) throw new ApiError('NOT_FOUND')
-    if (workflowId) {
-      await assertWorkflowCanBeProjectDefaultInTransaction(tx, userId, workflowId, mediaType)
-    }
+    const version = workflowId
+      ? await assertWorkflowCanBeProjectDefaultInTransaction(tx, userId, workflowId, mediaType)
+      : null
     const field = mediaType === 'image' ? 'imageWorkflowId' : 'videoWorkflowId'
+    const versionField = mediaType === 'image' ? 'imageWorkflowVersionId' : 'videoWorkflowVersionId'
     return tx.projectComfyBinding.upsert({
       where: { projectId_userId: { projectId, userId } },
-      create: { projectId, userId, [field]: workflowId },
-      update: { [field]: workflowId },
+      create: { projectId, userId, [field]: workflowId, [versionField]: version?.id ?? null },
+      update: { [field]: workflowId, [versionField]: version?.id ?? null },
     })
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+}
+
+export interface UpdateProjectWithComfyDefaultsInput {
+  userId: string
+  projectId: string
+  projectData: Prisma.NovelPromotionProjectUncheckedUpdateInput
+  imageWorkflowId?: string | null
+  videoWorkflowId?: string | null
+}
+
+const PROJECT_DEFAULT_UPDATE_ATTEMPTS = 3
+
+export async function updateProjectWithComfyDefaults(input: UpdateProjectWithComfyDefaultsInput) {
+  for (let attempt = 1; attempt <= PROJECT_DEFAULT_UPDATE_ATTEMPTS; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const project = await tx.project.findFirst({ where: { id: input.projectId, userId: input.userId } })
+        if (!project) throw new ApiError('NOT_FOUND')
+        const novelProject = await tx.novelPromotionProject.findUnique({ where: { projectId: input.projectId } })
+        if (!novelProject) throw new ApiError('NOT_FOUND')
+
+        const bindingData: Record<string, string | null> = {}
+        if (Object.hasOwn(input, 'imageWorkflowId')) {
+          const version = input.imageWorkflowId
+            ? await assertWorkflowCanBeProjectDefaultInTransaction(tx, input.userId, input.imageWorkflowId, 'image')
+            : null
+          bindingData.imageWorkflowId = input.imageWorkflowId ?? null
+          bindingData.imageWorkflowVersionId = version?.id ?? null
+        }
+        if (Object.hasOwn(input, 'videoWorkflowId')) {
+          const version = input.videoWorkflowId
+            ? await assertWorkflowCanBeProjectDefaultInTransaction(tx, input.userId, input.videoWorkflowId, 'video')
+            : null
+          bindingData.videoWorkflowId = input.videoWorkflowId ?? null
+          bindingData.videoWorkflowVersionId = version?.id ?? null
+        }
+        if (Object.keys(bindingData).length > 0) {
+          await tx.projectComfyBinding.upsert({
+            where: { projectId_userId: { projectId: input.projectId, userId: input.userId } },
+            create: { projectId: input.projectId, userId: input.userId, ...bindingData },
+            update: bindingData,
+          })
+        }
+        const updated = Object.keys(input.projectData).length > 0
+          ? await tx.novelPromotionProject.update({
+            where: { projectId: input.projectId }, data: input.projectData,
+          })
+          : novelProject
+        return { novelPromotionProject: updated }
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      if (isPrismaCode(error, 'P2034') && attempt < PROJECT_DEFAULT_UPDATE_ATTEMPTS) continue
+      if (isPrismaCode(error, 'P2034')) throw new ApiError('CONFLICT')
+      throw error
+    }
+  }
+  throw new ApiError('CONFLICT')
 }
 
 function prepareVersion(input: CreateVersionInput) {

@@ -15,6 +15,10 @@ vi.mock('@/lib/task/submitter', () => ({ submitTask: submitTaskMock }))
 vi.mock('@/lib/task/has-output', () => ({ hasPanelVideoOutput: vi.fn(async () => false) }))
 vi.mock('@/lib/task/resolve-locale', () => ({ resolveRequiredTaskLocale: vi.fn(() => 'zh') }))
 vi.mock('@/lib/config-service', () => ({
+  getProjectModelConfig: vi.fn(async (_projectId: string, _userId: string, overrides: { videoModel?: string }) => ({
+    videoModel: overrides.videoModel ?? null,
+    comfyVideoWorkflowVersionId: null,
+  })),
   resolveProjectModelCapabilityGenerationOptions: vi.fn(async () => ({})),
 }))
 vi.mock('@/lib/model-pricing/lookup', () => ({

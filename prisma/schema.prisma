@@ -1080,6 +1080,8 @@ model ComfyWorkflowVersion {
   currentForWorkflow    ComfyWorkflow?            @relation("ComfyWorkflowCurrentVersion")
   lastTestConnection    ComfyConnection?          @relation("ComfyWorkflowVersionLastTestConnection", fields: [lastTestConnectionId], references: [id], onDelete: SetNull)
   requests              ComfyGenerationRequest[]
+  imageDefaultBindings  ProjectComfyBinding[]    @relation("ProjectComfyImageVersion")
+  videoDefaultBindings  ProjectComfyBinding[]    @relation("ProjectComfyVideoVersion")
 
   @@unique([workflowId, version])
   @@unique([id, workflowId])
@@ -1091,7 +1093,9 @@ model ProjectComfyBinding {
   projectId             String                   @id
   userId                String
   imageWorkflowId       String?
+  imageWorkflowVersionId String?
   videoWorkflowId       String?
+  videoWorkflowVersionId String?
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @default(now()) @updatedAt
 
@@ -1099,10 +1103,14 @@ model ProjectComfyBinding {
   user                  User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   imageWorkflow         ComfyWorkflow?           @relation("ProjectComfyImageWorkflow", fields: [imageWorkflowId, userId], references: [id, userId], onDelete: Restrict)
   videoWorkflow         ComfyWorkflow?           @relation("ProjectComfyVideoWorkflow", fields: [videoWorkflowId, userId], references: [id, userId], onDelete: Restrict)
+  imageWorkflowVersion  ComfyWorkflowVersion?    @relation("ProjectComfyImageVersion", fields: [imageWorkflowVersionId, imageWorkflowId], references: [id, workflowId], onDelete: Restrict, map: "project_comfy_bindings_image_version_fkey")
+  videoWorkflowVersion  ComfyWorkflowVersion?    @relation("ProjectComfyVideoVersion", fields: [videoWorkflowVersionId, videoWorkflowId], references: [id, workflowId], onDelete: Restrict, map: "project_comfy_bindings_video_version_fkey")
 
   @@index([userId])
   @@index([imageWorkflowId])
   @@index([videoWorkflowId])
+  @@index([imageWorkflowVersionId, imageWorkflowId])
+  @@index([videoWorkflowVersionId, videoWorkflowId])
   @@unique([projectId, userId])
   @@map("project_comfy_bindings")
 }

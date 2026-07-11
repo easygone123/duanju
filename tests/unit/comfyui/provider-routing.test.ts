@@ -81,6 +81,7 @@ describe('ComfyUI native provider routing', () => {
     await expect(submitComfyImageGeneration({
       userId: 'user-1',
       workflowId: 'wf-image',
+      workflowVersionId: 'version-pinned',
       prompt: 'rain',
       context: {
         projectId: 'project-1',
@@ -100,6 +101,7 @@ describe('ComfyUI native provider routing', () => {
       taskId: 'task-1',
       mediaType: 'image',
       workflowId: 'wf-image',
+      workflowVersionId: 'version-pinned',
       variables: { prompt: 'rain', seed: 42 },
     })
   })

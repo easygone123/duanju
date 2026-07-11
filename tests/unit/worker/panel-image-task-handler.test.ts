@@ -131,7 +131,7 @@ describe('worker panel-image-task-handler behavior', () => {
   })
 
   it('first generation -> persists main image and candidate list', async () => {
-    const job = buildJob({ candidateCount: 2 })
+    const job = buildJob({ candidateCount: 2, comfyWorkflowVersionId: 'image-version-1' })
     const result = await handlePanelImageTask(job)
 
     expect(result).toEqual({
@@ -154,10 +154,12 @@ describe('worker panel-image-task-handler behavior', () => {
     )
     expect(utilsMock.resolveImageSourceFromGeneration.mock.calls[0]?.[1]).toMatchObject({
       invocationKey: 'task-panel-image-1:panel:panel-1:candidate:0',
+      comfyWorkflowVersionId: 'image-version-1',
       comfyReferenceImages: ['https://signed.example/ref-1.png'],
     })
     expect(utilsMock.resolveImageSourceFromGeneration.mock.calls[1]?.[1]).toMatchObject({
       invocationKey: 'task-panel-image-1:panel:panel-1:candidate:1',
+      comfyWorkflowVersionId: 'image-version-1',
       comfyReferenceImages: ['https://signed.example/ref-1.png'],
     })
     expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({

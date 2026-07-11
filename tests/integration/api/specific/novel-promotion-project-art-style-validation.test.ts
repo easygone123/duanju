@@ -47,6 +47,11 @@ const capabilityLookupMock = vi.hoisted(() => ({
   getCapabilityOptionFields: vi.fn(() => ({})),
   validateCapabilitySelectionsPayload: vi.fn(() => []),
 }))
+const workflowServiceMock = vi.hoisted(() => ({
+  updateProjectWithComfyDefaults: vi.fn(async (input: { projectData: Record<string, unknown> }) => ({
+    novelPromotionProject: { id: 'np-1', ...input.projectData },
+  })),
+}))
 
 vi.mock('@/lib/api-auth', () => authMock)
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
@@ -54,6 +59,7 @@ vi.mock('@/lib/media/attach', () => mediaAttachMock)
 vi.mock('@/lib/logging/semantic', () => logMock)
 vi.mock('@/lib/model-config-contract', () => modelConfigContractMock)
 vi.mock('@/lib/model-capabilities/lookup', () => capabilityLookupMock)
+vi.mock('@/lib/comfyui/workflow-service', () => workflowServiceMock)
 
 describe('api specific - novel promotion project art style validation', () => {
   beforeEach(() => {
@@ -72,9 +78,9 @@ describe('api specific - novel promotion project art style validation', () => {
 
     const res = await mod.PATCH(req, { params: Promise.resolve({ projectId: 'project-1' }) })
     expect(res.status).toBe(200)
-    expect(prismaMock.novelPromotionProject.update).toHaveBeenCalledWith(
+    expect(workflowServiceMock.updateProjectWithComfyDefaults).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ artStyle: 'realistic' }),
+        projectData: expect.objectContaining({ artStyle: 'realistic' }),
       }),
     )
     expect(prismaMock.userPreference.upsert).not.toHaveBeenCalled()
@@ -94,7 +100,7 @@ describe('api specific - novel promotion project art style validation', () => {
     const body = await res.json()
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('INVALID_PARAMS')
-    expect(prismaMock.novelPromotionProject.update).not.toHaveBeenCalled()
+    expect(workflowServiceMock.updateProjectWithComfyDefaults).not.toHaveBeenCalled()
     expect(prismaMock.userPreference.upsert).not.toHaveBeenCalled()
   })
 
@@ -110,9 +116,9 @@ describe('api specific - novel promotion project art style validation', () => {
 
     const res = await mod.PATCH(req, { params: Promise.resolve({ projectId: 'project-1' }) })
     expect(res.status).toBe(200)
-    expect(prismaMock.novelPromotionProject.update).toHaveBeenCalledWith(
+    expect(workflowServiceMock.updateProjectWithComfyDefaults).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
+        projectData: expect.objectContaining({
           audioModel: 'bailian::qwen3-tts-vd-2026-01-26',
         }),
       }),

@@ -146,6 +146,9 @@ async function generateVideoForPanel(
     userId: job.data.userId,
     modelId: model,
     invocationKey: `${job.data.taskId}:panel:${panel.id}:video`,
+    comfyWorkflowVersionId: typeof payload.comfyWorkflowVersionId === 'string'
+      ? payload.comfyWorkflowVersionId
+      : undefined,
     imageUrl: sourceImageBase64,
     comfyFirstFrameSource: panel.imageUrl,
     comfyLastFrameSource: lastFrameStorageValue,

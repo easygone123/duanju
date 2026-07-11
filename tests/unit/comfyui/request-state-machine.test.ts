@@ -69,6 +69,32 @@ describe('ComfyUI request state machine', () => {
     }))
   })
 
+  it('uses an explicitly pinned tested project version after workflow current changes', async () => {
+    const pinned = { ...version, id: 'version-1', lastSuccessfulTestAt: new Date() }
+    const create = vi.fn().mockResolvedValue({ id: 'request-pinned' })
+    const dependencies = {
+      findInvocation: vi.fn().mockResolvedValue(null),
+      findPublishedWorkflow: vi.fn().mockResolvedValue({
+        id: 'workflow-1', status: 'published', currentVersionId: 'version-2',
+        currentVersion: { ...version, id: 'version-2', lastSuccessfulTestAt: null },
+      }),
+      findPublishedVersion: vi.fn().mockResolvedValue(pinned),
+      create,
+      transaction: async <T>(operation: (value: never) => Promise<T>) => operation(dependencies as never),
+    }
+
+    await createComfyGenerationRequest({
+      invocationKey: 'invoke-pinned', userId: 'user-1', projectId: 'project-1', taskId: 'task-1',
+      mediaType: 'image', workflowId: 'workflow-1', workflowVersionId: 'version-1',
+      variables: { prompt: 'first' },
+    }, dependencies)
+
+    expect(dependencies.findPublishedVersion).toHaveBeenCalledWith({
+      id: 'version-1', workflowId: 'workflow-1', requireSuccessfulTest: true,
+    })
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ workflowVersionId: 'version-1' }))
+  })
+
   it('uses compare-and-set and refuses stale or illegal transitions', async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 })
     await transitionComfyGenerationRequest({

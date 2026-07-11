@@ -47,9 +47,13 @@ describe('api specific - dynamic ComfyUI user models', () => {
       providerName: 'ComfyUI',
     })
     expect(prismaMock.comfyWorkflow.findMany).toHaveBeenCalledWith({
-      where: { userId: 'user-1', status: 'published' },
+      where: {
+        userId: 'user-1', status: 'published', currentVersionId: { not: null },
+        currentVersion: { is: { publishedAt: { not: null } } },
+      },
       select: { id: true, name: true, mediaType: true },
       orderBy: [{ mediaType: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+      take: 500,
     })
   })
 

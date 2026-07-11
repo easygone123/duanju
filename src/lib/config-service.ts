@@ -105,6 +105,8 @@ export interface ProjectModelConfig {
   editModel: string | null
   videoModel: string | null
   audioModel: string | null
+  comfyImageWorkflowVersionId: string | null
+  comfyVideoWorkflowVersionId: string | null
   videoRatio: string | null
   artStyle: string | null
   capabilityDefaults: CapabilitySelections
@@ -159,14 +161,21 @@ export async function getProjectModelConfig(
     prisma.userPreference.findUnique({ where: { userId } }),
     prisma.projectComfyBinding.findUnique({
       where: { projectId_userId: { projectId, userId } },
-      select: { imageWorkflowId: true, videoWorkflowId: true },
+      select: {
+        imageWorkflowId: true, imageWorkflowVersionId: true,
+        videoWorkflowId: true, videoWorkflowVersionId: true,
+      },
     }),
   ])
 
   const taskImageModel = strictTaskOverride(taskOverrides.imageModel, 'imageModel')
   const taskVideoModel = strictTaskOverride(taskOverrides.videoModel, 'videoModel')
-  const comfyImageModel = workflowModelKey(comfyBinding?.imageWorkflowId)
-  const comfyVideoModel = workflowModelKey(comfyBinding?.videoWorkflowId)
+  const comfyImageModel = workflowModelKey(
+    comfyBinding?.imageWorkflowId, comfyBinding?.imageWorkflowVersionId,
+  )
+  const comfyVideoModel = workflowModelKey(
+    comfyBinding?.videoWorkflowId, comfyBinding?.videoWorkflowVersionId,
+  )
 
   return {
     analysisModel: extractModelKey(projectData?.analysisModel) || extractModelKey(userPref?.analysisModel) || null,
@@ -176,6 +185,8 @@ export async function getProjectModelConfig(
     editModel: taskImageModel || comfyImageModel || extractModelKey(projectData?.editModel) || extractModelKey(userPref?.editModel) || null,
     videoModel: taskVideoModel || comfyVideoModel || extractModelKey(projectData?.videoModel) || extractModelKey(userPref?.videoModel) || null,
     audioModel: extractModelKey(projectData?.audioModel) || extractModelKey(userPref?.audioModel) || null,
+    comfyImageWorkflowVersionId: taskImageModel ? null : comfyBinding?.imageWorkflowVersionId ?? null,
+    comfyVideoWorkflowVersionId: taskVideoModel ? null : comfyBinding?.videoWorkflowVersionId ?? null,
     videoRatio: projectData?.videoRatio || '16:9',
     artStyle: projectData?.artStyle || null,
     capabilityDefaults: parseCapabilitySelections(userPref?.capabilityDefaults),
@@ -190,8 +201,11 @@ function strictTaskOverride(value: string | null | undefined, field: keyof TaskM
   return modelKey
 }
 
-function workflowModelKey(workflowId: string | null | undefined): string | null {
-  if (!workflowId) return null
+function workflowModelKey(
+  workflowId: string | null | undefined,
+  workflowVersionId: string | null | undefined,
+): string | null {
+  if (!workflowId || !workflowVersionId) return null
   return extractModelKey(composeModelKey('comfyui', workflowId))
 }
 
