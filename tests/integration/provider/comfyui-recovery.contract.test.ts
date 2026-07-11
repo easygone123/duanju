@@ -277,6 +277,61 @@ describe('ComfyUI recovery and cancellation contract', () => {
     expect(JSON.stringify(persistRecoveredDiagnostics.mock.calls)).not.toContain('secret prompt')
   })
 
+  it('cancels completed history with missing or malformed declared outputs using only stable codes', async () => {
+    const cases = [
+      {
+        outputs: [{ name: 'result', nodeId: '2', fieldPath: 'images', mediaType: 'image' as const, primary: true }],
+        history: { outputs: { '2': { images: [] }, secret: 'raw-history-secret' } },
+        code: 'COMFY_OUTPUT_MISSING',
+      },
+      {
+        outputs: [],
+        history: { outputs: { '2': { images: [{ filename: 'out.png' }] } }, secret: 'raw-history-secret' },
+        code: 'COMFY_WORKFLOW_BINDING_INVALID',
+      },
+    ]
+    for (const testCase of cases) {
+      const persistRecoveredDiagnostics = vi.fn().mockResolvedValue(true)
+      const persistRecoveredCancellation = vi.fn().mockResolvedValue(true)
+      const releaseLease = vi.fn().mockResolvedValue(true)
+      const deps = {
+        ...reconciliationSafetyDefaults(),
+        persistRecoveredDiagnostics, persistRecoveredCancellation, releaseLease,
+        loadContext: vi.fn().mockResolvedValue({ request: {
+          id: 'request-1', userId: 'user-1', status: 'reconciling', connectionId: 'connection-1',
+          leaseId: 'lease-1', promptId: 'prompt-1', cancelRequestedAt: new Date(1),
+        }, version: { outputs: testCase.outputs } }),
+        verifyLeaseOwner: vi.fn().mockResolvedValue(true),
+        getQueue: vi.fn().mockResolvedValue({ running: [], pending: [] }),
+        getHistory: vi.fn().mockResolvedValue(testCase.history), persistRecoveredState: vi.fn(),
+      } satisfies ComfyReconciliationDependencies
+      await expect(reconcileComfyRequest('request-1', deps)).resolves.toMatchObject({ outcome: 'canceled' })
+      expect(persistRecoveredDiagnostics).toHaveBeenCalledWith(expect.objectContaining({
+        errorCode: testCase.code,
+      }))
+      expect(JSON.stringify(persistRecoveredDiagnostics.mock.calls)).not.toContain('raw-history-secret')
+      expect(persistRecoveredCancellation).toHaveBeenCalled()
+      expect(releaseLease).toHaveBeenCalled()
+    }
+  })
+
+  it('keeps cancellation reconciling on an unknown output extraction exception without leaking it', async () => {
+    const persistRecoveredDiagnostics = vi.fn()
+    const deps = {
+      ...reconciliationSafetyDefaults(), persistRecoveredDiagnostics,
+      loadContext: vi.fn().mockResolvedValue({ request: {
+        id: 'request-1', userId: 'user-1', status: 'reconciling', connectionId: 'connection-1',
+        leaseId: 'lease-1', promptId: 'prompt-1', cancelRequestedAt: new Date(1),
+      }, version: { outputs: null } }),
+      verifyLeaseOwner: vi.fn().mockResolvedValue(true),
+      getQueue: vi.fn().mockResolvedValue({ running: [], pending: [] }),
+      getHistory: vi.fn().mockResolvedValue({ outputs: { secret: 'unknown-secret' } }),
+      persistRecoveredState: vi.fn(),
+    } as unknown as ComfyReconciliationDependencies
+    await expect(reconcileComfyRequest('request-1', deps)).resolves.toEqual({ outcome: 'reconciling' })
+    expect(persistRecoveredDiagnostics).not.toHaveBeenCalled()
+  })
+
   it('never cancels external work or acts after recovery ownership is lost', async () => {
     for (const [queue, ownerResults] of [
       [{ running: [[0, 'manual']], pending: [] }, [true]],

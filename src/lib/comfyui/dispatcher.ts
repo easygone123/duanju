@@ -441,9 +441,20 @@ export async function reconcileComfyRequest(
         })) throw lostLease()
       } else if (hasHistoryEntry(cancellationHistory, promptId)
         || Object.hasOwn(cancellationHistory, 'outputs')) {
-        const outputs = extractComfyOutputs(cancellationHistory, context.version.outputs)
+        let outputs: ComfyOutputRef[] | undefined
+        let extractionCode: string | undefined
+        try {
+          outputs = extractComfyOutputs(cancellationHistory, context.version.outputs)
+        } catch (error) {
+          if (!(error instanceof ComfyError)) return { outcome: 'reconciling' as const }
+          extractionCode = error.code
+        }
         if (!await dependencies.verifyLeaseOwner(owner)) throw lostLease()
-        if (!await dependencies.persistRecoveredDiagnostics({ ...owner, promptId, outputs })) {
+        if (!await dependencies.persistRecoveredDiagnostics({
+          ...owner, promptId,
+          ...(outputs ? { outputs } : {}),
+          ...(extractionCode ? { errorCode: extractionCode } : {}),
+        })) {
           throw lostLease()
         }
       } else if (!await dependencies.isAbsenceConclusive?.({ ...owner, promptId })) {
