@@ -313,7 +313,7 @@ export class InMemoryComfyExecution {
         this.aggregate.attempt = { id: attemptId, clientId, promptId }
         return { outcome: 'request_recorded' }
       },
-      cancelIfRequested: async () => false,
+      cancelIfRequested: async () => 'continue',
       cancelBeforeTransfer: async () => {
         if (!request.cancelRequestedAt) return false
         request.status = 'canceled'; return true

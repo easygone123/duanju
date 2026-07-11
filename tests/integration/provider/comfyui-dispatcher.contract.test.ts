@@ -47,7 +47,7 @@ function dependencies(overrides: Partial<ComfyDispatcherDependencies> = {}): Com
       outcome: 'claimed', attemptId: 'attempt-1', clientId: 'client-1',
     }),
     recordAcceptedPrompt: vi.fn().mockResolvedValue({ outcome: 'request_recorded' }),
-    cancelIfRequested: vi.fn().mockResolvedValue(false),
+    cancelIfRequested: vi.fn().mockResolvedValue('continue'),
     cancelBeforeTransfer: vi.fn().mockResolvedValue(false),
     persistProgress: vi.fn().mockResolvedValue(true),
     persistOutputRefs: vi.fn().mockResolvedValue(true),
@@ -86,6 +86,15 @@ function dependencies(overrides: Partial<ComfyDispatcherDependencies> = {}): Com
 }
 
 describe('ComfyUI dispatcher contract', () => {
+  it('keeps an accepted running cancellation reconciling without releasing its durable lease', async () => {
+    const deps = dependencies({ cancelIfRequested: vi.fn().mockResolvedValue('reconciling') })
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toEqual({
+      outcome: 'reconciling', promptId: 'prompt-1',
+    })
+    expect(deps.persistOutputRefs).not.toHaveBeenCalled()
+    expect(deps.release).not.toHaveBeenCalled()
+  })
+
   it('uploads then renders, persists prompt immediately, tracks progress and transfers every output', async () => {
     const deps = dependencies()
     const result = await dispatchComfyRequest('request-1', deps)

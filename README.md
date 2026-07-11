@@ -153,7 +153,7 @@ COMFYUI_OUTPUT_MAX_BYTES=536870912
 2. 导入后声明占位符或显式 node/input mappings、输入上传变量，以及至少一个 primary output mapping。图片和视频输出都必须明确映射，系统不会猜测节点。
 3. 发布不可变版本，再配置项目级图片/视频默认工作流；具体任务仍可覆盖选择。
 
-每个 ComfyUI 实例的 waoowaoo 并发固定为 1。所有兼容实例忙碌时，任务留在 waoowaoo queue 中等待空闲实例，不会提前塞进 ComfyUI queue。已接受 prompt 会固定在原实例进行恢复；重启、断线和输出传输重试不会重新提交。取消只作用于当前用户拥有的 queued prompt；运行中的 prompt 不会通过全局 interrupt 误伤其他工作。所有映射输出会复制到 waoowaoo 存储后再进入现有业务流。
+每个 ComfyUI 实例的 waoowaoo 并发固定为 1。所有兼容实例忙碌时，任务留在 waoowaoo queue 中等待空闲实例，不会提前塞进 ComfyUI queue。已接受 prompt 会固定在原实例进行恢复；重启、断线和输出传输重试不会重新提交。取消只自动删除经二次确认、属于当前任务的 queued prompt；运行中的 prompt 进入 canceling/reconciling，保留租约并等待 queue/history 自然终态，绝不会调用全局 `/interrupt` 误伤手工工作。所有映射输出会复制到 waoowaoo 存储后再进入现有业务流。
 
 项目不内置、不下载也不自动选择任何 ComfyUI workflow、checkpoint、LoRA 或 custom node。模型和节点必须由实例管理员准备。
 

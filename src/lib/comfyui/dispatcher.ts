@@ -96,7 +96,9 @@ export interface ComfyDispatcherDependencies extends ComfyMediaDependencies {
   recordAcceptedPrompt(input: OwnerInput & {
     attemptId: string; clientId: string; promptId: string
   }): Promise<ComfyAcceptedPromptResult>
-  cancelIfRequested(input: OwnerInput & { attemptId: string; promptId: string }): Promise<boolean>
+  cancelIfRequested(input: OwnerInput & { attemptId: string; promptId: string }): Promise<
+    'continue' | 'canceled' | 'reconciling'
+  >
   cancelBeforeTransfer(input: OwnerInput & {
     promptId?: string; outputs: ComfyOutputRef[]
   }): Promise<boolean>
@@ -246,10 +248,14 @@ export async function dispatchComfyRequest(
       dependencies.observation?.increment('reconciliation', { outcome: 'detached_receipt' })
       return { outcome: 'reconciling', promptId }
     }
-    if (await dependencies.cancelIfRequested({ ...owner, promptId, attemptId: fence.attemptId })) {
+    const cancellation = await dependencies.cancelIfRequested({
+      ...owner, promptId, attemptId: fence.attemptId,
+    })
+    if (cancellation === 'canceled') {
       terminal = true
       return { outcome: 'canceled' }
     }
+    if (cancellation === 'reconciling') return { outcome: 'reconciling', promptId }
 
     executionDeadline = dependencies.startExecutionTimeout?.()
     const executionStartedAt = Date.now()

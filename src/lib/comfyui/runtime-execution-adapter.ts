@@ -109,15 +109,24 @@ export async function createProductionDispatcherDependencies(
         where: { ...ownerWhere(), promptId, cancelRequestedAt: { not: null } },
         select: { id: true },
       })
-      if (!canceled) return false
-      const queue = await client.getQueue()
-      if (!await executionOwned()) return false
-      if (queueContains(queue.pending, promptId)) await client.deleteQueuedPrompt(promptId)
-      else if (queueContains(queue.running, promptId)) await client.interruptPrompt(promptId)
-      return updateOwned({
-        promptId, cancelRequestedAt: { not: null },
-        status: { notIn: ['completed', 'failed', 'canceled'] },
-      }, { status: 'canceled', canceledAt: new Date() })
+      if (!canceled) return 'continue'
+      return cancelAcceptedPromptSafely({
+        promptId,
+        getQueue: () => client.getQueue(),
+        deleteQueuedPrompt: (id) => client.deleteQueuedPrompt(id),
+        verifyOwner: executionOwned,
+        persistCanceled: () => updateOwned({
+          promptId, cancelRequestedAt: { not: null },
+          status: { notIn: ['completed', 'failed', 'canceled'] },
+        }, { status: 'canceled', canceledAt: new Date() }),
+        persistReconciling: () => updateOwned({
+          promptId, cancelRequestedAt: { not: null },
+          status: { notIn: ['completed', 'failed', 'canceled'] },
+        }, {
+          status: 'reconciling', reconcilingAt: new Date(),
+          errorCode: COMFY_ERROR_CODE.RECONCILIATION_REQUIRED,
+        }),
+      })
     },
     cancelBeforeTransfer: ({ promptId }) => updateOwned({
       status: { in: ['transferring', 'reconciling'] },
@@ -174,6 +183,41 @@ export async function createProductionDispatcherDependencies(
     objectExists: async () => false,
     resolveStoredUrl: (key) => getSignedUrl(key),
   }
+}
+
+export async function cancelAcceptedPromptSafely(input: {
+  promptId: string
+  getQueue(): Promise<{ running: unknown[]; pending: unknown[] }>
+  deleteQueuedPrompt(promptId: string): Promise<void>
+  verifyOwner(): Promise<boolean>
+  persistCanceled(): Promise<boolean>
+  persistReconciling(): Promise<boolean>
+}): Promise<'canceled' | 'reconciling'> {
+  const queue = await input.getQueue()
+  if (!await input.verifyOwner()) return 'reconciling'
+  if (queueContains(queue.running, input.promptId)) {
+    await input.persistReconciling()
+    return 'reconciling'
+  }
+  if (!queueContains(queue.pending, input.promptId)) {
+    await input.persistReconciling()
+    return 'reconciling'
+  }
+  const confirmed = await input.getQueue()
+  if (!await input.verifyOwner()
+    || !queueContains(confirmed.pending, input.promptId)
+    || queueContains(confirmed.running, input.promptId)) {
+    await input.persistReconciling()
+    return 'reconciling'
+  }
+  await input.deleteQueuedPrompt(input.promptId)
+  const afterDelete = await input.getQueue()
+  if (queueContains(afterDelete.pending, input.promptId)
+    || queueContains(afterDelete.running, input.promptId)) {
+    await input.persistReconciling()
+    return 'reconciling'
+  }
+  return await input.persistCanceled() ? 'canceled' : 'reconciling'
 }
 
 export async function createProductionReconciliationDependencies(
