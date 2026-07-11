@@ -129,6 +129,25 @@ export interface TaskModelOverrides {
   videoModel?: string | null
 }
 
+const UNTRUSTED_COMFY_VERSION_FIELDS = [
+  'comfyWorkflowVersionId',
+  'comfyImageWorkflowVersionId',
+  'comfyVideoWorkflowVersionId',
+  'workflowVersionId',
+  'workflow_version_id',
+  'comfyWorkflowVersion',
+  'comfyVersionId',
+] as const
+
+export function applyTrustedComfyVersionSnapshot(
+  payload: Record<string, unknown>,
+  trustedWorkflowVersionId?: string | null,
+): Record<string, unknown> {
+  for (const field of UNTRUSTED_COMFY_VERSION_FIELDS) delete payload[field]
+  if (trustedWorkflowVersionId) payload.comfyWorkflowVersionId = trustedWorkflowVersionId
+  return payload
+}
+
 export async function getUserWorkflowConcurrencyConfig(
   userId: string,
 ): Promise<WorkflowConcurrencyConfig> {
@@ -350,12 +369,13 @@ export async function buildImageBillingPayload(input: {
   }
 
   return {
-    ...basePayload,
+    ...applyTrustedComfyVersionSnapshot(
+      { ...basePayload },
+      parseModelKeyStrict(imageModel)?.provider === 'comfyui'
+        ? projectModelConfig.comfyImageWorkflowVersionId
+        : null,
+    ),
     imageModel,
-    ...(parseModelKeyStrict(imageModel)?.provider === 'comfyui'
-      && projectModelConfig.comfyImageWorkflowVersionId
-      ? { comfyWorkflowVersionId: projectModelConfig.comfyImageWorkflowVersionId }
-      : {}),
     ...(Object.keys(capabilityOptions).length > 0 ? { generationOptions: capabilityOptions } : {}),
   }
 }

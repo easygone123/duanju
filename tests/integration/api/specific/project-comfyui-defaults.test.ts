@@ -169,6 +169,31 @@ describe('api specific - project ComfyUI defaults', () => {
     })
   })
 
+  it('strips user-supplied Comfy version aliases when a task override has no trusted project pin', async () => {
+    const { buildImageBillingPayload, getProjectModelConfig } = await import('@/lib/config-service')
+    const taskConfig = await getProjectModelConfig('project-1', 'user-1', {
+      imageModel: 'comfyui::task-workflow',
+    })
+    const payload = await buildImageBillingPayload({
+      projectId: 'project-1', userId: 'user-1', imageModel: taskConfig.storyboardModel,
+      projectModelConfig: taskConfig,
+      basePayload: {
+        comfyWorkflowVersionId: 'attacker-old-version',
+        comfyImageWorkflowVersionId: 'attacker-alias',
+        workflowVersionId: 'attacker-generic-alias',
+        workflow_version_id: 'attacker-snake-alias',
+        cloudRequestTag: 'preserved',
+      },
+    })
+    expect(payload).toMatchObject({
+      imageModel: 'comfyui::task-workflow', cloudRequestTag: 'preserved',
+    })
+    expect(payload).not.toHaveProperty('comfyWorkflowVersionId')
+    expect(payload).not.toHaveProperty('comfyImageWorkflowVersionId')
+    expect(payload).not.toHaveProperty('workflowVersionId')
+    expect(payload).not.toHaveProperty('workflow_version_id')
+  })
+
   it.each([
     ['null body', null],
     ['array body', []],

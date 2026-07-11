@@ -14,7 +14,11 @@ import {
   resolveBuiltinCapabilitiesByModelKey,
 } from '@/lib/model-capabilities/lookup'
 import { resolveBuiltinPricing } from '@/lib/model-pricing/lookup'
-import { getProjectModelConfig, resolveProjectModelCapabilityGenerationOptions } from '@/lib/config-service'
+import {
+  applyTrustedComfyVersionSnapshot,
+  getProjectModelConfig,
+  resolveProjectModelCapabilityGenerationOptions,
+} from '@/lib/config-service'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -204,11 +208,10 @@ export const POST = apiHandler(async (
     throw new ApiError('INVALID_PARAMS', { code: 'VIDEO_MODEL_REQUIRED', field: 'videoModel' })
   }
   if (!requestedVideoModel) body.videoModel = projectModels.videoModel
-  if (!requestedVideoModel && projectModels.comfyVideoWorkflowVersionId) {
-    body.comfyWorkflowVersionId = projectModels.comfyVideoWorkflowVersionId
-  } else {
-    delete body.comfyWorkflowVersionId
-  }
+  applyTrustedComfyVersionSnapshot(
+    body,
+    requestedVideoModel ? null : projectModels.comfyVideoWorkflowVersionId,
+  )
   requireVideoModelKeyFromPayload(body)
   const locale = resolveRequiredTaskLocale(request, body)
   const isBatch = body?.all === true
