@@ -89,6 +89,9 @@ export interface ComfyDispatcherDependencies extends ComfyMediaDependencies {
     attemptId: string; clientId: string; promptId: string
   }): Promise<ComfyAcceptedPromptResult>
   cancelIfRequested(input: OwnerInput & { attemptId: string; promptId: string }): Promise<boolean>
+  cancelBeforeTransfer(input: OwnerInput & {
+    promptId?: string; outputs: ComfyOutputRef[]
+  }): Promise<boolean>
   persistProgress(input: OwnerInput & { promptId: string; event: ComfyExecutionEvent; value?: number; max?: number }): Promise<boolean>
   persistOutputRefs(input: OwnerInput & { promptId: string; outputs: ComfyOutputRef[] }): Promise<boolean>
   persistCompletedOutputs(input: OwnerInput & { promptId: string; outputs: ComfyStoredOutputRef[] }): Promise<boolean>
@@ -128,6 +131,16 @@ export async function dispatchComfyRequest(
       throw lostLease()
     }
 
+    if (request.cancelRequestedAt && request.outputRefs?.length
+      && (request.status === 'transferring' || request.status === 'reconciling')) {
+      if (await dependencies.cancelBeforeTransfer({
+        ...owner, ...(promptId ? { promptId } : {}), outputs: request.outputRefs,
+      })) {
+        terminal = true
+        return { outcome: 'canceled' }
+      }
+      return { outcome: 'reconciling', promptId: promptId ?? '' }
+    }
     if ((request.status === 'transferring' || request.status === 'reconciling')
       && request.outputRefs?.length) {
       const result = await transferAndComplete(context, request.outputRefs, promptId, owner, dependencies)
@@ -365,6 +378,9 @@ export interface ComfyReconciliationDependencies {
   deleteQueuedPrompt(promptId: string): Promise<void>
   interruptPrompt(promptId: string): Promise<void>
   persistRecoveredCancellation(input: OwnerInput & { promptId: string }): Promise<boolean>
+  persistRecoveredDiagnostics(input: OwnerInput & {
+    promptId: string; outputs?: ComfyOutputRef[]; errorCode?: string
+  }): Promise<boolean>
   releaseLease(input: OwnerInput): Promise<boolean>
   isAbsenceConclusive?(input: OwnerInput & { promptId: string }): Promise<boolean>
   persistRecoveredState(input: OwnerInput & {
@@ -409,12 +425,32 @@ export async function reconcileComfyRequest(
     queue = await dependencies.getQueue()
     const queued = queueContainsPrompt(queue.pending, promptId)
     const running = queueContainsPrompt(queue.running, promptId)
-    if (!queued && !running) return { outcome: 'reconciling' as const }
-    if (!await dependencies.verifyLeaseOwner(owner)) throw lostLease()
+    if (queued || running) {
+      if (!await dependencies.verifyLeaseOwner(owner)) throw lostLease()
+    }
     if (queued) {
       await dependencies.deleteQueuedPrompt(promptId)
-    } else {
+    } else if (running) {
       await dependencies.interruptPrompt(promptId)
+    } else {
+      const cancellationHistory = await dependencies.getHistory(promptId)
+      if (historyShowsExecutionFailure(cancellationHistory, promptId)) {
+        if (!await dependencies.verifyLeaseOwner(owner)) throw lostLease()
+        if (!await dependencies.persistRecoveredDiagnostics({
+          ...owner, promptId, errorCode: COMFY_ERROR_CODE.EXECUTION_FAILED,
+        })) throw lostLease()
+      } else if (hasHistoryEntry(cancellationHistory, promptId)
+        || Object.hasOwn(cancellationHistory, 'outputs')) {
+        const outputs = extractComfyOutputs(cancellationHistory, context.version.outputs)
+        if (!await dependencies.verifyLeaseOwner(owner)) throw lostLease()
+        if (!await dependencies.persistRecoveredDiagnostics({ ...owner, promptId, outputs })) {
+          throw lostLease()
+        }
+      } else if (!await dependencies.isAbsenceConclusive?.({ ...owner, promptId })) {
+        return { outcome: 'reconciling' as const }
+      } else if (!await dependencies.verifyLeaseOwner(owner)) {
+        throw lostLease()
+      }
     }
     if (!await dependencies.persistRecoveredCancellation({ ...owner, promptId })) throw lostLease()
     await dependencies.releaseLease(owner).catch(() => false)

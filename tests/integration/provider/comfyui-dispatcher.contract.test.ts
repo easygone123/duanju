@@ -48,6 +48,7 @@ function dependencies(overrides: Partial<ComfyDispatcherDependencies> = {}): Com
     }),
     recordAcceptedPrompt: vi.fn().mockResolvedValue({ outcome: 'request_recorded' }),
     cancelIfRequested: vi.fn().mockResolvedValue(false),
+    cancelBeforeTransfer: vi.fn().mockResolvedValue(false),
     persistProgress: vi.fn().mockResolvedValue(true),
     persistOutputRefs: vi.fn().mockResolvedValue(true),
     persistCompletedOutputs: vi.fn().mockResolvedValue(true),
@@ -278,5 +279,22 @@ describe('ComfyUI dispatcher contract', () => {
     expect(metrics.increment).toHaveBeenCalledWith(
       'comfy.lease_contention', 1, expect.objectContaining({ requestId: 'request-1' }),
     )
+  })
+
+  it('cancels transferring work without downloading or uploading outputs', async () => {
+    const refs = [output('primary', true)]
+    const deps = dependencies({
+      loadContext: vi.fn().mockResolvedValue(context({ request: {
+        ...context().request, status: 'transferring', promptId: 'prompt-1', clientId: 'client-1',
+        outputRefs: refs, cancelRequestedAt: new Date(1),
+      } })),
+      cancelBeforeTransfer: vi.fn().mockResolvedValue(true),
+    })
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({ outcome: 'canceled' })
+    expect(deps.cancelBeforeTransfer).toHaveBeenCalledWith(expect.objectContaining({
+      promptId: 'prompt-1', outputs: refs,
+    }))
+    expect(deps.client.downloadOutput).not.toHaveBeenCalled()
+    expect(deps.uploadObject).not.toHaveBeenCalled()
   })
 })

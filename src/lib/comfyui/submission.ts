@@ -275,8 +275,8 @@ export async function recordComfyAttemptAbsenceWithStore(
       ? new Date(createdAt.getTime() + input.policy.deadlineMs)
       : asDate(attempt.reconcileDeadlineAt)
     const oldEnough = input.now.getTime() - createdAt.getTime() >= input.policy.minAgeMs
-    const conclusive = checkCount >= input.policy.minChecks
-      && (oldEnough || input.now.getTime() >= deadlineAt.getTime())
+    const deadlineReached = input.now.getTime() >= deadlineAt.getTime()
+    const conclusive = (checkCount >= input.policy.minChecks && oldEnough) || deadlineReached
     const terminal = attempt.request.cancelRequestedAt ? 'canceled' as const : 'failed' as const
     const recorded = await client.recordCheck({
       where: {
