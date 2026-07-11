@@ -17,6 +17,73 @@ export interface WorkflowCompatibilityResponseItem {
   missingModels?: Array<{ nodeId: string; field: string; value: string }>
 }
 
+export interface WorkflowCompatibilityRequestTicket {
+  kind: 'initial' | 'loadMore'
+  workflowId: string
+  versionId: string
+  cursor: string | null
+  generation: number
+  controller: AbortController
+}
+
+export function createWorkflowCompatibilityCoordinator() {
+  let generation = 0
+  let identity: { workflowId: string; versionId: string; cursor: string | null } | null = null
+  let initialController: AbortController | null = null
+  let loadMoreController: AbortController | null = null
+
+  const abortRequests = () => {
+    initialController?.abort(); loadMoreController?.abort()
+    initialController = null; loadMoreController = null
+  }
+  const select = (workflowId: string, versionId: string) => {
+    abortRequests(); generation += 1
+    identity = { workflowId, versionId, cursor: null }
+    return { ...identity, generation }
+  }
+  const begin = (kind: 'initial' | 'loadMore', cursor: string | null): WorkflowCompatibilityRequestTicket | null => {
+    if (!identity) return null
+    if (kind === 'loadMore' && (loadMoreController || !cursor || cursor !== identity.cursor)) return null
+    if (kind === 'initial' && initialController) initialController.abort()
+    const controller = new AbortController()
+    if (kind === 'initial') initialController = controller
+    else loadMoreController = controller
+    return { kind, ...identity, cursor, generation, controller }
+  }
+  const isCurrent = (ticket: WorkflowCompatibilityRequestTicket) => {
+    const activeController = ticket.kind === 'initial' ? initialController : loadMoreController
+    return !ticket.controller.signal.aborted
+      && activeController === ticket.controller
+      && ticket.generation === generation
+      && ticket.workflowId === identity?.workflowId
+      && ticket.versionId === identity?.versionId
+      && ticket.cursor === identity?.cursor
+  }
+  const finish = (ticket: WorkflowCompatibilityRequestTicket) => {
+    if (ticket.kind === 'initial' && initialController === ticket.controller) initialController = null
+    if (ticket.kind === 'loadMore' && loadMoreController === ticket.controller) loadMoreController = null
+  }
+  const accept = (ticket: WorkflowCompatibilityRequestTicket, nextCursor: string | null) => {
+    if (!isCurrent(ticket) || !identity) return false
+    identity.cursor = nextCursor
+    finish(ticket)
+    return true
+  }
+  const cancel = (selection: { generation: number }) => {
+    if (selection.generation !== generation) return
+    abortRequests(); identity = null; generation += 1
+  }
+  return {
+    select,
+    beginInitial: () => begin('initial', null),
+    beginLoadMore: (cursor: string) => begin('loadMore', cursor),
+    isCurrent,
+    accept,
+    finish,
+    cancel,
+  }
+}
+
 export function mapWorkflowCompatibility(item: WorkflowCompatibilityResponseItem) {
   return {
     connectionId: item.connectionId,

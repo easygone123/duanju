@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import {
   discoverPlaceholderNames,
+  createWorkflowCompatibilityCoordinator,
   draftFromWorkflow,
   mapWorkflowCompatibility,
   removeWorkflowOutput,
@@ -178,6 +179,36 @@ describe('ComfyUI workflow settings UI contract', () => {
       connectionId: 'disabled-1', connectionName: 'Paused GPU', state: 'disabled',
       missingNodes: [], missingModels: [],
     })
+  })
+
+  it('drops and aborts a stale load-more response after workflow or version selection changes', async () => {
+    const coordinator = createWorkflowCompatibilityCoordinator()
+    coordinator.select('workflow-a', 'version-1')
+    const initialA = coordinator.beginInitial()
+    expect(initialA).not.toBeNull()
+    expect(coordinator.accept(initialA!, 'cursor-a')).toBe(true)
+    const loadMoreA = coordinator.beginLoadMore('cursor-a')
+    expect(loadMoreA).not.toBeNull()
+    expect(coordinator.beginLoadMore('cursor-a')).toBeNull()
+
+    let resolveA!: (rows: string[]) => void
+    const delayedA = new Promise<string[]>((resolve) => { resolveA = resolve })
+    let rows: string[] = []
+    const appendA = delayedA.then((next) => {
+      if (coordinator.accept(loadMoreA!, null)) rows = [...rows, ...next]
+    })
+
+    coordinator.select('workflow-b', 'version-2')
+    expect(loadMoreA!.controller.signal.aborted).toBe(true)
+    const initialB = coordinator.beginInitial()!
+    if (coordinator.accept(initialB, null)) rows = ['b']
+    resolveA(['a-stale'])
+    await appendA
+    expect(rows).toEqual(['b'])
+
+    const versionB2 = coordinator.select('workflow-b', 'version-3')
+    expect(versionB2.generation).toBeGreaterThan(initialB.generation)
+    expect(coordinator.accept(initialB, null)).toBe(false)
   })
 
   it('maps only trusted API codes to localized errors and never renders raw server text', () => {

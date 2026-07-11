@@ -11,6 +11,7 @@ import WorkflowTestForm, { emptyWorkflowTestPayload, type WorkflowTestPayload } 
 import { useComfyConnections } from './hooks'
 import {
   draftFromWorkflow,
+  createWorkflowCompatibilityCoordinator,
   emptyWorkflowDraft,
   mapWorkflowCompatibility,
   safeWorkflowErrorKey,
@@ -49,6 +50,7 @@ export default function WorkflowLibraryPanel() {
   const [compatibilityCursor, setCompatibilityCursor] = useState<string | null>(null)
   const [compatibilityError, setCompatibilityError] = useState(false)
   const [compatibilityLoadingMore, setCompatibilityLoadingMore] = useState(false)
+  const [compatibilityCoordinator] = useState(() => createWorkflowCompatibilityCoordinator())
   const [testPayload, setTestPayload] = useState<WorkflowTestPayload | null>(emptyWorkflowTestPayload)
   const connectionsQuery = useComfyConnections()
 
@@ -101,15 +103,27 @@ export default function WorkflowLibraryPanel() {
     await load(selectedId)
   })
 
+  const savedVersionId = savedVersion?.id ?? null
   useEffect(() => {
-    if (selectedId === 'new' || !savedVersion) { setCompatibility([]); setCompatibilityCursor(null); return }
-    const controller = new AbortController()
-    setCompatibilityError(false)
-    requestJson<{ compatibility: WorkflowCompatibilityResponseItem[]; nextCursor: string | null }>(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(savedVersion.id)}/compatibility?limit=20`, { signal: controller.signal })
-      .then((payload) => { setCompatibility(payload.compatibility.map(mapWorkflowCompatibility)); setCompatibilityCursor(payload.nextCursor) })
-      .catch(() => { if (!controller.signal.aborted) setCompatibilityError(true) })
-    return () => controller.abort()
-  }, [savedVersion, selectedId])
+    const selection = compatibilityCoordinator.select(
+      selectedId === 'new' ? '' : selectedId,
+      savedVersionId ?? '',
+    )
+    setCompatibility([]); setCompatibilityCursor(null); setCompatibilityError(false); setCompatibilityLoadingMore(false)
+    if (selectedId === 'new' || !savedVersionId) return () => compatibilityCoordinator.cancel(selection)
+    const ticket = compatibilityCoordinator.beginInitial()
+    if (!ticket) return () => compatibilityCoordinator.cancel(selection)
+    requestJson<{ compatibility: WorkflowCompatibilityResponseItem[]; nextCursor: string | null }>(`/api/comfyui/workflows/${encodeURIComponent(ticket.workflowId)}/versions/${encodeURIComponent(ticket.versionId)}/compatibility?limit=20`, { signal: ticket.controller.signal })
+      .then((payload) => {
+        if (!compatibilityCoordinator.accept(ticket, payload.nextCursor)) return
+        setCompatibility(payload.compatibility.map(mapWorkflowCompatibility)); setCompatibilityCursor(payload.nextCursor)
+      })
+      .catch(() => {
+        if (compatibilityCoordinator.isCurrent(ticket)) setCompatibilityError(true)
+      })
+      .finally(() => compatibilityCoordinator.finish(ticket))
+    return () => compatibilityCoordinator.cancel(selection)
+  }, [compatibilityCoordinator, savedVersionId, selectedId])
   const publishVersion = () => runAction(async () => {
     if (selectedId === 'new' || !savedVersion?.validation.valid) return
     await requestJson(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/publish`, {
@@ -128,12 +142,29 @@ export default function WorkflowLibraryPanel() {
   })
   const loadMoreCompatibility = async () => {
     if (selectedId === 'new' || !savedVersion || !compatibilityCursor || compatibilityLoadingMore) return
+    const ticket = compatibilityCoordinator.beginLoadMore(compatibilityCursor)
+    if (!ticket) return
     setCompatibilityLoadingMore(true); setCompatibilityError(false)
+    let settledCurrent = false
     try {
-      const payload = await requestJson<{ compatibility: WorkflowCompatibilityResponseItem[]; nextCursor: string | null }>(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(savedVersion.id)}/compatibility?limit=20&cursor=${encodeURIComponent(compatibilityCursor)}`)
-      setCompatibility((current) => [...current, ...payload.compatibility.map(mapWorkflowCompatibility)])
+      const payload = await requestJson<{ compatibility: WorkflowCompatibilityResponseItem[]; nextCursor: string | null }>(`/api/comfyui/workflows/${encodeURIComponent(ticket.workflowId)}/versions/${encodeURIComponent(ticket.versionId)}/compatibility?limit=20&cursor=${encodeURIComponent(ticket.cursor ?? '')}`, { signal: ticket.controller.signal })
+      if (!compatibilityCoordinator.accept(ticket, payload.nextCursor)) return
+      settledCurrent = true
+      setCompatibility((current) => {
+        const rows = new Map(current.map((item) => [item.connectionId, item]))
+        for (const item of payload.compatibility.map(mapWorkflowCompatibility)) rows.set(item.connectionId, item)
+        return [...rows.values()]
+      })
       setCompatibilityCursor(payload.nextCursor)
-    } catch { setCompatibilityError(true) } finally { setCompatibilityLoadingMore(false) }
+    } catch {
+      if (compatibilityCoordinator.isCurrent(ticket)) {
+        settledCurrent = true; setCompatibilityError(true)
+      }
+    } finally {
+      const stillCurrent = compatibilityCoordinator.isCurrent(ticket)
+      compatibilityCoordinator.finish(ticket)
+      if (settledCurrent || stillCurrent) setCompatibilityLoadingMore(false)
+    }
   }
 
   const issues = savedVersion?.validation.issues ?? []
