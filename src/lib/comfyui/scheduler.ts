@@ -10,12 +10,13 @@ import {
   releaseComfyRequestLease,
   type ComfyRequestLeaseOwner,
 } from './lease'
-import type { ComfyHealthState, ComfyRequestStatus } from './types'
+import {
+  COMFY_ACTIVE_REQUEST_STATUSES,
+  type ComfyHealthState,
+  type ComfyRequestStatus,
+} from './types'
 
 const SCHEDULABLE_STATUSES = ['waiting_capacity', 'blocked_no_compatible_instance'] as const
-const CONNECTION_ACTIVE_STATUSES = [
-  'leased', 'uploading', 'submitted', 'running', 'transferring', 'reconciling',
-] as const
 
 export interface ComfySchedulableRequest {
   id: string
@@ -55,9 +56,11 @@ export interface ComfySchedulerDependencies {
     leaseId: string
     leaseExpiresAt: Date
     assignedAt: Date
-  }): Promise<boolean>
+  }): Promise<ComfyAssignmentOutcome>
   markBlockedIfEligible(requestId: string, userId: string): Promise<boolean>
 }
+
+export type ComfyAssignmentOutcome = 'assigned' | 'request_lost' | 'connection_busy'
 
 export interface ComfySchedulerOptions {
   leaseTtlMs?: number
@@ -142,9 +145,9 @@ export async function scheduleNextComfyRequest(
       ttlMs,
     }
     if (!await dependencies.acquireLease(owner)) continue
-    let assigned: boolean
+    let assignment: ComfyAssignmentOutcome
     try {
-      assigned = await dependencies.assignIfEligible({
+      assignment = await dependencies.assignIfEligible({
         requestId: request.id,
         userId,
         connectionId: connection.id,
@@ -160,14 +163,16 @@ export async function scheduleNextComfyRequest(
       }
       throw error
     }
-    if (assigned) {
+    if (assignment === 'assigned') {
       return {
         outcome: 'leased', requestId: request.id,
         connectionId: connection.id, leaseId: owner.leaseId,
       }
     }
-    await dependencies.releaseLease(owner)
-    return { outcome: 'lost_race', requestId: request.id }
+    await bestEffortRelease(dependencies, owner)
+    if (assignment === 'request_lost') {
+      return { outcome: 'lost_race', requestId: request.id }
+    }
   }
   return { outcome: 'lost_race', requestId: request.id }
 }
@@ -232,7 +237,8 @@ export function createDefaultComfySchedulerDependencies(
   }
 }
 
-const ASSIGNMENT_RACE = Symbol('COMFY_ASSIGNMENT_RACE')
+const CONNECTION_BUSY = Symbol('COMFY_CONNECTION_BUSY')
+const REQUEST_LOST = Symbol('COMFY_REQUEST_LOST')
 
 export async function assignComfyRequestWithStore(
   input: ComfyAssignmentInput,
@@ -244,15 +250,15 @@ export async function assignComfyRequestWithStore(
         where: {
           connectionId: input.connectionId,
           id: { not: input.requestId },
-          status: { in: [...CONNECTION_ACTIVE_STATUSES] },
+          status: { in: [...COMFY_ACTIVE_REQUEST_STATUSES] },
         },
       })
-      if (activeRequests > 0) throw ASSIGNMENT_RACE
+      if (activeRequests > 0) throw CONNECTION_BUSY
       const connection = await client.updateConnection({
         where: { id: input.connectionId, userId: input.userId, enabled: true },
         data: { lastAssignedAt: input.assignedAt },
       })
-      if (connection.count !== 1) throw ASSIGNMENT_RACE
+      if (connection.count !== 1) throw CONNECTION_BUSY
       const request = await client.updateRequest({
         where: {
           id: input.requestId, userId: input.userId,
@@ -264,12 +270,24 @@ export async function assignComfyRequestWithStore(
           leaseExpiresAt: input.leaseExpiresAt, leasedAt: input.assignedAt,
         },
       })
-      if (request.count !== 1) throw ASSIGNMENT_RACE
-      return true
+      if (request.count !== 1) throw REQUEST_LOST
+      return 'assigned' as const
     })
   } catch (error) {
-    if (error === ASSIGNMENT_RACE) return false
+    if (error === CONNECTION_BUSY) return 'connection_busy'
+    if (error === REQUEST_LOST) return 'request_lost'
     throw error
+  }
+}
+
+async function bestEffortRelease(
+  dependencies: Pick<ComfySchedulerDependencies, 'releaseLease'>,
+  owner: ComfyRequestLeaseOwner,
+) {
+  try {
+    await dependencies.releaseLease(owner)
+  } catch {
+    // The lease has a bounded TTL; a release transport error is not a new assignment result.
   }
 }
 

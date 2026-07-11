@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import type { Prisma } from '@prisma/client'
+
+import { prisma } from '@/lib/prisma'
 
 import {
   comfyLeaseKey,
@@ -7,6 +10,7 @@ import {
   tryAcquireComfyLease,
   type ComfyLeaseStore,
 } from './test-lease'
+import { COMFY_ACTIVE_REQUEST_STATUSES } from './types'
 
 export type ComfyLeaseRedis = ComfyLeaseStore
 
@@ -15,6 +19,14 @@ export interface ComfyRequestLeaseOwner {
   requestId: string
   leaseId: string
   ttlMs: number
+}
+
+export interface ComfyDurableLeaseStore {
+  updateMany(input: Prisma.ComfyGenerationRequestUpdateManyArgs): Promise<{ count: number }>
+}
+
+const defaultDurableLeaseStore: ComfyDurableLeaseStore = {
+  updateMany: (input) => prisma.comfyGenerationRequest.updateMany(input),
 }
 
 export function newComfyLeaseId() {
@@ -49,6 +61,35 @@ export async function heartbeatComfyRequestLease(
   } catch {
     return false
   }
+}
+
+export async function heartbeatDurableComfyRequestLease(
+  owner: ComfyRequestLeaseOwner,
+  durableStore: ComfyDurableLeaseStore = defaultDurableLeaseStore,
+  redisStore?: ComfyLeaseRedis,
+  now = new Date(),
+) {
+  if (!await heartbeatComfyRequestLease(owner, redisStore)) {
+    return { owned: false as const, reason: 'redis_lost' as const }
+  }
+  const leaseExpiresAt = new Date(now.getTime() + owner.ttlMs)
+  try {
+    const result = await durableStore.updateMany({
+      where: {
+        id: owner.requestId,
+        connectionId: owner.connectionId,
+        leaseId: owner.leaseId,
+        status: { in: [...COMFY_ACTIVE_REQUEST_STATUSES] },
+      },
+      data: { leaseExpiresAt },
+    })
+    if (result.count === 1) return { owned: true as const, leaseExpiresAt }
+  } catch (error) {
+    await releaseComfyRequestLease(owner, redisStore).catch(() => false)
+    throw error
+  }
+  await releaseComfyRequestLease(owner, redisStore).catch(() => false)
+  return { owned: false as const, reason: 'db_lost' as const }
 }
 
 export async function releaseComfyRequestLease(

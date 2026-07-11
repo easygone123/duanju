@@ -50,6 +50,7 @@ describe('ComfyUI request state machine', () => {
         currentVersionId: version.id, currentVersion: version,
       }),
       create,
+      transaction: async <T>(operation: (value: never) => Promise<T>) => operation(dependencies as never),
     }
     const input = {
       invocationKey: 'invoke-1', userId: 'user-1', projectId: 'project-1', taskId: 'task-1',
@@ -74,7 +75,7 @@ describe('ComfyUI request state machine', () => {
       from: COMFY_REQUEST_STATUS.WAITING_CAPACITY, to: COMFY_REQUEST_STATUS.LEASED,
       patch: { connectionId: 'connection-1', leaseId: 'lease-1' },
       now: new Date('2026-07-11T01:00:00.000Z'),
-    }, { updateMany })
+    }, { updateMany, findCurrent: vi.fn() })
 
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: 'request-1', userId: 'user-1', status: 'waiting_capacity' },
@@ -83,9 +84,94 @@ describe('ComfyUI request state machine', () => {
     updateMany.mockResolvedValueOnce({ count: 0 })
     await expect(transitionComfyGenerationRequest({
       requestId: 'request-1', userId: 'user-1', from: 'waiting_capacity', to: 'leased',
-    }, { updateMany })).rejects.toMatchObject({ code: 'CONFLICT' })
+    }, { updateMany, findCurrent: vi.fn().mockResolvedValue(null) })).rejects.toMatchObject({ code: 'CONFLICT' })
     await expect(transitionComfyGenerationRequest({
       requestId: 'request-1', userId: 'user-1', from: 'completed', to: 'running',
-    }, { updateMany })).rejects.toMatchObject({ code: 'CONFLICT' })
+    }, { updateMany, findCurrent: vi.fn() })).rejects.toMatchObject({ code: 'CONFLICT' })
+  })
+
+  it('accepts an exact same-target retry but rejects a different stale lease', async () => {
+    const leasedAt = new Date('2026-07-11T01:00:00.000Z')
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 })
+    const findCurrent = vi.fn().mockResolvedValue({
+      id: 'request-1', userId: 'user-1', status: 'leased',
+      connectionId: 'connection-1', leaseId: 'lease-1',
+      leaseExpiresAt: new Date('2026-07-11T01:01:00.000Z'), leasedAt,
+    })
+    const base = {
+      requestId: 'request-1', userId: 'user-1',
+      from: COMFY_REQUEST_STATUS.WAITING_CAPACITY, to: COMFY_REQUEST_STATUS.LEASED,
+      expectedLeaseId: 'lease-1',
+      patch: {
+        connectionId: 'connection-1', leaseId: 'lease-1',
+        leaseExpiresAt: new Date('2026-07-11T01:01:00.000Z'),
+      },
+    }
+
+    await expect(transitionComfyGenerationRequest(base, {
+      updateMany, findCurrent,
+    })).resolves.toBeUndefined()
+    await expect(transitionComfyGenerationRequest({
+      ...base, patch: { ...base.patch, leaseId: 'different-lease' },
+    }, { updateMany, findCurrent })).rejects.toMatchObject({ code: 'CONFLICT' })
+    await expect(transitionComfyGenerationRequest({
+      ...base, expectedLeaseId: 'different-lease',
+    }, { updateMany, findCurrent })).rejects.toMatchObject({ code: 'CONFLICT' })
+  })
+
+  it('requires a matching lease owner for transitions from an assigned phase', async () => {
+    await expect(transitionComfyGenerationRequest({
+      requestId: 'request-1', userId: 'user-1', from: 'leased', to: 'uploading',
+    }, { updateMany: vi.fn(), findCurrent: vi.fn() })).rejects.toMatchObject({
+      code: 'INVALID_PARAMS',
+    })
+  })
+
+  it('rejects immutable and phase-inappropriate transition patch fields at runtime', async () => {
+    const dependencies = { updateMany: vi.fn(), findCurrent: vi.fn() }
+    for (const patch of [
+      { workflowVersionId: 'evil-version' },
+      { userId: 'other-user' },
+      { variableSnapshot: { prompt: 'changed' } },
+      { promptId: 'too-early' },
+    ]) {
+      await expect(transitionComfyGenerationRequest({
+        requestId: 'request-1', userId: 'user-1',
+        from: 'waiting_capacity', to: 'leased', patch,
+      }, dependencies)).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
+    }
+    expect(dependencies.updateMany).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['missing required', {}],
+    ['wrong type', { prompt: 42 }],
+    ['nonfinite number', { prompt: 'ok', steps: Number.POSITIVE_INFINITY }],
+    ['extra variable', { prompt: 'ok', secret: 'nope' }],
+    ['oversized snapshot', { prompt: 'x'.repeat(300_000) }],
+  ])('rejects an invalid pinned variable snapshot: %s', async (_case, variables) => {
+    const dependencies = requestDependenciesWithDefinitions([
+      { name: 'prompt', type: 'string', required: true },
+      { name: 'steps', type: 'number', required: false },
+    ])
+    await expect(createComfyGenerationRequest({
+      invocationKey: `invoke-${_case}`, userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'image', workflowId: 'workflow-1', variables,
+    }, dependencies)).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
+    expect(dependencies.create).not.toHaveBeenCalled()
   })
 })
+
+function requestDependenciesWithDefinitions(variableDefinitions: unknown[]) {
+  const dependencies = {
+    findInvocation: vi.fn().mockResolvedValue(null),
+    findPublishedWorkflow: vi.fn().mockResolvedValue({
+      id: 'workflow-1', userId: 'user-1', mediaType: 'image', status: 'published',
+      currentVersionId: version.id,
+      currentVersion: { ...version, variableDefinitions },
+    }),
+    create: vi.fn(),
+    transaction: async <T>(operation: (value: never) => Promise<T>) => operation(dependencies as never),
+  }
+  return dependencies
+}

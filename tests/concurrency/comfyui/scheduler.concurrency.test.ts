@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   acquireComfyRequestLease,
+  heartbeatDurableComfyRequestLease,
   heartbeatComfyRequestLease,
   releaseComfyRequestLease,
   type ComfyLeaseRedis,
@@ -52,6 +53,52 @@ describe('ComfyUI request leases', () => {
     redis.now = 101
     await expect(acquireComfyRequestLease({ ...owner, requestId: 'request-2', leaseId: 'lease-2' }, redis)).resolves.toBe(true)
   })
+
+  it('heartbeats Redis first and extends the durable owner-CAS expiry for long work', async () => {
+    const redis = new MemoryLeaseRedis()
+    const owner = { connectionId: 'connection-1', requestId: 'request-1', leaseId: 'lease-1', ttlMs: 100 }
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 })
+    await acquireComfyRequestLease(owner, redis)
+    redis.now = 50
+
+    await expect(heartbeatDurableComfyRequestLease(
+      owner, { updateMany }, redis, new Date(50),
+    )).resolves.toEqual({ owned: true, leaseExpiresAt: new Date(150) })
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'request-1', connectionId: 'connection-1', leaseId: 'lease-1',
+        status: { in: [
+          'leased', 'uploading', 'submitted', 'running', 'transferring', 'reconciling',
+        ] },
+      },
+      data: { leaseExpiresAt: new Date(150) },
+    })
+  })
+
+  it('never extends DB expiry for a wrong Redis owner', async () => {
+    const redis = new MemoryLeaseRedis()
+    const owner = { connectionId: 'connection-1', requestId: 'request-1', leaseId: 'lease-1', ttlMs: 100 }
+    const updateMany = vi.fn()
+    await acquireComfyRequestLease(owner, redis)
+
+    await expect(heartbeatDurableComfyRequestLease(
+      { ...owner, leaseId: 'wrong' }, { updateMany }, redis, new Date(10),
+    )).resolves.toEqual({ owned: false, reason: 'redis_lost' })
+    expect(updateMany).not.toHaveBeenCalled()
+  })
+
+  it('owner-releases Redis and reports reconciliation when durable CAS is lost', async () => {
+    const redis = new MemoryLeaseRedis()
+    const owner = { connectionId: 'connection-1', requestId: 'request-1', leaseId: 'lease-1', ttlMs: 100 }
+    await acquireComfyRequestLease(owner, redis)
+
+    await expect(heartbeatDurableComfyRequestLease(
+      owner, { updateMany: vi.fn().mockResolvedValue({ count: 0 }) }, redis, new Date(10),
+    )).resolves.toEqual({ owned: false, reason: 'db_lost' })
+    await expect(acquireComfyRequestLease({
+      ...owner, requestId: 'request-2', leaseId: 'lease-2',
+    }, redis)).resolves.toBe(true)
+  })
 })
 
 function schedulerFixture(overrides: Partial<ComfySchedulerDependencies> = {}) {
@@ -77,7 +124,7 @@ function schedulerFixture(overrides: Partial<ComfySchedulerDependencies> = {}) {
     }),
     releaseLease: vi.fn().mockResolvedValue(true),
     makeWaitingIfBlocked: vi.fn().mockResolvedValue(true),
-    assignIfEligible: vi.fn().mockResolvedValue(true),
+    assignIfEligible: vi.fn().mockResolvedValue('assigned'),
     markBlockedIfEligible: vi.fn().mockResolvedValue(true),
     ...overrides,
   }
@@ -143,9 +190,32 @@ describe('idle-first ComfyUI scheduler', () => {
   })
 
   it('releases Redis ownership when the database compare-and-set loses', async () => {
-    const { deps } = schedulerFixture({ assignIfEligible: vi.fn().mockResolvedValue(false) })
+    const { deps } = schedulerFixture({
+      assignIfEligible: vi.fn().mockResolvedValue('request_lost'),
+      releaseLease: vi.fn().mockRejectedValue(new Error('redis unavailable')),
+    })
     await expect(scheduleNextComfyRequest('user-1', deps)).resolves.toMatchObject({ outcome: 'lost_race' })
     expect(deps.releaseLease).toHaveBeenCalledOnce()
+  })
+
+  it('skips a stale-active LRU node and leases the next idle candidate', async () => {
+    const { deps } = schedulerFixture({
+      acquireLease: vi.fn().mockResolvedValue(true),
+      assignIfEligible: vi.fn()
+        .mockResolvedValueOnce('connection_busy')
+        .mockResolvedValueOnce('assigned'),
+    })
+
+    await expect(scheduleNextComfyRequest('user-1', deps, {
+      newLeaseId: vi.fn().mockReturnValueOnce('lease-stale').mockReturnValueOnce('lease-next'),
+    })).resolves.toMatchObject({
+      outcome: 'leased', requestId: 'request-old', connectionId: 'connection-older',
+      leaseId: 'lease-next',
+    })
+    expect(deps.releaseLease).toHaveBeenCalledWith({
+      connectionId: 'connection-never', requestId: 'request-old',
+      leaseId: 'lease-stale', ttlMs: 30_000,
+    })
   })
 
   it('best-effort releases Redis ownership when database assignment throws', async () => {
@@ -173,6 +243,30 @@ describe('idle-first ComfyUI scheduler', () => {
     expect([first.outcome, second.outcome].sort()).toEqual(['leased', 'lost_race'])
     expect(deps.assignIfEligible).toHaveBeenCalledOnce()
   })
+
+  it('gives two schedulers one winner through the real memory Redis and DB CAS gates', async () => {
+    const redis = new MemoryLeaseRedis()
+    let requestAvailable = true
+    const { deps } = schedulerFixture({
+      acquireLease: (owner) => acquireComfyRequestLease(owner, redis),
+      releaseLease: (owner) => releaseComfyRequestLease(owner, redis),
+      assignIfEligible: (input) => assignComfyRequestWithStore(input, transactionStore(
+        vi.fn().mockResolvedValue({ count: 1 }),
+        vi.fn().mockImplementation(async () => {
+          if (!requestAvailable) return { count: 0 }
+          requestAvailable = false
+          return { count: 1 }
+        }),
+      )),
+    })
+
+    const results = await Promise.all([
+      scheduleNextComfyRequest('user-1', deps),
+      scheduleNextComfyRequest('user-1', deps),
+    ])
+    expect(results.filter((result) => result.outcome === 'leased')).toHaveLength(1)
+    expect(results.filter((result) => result.outcome === 'lost_race')).toHaveLength(1)
+  })
 })
 
 describe('ComfyUI database assignment CAS', () => {
@@ -187,7 +281,7 @@ describe('ComfyUI database assignment CAS', () => {
     const updateConnection = vi.fn().mockResolvedValue({ count: 0 })
     const store = transactionStore(updateConnection, updateRequest)
 
-    await expect(assignComfyRequestWithStore(input, store)).resolves.toBe(false)
+    await expect(assignComfyRequestWithStore(input, store)).resolves.toBe('connection_busy')
     expect(updateConnection).toHaveBeenCalledWith({
       where: { id: 'connection-1', userId: 'user-1', enabled: true },
       data: { lastAssignedAt: input.assignedAt },
@@ -201,7 +295,7 @@ describe('ComfyUI database assignment CAS', () => {
     const countActiveRequests = vi.fn().mockResolvedValue(1)
     const store = transactionStore(updateConnection, updateRequest, countActiveRequests)
 
-    await expect(assignComfyRequestWithStore(input, store)).resolves.toBe(false)
+    await expect(assignComfyRequestWithStore(input, store)).resolves.toBe('connection_busy')
     expect(countActiveRequests).toHaveBeenCalledWith({
       where: {
         connectionId: 'connection-1',
@@ -220,7 +314,7 @@ describe('ComfyUI database assignment CAS', () => {
     const updateConnection = vi.fn().mockResolvedValue({ count: 1 })
     const store = transactionStore(updateConnection, updateRequest)
 
-    await expect(assignComfyRequestWithStore(input, store)).resolves.toBe(true)
+    await expect(assignComfyRequestWithStore(input, store)).resolves.toBe('assigned')
     expect(updateRequest).toHaveBeenCalledWith({
       where: {
         id: 'request-1', userId: 'user-1',
@@ -232,6 +326,15 @@ describe('ComfyUI database assignment CAS', () => {
         leaseExpiresAt: input.leaseExpiresAt, leasedAt: input.assignedAt,
       },
     })
+  })
+
+  it('distinguishes a lost request CAS from a busy connection', async () => {
+    const updateRequest = vi.fn().mockResolvedValue({ count: 0 })
+    const updateConnection = vi.fn().mockResolvedValue({ count: 1 })
+
+    await expect(assignComfyRequestWithStore(
+      input, transactionStore(updateConnection, updateRequest),
+    )).resolves.toBe('request_lost')
   })
 })
 

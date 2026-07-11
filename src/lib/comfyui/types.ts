@@ -15,6 +15,15 @@ export const COMFY_REQUEST_STATUS = {
 export type ComfyRequestStatus =
   (typeof COMFY_REQUEST_STATUS)[keyof typeof COMFY_REQUEST_STATUS]
 
+export const COMFY_ACTIVE_REQUEST_STATUSES = [
+  COMFY_REQUEST_STATUS.LEASED,
+  COMFY_REQUEST_STATUS.UPLOADING,
+  COMFY_REQUEST_STATUS.SUBMITTED,
+  COMFY_REQUEST_STATUS.RUNNING,
+  COMFY_REQUEST_STATUS.TRANSFERRING,
+  COMFY_REQUEST_STATUS.RECONCILING,
+] as const
+
 export type ComfyMediaType = 'image' | 'video'
 
 export type ComfyAuthType = 'none' | 'bearer' | 'basic'
