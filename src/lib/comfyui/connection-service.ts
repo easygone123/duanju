@@ -10,6 +10,10 @@ import { authorizeComfyTarget, type ComfyNetworkPolicyConfig } from './network-p
 import type { ComfyAuthType, ComfyConnectionAuth, ComfyHealthSummary } from './types'
 
 const TERMINAL_REQUEST_STATUSES = ['completed', 'failed', 'canceled'] as const
+const MAX_DELETE_ATTEMPTS = 3
+const MAX_STABLE_PROBE_ATTEMPTS = 3
+const DEFAULT_STATUS_PROBE_CONCURRENCY = 4
+const MAX_STATUS_PROBE_CONCURRENCY = 8
 
 export type ComfyCredentialInput =
   | { token: string }
@@ -119,6 +123,94 @@ export async function updateOwnedConnection(
 }
 
 export async function deleteOwnedConnection(userId: string, connectionId: string) {
+  for (let attempt = 1; attempt <= MAX_DELETE_ATTEMPTS; attempt += 1) {
+    try {
+      await deleteOwnedConnectionOnce(userId, connectionId)
+      return
+    } catch (error) {
+      if (isPrismaCode(error, 'P2034') && attempt < MAX_DELETE_ATTEMPTS) continue
+      if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2003')) {
+        throw new ApiError('CONFLICT')
+      }
+      throw error
+    }
+  }
+}
+
+export async function probeOwnedConnection(
+  userId: string,
+  connectionId: string,
+): Promise<ComfyHealthSummary> {
+  const record = await findOwnedConnection(userId, connectionId)
+  return probeStableConnection(record, userId)
+}
+
+export async function probeOwnedConnectionStatuses(userId: string) {
+  const records = await prisma.comfyConnection.findMany({
+    where: { userId, enabled: true },
+    orderBy: { createdAt: 'asc' },
+  })
+  const statuses = await mapWithConcurrency(
+    records,
+    readStatusProbeConcurrency(),
+    async (record) => {
+      try {
+        return {
+          connectionId: record.id,
+          ...await probeStableConnection(record, userId),
+        }
+      } catch (error) {
+        if (error instanceof ApiError
+          && (error.code === 'NOT_FOUND' || error.code === 'CONFLICT')) return null
+        throw error
+      }
+    },
+  )
+  return statuses.filter((status) => status !== null)
+}
+
+async function probeStableConnection(initialRecord: ComfyConnection, userId: string) {
+  let record = initialRecord
+  for (let attempt = 1; attempt <= MAX_STABLE_PROBE_ATTEMPTS; attempt += 1) {
+    const summary = await collectProbe(record, userId)
+    const persisted = await prisma.comfyConnection.updateMany({
+      where: { id: record.id, userId, updatedAt: record.updatedAt },
+      data: sanitizeComfyHealthDiagnostic(summary),
+    })
+    if (persisted.count === 1) return summary
+    const current = await prisma.comfyConnection.findFirst({
+      where: { id: record.id, userId },
+    })
+    if (!current) throw new ApiError('NOT_FOUND')
+    record = current
+  }
+  throw new ApiError('CONFLICT')
+}
+
+async function collectProbe(record: ComfyConnection, userId: string) {
+  const policy = readNetworkPolicy()
+  const checkedAt = new Date()
+  let summary: ComfyHealthSummary
+  try {
+    await authorizeComfyTarget(record.normalizedBaseUrl, policy)
+    const client = new ComfyClient({
+      baseUrl: record.normalizedBaseUrl,
+      auth: decodeCredentials(record),
+      networkPolicy: policy,
+    })
+    const [systemStats, queue, ownedNonterminalCount] = await Promise.all([
+      client.getSystemStats(),
+      client.getQueue(),
+      countOwnedNonterminal(record.id, userId),
+    ])
+    summary = deriveComfyHealth({ checkedAt, systemStats, queue, ownedNonterminalCount })
+  } catch (error) {
+    summary = deriveComfyHealth({ checkedAt, error, ownedNonterminalCount: 0 })
+  }
+  return summary
+}
+
+async function deleteOwnedConnectionOnce(userId: string, connectionId: string) {
   await prisma.$transaction(async (tx) => {
     const existing = await tx.comfyConnection.findFirst({ where: { id: connectionId, userId } })
     if (!existing) throw new ApiError('NOT_FOUND')
@@ -142,52 +234,6 @@ export async function deleteOwnedConnection(userId: string, connectionId: string
       where: { id_userId: { id: existing.id, userId } },
     })
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
-}
-
-export async function probeOwnedConnection(
-  userId: string,
-  connectionId: string,
-): Promise<ComfyHealthSummary> {
-  const record = await findOwnedConnection(userId, connectionId)
-  return probeAuthorizedConnection(record, userId)
-}
-
-export async function probeOwnedConnectionStatuses(userId: string) {
-  const records = await prisma.comfyConnection.findMany({
-    where: { userId, enabled: true },
-    orderBy: { createdAt: 'asc' },
-  })
-  return Promise.all(records.map(async (record) => ({
-    connectionId: record.id,
-    ...await probeAuthorizedConnection(record, userId),
-  })))
-}
-
-async function probeAuthorizedConnection(record: ComfyConnection, userId: string) {
-  const policy = readNetworkPolicy()
-  const checkedAt = new Date()
-  let summary: ComfyHealthSummary
-  try {
-    await authorizeComfyTarget(record.normalizedBaseUrl, policy)
-    const client = new ComfyClient({
-      baseUrl: record.normalizedBaseUrl,
-      auth: decodeCredentials(record),
-      networkPolicy: policy,
-    })
-    const [systemStats, queue, ownedNonterminalCount] = await Promise.all([
-      client.getSystemStats(),
-      client.getQueue(),
-      countOwnedNonterminal(record.id, userId),
-    ])
-    summary = deriveComfyHealth({ checkedAt, systemStats, queue, ownedNonterminalCount })
-  } catch (error) {
-    summary = deriveComfyHealth({ checkedAt, error, ownedNonterminalCount: 0 })
-  }
-  await prisma.comfyConnection.update({
-    where: { id_userId: { id: record.id, userId } },
-    data: sanitizeComfyHealthDiagnostic(summary),
-  })
-  return summary
 }
 
 async function countOwnedNonterminal(connectionId: string, userId: string) {
@@ -259,6 +305,30 @@ function commaList(value: string | undefined) {
   return (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
 }
 
+function readStatusProbeConcurrency() {
+  const configured = Number(process.env.COMFYUI_STATUS_PROBE_CONCURRENCY)
+  if (!Number.isInteger(configured) || configured < 1) return DEFAULT_STATUS_PROBE_CONCURRENCY
+  return Math.min(configured, MAX_STATUS_PROBE_CONCURRENCY)
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  operation: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length)
+  let nextIndex = 0
+  async function worker() {
+    while (nextIndex < values.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await operation(values[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker))
+  return results
+}
+
 function toPublicConnection(record: ComfyConnection) {
   return {
     id: record.id,
@@ -280,5 +350,9 @@ function toPublicConnection(record: ComfyConnection) {
 }
 
 function isUniqueViolation(error: unknown) {
-  return !!error && typeof error === 'object' && 'code' in error && error.code === 'P2002'
+  return isPrismaCode(error, 'P2002')
+}
+
+function isPrismaCode(error: unknown, code: string) {
+  return !!error && typeof error === 'object' && 'code' in error && error.code === code
 }

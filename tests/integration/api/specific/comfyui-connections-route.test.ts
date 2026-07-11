@@ -10,6 +10,7 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
     delete: vi.fn(),
   },
   comfyGenerationRequest: {
@@ -79,11 +80,14 @@ describe('ComfyUI private connection routes', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.clearAllMocks()
+    prismaMock.$transaction.mockReset()
     resetAuthMockState()
     process.env.COMFYUI_NETWORK_MODE = 'allowlist'
     process.env.COMFYUI_ALLOWED_HOSTS = 'example.com'
     process.env.COMFYUI_ALLOWED_CIDRS = ''
+    delete process.env.COMFYUI_STATUS_PROBE_CONCURRENCY
     prismaMock.comfyConnection.findMany.mockResolvedValue([])
+    prismaMock.comfyConnection.updateMany.mockResolvedValue({ count: 1 })
     prismaMock.comfyGenerationRequest.count.mockResolvedValue(0)
     prismaMock.comfyGenerationRequest.updateMany.mockResolvedValue({ count: 0 })
     getSystemStatsMock.mockResolvedValue({ system: { comfyui_version: '0.3.50' }, devices: [] })
@@ -132,7 +136,7 @@ describe('ComfyUI private connection routes', () => {
     prismaMock.comfyConnection.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) =>
       connection({ ...data, id: 'connection-new' }))
     prismaMock.comfyConnection.findFirst.mockResolvedValue(connection({ id: 'connection-new' }))
-    prismaMock.comfyConnection.update.mockResolvedValue(connection({ id: 'connection-new' }))
+    prismaMock.comfyConnection.updateMany.mockResolvedValue({ count: 1 })
     const route = await import('@/app/api/comfyui/connections/route')
     const response = await route.POST(buildMockRequest({
       path: '/api/comfyui/connections',
@@ -275,7 +279,7 @@ describe('ComfyUI private connection routes', () => {
     installAuthMocks()
     mockAuthenticated('user-1')
     prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
-    prismaMock.comfyConnection.update.mockResolvedValue(connection())
+    prismaMock.comfyConnection.updateMany.mockResolvedValue({ count: 1 })
     getSystemStatsMock.mockRejectedValue(new Error('Authorization: Bearer top-secret'))
     const route = await import('@/app/api/comfyui/connections/[connectionId]/probe/route')
     const response = await route.POST(buildMockRequest({
@@ -283,14 +287,62 @@ describe('ComfyUI private connection routes', () => {
     }), connectionContext('connection-1'))
 
     expect(response.status).toBe(200)
-    expect(prismaMock.comfyConnection.update).toHaveBeenCalledWith({
-      where: { id_userId: { id: 'connection-1', userId: 'user-1' } },
+    expect(prismaMock.comfyConnection.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'connection-1',
+        userId: 'user-1',
+        updatedAt: new Date('2026-07-11T08:00:00.000Z'),
+      },
       data: expect.objectContaining({
         lastHealthCode: 'offline',
         lastHealthMessage: 'Connection unavailable',
       }),
     })
-    expect(JSON.stringify(prismaMock.comfyConnection.update.mock.calls)).not.toContain('top-secret')
+    expect(JSON.stringify(prismaMock.comfyConnection.updateMany.mock.calls)).not.toContain('top-secret')
+  })
+
+  it('discards a stale probe after PATCH and re-probes the stable connection version', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const changed = connection({
+      normalizedBaseUrl: 'http://changed.example.com',
+      updatedAt: new Date('2026-07-11T08:01:00.000Z'),
+    })
+    prismaMock.comfyConnection.findFirst
+      .mockResolvedValueOnce(connection())
+      .mockResolvedValueOnce(changed)
+    prismaMock.comfyConnection.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 })
+    getSystemStatsMock
+      .mockResolvedValueOnce({ system: { comfyui_version: 'stale' }, devices: [] })
+      .mockResolvedValueOnce({ system: { comfyui_version: 'stable' }, devices: [] })
+    const route = await import('@/app/api/comfyui/connections/[connectionId]/probe/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/connections/connection-1/probe', method: 'POST',
+    }), connectionContext('connection-1'))
+
+    expect(response.status).toBe(200)
+    expect(await responseJson(response)).toEqual({ health: expect.objectContaining({ version: 'stable' }) })
+    expect(clientConstructedMock).toHaveBeenCalledTimes(2)
+    expect(prismaMock.comfyConnection.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ updatedAt: changed.updatedAt }),
+    }))
+  })
+
+  it('discards a stale probe after concurrent DELETE and returns 404 rather than 500', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findFirst
+      .mockResolvedValueOnce(connection())
+      .mockResolvedValueOnce(null)
+    prismaMock.comfyConnection.updateMany.mockResolvedValueOnce({ count: 0 })
+    const route = await import('@/app/api/comfyui/connections/[connectionId]/probe/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/connections/connection-1/probe', method: 'POST',
+    }), connectionContext('connection-1'))
+
+    expect(response.status).toBe(404)
   })
 
   it('returns exact idle, external-busy, owned-busy, offline, and auth status states', async () => {
@@ -329,5 +381,60 @@ describe('ComfyUI private connection routes', () => {
       ['offline', 'offline'],
       ['auth', 'auth_failed'],
     ])
+  })
+
+  it('bounds status fan-out to the configured safe probe concurrency', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    process.env.COMFYUI_STATUS_PROBE_CONCURRENCY = '3'
+    prismaMock.comfyConnection.findMany.mockResolvedValue(
+      Array.from({ length: 12 }, (_, index) => connection({ id: `connection-${index}` })),
+    )
+    let active = 0
+    let peak = 0
+    getSystemStatsMock.mockImplementation(async () => {
+      active += 1
+      peak = Math.max(peak, active)
+      await new Promise((resolve) => setTimeout(resolve, 2))
+      active -= 1
+      return {}
+    })
+    const route = await import('@/app/api/comfyui/connections/status/route')
+    const response = await route.GET(buildMockRequest({
+      path: '/api/comfyui/connections/status', method: 'GET',
+    }), collectionContext)
+
+    expect(response.status).toBe(200)
+    expect(peak).toBe(3)
+  })
+
+  it('retries P2034 serialization conflicts finitely before deleting', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.$transaction
+      .mockRejectedValueOnce({ code: 'P2034' })
+      .mockRejectedValueOnce({ code: 'P2034' })
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    prismaMock.comfyConnection.delete.mockResolvedValue(connection())
+    const route = await import('@/app/api/comfyui/connections/[connectionId]/route')
+    const response = await route.DELETE(buildMockRequest({
+      path: '/api/comfyui/connections/connection-1', method: 'DELETE',
+    }), connectionContext('connection-1'))
+
+    expect(response.status).toBe(200)
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(3)
+  })
+
+  it('maps scheduler FK races during delete to a stable 409', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    prismaMock.comfyConnection.delete.mockRejectedValue({ code: 'P2003' })
+    const route = await import('@/app/api/comfyui/connections/[connectionId]/route')
+    const response = await route.DELETE(buildMockRequest({
+      path: '/api/comfyui/connections/connection-1', method: 'DELETE',
+    }), connectionContext('connection-1'))
+
+    expect(response.status).toBe(409)
   })
 })
