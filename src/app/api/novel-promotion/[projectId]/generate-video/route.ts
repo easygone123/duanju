@@ -78,14 +78,17 @@ function validateFirstLastFrameModel(input: unknown) {
   }
 
   const flModel = input.flModel
-  if (typeof flModel !== 'string' || !parseModelKeyStrict(flModel)) {
+  const parsed = typeof flModel === 'string' ? parseModelKeyStrict(flModel) : null
+  if (!parsed) {
     throw new ApiError('INVALID_PARAMS', {
       code: 'FIRSTLASTFRAME_MODEL_INVALID',
       field: 'firstLastFrame.flModel',
     })
   }
 
-  const capabilities = resolveBuiltinCapabilitiesByModelKey('video', flModel)
+  if (parsed.provider === 'comfyui') return
+
+  const capabilities = resolveBuiltinCapabilitiesByModelKey('video', parsed.modelKey)
   if (capabilities?.video?.firstlastframe !== true) {
     throw new ApiError('INVALID_PARAMS', {
       code: 'FIRSTLASTFRAME_MODEL_UNSUPPORTED',
@@ -103,6 +106,7 @@ async function validateVideoCapabilityCombination(input: {
   if (!isRecord(payload)) return
   const modelKey = resolveVideoModelKeyFromPayload(payload)
   if (!modelKey) return
+  if (parseModelKeyStrict(modelKey)?.provider === 'comfyui') return
 
   // Skip validation for models not in the built-in capability catalog
   const builtinCaps = resolveBuiltinCapabilitiesByModelKey('video', modelKey)
