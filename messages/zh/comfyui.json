@@ -99,7 +99,7 @@
     "instance": "节点",
     "state": "状态",
     "details": "详情",
-    "compatibilityStates": { "compatible": "兼容", "incompatible": "不兼容", "unknown": "未检查", "offline": "离线", "auth_failed": "认证失败" },
+    "compatibilityStates": { "compatible": "兼容", "incompatible": "不兼容", "unknown": "未检查", "offline": "离线", "auth_failed": "认证失败", "disabled": "已禁用" },
     "statuses": { "draft": "草稿", "published": "已发布", "archived": "已归档" },
     "requestFailed": "工作流请求失败。",
     "workflowInvalidJson": "请输入有效的 ComfyUI API Format JSON 对象。",

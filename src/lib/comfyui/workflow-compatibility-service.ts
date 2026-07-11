@@ -17,7 +17,7 @@ export async function listOwnedWorkflowCompatibility(userId: string, workflowId:
   const version = await prisma.comfyWorkflowVersion.findFirst({ where: { id: versionId, workflowId } })
   if (!version) throw new ApiError('NOT_FOUND')
   const connections = await prisma.comfyConnection.findMany({
-    where: { userId, enabled: true }, orderBy: { createdAt: 'asc' }, take: 500,
+    where: { userId }, orderBy: { createdAt: 'asc' }, take: 500,
   })
   if (compatibilityCache.size > 10_000) compatibilityCache.clear()
   return mapWithConcurrency(connections, COMPATIBILITY_CONCURRENCY, async (connection) =>
@@ -32,6 +32,16 @@ async function checkConnection(
   graph: ComfyApiWorkflow,
   requirements: ComfyWorkflowRequirements,
 ) {
+  if (!connection.enabled) {
+    return {
+      connectionId: connection.id,
+      connectionName: connection.name,
+      status: 'disabled' as const,
+      compatible: false,
+      workflowHash,
+      capabilityFingerprint: null,
+    }
+  }
   try {
     const client = createOwnedComfyClient(connection)
     await client.getSystemStats()

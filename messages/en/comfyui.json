@@ -99,7 +99,7 @@
     "instance": "Instance",
     "state": "State",
     "details": "Details",
-    "compatibilityStates": { "compatible": "Compatible", "incompatible": "Incompatible", "unknown": "Not checked", "offline": "Offline", "auth_failed": "Authentication failed" },
+    "compatibilityStates": { "compatible": "Compatible", "incompatible": "Incompatible", "unknown": "Not checked", "offline": "Offline", "auth_failed": "Authentication failed", "disabled": "Disabled" },
     "statuses": { "draft": "Draft", "published": "Published", "archived": "Archived" },
     "requestFailed": "The workflow request failed.",
     "workflowInvalidJson": "Enter a valid ComfyUI API Format JSON object.",

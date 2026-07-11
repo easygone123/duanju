@@ -6,6 +6,33 @@ import type {
   WorkflowValidationIssue,
 } from '@/lib/comfyui/types'
 
+export type WorkflowCompatibilityStatus = 'online' | 'offline' | 'auth_failed' | 'disabled'
+
+export interface WorkflowCompatibilityResponseItem {
+  connectionId: string
+  connectionName: string
+  status: WorkflowCompatibilityStatus
+  compatible: boolean
+  missingNodes?: string[]
+  missingModels?: Array<{ nodeId: string; field: string; value: string }>
+}
+
+export function mapWorkflowCompatibility(item: WorkflowCompatibilityResponseItem) {
+  return {
+    connectionId: item.connectionId,
+    connectionName: item.connectionName,
+    state: item.status === 'disabled'
+      ? 'disabled' as const
+      : item.status === 'auth_failed'
+        ? 'auth_failed' as const
+        : item.status === 'offline'
+          ? 'offline' as const
+          : item.compatible ? 'compatible' as const : 'incompatible' as const,
+    missingNodes: item.missingNodes ?? [],
+    missingModels: item.missingModels ?? [],
+  }
+}
+
 export const MAX_WORKFLOW_JSON_BYTES = 4 * 1024 * 1024
 
 export interface WorkflowVersionView {

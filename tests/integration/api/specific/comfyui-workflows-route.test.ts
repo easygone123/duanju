@@ -404,8 +404,32 @@ describe('ComfyUI workflow library', () => {
       expect.objectContaining({ connectionId: 'connection-2', status: 'online', compatible: true }),
     ] })
     expect(prismaMock.comfyConnection.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { userId: 'user-1', enabled: true },
+      where: { userId: 'user-1' },
     }))
+  })
+
+  it('lists disabled owned connections without probing ComfyUI or exposing another owner', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
+    prismaMock.comfyConnection.findMany.mockResolvedValue([
+      connection({ id: 'disabled-1', name: 'Paused GPU', enabled: false }),
+    ])
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/versions/[versionId]/compatibility/route')
+    const response = await route.GET(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/versions/version-1/compatibility', method: 'GET',
+    }), { params: Promise.resolve({ workflowId: 'workflow-1', versionId: 'version-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(await body(response)).toEqual({ compatibility: [expect.objectContaining({
+      connectionId: 'disabled-1', connectionName: 'Paused GPU', status: 'disabled', compatible: false,
+    })] })
+    expect(prismaMock.comfyConnection.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: 'user-1' },
+    }))
+    expect(getSystemStatsMock).not.toHaveBeenCalled()
+    expect(authorizeComfyTargetMock).not.toHaveBeenCalled()
   })
 
   it('rejects cross-workflow version pairing before probing connections', async () => {

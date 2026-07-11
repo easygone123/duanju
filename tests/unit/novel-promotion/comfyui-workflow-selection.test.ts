@@ -31,17 +31,6 @@ describe('ComfyUI project and task workflow selection', () => {
     expect(source).toContain('onGenerateVideo')
   })
 
-  it('submits an optional image workflow override from the panel while preserving cloud choices', () => {
-    const imageSection = read(`${workspace}/components/storyboard/ImageSection.tsx`)
-    const mutation = read('src/lib/query/mutations/storyboard-panel-mutations.ts')
-    expect(imageSection).toContain("provider === 'comfyui'")
-    expect(imageSection).toContain("provider !== 'comfyui'")
-    expect(imageSection).toContain("'/api/user/models'")
-    expect(imageSection).toContain('selectedImageModel')
-    expect(mutation).toContain('imageModel')
-    expect(mutation).toContain('buildPanelRegenerationPayload')
-  })
-
   it('omits an empty image override and submits an explicit ComfyUI model key unchanged', () => {
     expect(buildPanelRegenerationPayload('panel-1', undefined, undefined)).toEqual({ panelId: 'panel-1', count: 1 })
     expect(buildPanelRegenerationPayload('panel-1', 2, 'comfyui::workflow-1')).toEqual({

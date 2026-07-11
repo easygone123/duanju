@@ -13,6 +13,7 @@ import type {
     ModelCapabilities,
 } from '@/lib/model-config-contract'
 import { filterNormalVideoModelOptions } from '@/lib/model-capabilities/video-model-options'
+import { extractCapabilityFields } from '@/lib/model-capabilities/ui-fields'
 import { RatioSelector, StyleSelector } from './config-modal-selectors'
 import { ModelCapabilityDropdown } from './ModelCapabilityDropdown'
 import { AppIcon } from '@/components/ui/icons'
@@ -30,12 +31,6 @@ interface UserModels {
     image: ModelOption[]
     video: ModelOption[]
     audio: ModelOption[]
-}
-
-interface CapabilityFieldDefinition {
-    field: string
-    options: CapabilityValue[]
-    label: string
 }
 
 interface SettingsModalProps {
@@ -78,33 +73,10 @@ function isCapabilityValue(value: unknown): value is CapabilityValue {
     return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
 }
 
-function toFieldLabel(field: string): string {
-    return field.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase())
-}
-
 function parseBySample(input: string, sample: CapabilityValue): CapabilityValue {
     if (typeof sample === 'number') return Number(input)
     if (typeof sample === 'boolean') return input === 'true'
     return input
-}
-
-function extractCapabilityFields(
-    capabilities: ModelCapabilities | undefined,
-    namespace: 'llm' | 'image' | 'video' | 'audio',
-): CapabilityFieldDefinition[] {
-    const rawNamespace = capabilities?.[namespace]
-    if (!isRecord(rawNamespace)) return []
-
-    return Object.entries(rawNamespace)
-        .filter(([key, value]) => key.endsWith('Options') && Array.isArray(value) && value.every(isCapabilityValue) && value.length > 0)
-        .map(([key, value]) => {
-            const field = key.slice(0, -'Options'.length)
-            return {
-                field,
-                options: value as CapabilityValue[],
-                label: toFieldLabel(field),
-            }
-        })
 }
 
 function readCapabilitySelectionForModel(

@@ -1,7 +1,6 @@
 'use client'
 import { useTranslations } from 'next-intl'
-import { useState } from 'react'
-import { useEffect } from 'react'
+import { useMemo, useState } from 'react'
 import './ImageSection.css'
 import { GlassButton } from '@/components/ui/primitives'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
@@ -11,22 +10,14 @@ import type { TaskPresentationState } from '@/lib/task/presentation'
 import ImageSectionCandidateMode from './ImageSectionCandidateMode'
 import ImageSectionActionButtons from './ImageSectionActionButtons'
 import { AppIcon } from '@/components/ui/icons'
-import { apiFetch } from '@/lib/api-fetch'
+import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapabilityDropdown'
+import { selectImageModelOptions, useUserModels } from '@/lib/query/hooks/useUserModels'
+import { extractCapabilityFields } from '@/lib/model-capabilities/ui-fields'
+import type { CapabilityValue } from '@/lib/model-config-contract'
 
 interface PanelCandidateData {
   candidates: string[]
   selectedIndex: number
-}
-
-type ImageModelOption = { value: string; label: string; provider?: string }
-let imageModelsRequest: Promise<ImageModelOption[]> | null = null
-function loadImageModelOptions() {
-  imageModelsRequest ??= apiFetch('/api/user/models').then(async (response) => {
-    if (!response.ok) return []
-    const payload = await response.json() as { image?: ImageModelOption[] }
-    return payload.image ?? []
-  }).catch(() => [])
-  return imageModelsRequest
 }
 
 interface ImageSectionProps {
@@ -80,15 +71,14 @@ export default function ImageSection({
   const tc = useTranslations('comfyui.workflows')
   const [isTaskPulseAnimating, setIsTaskPulseAnimating] = useState(false)
   const [selectedImageModel, setSelectedImageModel] = useState('')
-  const [imageModelOptions, setImageModelOptions] = useState<ImageModelOption[]>([])
-  useEffect(() => {
-    let mounted = true
-    void loadImageModelOptions().then((models) => { if (mounted) setImageModelOptions(models) })
-    return () => { mounted = false }
-  }, [])
-  const comfyImageOptions = imageModelOptions.filter((option) => option.provider === 'comfyui')
-  const cloudImageOptions = imageModelOptions.filter((option) => option.provider !== 'comfyui')
-  const taskImageOptions = [...cloudImageOptions, ...comfyImageOptions]
+  const [capabilityOverrides, setCapabilityOverrides] = useState<Record<string, CapabilityValue>>({})
+  const userModelsQuery = useUserModels()
+  const taskImageOptions = selectImageModelOptions(userModelsQuery.data)
+  const selectedImageOption = taskImageOptions.find((option) => option.value === selectedImageModel)
+  const capabilityFields = useMemo(
+    () => extractCapabilityFields(selectedImageOption?.capabilities, 'image'),
+    [selectedImageOption],
+  )
   const cssAspectRatio = videoRatio.replace(':', '/')
   const hasValidCandidates = !!candidateData && candidateData.candidates.some((url) => !url.startsWith('PENDING:'))
 
@@ -210,12 +200,23 @@ export default function ImageSection({
 
       {!candidateData && (
         <>
-        <label className="absolute bottom-2 left-2 z-20 max-w-[55%] text-[10px] text-white">
+        <div className="absolute bottom-2 left-2 z-20 w-[55%] min-w-0 text-[10px] text-white">
           <span className="sr-only">{tc('taskImageWorkflow')}</span>
-          <select aria-label={tc('taskImageWorkflow')} value={selectedImageModel} onChange={(event) => setSelectedImageModel(event.target.value)} className="max-w-full rounded-md border border-white/20 bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur">
-            <option value="">{tc('inheritProjectDefault')}</option>{taskImageOptions.map((option) => <option key={option.value} value={option.value}>{option.provider === 'comfyui' ? `ComfyUI / ${option.label}` : option.label}</option>)}
-          </select>
-        </label>
+          <ModelCapabilityDropdown
+            compact
+            placementMode="auto"
+            models={taskImageOptions}
+            value={selectedImageModel || undefined}
+            onModelChange={(model) => { setSelectedImageModel(model); setCapabilityOverrides({}) }}
+            capabilityFields={capabilityFields}
+            capabilityOverrides={capabilityOverrides}
+            onCapabilityChange={(field, rawValue, sample) => setCapabilityOverrides((current) => ({
+              ...current,
+              [field]: typeof sample === 'number' ? Number(rawValue) : typeof sample === 'boolean' ? rawValue === 'true' : rawValue,
+            }))}
+            placeholder={tc('inheritProjectDefault')}
+          />
+        </div>
         <ImageSectionActionButtons
           panelId={panelId}
           imageUrl={imageUrl}

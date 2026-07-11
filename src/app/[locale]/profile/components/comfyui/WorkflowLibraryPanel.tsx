@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api-fetch'
+import { invalidateUserModels } from '@/lib/query/hooks/useUserModels'
 import WorkflowCompatibilityTable, { type WorkflowCompatibilityView } from './WorkflowCompatibilityTable'
 import WorkflowEditor from './WorkflowEditor'
 import WorkflowTestForm, { emptyWorkflowTestPayload, type WorkflowTestPayload } from './WorkflowTestForm'
@@ -10,9 +12,11 @@ import { useComfyConnections } from './hooks'
 import {
   draftFromWorkflow,
   emptyWorkflowDraft,
+  mapWorkflowCompatibility,
   safeWorkflowErrorKey,
   workflowPayload,
   type WorkflowAuthorDraft,
+  type WorkflowCompatibilityResponseItem,
   type WorkflowVersionView,
   type WorkflowView,
 } from './workflow-ui'
@@ -27,6 +31,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export default function WorkflowLibraryPanel() {
   const t = useTranslations('comfyui.workflows')
+  const queryClient = useQueryClient()
   const [workflows, setWorkflows] = useState<WorkflowView[]>([])
   const [selectedId, setSelectedId] = useState<string | 'new'>('new')
   const [authorDraft, setAuthorDraft] = useState<WorkflowAuthorDraft>(emptyWorkflowDraft)
@@ -91,15 +96,8 @@ export default function WorkflowLibraryPanel() {
   useEffect(() => {
     if (selectedId === 'new' || !savedVersion) { setCompatibility([]); return }
     const controller = new AbortController()
-    requestJson<{ compatibility: Array<{
-      connectionId: string; connectionName: string; status: 'online' | 'offline' | 'auth_failed';
-      compatible: boolean; missingNodes: string[]; missingModels: Array<{ nodeId: string; field: string; value: string }>
-    }> }>(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(savedVersion.id)}/compatibility`, { signal: controller.signal })
-      .then((payload) => setCompatibility(payload.compatibility.map((item) => ({
-        connectionId: item.connectionId, connectionName: item.connectionName,
-        state: item.status === 'auth_failed' ? 'auth_failed' : item.status === 'offline' ? 'offline' : item.compatible ? 'compatible' : 'incompatible',
-        missingNodes: item.missingNodes, missingModels: item.missingModels,
-      }))))
+    requestJson<{ compatibility: WorkflowCompatibilityResponseItem[] }>(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(savedVersion.id)}/compatibility`, { signal: controller.signal })
+      .then((payload) => setCompatibility(payload.compatibility.map(mapWorkflowCompatibility)))
       .catch(() => { if (!controller.signal.aborted) setCompatibility([]) })
     return () => controller.abort()
   }, [savedVersion, selectedId])
@@ -108,6 +106,7 @@ export default function WorkflowLibraryPanel() {
     await requestJson(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/publish`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ versionId: savedVersion.id }),
     })
+    await invalidateUserModels(queryClient)
     await load(selectedId)
   })
   const testVersion = () => runAction(async () => {

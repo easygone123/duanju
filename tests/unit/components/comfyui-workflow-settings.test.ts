@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   discoverPlaceholderNames,
   draftFromWorkflow,
+  mapWorkflowCompatibility,
   parseWorkflowImportText,
   setPrimaryOutput,
   type WorkflowView,
@@ -123,6 +124,15 @@ describe('ComfyUI workflow settings UI contract', () => {
     expect(source).not.toMatch(/authorization|bearer|password|rawPrompt/i)
   })
 
+  it('maps a disabled instance to an explicit unknown compatibility row without fake gaps', () => {
+    expect(mapWorkflowCompatibility({
+      connectionId: 'disabled-1', connectionName: 'Paused GPU', status: 'disabled', compatible: false,
+    })).toEqual({
+      connectionId: 'disabled-1', connectionName: 'Paused GPU', state: 'disabled',
+      missingNodes: [], missingModels: [],
+    })
+  })
+
   it('localizes the responsive workflow controls in both languages', () => {
     const en = JSON.parse(readFileSync('messages/en/comfyui.json', 'utf8'))
     const zh = JSON.parse(readFileSync('messages/zh/comfyui.json', 'utf8'))
@@ -133,6 +143,7 @@ describe('ComfyUI workflow settings UI contract', () => {
       expect(messages.workflows.test).toBeTruthy()
       expect(messages.workflows.primaryOutput).toBeTruthy()
       expect(messages.workflows.compatibility).toBeTruthy()
+      expect(messages.workflows.compatibilityStates.disabled).toBeTruthy()
     }
   })
 })

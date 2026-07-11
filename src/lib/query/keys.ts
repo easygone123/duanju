@@ -71,6 +71,7 @@ export const queryKeys = {
     // ============ 用户模型 ============
     userModels: {
         all: () => ['user-models'] as const,
+        scope: (userId: string) => ['user-models', userId] as const,
     },
 
     // ============ 任务轮询 ============
