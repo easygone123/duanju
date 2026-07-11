@@ -105,6 +105,13 @@ export async function scheduleNextComfyRequest(
   const connections = (await dependencies.listOwnedEnabledConnections(userId))
     .filter((connection) => connection.enabled && connection.userId === userId)
     .sort(compareConnections)
+  if (connections.length === 0) {
+    if (request.status === 'waiting_capacity'
+      && !await dependencies.markBlockedIfEligible(request.id, userId)) {
+      return { outcome: 'lost_race', requestId: request.id }
+    }
+    return { outcome: 'blocked_no_compatible_instance', requestId: request.id }
+  }
   const idle: ComfySchedulableConnection[] = []
   for (const connection of connections) {
     const health = await dependencies.readCachedHealth(connection.id)

@@ -40,6 +40,14 @@ export interface ComfyReconcileCursorItem {
   mediaType: 'image' | 'video'
 }
 
+export interface ComfyBackedOffLeaseInput {
+  requestId: string
+  userId: string
+  connectionId: string
+  leaseId: string
+  ttlMs: number
+}
+
 export interface ProductionComfyRuntimeServices {
   listHealthOwners(input: ComfyCursorPageInput): Promise<ComfyCursorPage<ComfyOwnerCursorItem>>
   probeOwnerHealth(
@@ -53,6 +61,9 @@ export interface ProductionComfyRuntimeServices {
     limits: ComfyRuntimeOperationLimits,
     signal: AbortSignal,
   ): Promise<unknown>
+  returnBackedOffLease(
+    input: ComfyBackedOffLeaseInput,
+  ): Promise<'waiting' | 'reconciling' | 'lost'>
   listReconcileRequests(
     input: ComfyReconcileCursorInput,
   ): Promise<ComfyCursorPage<ComfyReconcileCursorItem>>
@@ -71,6 +82,7 @@ const productionServices: ProductionComfyRuntimeServices = {
   listDispatchOwners: async (input) => (await import('./runtime-production')).listProductionComfyDispatchOwners(input),
   scheduleNext: async (userId, config) => (await import('./runtime-production')).scheduleProductionComfyRequest(userId, config),
   dispatch: async (requestId, limits, signal) => (await import('./runtime-production')).dispatchProductionComfyRequest(requestId, limits, signal),
+  returnBackedOffLease: async (input) => (await import('./runtime-production')).returnProductionBackedOffLease(input),
   listReconcileRequests: async (input) => (await import('./runtime-production')).listProductionComfyReconcileRequests(input),
   reconcile: async (requestId, limits, signal) => (await import('./runtime-production')).reconcileProductionComfyRequest(requestId, limits, signal),
   scanExpiredPreSubmit: async () => (await import('./runtime-production')).scanProductionExpiredPreSubmit(),
@@ -140,11 +152,22 @@ export function createProductionComfyRuntimeDeps(
           succeeded(key)
           if (result.outcome === 'leased') {
             const requestKey = `dispatch-request:${result.requestId}`
-            if (!allowed(requestKey)) continue
+            if (!allowed(requestKey)) {
+              await services.returnBackedOffLease({
+                requestId: result.requestId, userId, connectionId: result.connectionId,
+                leaseId: result.leaseId, ttlMs: config.leaseTtlMs,
+              })
+              continue
+            }
             executions.push(services.dispatch(
               result.requestId, limitsFor(result.mediaType, config), signal,
-            ).then(() => succeeded(requestKey)).catch((error) => {
-              failed(requestKey, config); services.onError(error, 'dispatch')
+            ).then(() => succeeded(requestKey)).catch(async (error) => {
+              failed(requestKey, config)
+              await services.returnBackedOffLease({
+                requestId: result.requestId, userId, connectionId: result.connectionId,
+                leaseId: result.leaseId, ttlMs: config.leaseTtlMs,
+              }).catch((compensationError) => services.onError(compensationError, 'dispatch'))
+              services.onError(error, 'dispatch')
             }))
           }
         } catch (error) {

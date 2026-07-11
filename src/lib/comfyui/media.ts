@@ -29,6 +29,7 @@ export interface ComfyMediaClient {
 }
 
 export interface ComfyMediaDependencies {
+  verifyExternalEffect?(): Promise<boolean>
   resolveOwnedMedia(input: OwnedComfyMediaInput): Promise<boolean>
   readOwnedObject(input: {
     userId: string
@@ -84,6 +85,7 @@ export async function prepareComfyMediaUploads(input: {
       if (!detected || !matchesDefinition(detected.mimeType, definition.type)) throw inputUploadError()
       const id = input.dependencies.randomId?.() ?? randomUUID()
       const safeStem = safeFilename(candidate.filename ?? definition.name)
+      await assertExternalEffect(input.dependencies)
       uploaded.push(await input.client.uploadImage({
         filename: `${id}-${safeStem}.${detected.extension}`,
         contentType: detected.mimeType,
@@ -125,6 +127,7 @@ export async function transferComfyOutputs(input: {
       stored.push(existing)
       continue
     }
+    await assertExternalEffect(input.dependencies)
     const bytes = await input.client.downloadOutput(output)
     totalBytes += bytes.byteLength
     if (bytes.byteLength > maxOutputBytes || totalBytes > maxTotalOutputBytes) throw transferError()
@@ -136,7 +139,10 @@ export async function transferComfyOutputs(input: {
       'comfyui', safePath(input.userId), safePath(input.projectId), safePath(input.requestId),
       `${id}-${safeFilename(output.name)}.${detected.extension}`,
     ].join('/')
-    const storageKey = await input.dependencies.objectExists(key)
+    await assertExternalEffect(input.dependencies)
+    const exists = await input.dependencies.objectExists(key)
+    await assertExternalEffect(input.dependencies)
+    const storageKey = exists
       ? key
       : await input.dependencies.uploadObject(bytes, key, 1, detected.mimeType)
     const receipt = {
@@ -147,6 +153,13 @@ export async function transferComfyOutputs(input: {
     stored.push(receipt)
   }
   return stored
+}
+
+async function assertExternalEffect(dependencies: ComfyMediaDependencies) {
+  if (dependencies.verifyExternalEffect
+    && !await dependencies.verifyExternalEffect()) {
+    throw new Error('ComfyUI execution ownership lost')
+  }
 }
 
 function hasTrustedByteSize(value: ComfyStoredOutputRef) {

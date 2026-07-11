@@ -270,6 +270,40 @@ describe('production ComfyUI runtime dependency composition', () => {
     expect(services.scheduleNext).toHaveBeenLastCalledWith('u10', config)
     expect(services.listDispatchOwners).toHaveBeenCalledOnce()
   })
+
+  it('compensates a newly leased backed-off request and continues with another owner', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const services = fixture()
+    services.listDispatchOwners.mockResolvedValue({
+      items: [{ id: 'request-1', userId: 'u1' }, { id: 'request-2', userId: 'u2' }],
+      nextCursor: null,
+    })
+    services.scheduleNext
+      .mockResolvedValueOnce({
+        outcome: 'leased', requestId: 'r1', connectionId: 'c1', leaseId: 'l1', mediaType: 'image',
+      })
+      .mockResolvedValueOnce({ outcome: 'empty' })
+      .mockResolvedValueOnce({
+        outcome: 'leased', requestId: 'r1', connectionId: 'c1', leaseId: 'l2', mediaType: 'image',
+      })
+      .mockResolvedValueOnce({
+        outcome: 'leased', requestId: 'r2', connectionId: 'c2', leaseId: 'l3', mediaType: 'video',
+      })
+    services.dispatch.mockRejectedValueOnce(new Error('r1 failed')).mockResolvedValueOnce(undefined)
+    const deps = createProductionComfyRuntimeDeps(services)
+    const signal = new AbortController().signal
+
+    await deps.dispatchTick(signal, config)
+    await deps.dispatchTick(signal, config)
+
+    expect(services.returnBackedOffLease).toHaveBeenNthCalledWith(1, {
+      requestId: 'r1', userId: 'u1', connectionId: 'c1', leaseId: 'l1', ttlMs: config.leaseTtlMs,
+    })
+    expect(services.returnBackedOffLease).toHaveBeenNthCalledWith(2, {
+      requestId: 'r1', userId: 'u1', connectionId: 'c1', leaseId: 'l2', ttlMs: config.leaseTtlMs,
+    })
+    expect(services.dispatch.mock.calls.map(([requestId]) => requestId)).toEqual(['r1', 'r2'])
+  })
 })
 
 function fixture() {
@@ -279,6 +313,7 @@ function fixture() {
     listDispatchOwners: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     scheduleNext: vi.fn().mockResolvedValue({ outcome: 'empty' as const }),
     dispatch: vi.fn().mockResolvedValue(undefined),
+    returnBackedOffLease: vi.fn().mockResolvedValue('waiting' as const),
     listReconcileRequests: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     reconcile: vi.fn().mockResolvedValue(undefined),
     scanExpiredPreSubmit: vi.fn().mockResolvedValue(undefined),

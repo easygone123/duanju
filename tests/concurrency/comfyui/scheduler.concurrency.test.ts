@@ -201,6 +201,18 @@ describe('idle-first ComfyUI scheduler', () => {
     expect(deps.markBlockedIfEligible).not.toHaveBeenCalled()
   })
 
+  it('blocks a waiting owner that has no enabled connection', async () => {
+    const { deps } = schedulerFixture({
+      listOwnedEnabledConnections: vi.fn().mockResolvedValue([]),
+    })
+
+    await expect(scheduleNextComfyRequest('user-1', deps)).resolves.toEqual({
+      outcome: 'blocked_no_compatible_instance', requestId: 'request-old',
+    })
+    expect(deps.markBlockedIfEligible).toHaveBeenCalledWith('request-old', 'user-1')
+    expect(deps.acquireLease).not.toHaveBeenCalled()
+  })
+
   it('blocks only when no enabled connection is compatible', async () => {
     const { deps } = schedulerFixture({ checkCachedCompatibility: vi.fn().mockResolvedValue(false) })
     await expect(scheduleNextComfyRequest('user-1', deps)).resolves.toEqual({

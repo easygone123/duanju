@@ -54,6 +54,7 @@ export async function createProductionDispatcherDependencies(
   requestId: string,
   limits: ComfyRuntimeOperationLimits,
   signal: AbortSignal,
+  executionFence: () => Promise<boolean> = async () => true,
 ): Promise<ComfyDispatcherDependencies> {
   const { bundle, client, context } = await loadRuntimeContext(requestId, limits)
   const owner = ownerOf(bundle)
@@ -61,17 +62,19 @@ export async function createProductionDispatcherDependencies(
     id: owner.requestId, userId: owner.userId, connectionId: owner.connectionId,
     leaseId: owner.leaseId,
   })
+  const executionOwned = async () => await executionFence() && await verifyOwner(owner)
   const updateOwned = async (
     where: Record<string, unknown>, data: Record<string, unknown>,
-  ) => (await prisma.comfyGenerationRequest.updateMany({
-    where: { ...ownerWhere(), ...where }, data,
-  })).count === 1
+  ) => await executionFence() && (await prisma.comfyGenerationRequest.updateMany({
+      where: { ...ownerWhere(), ...where }, data,
+    })).count === 1
 
   return {
     loadContext: async () => context,
-    recheckClaim: async () => verifyOwner(owner),
-    heartbeat: async (input) => (await heartbeatDurableComfyRequestLease(input)).owned,
-    release: (input) => releaseComfyRequestLease(input),
+    recheckClaim: executionOwned,
+    heartbeat: async (input) => await executionFence()
+      && (await heartbeatDurableComfyRequestLease(input)).owned,
+    release: async (input) => await executionFence() && await releaseComfyRequestLease(input),
     transition: ({ from, to }) => updateOwned(
       { status: from }, { status: to, ...timestampFor(to) },
     ),
@@ -83,7 +86,8 @@ export async function createProductionDispatcherDependencies(
         nodeClasses: [], candidateLoaderInputs: [],
       },
       client,
-      verifyOwner: () => verifyFreshConnectionOwner(owner, bundle.connection!),
+      verifyOwner: async () => await executionFence()
+        && await verifyFreshConnectionOwner(owner, bundle.connection!),
     }),
     blockIncompatible: () => updateOwned({
       status: { in: ['leased', 'uploading'] }, promptId: null,
@@ -92,8 +96,10 @@ export async function createProductionDispatcherDependencies(
       leaseId: null, leaseExpiresAt: null,
       errorCode: COMFY_ERROR_CODE.WORKFLOW_INCOMPATIBLE,
     }),
-    claimSubmissionFence: claimComfySubmissionFenceWithStore,
-    recordAcceptedPrompt: recordComfyAcceptedPromptWithStore,
+    claimSubmissionFence: async (input) => await executionFence()
+      ? claimComfySubmissionFenceWithStore(input) : { outcome: 'lost' },
+    recordAcceptedPrompt: async (input) => await executionFence()
+      ? recordComfyAcceptedPromptWithStore(input) : { outcome: 'attempt_recorded' },
     cancelIfRequested: async ({ promptId }) => {
       const canceled = await prisma.comfyGenerationRequest.findFirst({
         where: { ...ownerWhere(), promptId, cancelRequestedAt: { not: null } },
@@ -101,7 +107,7 @@ export async function createProductionDispatcherDependencies(
       })
       if (!canceled) return false
       const queue = await client.getQueue()
-      if (!await verifyOwner(owner)) return false
+      if (!await executionOwned()) return false
       if (queueContains(queue.pending, promptId)) await client.deleteQueuedPrompt(promptId)
       else if (queueContains(queue.running, promptId)) await client.interruptPrompt(promptId)
       return updateOwned({
@@ -126,7 +132,8 @@ export async function createProductionDispatcherDependencies(
       promptId, status: { in: ['transferring', 'reconciling'] },
       cancelRequestedAt: null,
     }, { status: 'completed', completedAt: new Date(), outputRefs: outputs }),
-    persistStoredOutputReceipt: persistComfyOutputReceiptWithStore,
+    persistStoredOutputReceipt: async (input) => await executionFence()
+      && await persistComfyOutputReceiptWithStore(input),
     returnToWaiting: ({ errorCode }) => updateOwned({
       status: { in: ['leased', 'uploading'] }, promptId: null,
     }, {
@@ -147,6 +154,7 @@ export async function createProductionDispatcherDependencies(
     maxInputBytes: limits.inputMaxBytes,
     maxOutputBytes: limits.outputMaxBytes,
     resolveOwnedMedia: (input) => resolveOwnedComfyMedia(input),
+    verifyExternalEffect: executionOwned,
     readOwnedObject: async ({ storageKey, maxBytes }) => {
       const bytes = await getObjectBuffer(storageKey)
       if (bytes.byteLength > Math.min(maxBytes, limits.inputMaxBytes)) {
@@ -204,7 +212,12 @@ export async function createProductionReconciliationDependencies(
         policy: { minChecks: 3, minAgeMs: 5_000, deadlineMs: limits.executionTimeoutMs },
       })
     },
-    deleteQueuedPrompt: (promptId) => client.deleteQueuedPrompt(promptId),
+    deleteQueuedPrompt: async (promptId) => {
+      if (!await reconciliationFence() || !await verifyOwner(owner)) {
+        throw new Error('Reconciliation ownership lost')
+      }
+      await client.deleteQueuedPrompt(promptId)
+    },
     persistRecoveredCancellation: ({ promptId }) => updateOwned(
       { status: 'canceled', canceledAt: new Date() },
       { promptId, cancelRequestedAt: { not: null }, status: { notIn: ['completed', 'failed', 'canceled'] } },

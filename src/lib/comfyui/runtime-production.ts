@@ -6,6 +6,8 @@ import { probeOwnedConnectionStatuses } from './connection-service'
 import { cacheComfyHealthIfNewer } from './health'
 import { checkComfyCompatibility, type ComfyCompatibilityCache } from './compatibility'
 import { dispatchComfyRequest, reconcileComfyRequest } from './dispatcher'
+import { COMFY_ERROR_CODE } from './errors'
+import { releaseComfyRequestLease } from './lease'
 import { scanExpiredPreSubmitComfyRequests } from './recovery-scan'
 import {
   createDefaultComfySchedulerDependencies,
@@ -14,6 +16,7 @@ import {
 import type { ComfyRuntimeConfig } from './runtime'
 import type {
   ComfyCursorPageInput,
+  ComfyBackedOffLeaseInput,
   ComfyOwnerCursorItem,
   ComfyReconcileCursorInput,
   ComfyRuntimeOperationLimits,
@@ -59,7 +62,16 @@ export async function probeProductionComfyOwnerHealth(
 }
 
 export async function listProductionComfyDispatchOwners(input: ComfyCursorPageInput) {
-  return listProductionComfyOwnerPage(input)
+  const records = await prisma.comfyGenerationRequest.findMany({
+    where: {
+      status: { in: ['waiting_capacity', 'blocked_no_compatible_instance'] },
+      ...(input.afterId ? { id: { gt: input.afterId } } : {}),
+    },
+    orderBy: { id: 'asc' },
+    take: input.limit + 1,
+    select: { id: true, userId: true },
+  })
+  return boundedPage<ComfyOwnerCursorItem>(records, input.limit, (record) => record.id)
 }
 
 async function listProductionComfyOwnerPage(input: ComfyCursorPageInput) {
@@ -145,6 +157,42 @@ export async function dispatchProductionComfyRequest(
   )
 }
 
+export async function returnProductionBackedOffLease(input: ComfyBackedOffLeaseInput) {
+  const where = {
+    id: input.requestId, userId: input.userId, connectionId: input.connectionId,
+    leaseId: input.leaseId, status: 'leased',
+  }
+  try {
+    const returned = await prisma.comfyGenerationRequest.updateMany({
+      where,
+      data: {
+        status: 'waiting_capacity', connectionId: null, leaseId: null,
+        leaseExpiresAt: null,
+      },
+    })
+    if (returned.count !== 1) {
+      await releaseComfyRequestLease(input).catch(() => false)
+      return 'lost' as const
+    }
+    await releaseComfyRequestLease(input).catch(() => false)
+    return 'waiting' as const
+  } catch {
+    const reconciling = await prisma.comfyGenerationRequest.updateMany({
+      where,
+      data: {
+        status: 'reconciling', reconcilingAt: new Date(), leaseExpiresAt: new Date(),
+        errorCode: COMFY_ERROR_CODE.RECONCILIATION_REQUIRED,
+      },
+    })
+    if (reconciling.count !== 1) {
+      await releaseComfyRequestLease(input).catch(() => false)
+      return 'lost' as const
+    }
+    await releaseComfyRequestLease(input).catch(() => false)
+    return 'reconciling' as const
+  }
+}
+
 export async function listProductionComfyReconcileRequests(input: ComfyReconcileCursorInput) {
   const records = await prisma.comfyGenerationRequest.findMany({
     where: {
@@ -185,7 +233,9 @@ export async function reconcileProductionComfyRequest(
   requestId: string,
   limits: ComfyRuntimeOperationLimits,
   signal: AbortSignal,
+  overrides: Partial<ProductionComfyReconcileServices> = {},
 ) {
+  const services = { ...productionReconcileServices, ...overrides }
   if (signal.aborted) return
   const lockKey = `comfy:reconcile:${requestId}`
   const lockValue = randomUUID()
@@ -197,18 +247,18 @@ export async function reconcileProductionComfyRequest(
       .catch(() => { lockLost = true })
   }, Math.max(100, Math.floor(limits.leaseTtlMs / 3)))
   heartbeat.unref?.()
+  const ownsClaim = async () => !lockLost && await redis.get(lockKey) === lockValue
   try {
-    if (!await reclaimProductionRequestIfNeeded(requestId, limits.leaseTtlMs)) return
-    if (lockLost || signal.aborted) return
-    const result = await reconcileComfyRequest(
+    if (!await services.reclaimRequest(requestId, limits.leaseTtlMs)) return
+    if (signal.aborted || !await ownsClaim()) return
+    const result = await services.reconcile(
       requestId,
-      await createProductionReconciliationDependencies(requestId, limits, async () =>
-        !lockLost && await redis.get(lockKey) === lockValue),
+      await services.createReconciliationDependencies(requestId, limits, ownsClaim),
     )
-    if (result.outcome === 'transferring' && !signal.aborted && !lockLost) {
-      return dispatchComfyRequest(
+    if (result.outcome === 'transferring' && !signal.aborted && await ownsClaim()) {
+      return await services.dispatch(
         requestId,
-        await createProductionDispatcherDependencies(requestId, limits, signal),
+        await services.createDispatcherDependencies(requestId, limits, signal, ownsClaim),
       )
     }
     return result
@@ -216,6 +266,22 @@ export async function reconcileProductionComfyRequest(
     clearInterval(heartbeat)
     await redis.eval(COMFY_LEASE_RELEASE_SCRIPT, 1, lockKey, lockValue).catch(() => 0)
   }
+}
+
+interface ProductionComfyReconcileServices {
+  reclaimRequest: typeof reclaimProductionRequestIfNeeded
+  createReconciliationDependencies: typeof createProductionReconciliationDependencies
+  reconcile: typeof reconcileComfyRequest
+  createDispatcherDependencies: typeof createProductionDispatcherDependencies
+  dispatch: typeof dispatchComfyRequest
+}
+
+const productionReconcileServices: ProductionComfyReconcileServices = {
+  reclaimRequest: reclaimProductionRequestIfNeeded,
+  createReconciliationDependencies: createProductionReconciliationDependencies,
+  reconcile: reconcileComfyRequest,
+  createDispatcherDependencies: createProductionDispatcherDependencies,
+  dispatch: dispatchComfyRequest,
 }
 
 async function reclaimProductionRequestIfNeeded(requestId: string, ttlMs: number) {
