@@ -5,6 +5,7 @@ import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { isArtStyleValue } from '@/lib/constants'
 import { attachMediaFieldsToProject } from '@/lib/media/attach'
+import { bindProjectDefaultWorkflow } from '@/lib/comfyui/workflow-service'
 import {
   parseModelKeyStrict,
   type CapabilitySelections,
@@ -230,19 +231,26 @@ export const GET = apiHandler(async (
 
   const authResult = await requireProjectAuthLight(projectId)
   if (isErrorResponse(authResult)) return authResult
+  const userId = authResult.session.user.id
 
-  const projectData = await prisma.novelPromotionProject.findUnique({
-    where: { projectId },
-    select: {
-      capabilityOverrides: true,
-      analysisModel: true,
-      characterModel: true,
-      locationModel: true,
-      storyboardModel: true,
-      editModel: true,
-      videoModel: true,
-      audioModel: true,
-    }})
+  const [projectData, comfyBinding] = await Promise.all([
+    prisma.novelPromotionProject.findUnique({
+      where: { projectId },
+      select: {
+        capabilityOverrides: true,
+        analysisModel: true,
+        characterModel: true,
+        locationModel: true,
+        storyboardModel: true,
+        editModel: true,
+        videoModel: true,
+        audioModel: true,
+      }}),
+    prisma.projectComfyBinding.findUnique({
+      where: { projectId_userId: { projectId, userId } },
+      select: { imageWorkflowId: true, videoWorkflowId: true },
+    }),
+  ])
 
   const storedOverrides = parseStoredCapabilitySelections(projectData?.capabilityOverrides)
   const modelContextMap = projectData
@@ -259,7 +267,10 @@ export const GET = apiHandler(async (
   const cleanedOverrides = sanitizeCapabilityOverrides(storedOverrides, modelContextMap)
 
   return NextResponse.json({
-    capabilityOverrides: cleanedOverrides})
+    capabilityOverrides: cleanedOverrides,
+    comfyImageWorkflowId: comfyBinding?.imageWorkflowId ?? null,
+    comfyVideoWorkflowId: comfyBinding?.videoWorkflowId ?? null,
+  })
 })
 
 // PATCH - 更新小说推文项目配置
@@ -291,6 +302,26 @@ export const PATCH = apiHandler(async (
     throw new ApiError('NOT_FOUND')
   }
 
+  const comfyBindings = [
+    ['comfyImageWorkflowId', 'image'],
+    ['comfyVideoWorkflowId', 'video'],
+  ] as const
+  const normalizedComfyBindings: Array<{
+    mediaType: 'image' | 'video'
+    workflowId: string | null
+  }> = []
+  for (const [field, mediaType] of comfyBindings) {
+    if (body[field] === undefined) continue
+    const workflowId = body[field]
+    if (workflowId !== null && (typeof workflowId !== 'string' || !workflowId.trim())) {
+      throw new ApiError('INVALID_PARAMS', { code: 'COMFY_WORKFLOW_ID_INVALID', field })
+    }
+    normalizedComfyBindings.push({
+      mediaType,
+      workflowId: typeof workflowId === 'string' ? workflowId.trim() : null,
+    })
+  }
+
   const allowedProjectFields = [
     'analysisModel', 'characterModel', 'locationModel', 'storyboardModel',
     'editModel', 'videoModel', 'audioModel', 'videoRatio', 'artStyle',
@@ -320,6 +351,15 @@ export const PATCH = apiHandler(async (
     }
 
     updateData[field] = body[field]
+  }
+
+  for (const binding of normalizedComfyBindings) {
+    await bindProjectDefaultWorkflow(
+      session.user.id,
+      projectId,
+      binding.mediaType,
+      binding.workflowId,
+    )
   }
 
   const updatedNovelPromotionData = await prisma.novelPromotionProject.update({

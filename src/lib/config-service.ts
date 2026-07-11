@@ -122,6 +122,11 @@ export interface UserModelConfig {
   capabilityDefaults: CapabilitySelections
 }
 
+export interface TaskModelOverrides {
+  imageModel?: string | null
+  videoModel?: string | null
+}
+
 export async function getUserWorkflowConcurrencyConfig(
   userId: string,
 ): Promise<WorkflowConcurrencyConfig> {
@@ -147,25 +152,47 @@ export async function getUserWorkflowConcurrencyConfig(
 export async function getProjectModelConfig(
   projectId: string,
   userId: string,
+  taskOverrides: TaskModelOverrides = {},
 ): Promise<ProjectModelConfig> {
-  const [projectData, userPref] = await Promise.all([
+  const [projectData, userPref, comfyBinding] = await Promise.all([
     prisma.novelPromotionProject.findUnique({ where: { projectId } }),
     prisma.userPreference.findUnique({ where: { userId } }),
+    prisma.projectComfyBinding.findUnique({
+      where: { projectId_userId: { projectId, userId } },
+      select: { imageWorkflowId: true, videoWorkflowId: true },
+    }),
   ])
+
+  const taskImageModel = strictTaskOverride(taskOverrides.imageModel, 'imageModel')
+  const taskVideoModel = strictTaskOverride(taskOverrides.videoModel, 'videoModel')
+  const comfyImageModel = workflowModelKey(comfyBinding?.imageWorkflowId)
+  const comfyVideoModel = workflowModelKey(comfyBinding?.videoWorkflowId)
 
   return {
     analysisModel: extractModelKey(projectData?.analysisModel) || extractModelKey(userPref?.analysisModel) || null,
-    characterModel: extractModelKey(projectData?.characterModel) || null,
-    locationModel: extractModelKey(projectData?.locationModel) || null,
-    storyboardModel: extractModelKey(projectData?.storyboardModel) || null,
-    editModel: extractModelKey(projectData?.editModel) || null,
-    videoModel: extractModelKey(projectData?.videoModel) || null,
+    characterModel: taskImageModel || comfyImageModel || extractModelKey(projectData?.characterModel) || extractModelKey(userPref?.characterModel) || null,
+    locationModel: taskImageModel || comfyImageModel || extractModelKey(projectData?.locationModel) || extractModelKey(userPref?.locationModel) || null,
+    storyboardModel: taskImageModel || comfyImageModel || extractModelKey(projectData?.storyboardModel) || extractModelKey(userPref?.storyboardModel) || null,
+    editModel: taskImageModel || comfyImageModel || extractModelKey(projectData?.editModel) || extractModelKey(userPref?.editModel) || null,
+    videoModel: taskVideoModel || comfyVideoModel || extractModelKey(projectData?.videoModel) || extractModelKey(userPref?.videoModel) || null,
     audioModel: extractModelKey(projectData?.audioModel) || extractModelKey(userPref?.audioModel) || null,
     videoRatio: projectData?.videoRatio || '16:9',
     artStyle: projectData?.artStyle || null,
     capabilityDefaults: parseCapabilitySelections(userPref?.capabilityDefaults),
     capabilityOverrides: parseCapabilitySelections(projectData?.capabilityOverrides),
   }
+}
+
+function strictTaskOverride(value: string | null | undefined, field: keyof TaskModelOverrides): string | null {
+  if (value === undefined || value === null || value === '') return null
+  const modelKey = extractModelKey(value)
+  if (!modelKey) throw new Error(`MODEL_KEY_INVALID: ${field}`)
+  return modelKey
+}
+
+function workflowModelKey(workflowId: string | null | undefined): string | null {
+  if (!workflowId) return null
+  return extractModelKey(composeModelKey('comfyui', workflowId))
 }
 
 /**

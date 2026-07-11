@@ -36,6 +36,9 @@ const prismaMock = vi.hoisted(() => ({
       ]),
     })),
   },
+  comfyWorkflow: {
+    findMany: vi.fn(async () => []),
+  },
 }))
 
 vi.mock('@/lib/api-auth', () => authMock)

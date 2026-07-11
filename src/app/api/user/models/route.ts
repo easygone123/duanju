@@ -169,10 +169,17 @@ export const GET = apiHandler(async () => {
   const { session } = authResult
   const userId = session.user.id
 
-  const pref = await prisma.userPreference.findUnique({
-    where: { userId },
-    select: { customModels: true, customProviders: true },
-  })
+  const [pref, comfyWorkflows] = await Promise.all([
+    prisma.userPreference.findUnique({
+      where: { userId },
+      select: { customModels: true, customProviders: true },
+    }),
+    prisma.comfyWorkflow.findMany({
+      where: { userId, status: 'published' },
+      select: { id: true, name: true, mediaType: true },
+      orderBy: [{ mediaType: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+    }),
+  ])
 
   const modelsRaw: StoredModel[] = parseStoredModels(pref?.customModels)
   const providers: StoredProvider[] = parseStoredProviders(pref?.customProviders)
@@ -230,6 +237,16 @@ export const GET = apiHandler(async () => {
     }
 
     grouped[modelType].push(option)
+  }
+
+  for (const workflow of comfyWorkflows) {
+    if (workflow.mediaType !== 'image' && workflow.mediaType !== 'video') continue
+    grouped[workflow.mediaType].push({
+      value: composeModelKey('comfyui', workflow.id),
+      label: workflow.name,
+      provider: 'comfyui',
+      providerName: 'ComfyUI',
+    })
   }
 
   return NextResponse.json({
