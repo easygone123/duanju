@@ -3,6 +3,11 @@ import type { ClientRequest, IncomingMessage } from 'node:http'
 import WebSocket, { type RawData } from 'ws'
 
 import { COMFY_ERROR_CODE, ComfyError } from './errors'
+import {
+  sanitizeComfyDiagnosticMessage,
+  sanitizeComfyNodeErrors,
+  type ComfyHttpErrorContext,
+} from './http-response'
 import type { ComfyExecutionEvent } from './types'
 
 export async function* iterateComfyWebSocket(
@@ -10,7 +15,7 @@ export async function* iterateComfyWebSocket(
   promptId: string,
   signal: AbortSignal,
   idleTimeoutMs: number,
-  sanitize: (value: unknown) => unknown,
+  diagnosticContext: ComfyHttpErrorContext,
 ): AsyncIterable<ComfyExecutionEvent> {
   const values: ComfyExecutionEvent[] = []
   let wake: (() => void) | undefined
@@ -40,8 +45,8 @@ export async function* iterateComfyWebSocket(
   }
   const onOpen = () => resetIdleTimer()
   const onMessage = (raw: RawData, isBinary: boolean) => {
-    if (isBinary) return
-    const event = mapExecutionEvent(raw, promptId, sanitize)
+    if (isBinary || signal.aborted) return
+    const event = mapExecutionEvent(raw, promptId, diagnosticContext)
     if (!event) return
     values.push(event)
     resetIdleTimer()
@@ -80,12 +85,25 @@ export async function* iterateComfyWebSocket(
   }
   const onAbort = () => {
     ended = true
+    values.length = 0
+    cleanup()
     if (websocket.readyState === WebSocket.OPEN) websocket.close()
     else if (websocket.readyState === WebSocket.CONNECTING) {
       websocket.once('error', ignoreCleanupError)
       websocket.terminate()
     }
     notify()
+  }
+
+  const cleanup = () => {
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = undefined
+    signal.removeEventListener('abort', onAbort)
+    websocket.off('open', onOpen)
+    websocket.off('message', onMessage)
+    websocket.off('error', onError)
+    websocket.off('unexpected-response', onUnexpectedResponse)
+    websocket.off('close', onClose)
   }
 
   websocket.on('open', onOpen)
@@ -106,13 +124,7 @@ export async function* iterateComfyWebSocket(
     }
     if (failure) throw failure
   } finally {
-    if (idleTimer) clearTimeout(idleTimer)
-    signal.removeEventListener('abort', onAbort)
-    websocket.off('open', onOpen)
-    websocket.off('message', onMessage)
-    websocket.off('error', onError)
-    websocket.off('unexpected-response', onUnexpectedResponse)
-    websocket.off('close', onClose)
+    cleanup()
   }
 }
 
@@ -123,7 +135,7 @@ function ignoreCleanupError(): void {
 function mapExecutionEvent(
   raw: RawData,
   promptId: string,
-  sanitize: (value: unknown) => unknown,
+  diagnosticContext: ComfyHttpErrorContext,
 ): ComfyExecutionEvent | undefined {
   let message: { type?: string; data?: Record<string, unknown> }
   try {
@@ -155,11 +167,13 @@ function mapExecutionEvent(
   if (message.type === 'execution_error') {
     return {
       type: 'execution_error', promptId,
-      nodeId: typeof data.node_id === 'string' ? data.node_id : undefined,
+      nodeId: typeof data.node_id === 'string'
+        ? sanitizeComfyDiagnosticMessage(data.node_id, diagnosticContext, 128)
+        : undefined,
       message: typeof data.exception_message === 'string'
-        ? String(sanitize(data.exception_message))
+        ? sanitizeComfyDiagnosticMessage(data.exception_message, diagnosticContext)
         : 'Execution failed',
-      nodeErrors: sanitize(data.node_errors),
+      nodeErrors: sanitizeComfyNodeErrors(data.node_errors, diagnosticContext),
     }
   }
   return undefined

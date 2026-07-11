@@ -176,6 +176,108 @@ describe('ComfyClient contract', () => {
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
   })
 
+  it('bounds and structurally sanitizes WebSocket execution errors with submitted prompt context', async () => {
+    const comfy = client({ type: 'bearer', token: 'ws-auth-secret' })
+    await comfy.submitPrompt({
+      '1': { class_type: 'TextNode', inputs: { prompt: 'ws-prompt-secret' } },
+    }, 'client-1')
+    const controller = new AbortController()
+    const iterator = comfy.watchPrompt('prompt-1', 'client-1', controller.signal)[Symbol.asyncIterator]()
+    const next = iterator.next()
+    await server.waitForSocket()
+    server.send({
+      type: 'execution_error',
+      data: {
+        prompt_id: 'prompt-1',
+        node_id: 'ws-prompt-secret',
+        exception_message: `failed ws-prompt-secret ws-auth-secret ${'x'.repeat(5_000)}`,
+        node_errors: {
+          '4': {
+            class_type: 'KSampler',
+            errors: [{
+              type: 'value_error',
+              code: 'BAD_PROMPT',
+              message: 'invalid ws-prompt-secret',
+              extra_info: { raw_prompt: 'ws-prompt-secret' },
+            }],
+            extra_info: { arbitrary: 'must-not-survive' },
+          },
+        },
+        extra_info: { raw: 'must-not-survive' },
+      },
+    })
+
+    const result = await next
+    expect(result).toMatchObject({
+      done: false,
+      value: {
+        type: 'execution_error',
+        promptId: 'prompt-1',
+        nodeId: '[REDACTED]',
+        message: '[REDACTED]',
+        nodeErrors: {
+          '4': {
+            nodeId: '4',
+            classType: 'KSampler',
+            errors: [{ type: 'value_error', code: 'BAD_PROMPT', message: '[REDACTED]' }],
+          },
+        },
+      },
+    })
+    const serialized = JSON.stringify(result)
+    expect(serialized.length).toBeLessThan(2_000)
+    expect(serialized).not.toMatch(/ws-prompt-secret|ws-auth-secret|must-not-survive|x{100}/)
+
+    controller.abort()
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+  })
+
+  it('bounds direct-watch diagnostics and auth-redacts them without stored prompt context', async () => {
+    const controller = new AbortController()
+    const iterator = client({ type: 'bearer', token: 'direct-auth-secret' })
+      .watchPrompt('direct-prompt', 'client-1', controller.signal)[Symbol.asyncIterator]()
+    const next = iterator.next()
+    await server.waitForSocket()
+    server.send({
+      type: 'execution_error',
+      data: {
+        prompt_id: 'direct-prompt',
+        exception_message: 'x'.repeat(5_000),
+        node_errors: {
+          '8': {
+            errors: [{ message: 'leaked direct-auth-secret', extra_info: { raw: true } }],
+            extra_info: { raw: true },
+          },
+        },
+      },
+    })
+
+    const result = await next
+    expect(result.value?.type).toBe('execution_error')
+    if (result.value?.type !== 'execution_error') throw new Error('expected execution_error')
+    expect(result.value.message.length).toBeLessThanOrEqual(512)
+    expect(result.value.nodeErrors).toEqual({
+      '8': { nodeId: '8', errors: [{ message: '[REDACTED]' }] },
+    })
+    expect(JSON.stringify(result.value)).not.toMatch(/direct-auth-secret|extra_info/)
+    controller.abort()
+  })
+
+  it('discards queued WebSocket events when aborted before the next consumption', async () => {
+    const controller = new AbortController()
+    const iterator = client().watchPrompt('prompt-1', 'client-1', controller.signal)[Symbol.asyncIterator]()
+    const first = iterator.next()
+    await server.waitForSocket()
+    server.send({ type: 'execution_start', data: { prompt_id: 'prompt-1' } })
+    await expect(first).resolves.toMatchObject({ value: { type: 'execution_start' } })
+
+    server.send({ type: 'executing', data: { prompt_id: 'prompt-1', node: 'queued-node' } })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    controller.abort()
+
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+  })
+
   it('throws a stable connection error when the WebSocket handshake is refused', async () => {
     server.rejectWebSockets(503)
     const next = client().watchPrompt('prompt-1', 'client-1', new AbortController().signal)

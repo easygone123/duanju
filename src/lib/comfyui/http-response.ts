@@ -5,6 +5,7 @@ import type { ComfyApiWorkflow, ComfyConnectionAuth } from './types'
 export interface ComfyHttpErrorContext {
   auth: ComfyConnectionAuth
   workflow?: ComfyApiWorkflow
+  sensitiveValues?: string[]
 }
 
 export async function readComfySuccessBody(
@@ -61,15 +62,24 @@ export function sanitizeComfyNodeErrors(
   return sanitizeNodeErrors(value, context)
 }
 
+export function sanitizeComfyDiagnosticMessage(
+  value: string,
+  context: ComfyHttpErrorContext,
+  limit = 512,
+): string {
+  return redactDiagnostic(value, diagnosticRedactions(context), limit)
+}
+
+export function collectComfySensitiveValues(value: unknown): string[] {
+  return collectStringLeaves(value)
+}
+
 function sanitizeNodeErrors(
   value: unknown,
   context: ComfyHttpErrorContext,
 ): Record<string, unknown> {
   if (!isRecord(value)) return {}
-  const redactions = [
-    ...comfyAuthSecrets(context.auth),
-    ...collectStringLeaves(context.workflow),
-  ].filter(Boolean)
+  const redactions = diagnosticRedactions(context)
   const entries = Object.entries(value).slice(0, 100).map(([rawNodeId, rawNode]) => {
     const nodeId = redactDiagnostic(rawNodeId, redactions, 128)
     const node = isRecord(rawNode) ? rawNode : {}
@@ -88,6 +98,14 @@ function sanitizeNodeErrors(
     }]
   })
   return Object.fromEntries(entries)
+}
+
+function diagnosticRedactions(context: ComfyHttpErrorContext): string[] {
+  return [
+    ...comfyAuthSecrets(context.auth),
+    ...(context.sensitiveValues ?? []),
+    ...collectStringLeaves(context.workflow),
+  ].filter(Boolean)
 }
 
 function sanitizeNodeError(value: unknown, redactions: string[]): Record<string, string> {
@@ -111,15 +129,18 @@ function sanitizeNodeError(value: unknown, redactions: string[]): Record<string,
 }
 
 function collectStringLeaves(value: unknown): string[] {
-  const leaves: string[] = []
+  const leaves = new Set<string>()
   const pending: unknown[] = [value]
-  while (pending.length > 0 && leaves.length < 10_000) {
+  while (pending.length > 0) {
     const current = pending.pop()
-    if (typeof current === 'string') leaves.push(current)
-    else if (Array.isArray(current)) pending.push(...current)
-    else if (isRecord(current)) pending.push(...Object.values(current))
+    if (typeof current === 'string') leaves.add(current)
+    else if (Array.isArray(current)) {
+      for (const item of current) pending.push(item)
+    } else if (isRecord(current)) {
+      for (const item of Object.values(current)) pending.push(item)
+    }
   }
-  return leaves
+  return [...leaves]
 }
 
 function redactDiagnostic(value: string, redactions: string[], limit: number): string {
@@ -127,7 +148,9 @@ function redactDiagnostic(value: string, redactions: string[], limit: number): s
 }
 
 function bound(value: string, limit: number): string {
-  return value.length <= limit ? value : `${value.slice(0, limit)}…`
+  if (value.length <= limit) return value
+  if (limit <= 0) return ''
+  return `${value.slice(0, limit - 1)}…`
 }
 
 async function readErrorBody(

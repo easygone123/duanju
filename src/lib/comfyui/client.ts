@@ -4,10 +4,11 @@ import { Agent as HttpAgent } from 'node:http'
 import { Agent as HttpsAgent } from 'node:https'
 import type { LookupFunction } from 'node:net'
 
-import { buildComfyAuthorization, comfyAuthSecrets } from './auth'
+import { buildComfyAuthorization } from './auth'
 import { COMFY_ERROR_CODE, ComfyError, type ComfyErrorCode } from './errors'
 import {
   buildComfyHttpError,
+  collectComfySensitiveValues,
   readComfySuccessBody,
   sanitizeComfyNodeErrors,
   type ComfyHttpErrorContext,
@@ -60,6 +61,7 @@ const DEFAULT_MAX_INPUT_BYTES = 256 * 1024 * 1024
 const DEFAULT_MAX_REDIRECTS = 3
 
 export class ComfyClient {
+  private readonly promptSensitiveValues = new Map<string, string[]>()
   private readonly baseUrl: URL
   private readonly timeoutMs: number
   private readonly maxJsonBytes: number
@@ -158,6 +160,7 @@ export class ComfyClient {
         },
       })
     }
+    this.rememberPromptSensitiveValues(result.prompt_id, graph)
     return { promptId: result.prompt_id }
   }
 
@@ -166,45 +169,55 @@ export class ComfyClient {
     clientId: string,
     signal: AbortSignal,
   ): AsyncIterable<ComfyExecutionEvent> {
-    if (signal.aborted) return
-    const endpoint = this.endpoint('ws')
-    endpoint.searchParams.set('clientId', clientId)
-    let authorized
-    try {
-      authorized = await this.authorizeWithTimeout(endpoint, signal)
-    } catch (error) {
-      if (signal.aborted) return
-      throw error
+    const clearPromptSensitiveValues = () => this.promptSensitiveValues.delete(promptId)
+    if (signal.aborted) {
+      clearPromptSensitiveValues()
+      return
     }
-    const auth = buildComfyAuthorization(this.options.auth)
-    const websocketUrl = new URL(authorized.url)
-    websocketUrl.protocol = websocketUrl.protocol === 'https:' ? 'wss:' : 'ws:'
-    const websocketAgent = websocketUrl.protocol === 'wss:'
-      ? new HttpsAgent({ lookup: pinnedLookup(authorized.address, authorized.family) })
-      : new HttpAgent({ lookup: pinnedLookup(authorized.address, authorized.family) })
-    const websocket = this.webSocketFactory(websocketUrl.href, {
-      headers: auth ? { Authorization: auth } : undefined,
-      handshakeTimeout: this.timeoutMs,
-      maxPayload: this.maxJsonBytes,
-      agent: websocketAgent,
-    })
+    signal.addEventListener('abort', clearPromptSensitiveValues, { once: true })
+    let websocket: WebSocket | undefined
+    let websocketAgent: HttpAgent | HttpsAgent | undefined
     try {
+      const endpoint = this.endpoint('ws')
+      endpoint.searchParams.set('clientId', clientId)
+      const authorized = await this.authorizeWithTimeout(endpoint, signal)
+      const auth = buildComfyAuthorization(this.options.auth)
+      const websocketUrl = new URL(authorized.url)
+      websocketUrl.protocol = websocketUrl.protocol === 'https:' ? 'wss:' : 'ws:'
+      websocketAgent = websocketUrl.protocol === 'wss:'
+        ? new HttpsAgent({ lookup: pinnedLookup(authorized.address, authorized.family) })
+        : new HttpAgent({ lookup: pinnedLookup(authorized.address, authorized.family) })
+      websocket = this.webSocketFactory(websocketUrl.href, {
+        headers: auth ? { Authorization: auth } : undefined,
+        handshakeTimeout: this.timeoutMs,
+        maxPayload: this.maxJsonBytes,
+        agent: websocketAgent,
+      })
       for await (const event of iterateComfyWebSocket(
         websocket,
         promptId,
         signal,
         this.wsIdleTimeoutMs,
-        this.sanitize.bind(this),
+        {
+          auth: this.options.auth,
+          sensitiveValues: this.promptSensitiveValues.get(promptId),
+        },
       )) {
+        if (isTerminalExecutionEvent(event)) clearPromptSensitiveValues()
         yield event
       }
+    } catch (error) {
+      if (signal.aborted) return
+      throw error
     } finally {
-      if (websocket.readyState === WebSocket.OPEN) websocket.close()
-      else if (websocket.readyState === WebSocket.CONNECTING) {
+      signal.removeEventListener('abort', clearPromptSensitiveValues)
+      clearPromptSensitiveValues()
+      if (websocket?.readyState === WebSocket.OPEN) websocket.close()
+      else if (websocket?.readyState === WebSocket.CONNECTING) {
         websocket.once('error', ignoreWebSocketCleanupError)
         websocket.terminate()
       }
-      websocketAgent.destroy()
+      websocketAgent?.destroy()
     }
   }
 
@@ -384,20 +397,12 @@ export class ComfyClient {
     return new ComfyError(COMFY_ERROR_CODE.NETWORK_TARGET_BLOCKED, 'Redirect target is not permitted')
   }
 
-  private sanitize(value: unknown): unknown {
-    if (typeof value === 'string') return this.sanitizeText(value)
-    if (Array.isArray(value)) return value.map((item) => this.sanitize(item))
-    if (value && typeof value === 'object') {
-      return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [this.sanitizeText(key), this.sanitize(item)]),
-      )
+  private rememberPromptSensitiveValues(promptId: string, graph: ComfyApiWorkflow): void {
+    this.promptSensitiveValues.set(promptId, collectComfySensitiveValues(graph))
+    if (this.promptSensitiveValues.size > 1_000) {
+      const oldestPromptId = this.promptSensitiveValues.keys().next().value
+      if (oldestPromptId) this.promptSensitiveValues.delete(oldestPromptId)
     }
-    return value
-  }
-
-  private sanitizeText(value: string): string {
-    const secrets = comfyAuthSecrets(this.options.auth).filter(Boolean)
-    return secrets.some((secret) => value.includes(secret)) ? '[REDACTED]' : value
   }
 }
 
@@ -425,6 +430,10 @@ function pinnedLookup(address: string, family: 4 | 6): LookupFunction {
 
 function isRedirect(status: number): boolean {
   return status >= 300 && status < 400
+}
+
+function isTerminalExecutionEvent(event: ComfyExecutionEvent): boolean {
+  return event.type === 'execution_error' || (event.type === 'executing' && event.nodeId === null)
 }
 
 function ignoreWebSocketCleanupError(): void {
