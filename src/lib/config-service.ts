@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma'
 import {
   type CapabilitySelections,
   type CapabilityValue,
+  type ImageTaskCapabilityOverrides,
   composeModelKey as composeStrictModelKey,
   parseModelKeyStrict,
 } from '@/lib/model-config-contract'
@@ -326,6 +327,36 @@ export async function resolveProjectModelCapabilityGenerationOptions(input: {
   })
 }
 
+export function resolveImageTaskGenerationOptions(input: {
+  imageModel: string
+  projectModelConfig: Pick<ProjectModelConfig, 'capabilityDefaults' | 'capabilityOverrides'>
+  taskSelections?: ImageTaskCapabilityOverrides
+}): Record<string, CapabilityValue> {
+  const taskSelections = input.taskSelections ?? {}
+  for (const key of Object.keys(taskSelections)) {
+    if (key !== 'resolution' && key !== 'aspectRatio') {
+      throw new Error(`CAPABILITY_FIELD_INVALID: ${key}`)
+    }
+  }
+  const aspectRatio = taskSelections.aspectRatio
+  if (aspectRatio !== undefined && (typeof aspectRatio !== 'string' || !/^[1-9]\d{0,2}:[1-9]\d{0,2}$/.test(aspectRatio))) {
+    throw new Error('CAPABILITY_VALUE_NOT_ALLOWED: aspectRatio')
+  }
+  const runtimeSelections: Record<string, CapabilityValue> = {}
+  if (taskSelections.resolution !== undefined) runtimeSelections.resolution = taskSelections.resolution
+  const capabilityOptions = resolveModelCapabilityGenerationOptions({
+    modelType: 'image',
+    modelKey: input.imageModel,
+    capabilityDefaults: input.projectModelConfig.capabilityDefaults,
+    capabilityOverrides: input.projectModelConfig.capabilityOverrides,
+    runtimeSelections,
+  })
+  return {
+    ...capabilityOptions,
+    ...(aspectRatio !== undefined ? { aspectRatio } : {}),
+  }
+}
+
 /**
  * 检查必需的模型配置是否存在
  */
@@ -378,6 +409,7 @@ export async function buildImageBillingPayload(input: {
   userId: string
   imageModel: string | null
   projectModelConfig?: ProjectModelConfig
+  taskSelections?: ImageTaskCapabilityOverrides
   basePayload: Record<string, unknown>
 }): Promise<Record<string, unknown>> {
   const { projectId, userId, imageModel, basePayload } = input
@@ -387,11 +419,10 @@ export async function buildImageBillingPayload(input: {
   const projectModelConfig = input.projectModelConfig
     ?? await getProjectModelConfig(projectId, userId)
   try {
-    capabilityOptions = resolveModelCapabilityGenerationOptions({
-      modelType: 'image',
-      modelKey: imageModel,
-      capabilityDefaults: projectModelConfig.capabilityDefaults,
-      capabilityOverrides: projectModelConfig.capabilityOverrides,
+    capabilityOptions = resolveImageTaskGenerationOptions({
+      imageModel,
+      projectModelConfig,
+      taskSelections: input.taskSelections,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Image model capability not configured'

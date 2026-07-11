@@ -3,6 +3,7 @@ import type { StoryboardPanel } from './hooks/useStoryboardState'
 import type { PanelEditData } from '../PanelEditForm'
 import type { VariantData, VariantOptions } from './hooks/usePanelVariant'
 import type { PanelSaveState } from './hooks/usePanelCrudActions'
+import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 
 export interface StoryboardGroupProps {
   storyboard: NovelPromotionStoryboard
@@ -42,7 +43,7 @@ export interface StoryboardGroupProps {
   onRemoveCharacter: (panel: StoryboardPanel, index: number) => void
   onRemoveLocation: (panel: StoryboardPanel) => void
   onRetryPanelSave: (panelId: string) => void
-  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string) => void
+  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => void
   onOpenEditModal: (panelIndex: number) => void
   onOpenAIDataModal: (panelIndex: number) => void
   getPanelCandidates: (panel: NovelPromotionPanel) => { candidates: string[]; selectedIndex: number } | null

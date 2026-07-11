@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError, getRequestId } from '@/lib/api-errors'
 import { submitTask } from '@/lib/task/submitter'
@@ -11,6 +12,18 @@ import { buildImageBillingPayload, getProjectModelConfig } from '@/lib/config-se
 import { resolveModelSelection } from '@/lib/api-config'
 
 const DEFAULT_CANDIDATE_COUNT = 1
+const generationOptionsSchema = z.object({
+  resolution: z.string().trim().min(1).max(64).optional(),
+  aspectRatio: z.string().trim().regex(/^[1-9]\d{0,2}:[1-9]\d{0,2}$/).optional(),
+}).strict()
+const requestSchema = z.object({
+  panelId: z.string().trim().min(1).max(200),
+  count: z.number().int().min(1).max(4).optional(),
+  imageModel: z.string().trim().min(1).max(500).optional(),
+  generationOptions: generationOptionsSchema.optional(),
+  locale: z.string().max(20).optional(),
+  meta: z.object({ locale: z.string().max(20).optional() }).strict().optional(),
+}).strict()
 
 export const POST = apiHandler(async (
   request: NextRequest,
@@ -22,17 +35,18 @@ export const POST = apiHandler(async (
   if (isErrorResponse(authResult)) return authResult
   const { session } = authResult
 
-  const body = await request.json()
+  const parsedBody = requestSchema.safeParse(await request.json())
+  if (!parsedBody.success) throw new ApiError('INVALID_PARAMS', {
+    code: 'PANEL_IMAGE_PAYLOAD_INVALID',
+    field: parsedBody.error.issues[0]?.path.join('.') || 'body',
+  })
+  const body = parsedBody.data
   const locale = resolveRequiredTaskLocale(request, body)
-  const panelId = body?.panelId
-  const count = body?.count
+  const panelId = body.panelId
+  const count = body.count
   const candidateCount = Math.max(1, Math.min(4, Number(count ?? DEFAULT_CANDIDATE_COUNT)))
 
-  if (!panelId) {
-    throw new ApiError('INVALID_PARAMS')
-  }
-
-  const requestedImageModel = typeof body?.imageModel === 'string' ? body.imageModel : undefined
+  const requestedImageModel = body.imageModel
   const projectModelConfig = await getProjectModelConfig(projectId, session.user.id, {
     imageModel: requestedImageModel,
   })
@@ -49,13 +63,23 @@ export const POST = apiHandler(async (
       message})
   }
 
-  const billingPayload = await buildImageBillingPayload({
-    projectId,
-    userId: session.user.id,
-    imageModel: projectModelConfig.storyboardModel,
-    projectModelConfig,
-    basePayload: { ...body, candidateCount },
-  })
+  let billingPayload: Record<string, unknown>
+  try {
+    billingPayload = await buildImageBillingPayload({
+      projectId,
+      userId: session.user.id,
+      imageModel: projectModelConfig.storyboardModel,
+      projectModelConfig,
+      taskSelections: body.generationOptions,
+      basePayload: { ...body, candidateCount },
+    })
+  } catch (error) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'IMAGE_CAPABILITY_COMBINATION_UNSUPPORTED',
+      field: 'generationOptions',
+      details: { message: error instanceof Error ? error.message : String(error) },
+    })
+  }
 
   const hasOutputAtStart = await hasPanelImageOutput(panelId)
 

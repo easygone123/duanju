@@ -56,9 +56,12 @@ const configServiceMock = vi.hoisted(() => ({
     comfyImageWorkflowVersionId: null,
     comfyVideoWorkflowVersionId: null,
   })),
-  buildImageBillingPayload: vi.fn(async (input: { basePayload: Record<string, unknown> }) => ({
+  buildImageBillingPayload: vi.fn(async (input: {
+    basePayload: Record<string, unknown>
+    taskSelections?: Record<string, unknown>
+  }) => ({
     ...input.basePayload,
-    generationOptions: { resolution: '1024x1024' },
+    generationOptions: input.taskSelections ?? { resolution: '1024x1024' },
   })),
   resolveProjectModelCapabilityGenerationOptions: vi.fn(async () => ({
     resolution: '1024x1024',
@@ -246,7 +249,12 @@ vi.mock('@/lib/task/resolve-locale', () => ({
 vi.mock('@/lib/config-service', () => configServiceMock)
 vi.mock('@/lib/task/has-output', () => hasOutputMock)
 vi.mock('@/lib/billing', () => ({
-  buildDefaultTaskBillingInfo: vi.fn(() => ({ mode: 'default' })),
+  buildDefaultTaskBillingInfo: vi.fn((_taskType: string, payload: Record<string, unknown>) => ({
+    mode: 'default',
+    metadata: payload.generationOptions && typeof payload.generationOptions === 'object'
+      ? { resolution: (payload.generationOptions as Record<string, unknown>).resolution }
+      : undefined,
+  })),
 }))
 vi.mock('@/lib/providers/bailian/voice-design', () => ({
   validateVoicePrompt: vi.fn(() => ({ valid: true })),
@@ -505,11 +513,12 @@ const DIRECT_CASES: ReadonlyArray<DirectRouteCase> = [
   },
   {
     routeFile: 'src/app/api/novel-promotion/[projectId]/regenerate-panel-image/route.ts',
-    body: { panelId: 'panel-1', count: 1 },
+    body: { panelId: 'panel-1', count: 1, generationOptions: { resolution: '4K', aspectRatio: '1:1' } },
     params: { projectId: 'project-1' },
     expectedTaskType: TASK_TYPE.IMAGE_PANEL,
     expectedTargetType: 'NovelPromotionPanel',
     expectedProjectId: 'project-1',
+    expectedPayloadSubset: { generationOptions: { resolution: '4K', aspectRatio: '1:1' } },
   },
   {
     routeFile: 'src/app/api/novel-promotion/[projectId]/regenerate-single-image/route.ts',
@@ -570,6 +579,39 @@ describe('api contract - direct submit routes (behavior)', () => {
 
   it('keeps expected coverage size', () => {
     expect(DIRECT_CASES.length).toBe(20)
+  })
+
+  it('rejects unsupported panel image task capabilities as invalid parameters', async () => {
+    const routeCase = DIRECT_CASES.find((item) => item.routeFile.endsWith('/regenerate-panel-image/route.ts'))!
+    configServiceMock.buildImageBillingPayload.mockRejectedValueOnce(new Error('CAPABILITY_VALUE_NOT_ALLOWED'))
+    const res = await invokePostRoute({
+      ...routeCase,
+      body: { panelId: 'panel-1', generationOptions: { resolution: '8K' } },
+    })
+    expect(res.status).toBe(400)
+    expect(submitTaskMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects unknown panel image task capability fields before task submission', async () => {
+    const routeCase = DIRECT_CASES.find((item) => item.routeFile.endsWith('/regenerate-panel-image/route.ts'))!
+    const res = await invokePostRoute({
+      ...routeCase,
+      body: { panelId: 'panel-1', generationOptions: { steps: 30 } },
+    })
+    expect(res.status).toBe(400)
+    expect(configServiceMock.buildImageBillingPayload).not.toHaveBeenCalled()
+    expect(submitTaskMock).not.toHaveBeenCalled()
+  })
+
+  it('uses the same panel image capability snapshot for billing and worker payload', async () => {
+    const routeCase = DIRECT_CASES.find((item) => item.routeFile.endsWith('/regenerate-panel-image/route.ts'))!
+    const res = await invokePostRoute(routeCase)
+    expect(res.status).toBe(200)
+    const submitArg = submitTaskMock.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(submitArg.payload).toEqual(expect.objectContaining({
+      generationOptions: { resolution: '4K', aspectRatio: '1:1' },
+    }))
+    expect(submitArg.billingInfo).toEqual(expect.objectContaining({ metadata: { resolution: '4K' } }))
   })
 
   for (const routeCase of DIRECT_CASES) {

@@ -7,6 +7,7 @@ import { PanelEditData } from '../PanelEditForm'
 import { ASPECT_RATIO_CONFIGS } from '@/lib/constants'
 import PanelCard from './PanelCard'
 import type { PanelSaveState } from './hooks/usePanelCrudActions'
+import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 
 interface StoryboardPanelListProps {
   storyboardId: string
@@ -30,7 +31,7 @@ interface StoryboardPanelListProps {
   onRemoveCharacter: (panel: StoryboardPanel, index: number) => void
   onRemoveLocation: (panel: StoryboardPanel) => void
   onRetryPanelSave: (panelId: string) => void
-  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string) => void
+  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => void
   onOpenEditModal: (panelIndex: number) => void
   onOpenAIDataModal: (panelIndex: number) => void
   onSelectPanelCandidateIndex: (panelId: string, index: number) => void

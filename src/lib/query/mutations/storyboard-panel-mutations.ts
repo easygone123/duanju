@@ -3,6 +3,7 @@ import { queryKeys } from '../keys'
 import { resolveTaskResponse } from '@/lib/task/client'
 import { resolveTaskErrorMessage } from '@/lib/task/error-message'
 import { apiFetch } from '@/lib/api-fetch'
+import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import {
     clearTaskTargetOverlay,
     upsertTaskTargetOverlay,
@@ -16,11 +17,11 @@ import {
 export function useRegenerateProjectPanelImage(projectId: string) {
     const queryClient = useQueryClient()
     return useMutation({
-        mutationFn: async ({ panelId, count, imageModel }: { panelId: string; count?: number; imageModel?: string }) => {
+        mutationFn: async ({ panelId, count, imageModel, generationOptions }: { panelId: string; count?: number; imageModel?: string; generationOptions?: ImageTaskCapabilityOverrides }) => {
             const res = await apiFetch(`/api/novel-promotion/${projectId}/regenerate-panel-image`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(buildPanelRegenerationPayload(panelId, count, imageModel)),
+                body: JSON.stringify(buildPanelRegenerationPayload(panelId, count, imageModel, generationOptions)),
             })
             if (!res.ok) {
                 const error = await res.json().catch(() => ({}))
@@ -57,8 +58,13 @@ export function useRegenerateProjectPanelImage(projectId: string) {
     })
 }
 
-export function buildPanelRegenerationPayload(panelId: string, count?: number, imageModel?: string) {
-    return { panelId, count: count ?? 1, ...(imageModel ? { imageModel } : {}) }
+export function buildPanelRegenerationPayload(panelId: string, count?: number, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) {
+    return {
+        panelId,
+        count: count ?? 1,
+        ...(imageModel ? { imageModel } : {}),
+        ...(generationOptions && Object.keys(generationOptions).length > 0 ? { generationOptions } : {}),
+    }
 }
 
 /**

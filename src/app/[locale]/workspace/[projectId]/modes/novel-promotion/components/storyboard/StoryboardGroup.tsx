@@ -15,6 +15,7 @@ import StoryboardGroupFailedAlert from './StoryboardGroupFailedAlert'
 import StoryboardGroupDialogs from './StoryboardGroupDialogs'
 import type { StoryboardGroupProps } from './StoryboardGroup.types'
 import { AppIcon } from '@/components/ui/icons'
+import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 
 export default function StoryboardGroup({
   storyboard,
@@ -128,9 +129,9 @@ export default function StoryboardGroup({
   }, [hasAnyImage, isSelectingCandidate, isSubmittingStoryboardTask])
 
   const handleRegeneratePanelImage = useCallback(
-    (panelId: string, count?: number, force?: boolean, imageModel?: string) => {
+    (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => {
       clearPanelTaskError(panelId)
-      onRegeneratePanelImage(panelId, count, force, imageModel)
+      onRegeneratePanelImage(panelId, count, force, imageModel, generationOptions)
     },
     [clearPanelTaskError, onRegeneratePanelImage],
   )

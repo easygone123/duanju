@@ -170,7 +170,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
 
   const projectData = await resolveNovelData(job.data.projectId)
   const modelConfig = await getProjectModels(job.data.projectId, job.data.userId)
-  const modelKey = modelConfig.storyboardModel
+  const modelKey = pickFirstString(payload.imageModel, modelConfig.storyboardModel)
   if (!modelKey) throw new Error('Storyboard model not configured')
 
   const candidateCount = clampCount(payload.candidateCount ?? payload.count, 1, 4, 1)
@@ -203,7 +203,15 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
 
   const artStyle = getArtStylePrompt(modelConfig.artStyle, job.data.locale)
   if (!projectData.videoRatio) throw new Error('Project videoRatio not configured')
-  const aspectRatio = projectData.videoRatio
+  const generationOptions = payload.generationOptions && typeof payload.generationOptions === 'object'
+    ? payload.generationOptions as Record<string, unknown>
+    : {}
+  const aspectRatio = typeof generationOptions.aspectRatio === 'string'
+    ? generationOptions.aspectRatio
+    : projectData.videoRatio
+  const resolution = typeof generationOptions.resolution === 'string'
+    ? generationOptions.resolution
+    : undefined
   const promptContext = buildPanelPromptContext({
     panel: {
       id: panel.id,
@@ -255,6 +263,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       options: {
         referenceImages: normalizedRefs,
         aspectRatio,
+        ...(resolution ? { resolution } : {}),
       },
       // 单个任务内会串行生成多候选，若允许按 task.externalId 续接会复用上一候选外部任务结果。
       allowTaskExternalIdResume: candidateCount === 1,

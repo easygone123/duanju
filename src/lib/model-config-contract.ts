@@ -2,6 +2,7 @@ export type UnifiedModelType = 'llm' | 'image' | 'video' | 'audio' | 'lipsync'
 export type CapabilityValue = string | number | boolean
 export type CapabilityOptionValue = CapabilityValue
 export type CapabilitySelections = Record<string, Record<string, CapabilityValue>>
+export type ImageTaskCapabilityOverrides = Partial<Record<'resolution' | 'aspectRatio', CapabilityValue>>
 
 export type CapabilityValidationCode =
   | 'CAPABILITY_SHAPE_INVALID'

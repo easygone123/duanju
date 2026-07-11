@@ -7,6 +7,7 @@ import PanelActionButtons from './PanelActionButtons'
 import { StoryboardPanel } from './hooks/useStoryboardState'
 import { GlassSurface } from '@/components/ui/primitives'
 import { AppIcon } from '@/components/ui/icons'
+import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 
 interface PanelCandidateData {
   candidates: string[]
@@ -36,7 +37,7 @@ interface PanelCardProps {
   onRetrySave?: () => void
   onRemoveCharacter: (index: number) => void
   onRemoveLocation: () => void
-  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string) => void
+  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => void
   onOpenEditModal: () => void
   onOpenAIDataModal: () => void
   onSelectCandidateIndex: (panelId: string, index: number) => void

@@ -12,8 +12,8 @@ import ImageSectionActionButtons from './ImageSectionActionButtons'
 import { AppIcon } from '@/components/ui/icons'
 import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapabilityDropdown'
 import { selectImageModelOptions, useUserModels } from '@/lib/query/hooks/useUserModels'
-import { extractCapabilityFields } from '@/lib/model-capabilities/ui-fields'
-import type { CapabilityValue } from '@/lib/model-config-contract'
+import { applyImageTaskCapabilityChange, extractCapabilityFields } from '@/lib/model-capabilities/ui-fields'
+import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 
 interface PanelCandidateData {
   candidates: string[]
@@ -33,7 +33,7 @@ interface ImageSectionProps {
   candidateData: PanelCandidateData | null
   previousImageUrl?: string | null
   taskPresentationState?: TaskPresentationState | null
-  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string) => void
+  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => void
   onOpenEditModal: () => void
   onOpenAIDataModal: () => void
   onSelectCandidateIndex: (panelId: string, index: number) => void
@@ -71,7 +71,7 @@ export default function ImageSection({
   const tc = useTranslations('comfyui.workflows')
   const [isTaskPulseAnimating, setIsTaskPulseAnimating] = useState(false)
   const [selectedImageModel, setSelectedImageModel] = useState('')
-  const [capabilityOverrides, setCapabilityOverrides] = useState<Record<string, CapabilityValue>>({})
+  const [capabilityOverrides, setCapabilityOverrides] = useState<ImageTaskCapabilityOverrides>({})
   const userModelsQuery = useUserModels()
   const taskImageOptions = selectImageModelOptions(userModelsQuery.data)
   const selectedImageOption = taskImageOptions.find((option) => option.value === selectedImageModel)
@@ -79,6 +79,9 @@ export default function ImageSection({
     () => extractCapabilityFields(selectedImageOption?.capabilities, 'image'),
     [selectedImageOption],
   )
+  const taskCapabilityOverrides = selectedImageModel && Object.keys(capabilityOverrides).length > 0
+    ? capabilityOverrides
+    : undefined
   const cssAspectRatio = videoRatio.replace(':', '/')
   const hasValidCandidates = !!candidateData && candidateData.candidates.some((url) => !url.startsWith('PENDING:'))
 
@@ -141,7 +144,7 @@ export default function ImageSection({
         size="sm"
         onClick={() => {
           triggerPulse()
-          onRegeneratePanelImage(panelId, 1, false, selectedImageModel || undefined)
+          onRegeneratePanelImage(panelId, 1, false, selectedImageModel || undefined, taskCapabilityOverrides)
         }}
       >
         {t('panel.generateImage')}
@@ -210,10 +213,8 @@ export default function ImageSection({
             onModelChange={(model) => { setSelectedImageModel(model); setCapabilityOverrides({}) }}
             capabilityFields={capabilityFields}
             capabilityOverrides={capabilityOverrides}
-            onCapabilityChange={(field, rawValue, sample) => setCapabilityOverrides((current) => ({
-              ...current,
-              [field]: typeof sample === 'number' ? Number(rawValue) : typeof sample === 'boolean' ? rawValue === 'true' : rawValue,
-            }))}
+            onCapabilityChange={(field, rawValue, sample) => setCapabilityOverrides((current) =>
+              applyImageTaskCapabilityChange(current, field, rawValue, sample))}
             placeholder={tc('inheritProjectDefault')}
           />
         </div>
@@ -223,7 +224,7 @@ export default function ImageSection({
           previousImageUrl={previousImageUrl}
           isSubmittingPanelImageTask={isSubmittingPanelImageTask}
           isModifying={isModifying}
-           onRegeneratePanelImage={(id, count, force) => onRegeneratePanelImage(id, count, force, selectedImageModel || undefined)}
+           onRegeneratePanelImage={(id, count, force) => onRegeneratePanelImage(id, count, force, selectedImageModel || undefined, taskCapabilityOverrides)}
           onOpenEditModal={onOpenEditModal}
           onOpenAIDataModal={onOpenAIDataModal}
           onUndo={onUndo}

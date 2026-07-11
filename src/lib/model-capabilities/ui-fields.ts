@@ -1,4 +1,8 @@
-import type { CapabilityValue, ModelCapabilities } from '@/lib/model-config-contract'
+import type {
+  CapabilityValue,
+  ImageTaskCapabilityOverrides,
+  ModelCapabilities,
+} from '@/lib/model-config-contract'
 
 export interface ModelCapabilityField {
   field: string
@@ -31,4 +35,21 @@ export function extractCapabilityFields(
       const field = key.slice(0, -'Options'.length)
       return { field, options: value as CapabilityValue[], label: toFieldLabel(field) }
     })
+}
+
+export function applyImageTaskCapabilityChange(
+  current: ImageTaskCapabilityOverrides,
+  field: string,
+  rawValue: string,
+  sample: CapabilityValue,
+): ImageTaskCapabilityOverrides {
+  if (field !== 'resolution' && field !== 'aspectRatio') return current
+  return {
+    ...current,
+    [field]: typeof sample === 'number'
+      ? Number(rawValue)
+      : typeof sample === 'boolean'
+        ? rawValue === 'true'
+        : rawValue,
+  }
 }

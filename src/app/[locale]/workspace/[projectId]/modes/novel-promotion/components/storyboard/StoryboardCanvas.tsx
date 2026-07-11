@@ -9,6 +9,7 @@ import { VariantData, VariantOptions } from './hooks/usePanelVariant'
 import type { PanelSaveState } from './hooks/usePanelCrudActions'
 import { AppIcon } from '@/components/ui/icons'
 import { GlassButton } from '@/components/ui/primitives'
+import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 
 interface StoryboardCanvasProps {
   sortedStoryboards: NovelPromotionStoryboard[]
@@ -52,7 +53,7 @@ interface StoryboardCanvasProps {
   onRemoveCharacter: (panel: StoryboardPanel, index: number, storyboardId: string) => void
   onRemoveLocation: (panel: StoryboardPanel, storyboardId: string) => void
   onRetryPanelSave: (panelId: string) => void
-  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string) => void
+  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => void
   onOpenEditModal: (storyboardId: string, panelIndex: number) => void
   onOpenAIDataModal: (storyboardId: string, panelIndex: number) => void
   getPanelCandidates: (panel: NovelPromotionPanel) => { candidates: string[]; selectedIndex: number } | null

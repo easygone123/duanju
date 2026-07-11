@@ -224,4 +224,24 @@ describe('worker panel-image-task-handler behavior', () => {
       },
     })
   })
+
+  it('uses the validated task capability snapshot for the generator call', async () => {
+    const job = buildJob({
+      candidateCount: 1,
+      imageModel: 'fal::banana-2',
+      generationOptions: { resolution: '4K', aspectRatio: '1:1' },
+    })
+    await handlePanelImageTask(job)
+
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        modelId: 'fal::banana-2',
+        options: expect.objectContaining({ resolution: '4K', aspectRatio: '1:1' }),
+      }),
+    )
+    expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      variables: expect.objectContaining({ aspect_ratio: '1:1' }),
+    }))
+  })
 })

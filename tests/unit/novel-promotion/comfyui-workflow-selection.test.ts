@@ -33,8 +33,8 @@ describe('ComfyUI project and task workflow selection', () => {
 
   it('omits an empty image override and submits an explicit ComfyUI model key unchanged', () => {
     expect(buildPanelRegenerationPayload('panel-1', undefined, undefined)).toEqual({ panelId: 'panel-1', count: 1 })
-    expect(buildPanelRegenerationPayload('panel-1', 2, 'comfyui::workflow-1')).toEqual({
-      panelId: 'panel-1', count: 2, imageModel: 'comfyui::workflow-1',
+    expect(buildPanelRegenerationPayload('panel-1', 2, 'comfyui::workflow-1', { resolution: '4K' })).toEqual({
+      panelId: 'panel-1', count: 2, imageModel: 'comfyui::workflow-1', generationOptions: { resolution: '4K' },
     })
   })
 

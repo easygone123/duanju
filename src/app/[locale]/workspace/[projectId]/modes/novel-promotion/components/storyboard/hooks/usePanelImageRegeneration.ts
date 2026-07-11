@@ -3,6 +3,7 @@ import { logInfo as _ulogInfo, logWarn as _ulogWarn } from '@/lib/logging/core'
 
 import { useCallback } from 'react'
 import type { NovelPromotionStoryboard } from '@/types/project'
+import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import {
   StoryboardImageMutationResult,
   getStoryboardPanels,
@@ -10,7 +11,7 @@ import {
 } from './image-generation-runtime'
 
 interface RegeneratePanelMutationLike {
-  mutateAsync: (payload: { panelId: string; count: number; imageModel?: string }) => Promise<unknown>
+  mutateAsync: (payload: { panelId: string; count: number; imageModel?: string; generationOptions?: ImageTaskCapabilityOverrides }) => Promise<unknown>
 }
 
 interface UsePanelImageRegenerationParams {
@@ -36,14 +37,19 @@ export function usePanelImageRegeneration({
   selectPanelCandidateIndex,
 }: UsePanelImageRegenerationParams) {
   const regeneratePanelImage = useCallback(
-    async (panelId: string, count: number = 1, force: boolean = false, imageModel?: string) => {
+    async (panelId: string, count: number = 1, force: boolean = false, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => {
       if (!force && submittingPanelImageIds.has(panelId)) return
 
       setSubmittingPanelImageIds((previous) => new Set(previous).add(panelId))
 
       let handoffToTaskState = false
       try {
-        const data = await regeneratePanelMutation.mutateAsync({ panelId, count, ...(imageModel ? { imageModel } : {}) })
+        const data = await regeneratePanelMutation.mutateAsync({
+          panelId,
+          count,
+          ...(imageModel ? { imageModel } : {}),
+          ...(generationOptions && Object.keys(generationOptions).length > 0 ? { generationOptions } : {}),
+        })
         const result = (data || {}) as StoryboardImageMutationResult
 
         if (result.async) {

@@ -2,6 +2,8 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { extractCapabilityFields } from '@/lib/model-capabilities/ui-fields'
+import { applyImageTaskCapabilityChange } from '@/lib/model-capabilities/ui-fields'
+import { buildPanelRegenerationPayload } from '@/lib/query/mutations/storyboard-panel-mutations'
 
 ;(globalThis as typeof globalThis & { React: typeof React }).React = React
 
@@ -57,5 +59,12 @@ describe('ImageSection model selection', () => {
     expect(extractCapabilityFields(imageModels.current.image[0].capabilities, 'image')).toEqual([
       { field: 'resolution', label: 'Resolution', options: ['1024x1024'] },
     ])
+  })
+
+  it('turns a capability dropdown change into the selected-model regeneration POST body', () => {
+    const generationOptions = applyImageTaskCapabilityChange({}, 'resolution', '4K', '1K')
+    expect(buildPanelRegenerationPayload('panel-1', 1, 'fal::banana-2', generationOptions)).toEqual({
+      panelId: 'panel-1', count: 1, imageModel: 'fal::banana-2', generationOptions: { resolution: '4K' },
+    })
   })
 })
