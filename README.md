@@ -125,6 +125,50 @@ npm run dev
 
 ---
 
+## 🧩 ComfyUI 图片与视频生成
+
+ComfyUI 作为原生 provider 与现有云端图片、视频 provider 共存。部署方先显式启用运行时；每位用户再在设置中心添加自己的 ComfyUI URL，连接和工作流默认仅添加者本人可用。
+
+```env
+COMFYUI_ENABLED=true
+# 默认且推荐：只允许明确列出的主机或网段
+COMFYUI_NETWORK_MODE=allowlist
+COMFYUI_ALLOWED_HOSTS=comfy.example.com
+COMFYUI_ALLOWED_CIDRS=192.168.1.0/24
+
+# 仅适用于你完全信任的自托管网络；必须显式选择
+# COMFYUI_NETWORK_MODE=trusted
+```
+
+`allowlist` 是默认网络模式；它拒绝未授权目标，并且访问环回、LAN 等敏感地址时必须通过 `COMFYUI_ALLOWED_CIDRS` 明确授权。`trusted` 是显式的部署选择，不等于关闭全部防护，云凭证元数据端点仍会被阻止。容器内连接宿主机 ComfyUI 时使用 `http://host.docker.internal:8188`；Linux Docker 还需要配置 `host-gateway`，并把解析地址加入允许网段。不要在 URL 中嵌入用户名或密码。
+
+连接支持无认证、Bearer token 和 Basic auth。凭证在设置中心配置并加密保存；状态只显示安全诊断：`online_idle`、`online_busy_owned`、`online_busy_external`、`offline`、`auth_failed`、`workflow_incompatible`。`online_busy_external` 表示实例正在执行手工或其他客户端提交的 prompt，waoowaoo 不会抢占它。
+
+工作流配置流程：
+
+1. 在 ComfyUI 中通过 **Save (API Format)** / **Export API Format** 导出 JSON；普通 UI workflow JSON 不能直接使用。
+2. 导入后声明占位符或显式 node/input mappings、输入上传变量，以及至少一个 primary output mapping。图片和视频输出都必须明确映射，系统不会猜测节点。
+3. 发布不可变版本，再配置项目级图片/视频默认工作流；具体任务仍可覆盖选择。
+
+每个 ComfyUI 实例的 waoowaoo 并发固定为 1。所有兼容实例忙碌时，任务留在 waoowaoo queue 中等待空闲实例，不会提前塞进 ComfyUI queue。已接受 prompt 会固定在原实例进行恢复；重启、断线和输出传输重试不会重新提交。取消只作用于当前用户拥有的 queued prompt；运行中的 prompt 不会通过全局 interrupt 误伤其他工作。所有映射输出会复制到 waoowaoo 存储后再进入现有业务流。
+
+项目不内置、不下载也不自动选择任何 ComfyUI workflow、checkpoint、LoRA 或 custom node。模型和节点必须由实例管理员准备。
+
+真实实例的授权合约检查是手动 opt-in，不属于默认 CI。工作流文件是包含 `graph`、`outputs`，以及可选 `variableDefinitions` / `bindings` / `variables` 的 JSON bundle；检查会沿用生产网络策略和认证，只输出脱敏耗时与主输出字节数：
+
+```bash
+COMFYUI_CONTRACT_URL=http://127.0.0.1:8188 \
+COMFYUI_CONTRACT_WORKFLOW_FILE=/absolute/path/to/contract-workflow.json \
+COMFYUI_ALLOWED_CIDRS=127.0.0.1/32 \
+npm run check:comfyui-contract
+```
+
+可选认证变量为 `COMFYUI_CONTRACT_AUTH_TYPE=none|bearer|basic`，以及对应的 `COMFYUI_CONTRACT_AUTH_TOKEN` 或 `COMFYUI_CONTRACT_AUTH_USERNAME` / `COMFYUI_CONTRACT_AUTH_PASSWORD`。该命令会真实提交一次生成，请只使用专用的安全测试工作流。
+
+本集成不改变仓库许可证：项目继续使用 **CC BY-NC-SA 4.0**，部署和再分发必须遵守非商业及署名、相同方式共享条款。
+
+---
+
 ## 📦 技术栈
 
 - **框架**: Next.js 15 + React 19

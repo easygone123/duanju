@@ -113,6 +113,50 @@ After launching, go to **Settings** to configure your AI service API keys. A bui
 
 ---
 
+## 🧩 ComfyUI Image and Video Generation
+
+ComfyUI is a native provider that coexists with every existing cloud image and video provider. The deployer explicitly enables the runtime, then each user adds their own ComfyUI URL in Settings. Connections and workflows are private to their creator by default.
+
+```env
+COMFYUI_ENABLED=true
+# Default and recommended: permit only explicitly listed hosts or networks
+COMFYUI_NETWORK_MODE=allowlist
+COMFYUI_ALLOWED_HOSTS=comfy.example.com
+COMFYUI_ALLOWED_CIDRS=192.168.1.0/24
+
+# Only for a self-hosted network you fully trust; this must be explicit
+# COMFYUI_NETWORK_MODE=trusted
+```
+
+`allowlist` is the default network mode. It rejects unauthorized destinations, and loopback/LAN targets require explicit authorization through `COMFYUI_ALLOWED_CIDRS`. `trusted` is an explicit deployment choice rather than a complete security bypass: cloud credential metadata endpoints remain blocked. From a container, reach ComfyUI on the Docker host at `http://host.docker.internal:8188`; Linux Docker also needs a `host-gateway` mapping and the resolved address in an allowed CIDR. Never embed credentials in the URL.
+
+Connections support no auth, a Bearer token, or Basic auth. Credentials are configured in Settings and stored encrypted. Only sanitized states are exposed: `online_idle`, `online_busy_owned`, `online_busy_external`, `offline`, `auth_failed`, and `workflow_incompatible`. `online_busy_external` means a manual or another client's prompt is active, so waoowaoo will not claim that instance.
+
+Workflow setup:
+
+1. In ComfyUI, use **Save (API Format)** / **Export API Format**. A regular UI workflow JSON is not accepted.
+2. After import, declare placeholders or explicit node/input mappings, uploaded inputs, and at least one primary output mapping. Image and video outputs must be explicit; the system does not guess nodes.
+3. Publish the immutable version, then choose project-level image and video defaults. An individual task can still override that selection.
+
+waoowaoo concurrency is fixed at 1 for each ComfyUI instance. When every compatible instance is busy, work remains in the waoowaoo queue and is not preloaded into the ComfyUI queue. An accepted prompt stays pinned to its original instance for recovery; restart, disconnect, and output-transfer retries do not resubmit it. Cancellation only deletes a queued prompt owned by the current user; a running prompt is never stopped with a global interrupt that could affect unrelated work. Every mapped output is copied into waoowaoo storage before continuing through existing business flows.
+
+The project ships, downloads, and auto-selects no built-in ComfyUI workflow, checkpoint, LoRA, or custom node. Instance operators provide all models and nodes.
+
+The authorized real-instance contract check is manually opt-in and excluded from default CI. Its workflow file is a JSON bundle containing `graph`, `outputs`, and optional `variableDefinitions` / `bindings` / `variables`. It uses the production network policy and auth path and prints only sanitized timings plus the primary output byte count:
+
+```bash
+COMFYUI_CONTRACT_URL=http://127.0.0.1:8188 \
+COMFYUI_CONTRACT_WORKFLOW_FILE=/absolute/path/to/contract-workflow.json \
+COMFYUI_ALLOWED_CIDRS=127.0.0.1/32 \
+npm run check:comfyui-contract
+```
+
+Optional auth variables are `COMFYUI_CONTRACT_AUTH_TYPE=none|bearer|basic` and the corresponding `COMFYUI_CONTRACT_AUTH_TOKEN` or `COMFYUI_CONTRACT_AUTH_USERNAME` / `COMFYUI_CONTRACT_AUTH_PASSWORD`. This command performs one real generation; use a dedicated safe test workflow.
+
+This integration does not change the repository license. The project remains under **CC BY-NC-SA 4.0**, and deployment or redistribution must honor its attribution, non-commercial, and share-alike terms.
+
+---
+
 ## 📦 Tech Stack
 
 - **Framework**: Next.js 15 + React 19

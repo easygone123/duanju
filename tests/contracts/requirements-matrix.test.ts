@@ -21,4 +21,38 @@ describe('requirements matrix integrity', () => {
       }
     }
   })
+
+  it('maps every ComfyUI acceptance criterion to the end-to-end fake system test', () => {
+    const expectedIds = Array.from(
+      { length: 11 },
+      (_, index) => `REQ-COMFYUI-AC-${String(index + 1).padStart(2, '0')}`,
+    )
+    const entries = REQUIREMENTS_MATRIX.filter((entry) => entry.id.startsWith('REQ-COMFYUI-AC-'))
+
+    expect(entries.map((entry) => entry.id)).toEqual(expectedIds)
+    for (const entry of entries) {
+      expect(entry.tests).toContain('tests/system/comfyui-generation.system.test.ts')
+    }
+  })
+
+  it('keeps the real ComfyUI contract check opt-in', () => {
+    const packageJson = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>
+    }
+    expect(packageJson.scripts['check:comfyui-contract']).toBe('tsx scripts/comfyui-contract-check.ts')
+    expect(packageJson.scripts['test:system']).not.toContain('check:comfyui-contract')
+    expect(packageJson.scripts['test:all']).not.toContain('check:comfyui-contract')
+  })
+
+  it('documents the complete ComfyUI operating contract in both READMEs', () => {
+    for (const filename of ['README.md', 'README_en.md']) {
+      const readme = fs.readFileSync(path.resolve(process.cwd(), filename), 'utf8')
+      for (const requiredText of [
+        'COMFYUI_ENABLED', 'COMFYUI_NETWORK_MODE', 'allowlist', 'trusted',
+        'host.docker.internal', 'API Format', 'online_busy_external',
+        'COMFYUI_CONTRACT_WORKFLOW_FILE', 'npm run check:comfyui-contract',
+        'CC BY-NC-SA 4.0',
+      ]) expect(readme, `${filename} -> ${requiredText}`).toContain(requiredText)
+    }
+  })
 })

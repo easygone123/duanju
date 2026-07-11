@@ -57,6 +57,7 @@
     "check:test-behavior-tasktype-coverage": "node scripts/guards/test-behavior-tasktype-coverage-guard.mjs",
     "check:test-coverage-guards": "npm run check:test-behavior-quality && npm run check:test-route-coverage && npm run check:test-tasktype-coverage && npm run check:test-behavior-route-coverage && npm run check:test-behavior-tasktype-coverage",
     "check:requirements-matrix": "cross-env BILLING_TEST_BOOTSTRAP=0 vitest run tests/contracts/requirements-matrix.test.ts",
+    "check:comfyui-contract": "tsx scripts/comfyui-contract-check.ts",
     "check:image-reference-normalization": "node scripts/guards/image-reference-normalization-guard.mjs",
     "check:task-submit-compensation": "node scripts/guards/task-submit-compensation-guard.mjs",
     "check:locale-navigation": "node scripts/guards/locale-navigation-guard.mjs",
