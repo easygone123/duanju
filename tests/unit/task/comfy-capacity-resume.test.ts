@@ -23,17 +23,22 @@ import { tryResumeTaskFromComfyCapacityWait } from '@/lib/task/service'
 describe('ComfyUI capacity resume durable lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.useRealTimers()
     updateManyMock.mockResolvedValue({ count: 1 })
   })
 
-  it.each(['waiting_capacity', 'blocked_no_compatible_instance'])(
-    'only refreshes ownership heartbeat for an owned request in %s',
+  it.each([
+    'waiting_capacity', 'blocked_no_compatible_instance', 'leased', 'uploading',
+    'submitting', 'submitted', 'running', 'transferring', 'reconciling',
+    'completed', 'failed', 'canceled',
+  ])('only refreshes ownership heartbeat for an owned request advanced to %s while delayed',
     async (status) => {
       const externalId = 'COMFY:IMAGE:req-2'
       findUniqueMock.mockResolvedValue({
         status: 'processing',
         userId: 'user-1',
         externalId: 'COMFY:IMAGE:req-1',
+        payload: { waitingForCapacity: true, externalId },
       })
       findComfyRequestMock.mockResolvedValue({
         id: 'req-2', taskId: 'task-1', userId: 'user-1',
@@ -58,8 +63,30 @@ describe('ComfyUI capacity resume durable lifecycle', () => {
       expect(update).not.toHaveProperty('attempt')
       expect(update).not.toHaveProperty('startedAt')
       expect(update).not.toHaveProperty('externalId')
-    },
-  )
+    })
+
+  it('uses the current resume heartbeat when the scheduler completes during the delay', async () => {
+    vi.useFakeTimers()
+    const resumedAt = new Date('2026-07-11T14:00:00.000Z')
+    vi.setSystemTime(resumedAt)
+    const externalId = 'COMFY:VIDEO:req-completed'
+    findUniqueMock.mockResolvedValue({
+      status: 'processing', userId: 'user-1',
+      payload: { waitingForCapacity: true, externalId },
+    })
+    findComfyRequestMock.mockResolvedValue({
+      id: 'req-completed', taskId: 'task-1', userId: 'user-1',
+      mediaType: 'video', status: 'completed',
+    })
+
+    await expect(tryResumeTaskFromComfyCapacityWait('task-1', {
+      version: 1, taskId: 'task-1', externalId,
+    })).resolves.toBe(true)
+    expect(updateManyMock).toHaveBeenCalledWith({
+      where: { id: 'task-1', status: 'processing' },
+      data: { heartbeatAt: resumedAt },
+    })
+  })
 
   it.each([
     ['cloud external id', 'FAL:IMAGE:req-1', null],
@@ -78,6 +105,7 @@ describe('ComfyUI capacity resume durable lifecycle', () => {
     findUniqueMock.mockResolvedValue({
       status: 'processing',
       userId: 'user-1',
+      payload: { waitingForCapacity: true, externalId: 'COMFY:VIDEO:req-forged' },
     })
     findComfyRequestMock.mockResolvedValue({
       id: 'req-forged', taskId: 'task-other', userId: 'user-1',
@@ -92,11 +120,29 @@ describe('ComfyUI capacity resume durable lifecycle', () => {
   })
 
   it.each([
-    ['terminal request', 'completed', 'task-1', 'image'],
+    { waitingForCapacity: false, externalId: 'COMFY:IMAGE:req-2' },
+    { waitingForCapacity: true, externalId: 'COMFY:IMAGE:req-other' },
+    { externalId: 'COMFY:IMAGE:req-2' },
+  ])('rejects a valid owned request when durable task payload does not match: %j', async (payload) => {
+    findUniqueMock.mockResolvedValue({ status: 'processing', userId: 'user-1', payload })
+    findComfyRequestMock.mockResolvedValue({
+      id: 'req-2', taskId: 'task-1', userId: 'user-1',
+      mediaType: 'image', status: 'running',
+    })
+    await expect(tryResumeTaskFromComfyCapacityWait('task-1', {
+      version: 1, taskId: 'task-1', externalId: 'COMFY:IMAGE:req-2',
+    })).resolves.toBe(false)
+    expect(updateManyMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
     ['wrong media', 'waiting_capacity', 'task-1', 'video'],
     ['other task request', 'blocked_no_compatible_instance', 'task-other', 'image'],
   ])('rejects %s even when its id and owner match', async (_case, status, requestTaskId, mediaType) => {
-    findUniqueMock.mockResolvedValue({ status: 'processing', userId: 'user-1' })
+    findUniqueMock.mockResolvedValue({
+      status: 'processing', userId: 'user-1',
+      payload: { waitingForCapacity: true, externalId: 'COMFY:IMAGE:req-2' },
+    })
     findComfyRequestMock.mockResolvedValue({
       id: 'req-2', taskId: requestTaskId, userId: 'user-1', mediaType, status,
     })

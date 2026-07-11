@@ -8,6 +8,7 @@ import { COMFY_REQUEST_STATUS } from '@/lib/comfyui/types'
 import { TASK_STATUS, type CreateTaskInput, type TaskBillingInfo, type TaskJobData, type TaskStatus } from './types'
 
 const ACTIVE_STATUSES: TaskStatus[] = [TASK_STATUS.QUEUED, TASK_STATUS.PROCESSING]
+const COMFY_REQUEST_STATUSES = new Set<string>(Object.values(COMFY_REQUEST_STATUS))
 const taskModel = prisma.task
 
 /**
@@ -420,9 +421,11 @@ export async function tryResumeTaskFromComfyCapacityWait(
 
   const task = await taskModel.findUnique({
     where: { id: taskId },
-    select: { status: true, userId: true },
+    select: { status: true, userId: true, payload: true },
   })
   if (task?.status !== TASK_STATUS.PROCESSING) return false
+  const payload = toObject(task.payload)
+  if (payload.waitingForCapacity !== true || payload.externalId !== marker.externalId) return false
 
   const request = await prisma.comfyGenerationRequest.findFirst({
     where: { id: parsed.requestId, userId: task.userId },
@@ -431,8 +434,7 @@ export async function tryResumeTaskFromComfyCapacityWait(
   if (request?.taskId !== taskId
     || request.userId !== task.userId
     || request.mediaType !== parsed.mediaType
-    || (request.status !== COMFY_REQUEST_STATUS.WAITING_CAPACITY
-      && request.status !== COMFY_REQUEST_STATUS.BLOCKED_NO_COMPATIBLE_INSTANCE)) return false
+    || !COMFY_REQUEST_STATUSES.has(request.status)) return false
 
   const result = await taskModel.updateMany({
     where: {
