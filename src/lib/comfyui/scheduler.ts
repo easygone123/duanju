@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { redis } from '@/lib/redis'
@@ -13,6 +13,9 @@ import {
 import type { ComfyHealthState, ComfyRequestStatus } from './types'
 
 const SCHEDULABLE_STATUSES = ['waiting_capacity', 'blocked_no_compatible_instance'] as const
+const CONNECTION_ACTIVE_STATUSES = [
+  'leased', 'uploading', 'submitted', 'running', 'transferring', 'reconciling',
+] as const
 
 export interface ComfySchedulableRequest {
   id: string
@@ -75,6 +78,7 @@ interface ComfyAssignmentStore {
   transaction<T>(operation: (client: {
     updateConnection(input: Prisma.ComfyConnectionUpdateManyArgs): Promise<{ count: number }>
     updateRequest(input: Prisma.ComfyGenerationRequestUpdateManyArgs): Promise<{ count: number }>
+    countActiveRequests(input: Prisma.ComfyGenerationRequestCountArgs): Promise<number>
   }) => Promise<T>): Promise<T>
 }
 
@@ -205,7 +209,8 @@ export function createDefaultComfySchedulerDependencies(
       transaction: (operation) => prisma.$transaction((tx) => operation({
         updateConnection: (data) => tx.comfyConnection.updateMany(data),
         updateRequest: (data) => tx.comfyGenerationRequest.updateMany(data),
-      })),
+        countActiveRequests: (data) => tx.comfyGenerationRequest.count(data),
+      }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }),
     }),
     markBlockedIfEligible: async (requestId, userId) => {
       const result = await prisma.comfyGenerationRequest.updateMany({
@@ -225,6 +230,14 @@ export async function assignComfyRequestWithStore(
 ) {
   try {
     return await store.transaction(async (client) => {
+      const activeRequests = await client.countActiveRequests({
+        where: {
+          connectionId: input.connectionId,
+          id: { not: input.requestId },
+          status: { in: [...CONNECTION_ACTIVE_STATUSES] },
+        },
+      })
+      if (activeRequests > 0) throw ASSIGNMENT_RACE
       const connection = await client.updateConnection({
         where: { id: input.connectionId, userId: input.userId, enabled: true },
         data: { lastAssignedAt: input.assignedAt },

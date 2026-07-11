@@ -179,6 +179,26 @@ describe('ComfyUI database assignment CAS', () => {
     expect(updateRequest).not.toHaveBeenCalled()
   })
 
+  it('fails closed while the connection still has another nonterminal request', async () => {
+    const updateRequest = vi.fn().mockResolvedValue({ count: 1 })
+    const updateConnection = vi.fn().mockResolvedValue({ count: 1 })
+    const countActiveRequests = vi.fn().mockResolvedValue(1)
+    const store = transactionStore(updateConnection, updateRequest, countActiveRequests)
+
+    await expect(assignComfyRequestWithStore(input, store)).resolves.toBe(false)
+    expect(countActiveRequests).toHaveBeenCalledWith({
+      where: {
+        connectionId: 'connection-1',
+        id: { not: 'request-1' },
+        status: { in: [
+          'leased', 'uploading', 'submitted', 'running', 'transferring', 'reconciling',
+        ] },
+      },
+    })
+    expect(updateConnection).not.toHaveBeenCalled()
+    expect(updateRequest).not.toHaveBeenCalled()
+  })
+
   it('claims the request with eligibility CAS in the same transaction', async () => {
     const updateRequest = vi.fn().mockResolvedValue({ count: 1 })
     const updateConnection = vi.fn().mockResolvedValue({ count: 1 })
@@ -202,11 +222,13 @@ describe('ComfyUI database assignment CAS', () => {
 function transactionStore(
   updateConnection: ReturnType<typeof vi.fn>,
   updateRequest: ReturnType<typeof vi.fn>,
+  countActiveRequests: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue(0),
 ) {
   return {
     transaction: async <T>(operation: (client: {
       updateConnection: typeof updateConnection
       updateRequest: typeof updateRequest
-    }) => Promise<T>) => operation({ updateConnection, updateRequest }),
+      countActiveRequests: typeof countActiveRequests
+    }) => Promise<T>) => operation({ updateConnection, updateRequest, countActiveRequests }),
   }
 }
