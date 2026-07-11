@@ -32,6 +32,13 @@ describe('requirements matrix integrity', () => {
     expect(entries.map((entry) => entry.id)).toEqual(expectedIds)
     for (const entry of entries) {
       expect(entry.tests).toContain('tests/system/comfyui-generation.system.test.ts')
+      const escapedId = entry.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const executableTitle = new RegExp(`(?:it|test)\\(\\s*['\"\\\`]${escapedId}\\b`, 'g')
+      const titleCount = entry.tests.reduce((count, testPath) => {
+        const source = fs.readFileSync(path.resolve(process.cwd(), testPath), 'utf8')
+        return count + [...source.matchAll(executableTitle)].length
+      }, 0)
+      expect(titleCount, `${entry.id} executable evidence`).toBe(1)
     }
   })
 
