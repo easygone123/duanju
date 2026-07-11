@@ -1,4 +1,4 @@
-import type { Job } from 'bullmq'
+import { DelayedError, type Job } from 'bullmq'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CHARACTER_PROMPT_SUFFIX, CHARACTER_IMAGE_BANANA_RATIO } from '@/lib/constants'
 import { TASK_TYPE, type TaskJobData, type TaskType } from '@/lib/task/types'
@@ -74,6 +74,10 @@ const workersSharedMock = vi.hoisted(() => ({
 
 const workersUtilsMock = vi.hoisted(() => ({
   assertTaskActive: vi.fn(async () => {}),
+  resolveImageSourceFromGeneration: vi.fn<(
+    job: Job<TaskJobData>,
+    params: { invocationKey: string },
+  ) => Promise<string>>(async () => 'https://example.com/comfy-generated.jpg'),
 }))
 
 const promptI18nMock = vi.hoisted(() => ({
@@ -256,5 +260,82 @@ describe('worker reference-to-character', () => {
 
     expect(fontsMock.initializeFonts).toHaveBeenCalledTimes(1)
     expect(fontsMock.createLabelSVG).toHaveBeenCalledTimes(1)
+  })
+
+  it('serializes ComfyUI multi-image invocations on the same BullMQ job in index order', async () => {
+    configServiceMock.getUserModelConfig.mockResolvedValueOnce({
+      characterModel: 'comfyui::workflow-1',
+      analysisModel: '',
+    })
+    let active = 0
+    let maxActive = 0
+    const invocationOrder: string[] = []
+    workersUtilsMock.resolveImageSourceFromGeneration.mockImplementation(async (_job, params) => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      invocationOrder.push(params.invocationKey)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      active -= 1
+      return 'https://example.com/comfy-generated.jpg'
+    })
+
+    await handleReferenceToCharacterTask(buildJob({
+      referenceImageUrl: 'https://example.com/ref.png', count: 3,
+    }, TASK_TYPE.ASSET_HUB_REFERENCE_TO_CHARACTER))
+
+    expect(maxActive).toBe(1)
+    expect(invocationOrder).toEqual([
+      'task-1:reference-character:ref-char:image:0',
+      'task-1:reference-character:ref-char:image:1',
+      'task-1:reference-character:ref-char:image:2',
+    ])
+  })
+
+  it('keeps cloud multi-image generation parallel', async () => {
+    let active = 0
+    let maxActive = 0
+    generatorApiMock.generateImage.mockImplementation(async () => {
+      active += 1
+      maxActive = Math.max(maxActive, active)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      active -= 1
+      return { success: true, imageUrl: 'https://example.com/generated.jpg', async: false }
+    })
+
+    await handleReferenceToCharacterTask(buildJob({
+      referenceImageUrl: 'https://example.com/ref.png', count: 3,
+    }, TASK_TYPE.ASSET_HUB_REFERENCE_TO_CHARACTER))
+
+    expect(maxActive).toBeGreaterThan(1)
+  })
+
+  it('stops at the first waiting ComfyUI invocation and resumes it before starting the next index', async () => {
+    configServiceMock.getUserModelConfig.mockResolvedValue({
+      characterModel: 'comfyui::workflow-1',
+      analysisModel: '',
+    })
+    const firstCycle: string[] = []
+    workersUtilsMock.resolveImageSourceFromGeneration.mockImplementation(async (_job, params) => {
+      firstCycle.push(params.invocationKey)
+      throw new DelayedError()
+    })
+    const job = buildJob({
+      referenceImageUrl: 'https://example.com/ref.png', count: 3,
+    }, TASK_TYPE.ASSET_HUB_REFERENCE_TO_CHARACTER)
+
+    await expect(handleReferenceToCharacterTask(job)).rejects.toMatchObject({ name: 'DelayedError' })
+    expect(firstCycle).toEqual(['task-1:reference-character:ref-char:image:0'])
+
+    const secondCycle: string[] = []
+    workersUtilsMock.resolveImageSourceFromGeneration.mockImplementation(async (_job, params) => {
+      secondCycle.push(params.invocationKey)
+      if (params.invocationKey.endsWith(':1')) throw new DelayedError()
+      return 'https://example.com/comfy-generated.jpg'
+    })
+    await expect(handleReferenceToCharacterTask(job)).rejects.toMatchObject({ name: 'DelayedError' })
+    expect(secondCycle).toEqual([
+      'task-1:reference-character:ref-char:image:0',
+      'task-1:reference-character:ref-char:image:1',
+    ])
   })
 })

@@ -1,5 +1,5 @@
 import sharp from 'sharp'
-import type { Job } from 'bullmq'
+import { DelayedError, type Job } from 'bullmq'
 import { prisma } from '@/lib/prisma'
 import { generateImage } from '@/lib/generator-api'
 import { queryFalStatus } from '@/lib/async-submit'
@@ -131,7 +131,10 @@ async function generateReferenceImage(params: {
 
     const key = generateUniqueKey(`${keyPrefix}-${Date.now()}-${imageIndex}`, 'jpg')
     return await uploadObject(processed, key)
-  } catch {
+  } catch (error) {
+    if (error instanceof DelayedError || (error instanceof Error && error.name === 'DelayedError')) {
+      throw error
+    }
     return null
   }
 }
@@ -222,7 +225,8 @@ export async function handleReferenceToCharacterTask(job: Job<TaskJobData>) {
   }
 
   const useReferenceImages = !customDescription
-  const falApiKey = parseModelKeyStrict(imageModel)?.provider === 'comfyui'
+  const isComfyImageModel = parseModelKeyStrict(imageModel)?.provider === 'comfyui'
+  const falApiKey = isComfyImageModel
     ? null
     : (await getProviderConfig(job.data.userId, 'fal')).apiKey
   const keyPrefix = isAssetHub ? 'ref-char' : `proj-ref-char-${job.data.projectId}`
@@ -234,19 +238,24 @@ export async function handleReferenceToCharacterTask(job: Job<TaskJobData>) {
     displayMode: 'detail',
   })
 
-  const imageResults = await Promise.all(Array.from({ length: count }, (_value, index) => index).map(async (index) =>
-    await generateReferenceImage({
-      job,
-      imageIndex: index,
-      userId: job.data.userId,
-      imageModel,
-      prompt,
-      referenceImages: useReferenceImages ? allReferenceImages : undefined,
-      falApiKey,
-      keyPrefix,
-      ...(isProject ? { labelText: characterName } : {}),
-    }),
-  ))
+  const generateAtIndex = async (index: number) => await generateReferenceImage({
+    job,
+    imageIndex: index,
+    userId: job.data.userId,
+    imageModel,
+    prompt,
+    referenceImages: useReferenceImages ? allReferenceImages : undefined,
+    falApiKey,
+    keyPrefix,
+    ...(isProject ? { labelText: characterName } : {}),
+  })
+  const indexes = Array.from({ length: count }, (_value, index) => index)
+  const imageResults: Array<string | null> = []
+  if (isComfyImageModel) {
+    for (const index of indexes) imageResults.push(await generateAtIndex(index))
+  } else {
+    imageResults.push(...await Promise.all(indexes.map(generateAtIndex)))
+  }
 
   let description: string | null = null
   if (analysisModel) {

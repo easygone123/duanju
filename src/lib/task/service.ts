@@ -4,6 +4,7 @@ import { withPrismaRetry } from '@/lib/prisma-retry'
 import { rollbackTaskBilling } from '@/lib/billing'
 import { locales } from '@/i18n/routing'
 import { parseComfyExternalId } from '@/lib/comfyui/external-id'
+import { COMFY_REQUEST_STATUS } from '@/lib/comfyui/types'
 import { TASK_STATUS, type CreateTaskInput, type TaskBillingInfo, type TaskJobData, type TaskStatus } from './types'
 
 const ACTIVE_STATUSES: TaskStatus[] = [TASK_STATUS.QUEUED, TASK_STATUS.PROCESSING]
@@ -410,29 +411,33 @@ export async function tryResumeTaskFromComfyCapacityWait(
   marker: TaskJobData['comfyCapacityResume'],
 ) {
   if (!marker || marker.version !== 1 || marker.taskId !== taskId) return false
+  let parsed: ReturnType<typeof parseComfyExternalId>
   try {
-    parseComfyExternalId(marker.externalId)
+    parsed = parseComfyExternalId(marker.externalId)
   } catch {
     return false
   }
 
   const task = await taskModel.findUnique({
     where: { id: taskId },
-    select: { status: true, externalId: true, payload: true },
+    select: { status: true, userId: true },
   })
-  const payload = toObject(task?.payload)
-  if (
-    task?.status !== TASK_STATUS.PROCESSING
-    || task.externalId !== marker.externalId
-    || payload.waitingForCapacity !== true
-    || payload.externalId !== marker.externalId
-  ) return false
+  if (task?.status !== TASK_STATUS.PROCESSING) return false
+
+  const request = await prisma.comfyGenerationRequest.findFirst({
+    where: { id: parsed.requestId, userId: task.userId },
+    select: { id: true, taskId: true, userId: true, mediaType: true, status: true },
+  })
+  if (request?.taskId !== taskId
+    || request.userId !== task.userId
+    || request.mediaType !== parsed.mediaType
+    || (request.status !== COMFY_REQUEST_STATUS.WAITING_CAPACITY
+      && request.status !== COMFY_REQUEST_STATUS.BLOCKED_NO_COMPATIBLE_INSTANCE)) return false
 
   const result = await taskModel.updateMany({
     where: {
       id: taskId,
       status: TASK_STATUS.PROCESSING,
-      externalId: marker.externalId,
     },
     data: { heartbeatAt: new Date() },
   })
