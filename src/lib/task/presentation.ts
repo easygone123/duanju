@@ -1,4 +1,5 @@
 import type { TaskIntent } from './intent'
+import type { ComfyTaskDiagnostics } from './state-service'
 
 export type TaskPresentationPhase = 'idle' | 'queued' | 'processing' | 'completed' | 'failed'
 export type TaskPresentationResource = 'image' | 'video' | 'audio' | 'text'
@@ -13,6 +14,7 @@ export type TaskPresentationState = {
   isRunning: boolean
   isError: boolean
   labelKey: string | null
+  comfyDiagnostics?: ComfyTaskDiagnostics | null
 }
 
 export function isRunningPhase(phase: string | null | undefined): phase is 'queued' | 'processing' {
@@ -24,6 +26,7 @@ export function resolveTaskPresentationState(input: {
   intent: TaskIntent
   resource: TaskPresentationResource
   hasOutput: boolean
+  comfyDiagnostics?: ComfyTaskDiagnostics | null
 }): TaskPresentationState {
   const isRunning = input.phase === 'queued' || input.phase === 'processing'
   if (isRunning) {
@@ -36,6 +39,7 @@ export function resolveTaskPresentationState(input: {
       isRunning: true,
       isError: false,
       labelKey: `taskStatus.intent.${input.intent}.running.${input.resource}`,
+      comfyDiagnostics: input.comfyDiagnostics ?? null,
     }
   }
 
@@ -49,6 +53,7 @@ export function resolveTaskPresentationState(input: {
       isRunning: false,
       isError: true,
       labelKey: `taskStatus.failed.${input.resource}`,
+      comfyDiagnostics: input.comfyDiagnostics ?? null,
     }
   }
 
@@ -61,5 +66,6 @@ export function resolveTaskPresentationState(input: {
     isRunning: false,
     isError: false,
     labelKey: null,
+    comfyDiagnostics: input.comfyDiagnostics ?? null,
   }
 }

@@ -25,6 +25,10 @@ export const publishWorkflowSchema = z.object({
   versionId: z.string().trim().min(1).max(128),
 }).strict()
 
+export const updateWorkflowMetadataSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+}).strict()
+
 export const testWorkflowSchema = z.object({
   versionId: z.string().trim().min(1).max(128),
   connectionId: z.string().trim().min(1).max(128),

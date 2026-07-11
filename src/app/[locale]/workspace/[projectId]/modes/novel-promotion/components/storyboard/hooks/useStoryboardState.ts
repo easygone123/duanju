@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query/keys'
 import { NovelPromotionStoryboard, NovelPromotionClip, NovelPromotionPanel } from '@/types/project'
 import { PanelEditData } from '../../PanelEditForm'
+import type { TaskPresentationState } from '@/lib/task/presentation'
 import {
   computeStoryboardStartIndex,
   computeTotalPanels,
@@ -31,6 +32,7 @@ export interface StoryboardPanel {
   photographyRules?: string | null  // 单镜头摄影规则JSON
   actingNotes?: string | null       // 演技指导数据JSON
   imageTaskRunning?: boolean  // 任务态运行状态（由 tasks 派生）
+  imageTaskPresentation?: TaskPresentationState | null
 }
 
 interface UseStoryboardStateProps {
@@ -146,7 +148,8 @@ export function useStoryboardState({
         imageUrl: p.imageUrl,
         photographyRules: p.photographyRules,
         actingNotes: p.actingNotes,
-        imageTaskRunning: p.imageTaskRunning || false
+        imageTaskRunning: p.imageTaskRunning || false,
+        imageTaskPresentation: (p as NovelPromotionPanel & { imageTaskPresentation?: TaskPresentationState | null }).imageTaskPresentation ?? null,
       }
     })
   }

@@ -84,6 +84,7 @@ function useTaskPresentationInternal(
           intent: state.intent,
           resource: target.resource,
           hasOutput: target.hasOutput || !!state.hasOutputAtStart,
+          comfyDiagnostics: state.comfyDiagnostics ?? null,
         }),
       )
     }

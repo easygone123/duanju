@@ -141,8 +141,11 @@ export function useStoryboardTaskAwareStoryboards({
           ...panel,
           imageTaskRunning: panelImageRunning,
           imageTaskIntent: panelImageTaskState?.intent,
+          imageTaskPresentation: panelImageStates.getState(`panel-image:${panel.id}`),
           videoTaskRunning: isRunningPhase(panelVideoStates.getTaskState(`panel-video:${panel.id}`)?.phase),
+          videoTaskPresentation: panelVideoStates.getState(`panel-video:${panel.id}`),
           lipSyncTaskRunning: isRunningPhase(panelLipSyncStates.getTaskState(`panel-lip:${panel.id}`)?.phase),
+          lipSyncTaskPresentation: panelLipSyncStates.getState(`panel-lip:${panel.id}`),
         }
       }),
     }))

@@ -35,4 +35,15 @@ describe('resolveTaskPresentationState', () => {
     expect(state.isError).toBe(true)
     expect(state.labelKey).toBe('taskStatus.failed.video')
   })
+
+  it('carries sanitized ComfyUI diagnostics into overlay presentation', () => {
+    const comfyDiagnostics = {
+      stage: 'waiting_capacity' as const, waitingForCapacity: true, capacityWaitMs: 5000,
+      executionMs: null, transferMs: null, connectionId: null, workflowId: 'wf-1',
+      workflowVersionId: 'v1', promptId: null,
+    }
+    expect(resolveTaskPresentationState({
+      phase: 'queued', intent: 'generate', resource: 'image', hasOutput: false, comfyDiagnostics,
+    }).comfyDiagnostics).toEqual(comfyDiagnostics)
+  })
 })

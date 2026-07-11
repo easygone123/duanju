@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { existsSync } from 'node:fs'
 
 import { buildMockRequest } from '../../../helpers/request'
 import { installAuthMocks, mockAuthenticated, mockUnauthenticated, resetAuthMockState } from '../../../helpers/auth'
@@ -13,7 +14,7 @@ const prismaMock = vi.hoisted(() => ({
   comfyWorkflowVersion: {
     findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn(),
   },
-  comfyConnection: { findFirst: vi.fn() },
+  comfyConnection: { findFirst: vi.fn(), findMany: vi.fn() },
   project: { findFirst: vi.fn() },
   novelPromotionProject: { findUnique: vi.fn(), update: vi.fn() },
   projectComfyBinding: { count: vi.fn(), upsert: vi.fn() },
@@ -26,6 +27,7 @@ const submitPromptMock = vi.hoisted(() => vi.fn())
 const getQueueMock = vi.hoisted(() => vi.fn())
 const getObjectInfoMock = vi.hoisted(() => vi.fn())
 const getModelsMock = vi.hoisted(() => vi.fn())
+const getSystemStatsMock = vi.hoisted(() => vi.fn())
 const watchPromptMock = vi.hoisted(() => vi.fn())
 const getHistoryMock = vi.hoisted(() => vi.fn())
 const uploadImageMock = vi.hoisted(() => vi.fn())
@@ -43,7 +45,14 @@ vi.mock('@/lib/comfyui/network-policy', async (importOriginal) => {
 })
 vi.mock('@/lib/comfyui/client', () => ({
   ComfyClient: class {
+    private readonly baseUrl: string
+
+    constructor(options: { baseUrl: string }) {
+      this.baseUrl = options.baseUrl
+    }
+
     getQueue = getQueueMock
+    getSystemStats = () => getSystemStatsMock(this.baseUrl)
     getObjectInfo = getObjectInfoMock
     getModels = getModelsMock
     submitPrompt = submitPromptMock
@@ -115,6 +124,7 @@ describe('ComfyUI workflow library', () => {
       SaveImage: { input: { required: {} } },
     })
     getModelsMock.mockResolvedValue(['model.safetensors'])
+    getSystemStatsMock.mockResolvedValue({ system: { comfyui_version: '0.3.50' } })
     getHistoryMock.mockResolvedValue({ outputs: {
       '2': { images: [{ filename: 'result.png', subfolder: '', type: 'output' }] },
     } })
@@ -353,6 +363,97 @@ describe('ComfyUI workflow library', () => {
     }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
     expect(response.status).toBe(404)
     expect(prismaMock.comfyWorkflowVersion.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('persists strict owned workflow metadata and keeps media type immutable', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/route')
+    const response = await route.PATCH(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1', method: 'PATCH', body: { name: ' Renamed portrait ' },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+    expect(response.status).toBe(200)
+    expect(prismaMock.comfyWorkflow.updateMany).toHaveBeenCalledWith({
+      where: { id: 'workflow-1', userId: 'user-1', status: { not: 'archived' } },
+      data: { name: 'Renamed portrait' },
+    })
+    expect((await route.PATCH(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1', method: 'PATCH', body: { mediaType: 'video' },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })).status).toBe(400)
+  })
+
+  it('returns exact compatibility for each enabled owned connection', async () => {
+    const routePath = 'src/app/api/comfyui/workflows/[workflowId]/versions/[versionId]/compatibility/route.ts'
+    expect(existsSync(routePath)).toBe(true)
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
+    prismaMock.comfyConnection.findMany.mockResolvedValue([
+      connection(), connection({ id: 'connection-2', name: 'Second GPU' }),
+    ])
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/versions/[versionId]/compatibility/route')
+    const response = await route.GET(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/versions/version-1/compatibility', method: 'GET',
+    }), { params: Promise.resolve({ workflowId: 'workflow-1', versionId: 'version-1' }) })
+    expect(response.status).toBe(200)
+    expect(await body(response)).toEqual({ compatibility: [
+      expect.objectContaining({ connectionId: 'connection-1', status: 'online', compatible: true,
+        missingNodes: [], missingModels: [], workflowHash: 'hash', capabilityFingerprint: expect.any(String) }),
+      expect.objectContaining({ connectionId: 'connection-2', status: 'online', compatible: true }),
+    ] })
+    expect(prismaMock.comfyConnection.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: 'user-1', enabled: true },
+    }))
+  })
+
+  it('rejects cross-workflow version pairing before probing connections', async () => {
+    const routePath = 'src/app/api/comfyui/workflows/[workflowId]/versions/[versionId]/compatibility/route.ts'
+    expect(existsSync(routePath)).toBe(true)
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(null)
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/versions/[versionId]/compatibility/route')
+    const response = await route.GET(buildMockRequest({ path: '/api/comfyui/workflows/workflow-1/versions/foreign/compatibility', method: 'GET' }), {
+      params: Promise.resolve({ workflowId: 'workflow-1', versionId: 'foreign' }),
+    })
+    expect(response.status).toBe(404)
+    expect(prismaMock.comfyConnection.findMany).not.toHaveBeenCalled()
+  })
+
+  it('returns exact missing nodes/models and distinguishes auth failure from offline', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const currentErrors = await import('@/lib/comfyui/errors')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
+    prismaMock.comfyConnection.findMany.mockResolvedValue([
+      connection({ id: 'incompatible', normalizedBaseUrl: 'http://incompatible.example.com' }),
+      connection({ id: 'auth', normalizedBaseUrl: 'http://auth.example.com' }),
+      connection({ id: 'offline', normalizedBaseUrl: 'http://offline.example.com' }),
+    ])
+    getSystemStatsMock.mockImplementation(async (baseUrl: string) => {
+      if (baseUrl === 'http://auth.example.com') {
+        throw new currentErrors.ComfyError(currentErrors.COMFY_ERROR_CODE.AUTH_FAILED, 'denied')
+      }
+      if (baseUrl === 'http://offline.example.com') throw new Error('offline')
+      return { system: {} }
+    })
+    getObjectInfoMock.mockResolvedValueOnce({
+      CheckpointLoaderSimple: { input: { required: { ckpt_name: [['other.safetensors']] } } },
+    })
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/versions/[versionId]/compatibility/route')
+    const response = await route.GET(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/versions/version-1/compatibility', method: 'GET',
+    }), { params: Promise.resolve({ workflowId: 'workflow-1', versionId: 'version-1' }) })
+    expect(await body(response)).toEqual({ compatibility: [
+      expect.objectContaining({ connectionId: 'incompatible', status: 'online', compatible: false,
+        missingNodes: ['SaveImage'], missingModels: [{ nodeId: '1', field: 'ckpt_name', value: 'model.safetensors' }] }),
+      expect.objectContaining({ connectionId: 'auth', status: 'auth_failed', compatible: false }),
+      expect.objectContaining({ connectionId: 'offline', status: 'offline', compatible: false }),
+    ] })
   })
 
   it('live-tests an owned compatible version on an idle owned connection and always releases its lease', async () => {

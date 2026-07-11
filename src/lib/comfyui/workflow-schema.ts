@@ -287,6 +287,18 @@ function validateDefinitions(
         'Variable default does not match its declared type.',
       ))
     }
+    if (definition.options !== undefined && (
+      !Array.isArray(definition.options)
+      || definition.options.length === 0
+      || definition.options.length > 128
+      || definition.options.some((value) => !typeValid
+        || !matchesComfyVariableType(value, definition.type as ComfyVariableType))
+    )) {
+      issues.push(issue(
+        'COMFY_VARIABLE_OPTIONS_INVALID', `${path}.options`,
+        'Variable options must be a bounded list matching the declared scalar type.',
+      ))
+    }
     if (nameValid && !duplicateName && !definitions.has(definition.name as string)
       && typeValid && requiredValid && missingPolicyValid) {
       definitions.set(definition.name as string, definition as unknown as ComfyVariableDefinition)

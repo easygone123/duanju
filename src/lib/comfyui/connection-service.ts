@@ -431,6 +431,14 @@ function readNetworkPolicy(): ComfyNetworkPolicyConfig {
   }
 }
 
+export function createOwnedComfyClient(connection: ComfyConnection) {
+  return new ComfyClient({
+    baseUrl: connection.normalizedBaseUrl,
+    auth: decodeCredentials(connection),
+    networkPolicy: readNetworkPolicy(),
+  })
+}
+
 function commaList(value: string | undefined) {
   return (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
 }

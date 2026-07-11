@@ -121,6 +121,7 @@ export interface ComfyVariableDefinition {
   required: boolean
   defaultValue?: ComfyVariableValue
   missingValuePolicy?: ComfyMissingValuePolicy
+  options?: Array<string | number | boolean>
 }
 
 export type ComfyBindingTransform = 'filename' | 'image_ref' | 'filename_list'

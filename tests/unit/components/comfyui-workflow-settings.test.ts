@@ -7,6 +7,7 @@ import {
   setPrimaryOutput,
   type WorkflowView,
 } from '@/app/[locale]/profile/components/comfyui/workflow-ui'
+import { buildWorkflowTestPayload } from '@/app/[locale]/profile/components/comfyui/WorkflowTestForm'
 
 const read = (path: string) => existsSync(path) ? readFileSync(path, 'utf8') : ''
 const base = 'src/app/[locale]/profile/components/comfyui'
@@ -81,6 +82,37 @@ describe('ComfyUI workflow settings UI contract', () => {
     expect(source).toContain('publishVersion')
     expect(source).toContain('testVersion')
     expect(source).toContain('lastSuccessfulTestAt')
+  })
+
+  it('collects typed live-test values and bounded media uploads instead of fixed empty objects', () => {
+    const form = read(`${base}/WorkflowTestForm.tsx`)
+    const library = read(`${base}/WorkflowLibraryPanel.tsx`)
+    expect(form).toContain('buildWorkflowTestPayload')
+    expect(form).toContain('fileToLiveTestUpload')
+    expect(form).toContain('variable.options')
+    expect(form).toContain('type="file"')
+    expect(form).toContain('required')
+    expect(library).toContain('testPayload.variables')
+    expect(library).toContain('testPayload.uploads')
+    expect(library).not.toContain('variables: {}, uploads: {}')
+  })
+
+  it('builds typed test variables and media payloads while failing closed on missing required values', () => {
+    const upload = { filename: 'input.png', contentType: 'image/png', base64: 'YQ==' }
+    const definitions = [
+      { name: 'prompt', type: 'string' as const, required: true },
+      { name: 'steps', type: 'number' as const, required: true, options: [20, 30] },
+      { name: 'enabled', type: 'boolean' as const, required: true },
+      { name: 'image', type: 'image_ref' as const, required: true },
+    ]
+    expect(buildWorkflowTestPayload(definitions, { prompt: '', steps: '20', enabled: 'false' }, {}))
+      .toMatchObject({ payload: null, missing: expect.arrayContaining(['prompt', 'image']) })
+    expect(buildWorkflowTestPayload(definitions, { prompt: 'portrait', steps: '20', enabled: 'false' }, { image: [upload] })).toEqual({
+      missing: [], payload: {
+        variables: { prompt: 'portrait', steps: 20, enabled: false, image: { storageKey: 'input.png', filename: 'input.png', mimeType: 'image/png' } },
+        uploads: { image: upload },
+      },
+    })
   })
 
   it('renders path-aware static validation and owned-instance compatibility without secrets', () => {

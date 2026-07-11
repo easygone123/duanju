@@ -84,6 +84,15 @@ export async function getOwnedWorkflow(userId: string, workflowId: string) {
   return toWorkflowDetail(record)
 }
 
+export async function updateOwnedWorkflowMetadata(userId: string, workflowId: string, name: string) {
+  const result = await prisma.comfyWorkflow.updateMany({
+    where: { id: workflowId, userId, status: { not: 'archived' } },
+    data: { name: name.trim() },
+  })
+  if (result.count !== 1) throw new ApiError('NOT_FOUND')
+  return getOwnedWorkflow(userId, workflowId)
+}
+
 export async function createWorkflowDraft(userId: string, input: CreateWorkflowInput) {
   const prepared = prepareVersion(input)
   const record = await prisma.comfyWorkflow.create({

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { sanitizeComfyDiagnosticId } from '@/components/task/TaskStatusOverlay'
+import { buildPanelRegenerationPayload } from '@/lib/query/mutations/storyboard-panel-mutations'
 
 const read = (path: string) => existsSync(path) ? readFileSync(path, 'utf8') : ''
 const workspace = 'src/app/[locale]/workspace/[projectId]/modes/novel-promotion'
@@ -30,6 +31,24 @@ describe('ComfyUI project and task workflow selection', () => {
     expect(source).toContain('onGenerateVideo')
   })
 
+  it('submits an optional image workflow override from the panel while preserving cloud choices', () => {
+    const imageSection = read(`${workspace}/components/storyboard/ImageSection.tsx`)
+    const mutation = read('src/lib/query/mutations/storyboard-panel-mutations.ts')
+    expect(imageSection).toContain("provider === 'comfyui'")
+    expect(imageSection).toContain("provider !== 'comfyui'")
+    expect(imageSection).toContain("'/api/user/models'")
+    expect(imageSection).toContain('selectedImageModel')
+    expect(mutation).toContain('imageModel')
+    expect(mutation).toContain('buildPanelRegenerationPayload')
+  })
+
+  it('omits an empty image override and submits an explicit ComfyUI model key unchanged', () => {
+    expect(buildPanelRegenerationPayload('panel-1', undefined, undefined)).toEqual({ panelId: 'panel-1', count: 1 })
+    expect(buildPanelRegenerationPayload('panel-1', 2, 'comfyui::workflow-1')).toEqual({
+      panelId: 'panel-1', count: 2, imageModel: 'comfyui::workflow-1',
+    })
+  })
+
   it('separates capacity waiting from execution diagnostics', () => {
     const source = read('src/components/task/TaskStatusOverlay.tsx')
     expect(source).toContain("stage === 'waiting_capacity'")
@@ -41,7 +60,7 @@ describe('ComfyUI project and task workflow selection', () => {
   it('shows only sanitized instance, workflow, node and prompt identifiers', () => {
     const source = read('src/components/task/TaskStatusOverlay.tsx')
     expect(source).toContain('sanitizeComfyDiagnosticId')
-    expect(source).toContain('instanceId')
+    expect(source).toContain('connectionId')
     expect(source).toContain('workflowId')
     expect(source).toContain('promptId')
     expect(source).not.toMatch(/credential|authorization|rawPrompt|apiFormatJson/)

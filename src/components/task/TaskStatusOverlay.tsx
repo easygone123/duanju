@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl'
 import type { TaskPresentationState } from '@/lib/task/presentation'
 import { AppIcon } from '@/components/ui/icons'
+import type { ComfyTaskDiagnostics } from '@/lib/task/state-service'
 
 type TaskStatusOverlayProps = {
   state: TaskPresentationState | null
@@ -10,17 +11,7 @@ type TaskStatusOverlayProps = {
   diagnostics?: ComfyTaskDiagnostics | null
 }
 
-export interface ComfyTaskDiagnostics {
-  stage: 'waiting_capacity' | 'executing' | 'transferring'
-  capacityWaitMs?: number
-  executionMs?: number
-  transferMs?: number
-  instanceId?: string | null
-  workflowId?: string | null
-  workflowVersion?: number | null
-  currentNodeId?: string | null
-  promptId?: string | null
-}
+export type { ComfyTaskDiagnostics } from '@/lib/task/state-service'
 
 export function sanitizeComfyDiagnosticId(value: string | null | undefined): string | null {
   if (!value || value.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) return null
@@ -37,12 +28,13 @@ export default function TaskStatusOverlay({ state, className, diagnostics }: Tas
   if (!state) return null
   if (state.mode !== 'overlay' && state.mode !== 'placeholder') return null
   const label = state.labelKey ? t(state.labelKey) : t('loading')
-  const stage = diagnostics?.stage
-  const diagnosticIds = diagnostics ? [
-    ['instance', sanitizeComfyDiagnosticId(diagnostics.instanceId)],
-    ['workflow', sanitizeComfyDiagnosticId(diagnostics.workflowId)],
-    ['node', sanitizeComfyDiagnosticId(diagnostics.currentNodeId)],
-    ['prompt', sanitizeComfyDiagnosticId(diagnostics.promptId)],
+  const details = diagnostics ?? state.comfyDiagnostics
+  const stage = details?.stage
+  const diagnosticIds = details ? [
+    ['instance', sanitizeComfyDiagnosticId(details.connectionId)],
+    ['workflow', sanitizeComfyDiagnosticId(details.workflowId)],
+    ['version', sanitizeComfyDiagnosticId(details.workflowVersionId)],
+    ['prompt', sanitizeComfyDiagnosticId(details.promptId)],
   ].filter((item): item is [string, string] => !!item[1]) : []
 
   return (
@@ -62,11 +54,11 @@ export default function TaskStatusOverlay({ state, className, diagnostics }: Tas
       {stage && <div role="status" aria-live="polite" className="mt-2 max-w-[90%] rounded-lg bg-black/30 px-3 py-2 text-center text-[10px] text-white">
         <p>{stage === 'waiting_capacity' ? tc('capacityWaiting') : stage === 'transferring' ? tc('transferring') : tc('executing')}</p>
         <p>{[
-          formatDuration(diagnostics?.capacityWaitMs) && `${tc('capacityWait')}: ${formatDuration(diagnostics?.capacityWaitMs)}`,
-          formatDuration(diagnostics?.executionMs) && `${tc('executionTime')}: ${formatDuration(diagnostics?.executionMs)}`,
-          formatDuration(diagnostics?.transferMs) && `${tc('transferTime')}: ${formatDuration(diagnostics?.transferMs)}`,
+          formatDuration(details?.capacityWaitMs ?? undefined) && `${tc('capacityWait')}: ${formatDuration(details?.capacityWaitMs ?? undefined)}`,
+          formatDuration(details?.executionMs ?? undefined) && `${tc('executionTime')}: ${formatDuration(details?.executionMs ?? undefined)}`,
+          formatDuration(details?.transferMs ?? undefined) && `${tc('transferTime')}: ${formatDuration(details?.transferMs ?? undefined)}`,
         ].filter(Boolean).join(' · ')}</p>
-        {diagnosticIds.length > 0 && <p className="mt-1 break-all">{diagnosticIds.map(([key, value]) => `${tc(`diagnostics.${key}`)}: ${value}`).join(' · ')}{diagnostics?.workflowVersion ? ` · v${diagnostics.workflowVersion}` : ''}</p>}
+        {diagnosticIds.length > 0 && <p className="mt-1 break-all">{diagnosticIds.map(([key, value]) => `${tc(`diagnostics.${key}`)}: ${value}`).join(' · ')}</p>}
       </div>}
     </div>
   )

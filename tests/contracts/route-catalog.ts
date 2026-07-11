@@ -76,6 +76,7 @@ const ROUTE_FILES = [
   'src/app/api/comfyui/workflows/[workflowId]/route.ts',
   'src/app/api/comfyui/workflows/[workflowId]/test-run/route.ts',
   'src/app/api/comfyui/workflows/[workflowId]/versions/route.ts',
+  'src/app/api/comfyui/workflows/[workflowId]/versions/[versionId]/compatibility/route.ts',
   'src/app/api/comfyui/workflows/route.ts',
   'src/app/api/files/[...path]/route.ts',
   'src/app/api/storage/sign/route.ts',

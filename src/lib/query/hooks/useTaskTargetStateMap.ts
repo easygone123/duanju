@@ -7,6 +7,7 @@ import type { TaskIntent } from '@/lib/task/intent'
 import type { TaskTargetOverlayMap } from '../task-target-overlay'
 import { createScopedLogger } from '@/lib/logging/core'
 import { apiFetch } from '@/lib/api-fetch'
+import type { ComfyTaskDiagnostics } from '@/lib/task/state-service'
 
 export type TaskTargetStateQuery = {
   targetType: string
@@ -30,6 +31,7 @@ export type TaskTargetState = {
     message: string
   } | null
   updatedAt: string | null
+  comfyDiagnostics?: ComfyTaskDiagnostics | null
 }
 
 type TaskTargetStateBatchSubscriber = {
@@ -101,6 +103,7 @@ function buildIdleState(target: TaskTargetStateQuery): TaskTargetState {
     stageLabel: null,
     lastError: null,
     updatedAt: null,
+    comfyDiagnostics: null,
   }
 }
 
@@ -410,7 +413,7 @@ export function useTaskTargetStateMap(
       }
     }
     return map
-  }, [normalizedTargets, overlayQuery.data, query.data])
+  }, [normalizedTargets, overlayQuery.data, projectId, query.data])
 
   const mergedData = useMemo(() => {
     return normalizedTargets.map((target) =>

@@ -1,18 +1,32 @@
 'use client'
 import { useTranslations } from 'next-intl'
 import { useState } from 'react'
+import { useEffect } from 'react'
 import './ImageSection.css'
 import { GlassButton } from '@/components/ui/primitives'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import TaskStatusOverlay from '@/components/task/TaskStatusOverlay'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
+import type { TaskPresentationState } from '@/lib/task/presentation'
 import ImageSectionCandidateMode from './ImageSectionCandidateMode'
 import ImageSectionActionButtons from './ImageSectionActionButtons'
 import { AppIcon } from '@/components/ui/icons'
+import { apiFetch } from '@/lib/api-fetch'
 
 interface PanelCandidateData {
   candidates: string[]
   selectedIndex: number
+}
+
+type ImageModelOption = { value: string; label: string; provider?: string }
+let imageModelsRequest: Promise<ImageModelOption[]> | null = null
+function loadImageModelOptions() {
+  imageModelsRequest ??= apiFetch('/api/user/models').then(async (response) => {
+    if (!response.ok) return []
+    const payload = await response.json() as { image?: ImageModelOption[] }
+    return payload.image ?? []
+  }).catch(() => [])
+  return imageModelsRequest
 }
 
 interface ImageSectionProps {
@@ -27,7 +41,8 @@ interface ImageSectionProps {
   failedError: string | null
   candidateData: PanelCandidateData | null
   previousImageUrl?: string | null
-  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean) => void
+  taskPresentationState?: TaskPresentationState | null
+  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string) => void
   onOpenEditModal: () => void
   onOpenAIDataModal: () => void
   onSelectCandidateIndex: (panelId: string, index: number) => void
@@ -50,6 +65,7 @@ export default function ImageSection({
   failedError,
   candidateData,
   previousImageUrl,
+  taskPresentationState,
   onRegeneratePanelImage,
   onOpenEditModal,
   onOpenAIDataModal,
@@ -61,7 +77,18 @@ export default function ImageSection({
   onPreviewImage,
 }: ImageSectionProps) {
   const t = useTranslations('storyboard')
+  const tc = useTranslations('comfyui.workflows')
   const [isTaskPulseAnimating, setIsTaskPulseAnimating] = useState(false)
+  const [selectedImageModel, setSelectedImageModel] = useState('')
+  const [imageModelOptions, setImageModelOptions] = useState<ImageModelOption[]>([])
+  useEffect(() => {
+    let mounted = true
+    void loadImageModelOptions().then((models) => { if (mounted) setImageModelOptions(models) })
+    return () => { mounted = false }
+  }, [])
+  const comfyImageOptions = imageModelOptions.filter((option) => option.provider === 'comfyui')
+  const cloudImageOptions = imageModelOptions.filter((option) => option.provider !== 'comfyui')
+  const taskImageOptions = [...cloudImageOptions, ...comfyImageOptions]
   const cssAspectRatio = videoRatio.replace(':', '/')
   const hasValidCandidates = !!candidateData && candidateData.candidates.some((url) => !url.startsWith('PENDING:'))
 
@@ -94,7 +121,7 @@ export default function ImageSection({
         )}
         <div className={`absolute inset-0 ${backdropImageUrl ? 'bg-black/45 backdrop-blur-[1px]' : 'bg-[var(--glass-bg-surface-modal)] backdrop-blur-md'}`} />
         <TaskStatusOverlay
-          state={state}
+          state={taskPresentationState ?? state}
           className={backdropImageUrl ? 'bg-black/45 backdrop-blur-[1px]' : undefined}
         />
       </div>
@@ -124,7 +151,7 @@ export default function ImageSection({
         size="sm"
         onClick={() => {
           triggerPulse()
-          onRegeneratePanelImage(panelId, 1, false)
+          onRegeneratePanelImage(panelId, 1, false, selectedImageModel || undefined)
         }}
       >
         {t('panel.generateImage')}
@@ -182,18 +209,26 @@ export default function ImageSection({
       </div>
 
       {!candidateData && (
+        <>
+        <label className="absolute bottom-2 left-2 z-20 max-w-[55%] text-[10px] text-white">
+          <span className="sr-only">{tc('taskImageWorkflow')}</span>
+          <select aria-label={tc('taskImageWorkflow')} value={selectedImageModel} onChange={(event) => setSelectedImageModel(event.target.value)} className="max-w-full rounded-md border border-white/20 bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur">
+            <option value="">{tc('inheritProjectDefault')}</option>{taskImageOptions.map((option) => <option key={option.value} value={option.value}>{option.provider === 'comfyui' ? `ComfyUI / ${option.label}` : option.label}</option>)}
+          </select>
+        </label>
         <ImageSectionActionButtons
           panelId={panelId}
           imageUrl={imageUrl}
           previousImageUrl={previousImageUrl}
           isSubmittingPanelImageTask={isSubmittingPanelImageTask}
           isModifying={isModifying}
-          onRegeneratePanelImage={onRegeneratePanelImage}
+           onRegeneratePanelImage={(id, count, force) => onRegeneratePanelImage(id, count, force, selectedImageModel || undefined)}
           onOpenEditModal={onOpenEditModal}
           onOpenAIDataModal={onOpenAIDataModal}
           onUndo={onUndo}
           triggerPulse={triggerPulse}
-        />
+         />
+        </>
       )}
     </div>
   )

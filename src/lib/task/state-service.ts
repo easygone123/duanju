@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { normalizeTaskError } from '@/lib/errors/normalize'
 import { coerceTaskIntent, type TaskIntent } from './intent'
+import { parseComfyExternalId } from '@/lib/comfyui/external-id'
 
 export type TaskTargetQuery = {
   targetType: string
@@ -26,7 +27,52 @@ export type TaskTargetState = {
     message: string
   } | null
   updatedAt: string | null
+  comfyDiagnostics?: ComfyTaskDiagnostics | null
 }
+
+export type ComfyTaskDiagnostics = {
+  stage: 'waiting_capacity' | 'executing' | 'transferring'
+  waitingForCapacity: boolean
+  capacityWaitMs: number | null
+  executionMs: number | null
+  transferMs: number | null
+  connectionId: string | null
+  workflowId: string
+  workflowVersionId: string
+  promptId: string | null
+}
+
+type ComfyDiagnosticRequest = {
+  id: string; status: string; connectionId: string | null; workflowId: string; workflowVersionId: string;
+  promptId: string | null; queuedAt: Date; leasedAt: Date | null; runningAt: Date | null;
+  transferringAt: Date | null; completedAt: Date | null; updatedAt: Date
+}
+
+const SAFE_DIAGNOSTIC_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+
+export function projectComfyTaskDiagnostics(externalId: string | null | undefined, request: ComfyDiagnosticRequest | null): ComfyTaskDiagnostics | null {
+  if (!externalId || !request) return null
+  let requestId: string
+  try { requestId = parseComfyExternalId(externalId).requestId } catch { return null }
+  if (!SAFE_DIAGNOSTIC_ID.test(requestId) || request.id !== requestId || !SAFE_DIAGNOSTIC_ID.test(request.workflowId)
+    || !SAFE_DIAGNOSTIC_ID.test(request.workflowVersionId)) return null
+  const connectionId = safeDiagnosticId(request.connectionId)
+  const promptId = safeDiagnosticId(request.promptId)
+  const waitingForCapacity = request.status === 'waiting_capacity' || request.status === 'blocked_no_compatible_instance'
+  const stage = waitingForCapacity ? 'waiting_capacity' as const
+    : request.status === 'transferring' ? 'transferring' as const : 'executing' as const
+  const end = request.completedAt ?? request.updatedAt
+  return {
+    stage, waitingForCapacity,
+    capacityWaitMs: duration(request.queuedAt, request.leasedAt ?? (waitingForCapacity ? end : null)),
+    executionMs: duration(request.runningAt, request.transferringAt ?? (!waitingForCapacity ? end : null)),
+    transferMs: duration(request.transferringAt, end),
+    connectionId, workflowId: request.workflowId, workflowVersionId: request.workflowVersionId, promptId,
+  }
+}
+
+function safeDiagnosticId(value: string | null) { return value && SAFE_DIAGNOSTIC_ID.test(value) ? value : null }
+function duration(start: Date | null, end: Date | null) { return start && end ? Math.max(0, end.getTime() - start.getTime()) : null }
 
 const ACTIVE_STATUS = new Set(['queued', 'processing'])
 
@@ -100,6 +146,7 @@ export function buildIdleState(target: TaskTargetQuery): TaskTargetState {
     stageLabel: null,
     lastError: null,
     updatedAt: null,
+    comfyDiagnostics: null,
   }
 }
 
@@ -114,6 +161,7 @@ export function resolveTargetState(
     errorCode: string | null
     errorMessage: string | null
     updatedAt: Date
+    externalId?: string | null
   }>,
 ): TaskTargetState {
   const allowedTypes = target.types?.length ? new Set(target.types) : null
@@ -227,6 +275,7 @@ export async function queryTaskTargetStates(params: {
     targetType: string
     targetId: string
     updatedAt: Date
+    externalId: string | null
   }> = []
 
   for (let i = 0; i < pairs.length; i += QUERY_BATCH_SIZE) {
@@ -255,7 +304,8 @@ export async function queryTaskTargetStates(params: {
         errorMessage: true,
         targetType: true,
         targetId: true,
-        updatedAt: true,
+      updatedAt: true,
+        externalId: true,
       },
     })
     allRows.push(...rows)
@@ -278,10 +328,30 @@ export async function queryTaskTargetStates(params: {
     group.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
   }
 
-  return params.targets.map((target) =>
-    resolveTargetState(
+  const requestIds = new Set<string>()
+  for (const row of allRows) {
+    if (!row.externalId || !ACTIVE_STATUS.has(row.status) || requestIds.size >= 500) continue
+    try {
+      const requestId = parseComfyExternalId(row.externalId).requestId
+      if (SAFE_DIAGNOSTIC_ID.test(requestId)) requestIds.add(requestId)
+    } catch { /* ignore untrusted external ids */ }
+  }
+  const requests = requestIds.size > 0 ? await prisma.comfyGenerationRequest.findMany({
+    where: { id: { in: [...requestIds] }, userId: params.userId, projectId: params.projectId },
+    select: {
+      id: true, taskId: true, status: true, connectionId: true, workflowId: true, workflowVersionId: true,
+      promptId: true, queuedAt: true, leasedAt: true, runningAt: true, transferringAt: true,
+      completedAt: true, updatedAt: true,
+    },
+  }) : []
+  const requestsByTaskId = new Map(requests.map((request) => [request.taskId, request]))
+  return params.targets.map((target) => {
+    const state = resolveTargetState(
       target,
       grouped.get(pairKey(target.targetType, target.targetId)) || [],
-    ),
-  )
+    )
+    if (!state.runningTaskId) return state
+    const task = allRows.find((row) => row.id === state.runningTaskId)
+    return { ...state, comfyDiagnostics: projectComfyTaskDiagnostics(task?.externalId, requestsByTaskId.get(state.runningTaskId) ?? null) }
+  })
 }

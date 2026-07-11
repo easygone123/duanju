@@ -1,6 +1,7 @@
 import { resolveErrorDisplay } from '@/lib/errors/display'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import type { VideoPanelCardShellProps } from '../../types'
+import type { TaskPresentationState } from '@/lib/task/presentation'
 
 interface UsePanelTaskStatusParams {
   panel: VideoPanelCardShellProps['panel']
@@ -11,6 +12,10 @@ interface UsePanelTaskStatusParams {
 export function usePanelTaskStatus({ panel, hasVisibleBaseVideo, tCommon }: UsePanelTaskStatusParams) {
   const isVideoTaskRunning = !!panel.videoTaskRunning
   const isLipSyncTaskRunning = !!panel.lipSyncTaskRunning
+  const taskPresentations = panel as typeof panel & {
+    videoTaskPresentation?: TaskPresentationState | null
+    lipSyncTaskPresentation?: TaskPresentationState | null
+  }
   const rawErrorMessage = panel.videoErrorMessage || panel.lipSyncErrorMessage || null
   const panelErrorDisplayBase = resolveErrorDisplay({
     code: panel.videoErrorCode || panel.lipSyncErrorCode || null,
@@ -24,7 +29,7 @@ export function usePanelTaskStatus({ panel, hasVisibleBaseVideo, tCommon }: UseP
       : panelErrorDisplayBase
 
   const videoRunningPresentation = isVideoTaskRunning
-    ? resolveTaskPresentationState({
+    ? taskPresentations.videoTaskPresentation ?? resolveTaskPresentationState({
       phase: 'processing',
       intent: hasVisibleBaseVideo ? 'regenerate' : 'generate',
       resource: 'video',
@@ -33,7 +38,7 @@ export function usePanelTaskStatus({ panel, hasVisibleBaseVideo, tCommon }: UseP
     : null
 
   const lipSyncRunningPresentation = isLipSyncTaskRunning
-    ? resolveTaskPresentationState({
+    ? taskPresentations.lipSyncTaskPresentation ?? resolveTaskPresentationState({
       phase: 'processing',
       intent: 'process',
       resource: 'video',

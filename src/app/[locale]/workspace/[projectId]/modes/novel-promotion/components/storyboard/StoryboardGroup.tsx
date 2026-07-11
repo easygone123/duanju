@@ -128,9 +128,9 @@ export default function StoryboardGroup({
   }, [hasAnyImage, isSelectingCandidate, isSubmittingStoryboardTask])
 
   const handleRegeneratePanelImage = useCallback(
-    (panelId: string, count?: number, force?: boolean) => {
+    (panelId: string, count?: number, force?: boolean, imageModel?: string) => {
       clearPanelTaskError(panelId)
-      onRegeneratePanelImage(panelId, count, force)
+      onRegeneratePanelImage(panelId, count, force, imageModel)
     },
     [clearPanelTaskError, onRegeneratePanelImage],
   )

@@ -5,6 +5,7 @@ import {
   asObject,
   buildIdleState,
   pairKey,
+  projectComfyTaskDiagnostics,
   resolveTargetState,
   toProgress,
 } from '@/lib/task/state-service'
@@ -101,5 +102,20 @@ describe('task state service helpers', () => {
     expect(state.phase).toBe('failed')
     expect(state.lastError?.code).toBe('CONFLICT')
     expect(state.lastError?.message).toBe('Task cancelled by user')
+  })
+
+  it('projects only owner-loaded ComfyUI diagnostics with separate capacity and execution timing', () => {
+    const diagnostics = projectComfyTaskDiagnostics('COMFY:IMAGE:request-1', {
+      id: 'request-1', status: 'running', connectionId: 'gpu-1', workflowId: 'workflow-1',
+      workflowVersionId: 'version-2', promptId: 'prompt-3', queuedAt: new Date('2026-07-12T00:00:00Z'),
+      leasedAt: new Date('2026-07-12T00:00:05Z'), runningAt: new Date('2026-07-12T00:00:08Z'),
+      transferringAt: null, completedAt: null, updatedAt: new Date('2026-07-12T00:00:18Z'),
+    })
+    expect(diagnostics).toEqual({
+      stage: 'executing', waitingForCapacity: false, capacityWaitMs: 5_000, executionMs: 10_000,
+      transferMs: null, connectionId: 'gpu-1', workflowId: 'workflow-1', workflowVersionId: 'version-2', promptId: 'prompt-3',
+    })
+    expect(projectComfyTaskDiagnostics('COMFY:IMAGE:request-1\n', null)).toBeNull()
+    expect(projectComfyTaskDiagnostics('COMFY:IMAGE:request-1', { id: 'other' } as never)).toBeNull()
   })
 })
