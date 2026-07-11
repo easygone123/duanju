@@ -18,6 +18,7 @@ import { normalizeToBase64ForGeneration } from '@/lib/media/outbound-image'
 import { resolveBuiltinCapabilitiesByModelKey } from '@/lib/model-capabilities/lookup'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { getProviderConfig } from '@/lib/api-config'
+import { resolveVideoGenerationModel } from '@/lib/video/model-selection'
 
 type AnyObj = Record<string, unknown>
 type VideoOptionValue = string | number | boolean
@@ -113,16 +114,14 @@ async function generateVideoForPanel(
   const requestedGenerateAudio = typeof generationOptions.generateAudio === 'boolean'
     ? generationOptions.generateAudio
     : undefined
-  let model = modelId
+  const model = resolveVideoGenerationModel(payload, modelId) ?? modelId
 
   if (firstLastFramePayload) {
-    model =
-      typeof firstLastFramePayload.flModel === 'string' && firstLastFramePayload.flModel
-        ? firstLastFramePayload.flModel
-        : modelId
-    const firstLastFrameCapabilities = resolveBuiltinCapabilitiesByModelKey('video', model)
-    if (firstLastFrameCapabilities?.video?.firstlastframe !== true) {
-      throw new Error(`VIDEO_FIRSTLASTFRAME_MODEL_UNSUPPORTED: ${model}`)
+    if (parseModelKeyStrict(model)?.provider !== 'comfyui') {
+      const firstLastFrameCapabilities = resolveBuiltinCapabilitiesByModelKey('video', model)
+      if (firstLastFrameCapabilities?.video?.firstlastframe !== true) {
+        throw new Error(`VIDEO_FIRSTLASTFRAME_MODEL_UNSUPPORTED: ${model}`)
+      }
     }
     if (
       typeof firstLastFramePayload.lastFrameStoryboardId === 'string' &&
@@ -189,8 +188,8 @@ async function handleVideoPanelTask(job: Job<TaskJobData>) {
   const payload = (job.data.payload || {}) as AnyObj
   const projectModels = await getProjectModels(job.data.projectId, job.data.userId)
 
-  const modelId = typeof payload.videoModel === 'string' ? payload.videoModel.trim() : ''
-  if (!modelId) throw new Error('VIDEO_MODEL_REQUIRED: payload.videoModel is required')
+  const modelId = resolveVideoGenerationModel(payload)
+  if (!modelId) throw new Error('VIDEO_MODEL_REQUIRED: payload video model is required')
 
   const panel = await getPanelForVideoTask(job)
 

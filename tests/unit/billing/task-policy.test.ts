@@ -71,6 +71,21 @@ describe('billing/task-policy', () => {
     expect(info.quantity).toBe(1)
   })
 
+  it('bills the actual first-last-frame cloud model even when the normal model is ComfyUI', () => {
+    const info = expectBillableInfo(buildDefaultTaskBillingInfo(TASK_TYPE.VIDEO_PANEL, {
+      videoModel: 'comfyui::wf-video',
+      firstLastFrame: { flModel: 'doubao-seedance-1-0-pro-250528' },
+    }))
+    expect(info.model).toBe('doubao-seedance-1-0-pro-250528')
+  })
+
+  it('skips billing for the actual first-last-frame ComfyUI model even when normal is cloud', () => {
+    expect(buildDefaultTaskBillingInfo(TASK_TYPE.VIDEO_PANEL, {
+      videoModel: 'doubao-seedance-1-0-pro-250528',
+      firstLastFrame: { flModel: 'comfyui::wf-video' },
+    })).toEqual({ billable: false, source: 'task', status: 'skipped' })
+  })
+
   it('uses explicit lip sync model from payload', () => {
     const info = expectBillableInfo(buildDefaultTaskBillingInfo(TASK_TYPE.LIP_SYNC, {
       lipSyncModel: 'vidu::vidu-lipsync',

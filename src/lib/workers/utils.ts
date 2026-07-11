@@ -1,5 +1,5 @@
 import sharp from 'sharp'
-import { type Job } from 'bullmq'
+import { DelayedError, type Job } from 'bullmq'
 import { createScopedLogger } from '@/lib/logging/core'
 import { withLogContext } from '@/lib/logging/context'
 import { generateImage, generateVideo } from '@/lib/generator-api'
@@ -141,7 +141,14 @@ export async function waitExternalResult(
   job: Job<TaskJobData>,
   externalId: string,
   userId: string,
-  opts?: { timeoutMs?: number; intervalMs?: number; progressStart?: number; progressEnd?: number },
+  opts?: {
+    timeoutMs?: number
+    intervalMs?: number
+    progressStart?: number
+    progressEnd?: number
+    capacityWaitBaseMs?: number
+    capacityWaitJitter?: () => number
+  },
 ) {
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_POLL_TIMEOUT_MS
   const intervalMs = opts?.intervalMs ?? DEFAULT_POLL_INTERVAL_MS
@@ -199,6 +206,18 @@ export async function waitExternalResult(
       throw new Error(status.error || `External task failed: ${externalId}`)
     }
 
+    if (status.waitingForCapacity === true) {
+      const progressUpdate = externalPollProgress({
+        result: status, executionElapsed: null, timeoutMs, progressStart, progressEnd,
+      })
+      await reportTaskProgress(job, progressUpdate.progress, {
+        stage: progressUpdate.stage,
+        externalId,
+        waitingForCapacity: true,
+      })
+      await yieldComfyCapacityWait(job, opts)
+    }
+
     const executionElapsed = advanceExternalExecutionClock(executionClock, status, Date.now())
     if (executionElapsed !== null && executionElapsed > timeoutMs) break
     const progressUpdate = externalPollProgress({
@@ -226,6 +245,22 @@ export async function waitExternalResult(
   throw new Error(`External task polling timeout (${Math.round(timeoutMs / 1000)}s): ${externalId}`)
 }
 
+async function yieldComfyCapacityWait(
+  job: Job<TaskJobData>,
+  opts: { capacityWaitBaseMs?: number; capacityWaitJitter?: () => number } | undefined,
+): Promise<never> {
+  const configured = opts?.capacityWaitBaseMs
+    ?? Number.parseInt(process.env.COMFY_CAPACITY_RETRY_MS || '3000', 10)
+  const baseMs = Number.isFinite(configured) ? Math.max(1_000, Math.min(30_000, configured)) : 3_000
+  const random = Math.max(0, Math.min(1, opts?.capacityWaitJitter?.() ?? Math.random()))
+  const delayMs = baseMs + Math.floor(baseMs * 0.25 * random)
+  if (typeof job.moveToDelayed !== 'function' || !job.token) {
+    throw new Error('COMFY_CAPACITY_DELAY_UNAVAILABLE')
+  }
+  await job.moveToDelayed(Date.now() + delayMs, job.token)
+  throw new DelayedError()
+}
+
 export async function resolveImageSourceFromGeneration(
   job: Job<TaskJobData>,
   params: {
@@ -248,9 +283,10 @@ export async function resolveImageSourceFromGeneration(
   const logger = scopedWorkerUtilLogger(job, 'worker.image.generate_source')
   const startedAt = Date.now()
   const allowTaskExternalIdResume = params.allowTaskExternalIdResume !== false
+  const isComfyInvocation = parseModelKeyStrict(params.modelId)?.provider === 'comfyui'
 
   // 服务重启续接：若 DB 中已有 externalId，直接恢复轮询，不重新提交外部 API
-  if (allowTaskExternalIdResume) {
+  if (allowTaskExternalIdResume && !isComfyInvocation) {
     const resumeExternalId = await getTaskExistingExternalId(job.data.taskId)
     if (resumeExternalId) {
       logger.info({
@@ -386,9 +422,10 @@ export async function resolveImageSourcesFromGeneration(
   const logger = scopedWorkerUtilLogger(job, 'worker.image.generate_sources')
   const startedAt = Date.now()
   const allowTaskExternalIdResume = params.allowTaskExternalIdResume !== false
+  const isComfyInvocation = parseModelKeyStrict(params.modelId)?.provider === 'comfyui'
 
   // 服务重启续接：若 DB 中已有 externalId，直接恢复轮询（异步只有一张）
-  if (allowTaskExternalIdResume) {
+  if (allowTaskExternalIdResume && !isComfyInvocation) {
     const resumeExternalId = await getTaskExistingExternalId(job.data.taskId)
     if (resumeExternalId) {
       logger.info({
@@ -515,9 +552,10 @@ export async function resolveVideoSourceFromGeneration(
 ): Promise<{ url: string; actualVideoTokens?: number; downloadHeaders?: Record<string, string> }> {
   const logger = scopedWorkerUtilLogger(job, 'worker.video.generate_source')
   const startedAt = Date.now()
+  const isComfyInvocation = parseModelKeyStrict(params.modelId)?.provider === 'comfyui'
 
   // 服务重启续接：若 DB 中已有 externalId，直接恢复轮询，不重新提交外部 API（避免重复扣费）
-  const resumeExternalId = await getTaskExistingExternalId(job.data.taskId)
+  const resumeExternalId = isComfyInvocation ? null : await getTaskExistingExternalId(job.data.taskId)
   if (resumeExternalId) {
     logger.info({
       message: 'video source generation resumed from existing external id',

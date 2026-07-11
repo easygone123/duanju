@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Job } from 'bullmq'
+import { DelayedError, type Job } from 'bullmq'
 import type { TaskJobData } from '@/lib/task/types'
 
 const tryUpdateTaskProgressMock = vi.hoisted(() => vi.fn(async () => true))
 const publishTaskEventMock = vi.hoisted(() => vi.fn(async () => ({})))
 const publishTaskStreamEventMock = vi.hoisted(() => vi.fn(async () => ({})))
 const publishRunEventMock = vi.hoisted(() => vi.fn(async () => undefined))
+const tryMarkTaskFailedMock = vi.hoisted(() => vi.fn(async () => true))
 const mapTaskSSEEventToRunEventsMock = vi.hoisted(() =>
   vi.fn(() => [{
     runId: 'run-1',
@@ -39,7 +40,7 @@ vi.mock('@/lib/task/service', () => ({
   rollbackTaskBillingForTask: vi.fn(async () => ({ attempted: false, rolledBack: false, billingInfo: null })),
   touchTaskHeartbeat: vi.fn(async () => undefined),
   tryMarkTaskCompleted: vi.fn(async () => true),
-  tryMarkTaskFailed: vi.fn(async () => true),
+  tryMarkTaskFailed: tryMarkTaskFailedMock,
   tryMarkTaskProcessing: vi.fn(async () => true),
   tryUpdateTaskProgress: tryUpdateTaskProgressMock,
   updateTaskBillingInfo: vi.fn(async () => undefined),
@@ -118,6 +119,7 @@ describe('worker shared direct run events', () => {
     publishTaskStreamEventMock.mockReset()
     publishRunEventMock.mockReset()
     mapTaskSSEEventToRunEventsMock.mockClear()
+    tryMarkTaskFailedMock.mockClear()
   })
 
   it('publishes run events directly for core analysis progress updates', async () => {
@@ -171,5 +173,12 @@ describe('worker shared direct run events', () => {
       runId: 'run-1',
       eventType: 'run.start',
     }))
+  })
+
+  it('rethrows BullMQ DelayedError without marking the durable task failed', async () => {
+    await expect(withTaskLifecycle(buildJob('story_to_script_run'), async () => {
+      throw new DelayedError()
+    })).rejects.toMatchObject({ name: 'DelayedError' })
+    expect(tryMarkTaskFailedMock).not.toHaveBeenCalled()
   })
 })

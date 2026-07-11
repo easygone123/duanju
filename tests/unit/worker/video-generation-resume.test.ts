@@ -116,4 +116,23 @@ describe('worker utils video generation resume', () => {
     expect(asyncPollMock.pollAsyncTask).not.toHaveBeenCalled()
     expect(generatorApiMock.generateImage).toHaveBeenCalledTimes(1)
   })
+
+  it('ignores task-level externalId for ComfyUI and re-enters the invocation-idempotent provider', async () => {
+    prismaMock.task.findUnique.mockResolvedValueOnce({ externalId: 'COMFY:IMAGE:other-invocation' })
+    generatorApiMock.generateImage.mockResolvedValueOnce({
+      success: true,
+      async: true,
+      externalId: 'COMFY:IMAGE:same-invocation',
+    })
+    asyncPollMock.pollAsyncTask.mockResolvedValueOnce({
+      status: 'completed', resultUrl: 'https://store/same.png',
+    })
+    const result = await resolveImageSourceFromGeneration(buildJob(), {
+      userId: 'user-1', modelId: 'comfyui::wf-image',
+      invocationKey: 'task-1:panel:p1:candidate:1', prompt: 'rain',
+      allowTaskExternalIdResume: true,
+    })
+    expect(result).toBe('https://store/same.png')
+    expect(generatorApiMock.generateImage).toHaveBeenCalledTimes(1)
+  })
 })

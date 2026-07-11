@@ -1,4 +1,4 @@
-import { UnrecoverableError, type Job } from 'bullmq'
+import { DelayedError, UnrecoverableError, type Job } from 'bullmq'
 import { prisma } from '@/lib/prisma'
 import { createScopedLogger } from '@/lib/logging/core'
 import type { LLMStreamChunk } from '@/lib/llm-observe/types'
@@ -465,6 +465,9 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
       },
     })
   } catch (error: unknown) {
+    if (error instanceof DelayedError || (error instanceof Error && error.name === 'DelayedError')) {
+      throw error
+    }
     if (error instanceof TaskTerminatedError) {
       if (billingInfo?.billable) {
         billingInfo = (await rollbackTaskBilling({

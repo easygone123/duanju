@@ -19,9 +19,11 @@ import { buildComfyProviderInvocation, waitExternalResult } from '@/lib/workers/
 describe('ComfyUI worker polling deadline', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    pollMock.mockReset()
+    progressMock.mockReset()
   })
 
-  it('polls the current result before timing out so a return to capacity can reset the clock', async () => {
+  it('polls the current result before yielding capacity without reporting an execution timeout', async () => {
     let now = 0
     vi.spyOn(Date, 'now').mockImplementation(() => now)
     pollMock
@@ -33,14 +35,57 @@ describe('ComfyUI worker polling deadline', () => {
       })
     progressMock.mockImplementationOnce(async () => { now = 200 })
 
+    const moveToDelayed = vi.fn(async () => undefined)
     const job = {
       data: { taskId: 'task-1', projectId: 'project-1', userId: 'user-1' },
+      token: 'worker-token', moveToDelayed,
     } as never
     await expect(waitExternalResult(job, 'COMFY:IMAGE:req-1', 'user-1', {
       timeoutMs: 100,
       intervalMs: 0,
+      capacityWaitBaseMs: 2_000,
+      capacityWaitJitter: () => 0,
+    })).rejects.toMatchObject({ name: 'DelayedError' })
+    expect(pollMock).toHaveBeenCalledTimes(2)
+    expect(moveToDelayed).toHaveBeenCalledWith(2_200, 'worker-token')
+  })
+
+  it.each([
+    ['comfy_waiting_capacity', 'IMAGE', 20],
+    ['comfy_checking_compatibility', 'VIDEO', 4],
+  ] as const) (
+    'yields %s immediately so capacity wait cannot occupy all %s worker slots',
+    async (stage, mediaType, count) => {
+      const now = 10_000
+      vi.spyOn(Date, 'now').mockImplementation(() => now)
+      for (let index = 0; index < count; index += 1) {
+        pollMock.mockResolvedValueOnce({ status: 'pending', stage, waitingForCapacity: true })
+        const moveToDelayed = vi.fn(async () => undefined)
+        const job = {
+          data: { taskId: `task-${index}`, projectId: 'project-1', userId: 'user-1' },
+          token: `token-${index}`, moveToDelayed,
+        } as never
+        await expect(waitExternalResult(job, `COMFY:${mediaType}:req-${index}`, 'user-1', {
+          capacityWaitBaseMs: 1_000, capacityWaitJitter: () => 0,
+        })).rejects.toMatchObject({ name: 'DelayedError' })
+        expect(moveToDelayed).toHaveBeenCalledWith(11_000, `token-${index}`)
+      }
+    },
+  )
+
+  it('continues polling execution states without yielding', async () => {
+    pollMock
+      .mockResolvedValueOnce({ status: 'pending', stage: 'comfy_running', waitingForCapacity: false })
+      .mockResolvedValueOnce({ status: 'completed', resultUrl: 'https://store/result.png' })
+    const moveToDelayed = vi.fn(async () => undefined)
+    const job = {
+      data: { taskId: 'task-1', projectId: 'project-1', userId: 'user-1' },
+      token: 'token', moveToDelayed,
+    } as never
+    await expect(waitExternalResult(job, 'COMFY:IMAGE:req-1', 'user-1', {
+      intervalMs: 0,
     })).resolves.toMatchObject({ url: 'https://store/result.png' })
-    expect(pollMock).toHaveBeenCalledTimes(3)
+    expect(moveToDelayed).not.toHaveBeenCalled()
   })
 
   it('maps owned edit and first/last-frame inputs without exposing source URLs', async () => {

@@ -43,6 +43,12 @@ const concurrencyGateMock = vi.hoisted(() => ({
     run: () => Promise<T>
   }) => await input.run()),
 }))
+const capabilityMock = vi.hoisted(() => vi.fn<
+  (mediaType: string, modelKey: string) => { video: { firstlastframe: boolean } } | undefined
+>(() => ({ video: { firstlastframe: true } })))
+const parseModelKeyStrictMock = vi.hoisted(() => vi.fn((key: string) => ({
+  provider: key.split('::')[0], modelId: key.split('::')[1], modelKey: key,
+})))
 
 const prismaMock = vi.hoisted(() => ({
   novelPromotionPanel: {
@@ -88,10 +94,10 @@ vi.mock('@/lib/media/outbound-image', () => ({
   normalizeToBase64ForGeneration: vi.fn(async (input: string) => input),
 }))
 vi.mock('@/lib/model-capabilities/lookup', () => ({
-  resolveBuiltinCapabilitiesByModelKey: vi.fn(() => ({ video: { firstlastframe: true } })),
+  resolveBuiltinCapabilitiesByModelKey: capabilityMock,
 }))
 vi.mock('@/lib/model-config-contract', () => ({
-  parseModelKeyStrict: vi.fn(() => ({ provider: 'fal' })),
+  parseModelKeyStrict: parseModelKeyStrictMock,
 }))
 vi.mock('@/lib/api-config', () => ({
   getProviderConfig: vi.fn(async () => ({ apiKey: 'api-key' })),
@@ -137,6 +143,7 @@ describe('worker video processor behavior', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     workerState.processor = null
+    capabilityMock.mockReturnValue({ video: { firstlastframe: true } })
 
     prismaMock.novelPromotionPanel.findUnique.mockResolvedValue(buildPanel())
     prismaMock.novelPromotionPanel.findFirst.mockResolvedValue(buildPanel())
@@ -159,7 +166,7 @@ describe('worker video processor behavior', () => {
       payload: {},
     })
 
-    await expect(processor!(job)).rejects.toThrow('VIDEO_MODEL_REQUIRED: payload.videoModel is required')
+    await expect(processor!(job)).rejects.toThrow('VIDEO_MODEL_REQUIRED: payload video model is required')
   })
 
   it('VIDEO_PANEL: 透传异步轮询返回的下载头到 COS 上传', async () => {
@@ -222,6 +229,43 @@ describe('worker video processor behavior', () => {
       videoUrl: 'cos/lip-sync/video.mp4',
       actualVideoTokens: 108000,
     })
+  })
+
+  it('VIDEO_PANEL: ComfyUI first-last-frame bypasses the cloud capability catalog', async () => {
+    const processor = workerState.processor
+    capabilityMock.mockReturnValueOnce(undefined)
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(buildPanel({
+      id: 'last-panel', imageUrl: 'cos/last.png',
+    }))
+    await processor!(buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: {
+        videoModel: 'cloud::normal',
+        firstLastFrame: {
+          flModel: 'comfyui::wf-video',
+          lastFrameStoryboardId: 'storyboard-1',
+          lastFramePanelIndex: 1,
+        },
+      },
+    }))
+    expect(capabilityMock).not.toHaveBeenCalled()
+    expect(utilsMock.resolveVideoSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        modelId: 'comfyui::wf-video',
+        comfyFirstFrameSource: 'cos/panel-image.png',
+        comfyLastFrameSource: 'cos/last.png',
+      }),
+    )
+  })
+
+  it('VIDEO_PANEL: unsupported cloud first-last-frame still fails closed', async () => {
+    const processor = workerState.processor
+    capabilityMock.mockReturnValueOnce(undefined)
+    await expect(processor!(buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: { videoModel: 'cloud::normal', firstLastFrame: { flModel: 'cloud::unsupported' } },
+    }))).rejects.toThrow('VIDEO_FIRSTLASTFRAME_MODEL_UNSUPPORTED: cloud::unsupported')
   })
 
   it('LIP_SYNC: 缺少 panel 时显式失败', async () => {

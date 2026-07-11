@@ -11,6 +11,7 @@ import { BUILTIN_PRICING_VERSION } from '@/lib/model-pricing/version'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { TASK_TYPE, type TaskType } from '@/lib/task/types'
 import type { TaskBillingInfo } from './types'
+import { resolveVideoGenerationModel } from '@/lib/video/model-selection'
 
 type AnyPayload = Record<string, unknown> | null | undefined
 
@@ -154,12 +155,7 @@ function buildImageTaskInfo(taskType: TaskType, payload: AnyPayload): TaskBillin
 function buildVideoTaskInfo(taskType: TaskType, payload: AnyPayload): TaskBillingInfo | null {
   const firstLastFramePayload = toRecord(payload?.firstLastFrame)
   const generationMode = Object.keys(firstLastFramePayload).length > 0 ? 'firstlastframe' : 'normal'
-  const model = pickFirstString([
-    payload?.videoModel,
-    payload?.modelId,
-    payload?.model,
-    firstLastFramePayload.flModel,
-  ])
+  const model = resolveVideoGenerationModel(payload)
   if (!model) return null
   if (isComfyModelKey(model)) return comfySkippedBilling()
   const generationOptions = toRecord(payload?.generationOptions)
