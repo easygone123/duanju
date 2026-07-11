@@ -288,6 +288,43 @@ describe('ComfyUI workflow compiler', () => {
     expect(uploads).toEqual({ image: upload, images: [upload, secondUpload] })
   })
 
+  it.each([
+    [
+      'malformed upload entry',
+      [
+        { name: 'input.png', subfolder: '', type: 'input' },
+        { name: undefined, subfolder: '', type: 'input' },
+      ],
+    ],
+    [
+      'partial upload list',
+      [{ name: 'input.png', subfolder: '', type: 'input' }],
+    ],
+    ['empty upload list', []],
+  ])('rejects filename_list with %s', (_case, uploads) => {
+    const error = captureError(() =>
+      renderComfyWorkflow({
+        graph: { '1': { class_type: 'Node', inputs: { filenames: [] } } },
+        variables: {
+          images: [{ storageKey: 'one' }, { storageKey: 'two' }],
+        },
+        variableDefinitions: [
+          { name: 'images', type: 'image_ref_list', required: true },
+        ],
+        bindings: [
+          {
+            nodeId: '1', inputPath: 'filenames', variable: 'images',
+            valueType: 'image_ref_list', transform: 'filename_list',
+          },
+        ],
+        uploads: { images: uploads },
+      } as unknown as Parameters<typeof renderComfyWorkflow>[0]),
+    ) as ComfyError
+
+    expect(error.code).toBe(COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID)
+    expect(error.message).toContain('images')
+  })
+
   it('validates the complete publication contract without mutating it', () => {
     const graph = {
       '1': { class_type: 'Node', inputs: { prompt: '${prompt}', width: 512 } },
@@ -365,6 +402,92 @@ describe('ComfyUI workflow compiler', () => {
       'COMFY_OUTPUT_REQUIRED',
       'COMFY_OUTPUT_PRIMARY_INVALID',
     ]))
+  })
+
+  it('returns deterministic issues for malformed variable definitions', () => {
+    const issues = validateWorkflowContract({
+      graph: { '1': { class_type: 'Node', inputs: {} } },
+      variableDefinitions: [
+        null,
+        { name: 42, type: 'string', required: true },
+        { name: 'bad.name', type: 'string', required: true },
+        { name: 'wrongType', type: 'expression', required: true },
+        { name: 'wrongRequired', type: 'string', required: 'yes' },
+        { name: 'wrongDefault', type: 'number', required: false, defaultValue: 'wide' },
+        {
+          name: 'wrongPolicy', type: 'string', required: false,
+          missingValuePolicy: 'delete_original',
+        },
+        { name: 'duplicate', type: 'expression', required: true },
+        { name: 'duplicate', type: 'string', required: true },
+      ],
+      bindings: [],
+      outputs: [
+        {
+          name: 'result', nodeId: '1', fieldPath: 'images',
+          mediaType: 'image', primary: true,
+        },
+      ],
+    } as unknown as Parameters<typeof validateWorkflowContract>[0])
+
+    expect(issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
+      'COMFY_VARIABLE_DEFINITION_INVALID',
+      'COMFY_VARIABLE_NAME_INVALID',
+      'COMFY_VARIABLE_TYPE_INVALID',
+      'COMFY_VARIABLE_REQUIRED_INVALID',
+      'COMFY_VARIABLE_DEFAULT_TYPE_INVALID',
+      'COMFY_VARIABLE_MISSING_POLICY_INVALID',
+      'COMFY_VARIABLE_DUPLICATE',
+    ]))
+  })
+
+  it('defensively validates binding fields and transform compatibility', () => {
+    const issues = validateWorkflowContract({
+      graph: { '1': { class_type: 'Node', inputs: {} } },
+      variableDefinitions: [
+        { name: 'label', type: 'string', required: true },
+        { name: 'image', type: 'image_ref', required: true },
+        { name: 'images', type: 'image_ref_list', required: true },
+      ],
+      bindings: [
+        null,
+        {
+          nodeId: 3, inputPath: 42, variable: null, valueType: 'expression',
+          missingValuePolicy: 'delete_original', transform: 'eval',
+        },
+        {
+          nodeId: '1', inputPath: 'label', variable: 'label',
+          valueType: 'string', transform: 'filename',
+        },
+        {
+          nodeId: '1', inputPath: 'images', variable: 'image',
+          valueType: 'image_ref', transform: 'filename_list',
+        },
+        {
+          nodeId: '1', inputPath: 'image', variable: 'images',
+          valueType: 'image_ref_list', transform: 'image_ref',
+        },
+      ],
+      outputs: [
+        {
+          name: 'result', nodeId: '1', fieldPath: 'images',
+          mediaType: 'image', primary: true,
+        },
+      ],
+    } as unknown as Parameters<typeof validateWorkflowContract>[0])
+
+    expect(issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
+      'COMFY_BINDING_INVALID',
+      'COMFY_BINDING_NODE_INVALID',
+      'COMFY_BINDING_PATH_UNSAFE',
+      'COMFY_BINDING_VARIABLE_INVALID',
+      'COMFY_BINDING_VALUE_TYPE_INVALID',
+      'COMFY_BINDING_MISSING_POLICY_INVALID',
+      'COMFY_BINDING_TRANSFORM_INVALID',
+      'COMFY_BINDING_TRANSFORM_TYPE_INVALID',
+    ]))
+    expect(issues.filter((issue) => issue.code === 'COMFY_BINDING_TRANSFORM_TYPE_INVALID'))
+      .toHaveLength(3)
   })
 
   it('extracts arrays only from explicitly declared history fields', () => {
@@ -468,6 +591,100 @@ describe('ComfyUI workflow compiler', () => {
 
     expect(error.code).toBe(COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID)
     expect(error.details).toEqual({ variable: 'width', reason: 'type' })
+  })
+
+  it('rejects undeclared placeholder and binding variables at render time', () => {
+    const placeholderError = captureError(() =>
+      renderComfyWorkflow({
+        graph: { '1': { class_type: 'Node', inputs: { text: '${prompt}' } } },
+        variables: { prompt: 'rain' },
+        variableDefinitions: [],
+        bindings: [],
+        uploads: {},
+      }),
+    ) as ComfyError
+    const bindingError = captureError(() =>
+      renderComfyWorkflow({
+        graph: { '1': { class_type: 'Node', inputs: { width: 512 } } },
+        variables: { width: 'not-a-number' },
+        variableDefinitions: [],
+        bindings: [
+          { nodeId: '1', inputPath: 'width', variable: 'width', valueType: 'number' },
+        ],
+        uploads: {},
+      }),
+    ) as ComfyError
+
+    expect(placeholderError).toMatchObject({
+      code: COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
+      details: { variable: 'prompt', reason: 'undeclared' },
+    })
+    expect(bindingError).toMatchObject({
+      code: COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
+      details: { variable: 'width', reason: 'undeclared' },
+    })
+  })
+
+  it('enforces binding valueType against the unique variable definition', () => {
+    const bindingTypeError = captureError(() =>
+      renderComfyWorkflow({
+        graph: { '1': { class_type: 'Node', inputs: { width: 512 } } },
+        variables: { width: 'not-a-number' },
+        variableDefinitions: [
+          { name: 'width', type: 'string', required: true },
+        ],
+        bindings: [
+          { nodeId: '1', inputPath: 'width', variable: 'width', valueType: 'number' },
+        ],
+        uploads: {},
+      }),
+    ) as ComfyError
+    const runtimeTypeError = captureError(() =>
+      renderComfyWorkflow({
+        graph: { '1': { class_type: 'Node', inputs: { width: 512 } } },
+        variables: { width: 'not-a-number' },
+        variableDefinitions: [
+          { name: 'width', type: 'number', required: true },
+        ],
+        bindings: [
+          { nodeId: '1', inputPath: 'width', variable: 'width', valueType: 'number' },
+        ],
+        uploads: {},
+      } as unknown as Parameters<typeof renderComfyWorkflow>[0]),
+    ) as ComfyError
+
+    expect(bindingTypeError).toMatchObject({
+      code: COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
+      details: { variable: 'width', reason: 'binding_type' },
+    })
+    expect(runtimeTypeError).toMatchObject({
+      code: COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
+      details: { variable: 'width', reason: 'type' },
+    })
+  })
+
+  it('revalidates links generated by placeholder substitution', () => {
+    const error = captureError(() =>
+      renderComfyWorkflow({
+        graph: {
+          '1': { class_type: 'Source', inputs: {} },
+          sink: {
+            class_type: 'Sink',
+            inputs: { images: ['${linkedNode}', '${outputIndex}'] },
+          },
+        },
+        variables: { linkedNode: 'missing', outputIndex: 0 },
+        variableDefinitions: [
+          { name: 'linkedNode', type: 'string', required: true },
+          { name: 'outputIndex', type: 'number', required: true },
+        ],
+        bindings: [],
+        uploads: {},
+      }),
+    ) as ComfyError
+
+    expect(error.code).toBe(COMFY_ERROR_CODE.WORKFLOW_FORMAT_INVALID)
+    expect(error.message).toContain('unknown node "missing"')
   })
 
   it('allows preserve-original policy to be declared on an explicit binding', () => {

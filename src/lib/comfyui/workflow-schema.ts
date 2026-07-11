@@ -12,6 +12,7 @@ const PLACEHOLDER_PATTERN = /\$\{([^{}]+)\}/g
 const NUMERIC_LINK_INDEX = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
 const BLOCKED_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor'])
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9_-]+$/
+const SAFE_VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 const VARIABLE_TYPES = new Set<ComfyVariableType>([
   'string', 'number', 'boolean', 'image_ref', 'image_ref_list', 'video_ref',
 ])
@@ -52,7 +53,25 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
   }
 
   const issues: WorkflowValidationIssue[] = []
-  const definitions = validateDefinitions(input.variableDefinitions, issues)
+  const rawDefinitions: unknown[] = Array.isArray(input.variableDefinitions)
+    ? input.variableDefinitions
+    : []
+  const rawBindings: unknown[] = Array.isArray(input.bindings) ? input.bindings : []
+  const rawOutputs: unknown[] = Array.isArray(input.outputs) ? input.outputs : []
+  if (!Array.isArray(input.variableDefinitions)) {
+    issues.push(issue(
+      'COMFY_VARIABLE_DEFINITIONS_INVALID', 'variableDefinitions',
+      'Variable definitions must be an array.',
+    ))
+  }
+  if (!Array.isArray(input.bindings)) {
+    issues.push(issue('COMFY_BINDINGS_INVALID', 'bindings', 'Bindings must be an array.'))
+  }
+  if (!Array.isArray(input.outputs)) {
+    issues.push(issue('COMFY_OUTPUTS_INVALID', 'outputs', 'Outputs must be an array.'))
+  }
+
+  const definitions = validateDefinitions(rawDefinitions, issues)
   const placeholders = new Set(discoverComfyPlaceholders(graph))
   for (const placeholder of placeholders) {
     if (!definitions.has(placeholder)) {
@@ -64,34 +83,68 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
     }
   }
 
-  input.bindings.forEach((binding, index) => {
+  rawBindings.forEach((rawBinding, index) => {
     const path = `bindings.${index}`
-    const definition = definitions.get(binding.variable)
-    if (!Object.hasOwn(graph, binding.nodeId)) {
+    if (!isObject(rawBinding)) {
+      issues.push(issue('COMFY_BINDING_INVALID', path, 'Binding must be an object.'))
+      return
+    }
+    const binding = rawBinding
+    const nodeIdValid = typeof binding.nodeId === 'string' && binding.nodeId.length > 0
+    const variableValid = typeof binding.variable === 'string'
+      && SAFE_VARIABLE_NAME.test(binding.variable)
+    const valueTypeValid = typeof binding.valueType === 'string'
+      && VARIABLE_TYPES.has(binding.valueType as ComfyVariableType)
+    const transformValid = binding.transform === undefined
+      || (typeof binding.transform === 'string' && BINDING_TRANSFORMS.has(binding.transform))
+    const missingPolicyValid = binding.missingValuePolicy === undefined
+      || binding.missingValuePolicy === 'preserve_original'
+    const definition = variableValid ? definitions.get(binding.variable as string) : undefined
+
+    if (!nodeIdValid) {
+      issues.push(issue(
+        'COMFY_BINDING_NODE_INVALID', `${path}.nodeId`, 'Binding nodeId is invalid.',
+      ))
+    } else if (!Object.hasOwn(graph, binding.nodeId as string)) {
       issues.push(issue('COMFY_BINDING_NODE_MISSING', `${path}.nodeId`, 'Binding node is missing.'))
     }
     if (!isSafeDottedPath(binding.inputPath)) {
       issues.push(issue('COMFY_BINDING_PATH_UNSAFE', `${path}.inputPath`, 'Binding path is unsafe.'))
     }
-    if (!definition) {
+    if (!variableValid) {
+      issues.push(issue(
+        'COMFY_BINDING_VARIABLE_INVALID', `${path}.variable`, 'Binding variable is invalid.',
+      ))
+    } else if (!definition) {
       issues.push(issue(
         'COMFY_VARIABLE_UNDECLARED', `${path}.variable`, 'Binding variable is undeclared.',
       ))
-    } else if (definition.type !== binding.valueType) {
+    }
+    if (!valueTypeValid) {
+      issues.push(issue(
+        'COMFY_BINDING_VALUE_TYPE_INVALID', `${path}.valueType`, 'Binding valueType is invalid.',
+      ))
+    } else if (definition && definition.type !== binding.valueType) {
       issues.push(issue(
         'COMFY_BINDING_TYPE_MISMATCH', `${path}.valueType`,
         'Binding valueType does not match its variable definition.',
       ))
     }
-    if (binding.transform !== undefined && !BINDING_TRANSFORMS.has(binding.transform)) {
+    if (!transformValid) {
       issues.push(issue(
         'COMFY_BINDING_TRANSFORM_INVALID', `${path}.transform`, 'Binding transform is unsupported.',
       ))
-    }
-    if (
-      binding.missingValuePolicy !== undefined
-      && binding.missingValuePolicy !== 'preserve_original'
+    } else if (
+      binding.transform !== undefined
+      && definition
+      && !isTransformCompatible(binding.transform as string, definition.type)
     ) {
+      issues.push(issue(
+        'COMFY_BINDING_TRANSFORM_TYPE_INVALID', `${path}.transform`,
+        'Binding transform is incompatible with its variable type.',
+      ))
+    }
+    if (!missingPolicyValid) {
       issues.push(issue(
         'COMFY_BINDING_MISSING_POLICY_INVALID', `${path}.missingValuePolicy`,
         'Binding missing value policy is unsupported.',
@@ -99,12 +152,24 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
     }
   })
 
-  input.variableDefinitions.forEach((definition, index) => {
+  rawDefinitions.forEach((rawDefinition, index) => {
+    if (!isObject(rawDefinition)) return
+    const definition = rawDefinition
+    if (
+      typeof definition.name !== 'string'
+      || !SAFE_VARIABLE_NAME.test(definition.name)
+      || typeof definition.required !== 'boolean'
+      || !VARIABLE_TYPES.has(definition.type as ComfyVariableType)
+    ) return
     if (definition.required || definition.defaultValue !== undefined
       || definition.missingValuePolicy === 'preserve_original') return
-    const relatedBindings = input.bindings.filter((binding) => binding.variable === definition.name)
+    const relatedBindings = rawBindings.filter((rawBinding) =>
+      isObject(rawBinding) && rawBinding.variable === definition.name)
     const bindingsPreserveOriginal = relatedBindings.length > 0
-      && relatedBindings.every((binding) => binding.missingValuePolicy === 'preserve_original')
+      && relatedBindings.every(
+        (rawBinding) => isObject(rawBinding)
+          && rawBinding.missingValuePolicy === 'preserve_original',
+      )
     if (placeholders.has(definition.name) || !bindingsPreserveOriginal) {
       issues.push(issue(
         'COMFY_VARIABLE_MISSING_POLICY_REQUIRED', `variableDefinitions.${index}`,
@@ -113,17 +178,23 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
     }
   })
 
-  if (input.outputs.length === 0) {
+  if (rawOutputs.length === 0) {
     issues.push(issue('COMFY_OUTPUT_REQUIRED', 'outputs', 'At least one output is required.'))
   }
-  if (input.outputs.filter((output) => output.primary).length !== 1) {
+  const validOutputs = rawOutputs.filter(isObject)
+  if (validOutputs.filter((output) => output.primary === true).length !== 1) {
     issues.push(issue(
       'COMFY_OUTPUT_PRIMARY_INVALID', 'outputs', 'Exactly one output must be primary.',
     ))
   }
-  input.outputs.forEach((output, index) => {
+  rawOutputs.forEach((rawOutput, index) => {
     const path = `outputs.${index}`
-    if (!Object.hasOwn(graph, output.nodeId)) {
+    if (!isObject(rawOutput)) {
+      issues.push(issue('COMFY_OUTPUT_INVALID', path, 'Output binding must be an object.'))
+      return
+    }
+    const output = rawOutput
+    if (typeof output.nodeId !== 'string' || !Object.hasOwn(graph, output.nodeId)) {
       issues.push(issue('COMFY_OUTPUT_NODE_MISSING', `${path}.nodeId`, 'Output node is missing.'))
     }
     if (!isSafeDottedPath(output.fieldPath)) {
@@ -137,44 +208,94 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
   return issues
 }
 
-export function isSafeDottedPath(path: string): boolean {
+function isTransformCompatible(transform: string, type: ComfyVariableType): boolean {
+  if (transform === 'filename_list') return type === 'image_ref_list'
+  return (transform === 'filename' || transform === 'image_ref')
+    && (type === 'image_ref' || type === 'video_ref')
+}
+
+/*
+ * Paths are interpreted relative to node.inputs or a declared node history output.
+ * Keeping this predicate defensive avoids leaking TypeErrors from JSON-authored contracts.
+ */
+export function isSafeDottedPath(path: unknown): path is string {
+  if (typeof path !== 'string') return false
   const segments = path.split('.')
   return segments.length > 0 && segments.every((segment) =>
     SAFE_PATH_SEGMENT.test(segment) && !BLOCKED_PATH_SEGMENTS.has(segment))
 }
 
 function validateDefinitions(
-  variableDefinitions: ComfyVariableDefinition[],
+  variableDefinitions: unknown[],
   issues: WorkflowValidationIssue[],
 ): Map<string, ComfyVariableDefinition> {
   const definitions = new Map<string, ComfyVariableDefinition>()
-  variableDefinitions.forEach((definition, index) => {
+  const seenNames = new Set<string>()
+  variableDefinitions.forEach((rawDefinition, index) => {
     const path = `variableDefinitions.${index}`
-    if (definition.name.trim().length === 0 || definitions.has(definition.name)) {
-      issues.push(issue('COMFY_VARIABLE_NAME_INVALID', `${path}.name`, 'Variable name is invalid.'))
+    if (!isObject(rawDefinition)) {
+      issues.push(issue(
+        'COMFY_VARIABLE_DEFINITION_INVALID', path, 'Variable definition must be an object.',
+      ))
       return
     }
-    definitions.set(definition.name, definition)
-    if (!VARIABLE_TYPES.has(definition.type)) {
+    const definition = rawDefinition
+    const nameValid = typeof definition.name === 'string'
+      && SAFE_VARIABLE_NAME.test(definition.name)
+    const duplicateName = nameValid && seenNames.has(definition.name as string)
+    if (!nameValid) {
+      issues.push(issue('COMFY_VARIABLE_NAME_INVALID', `${path}.name`, 'Variable name is invalid.'))
+    } else if (duplicateName) {
+      issues.push(issue(
+        'COMFY_VARIABLE_DUPLICATE', `${path}.name`, 'Variable name must be unique.',
+      ))
+      definitions.delete(definition.name as string)
+    } else {
+      seenNames.add(definition.name as string)
+    }
+    const typeValid = typeof definition.type === 'string'
+      && VARIABLE_TYPES.has(definition.type as ComfyVariableType)
+    if (!typeValid) {
       issues.push(issue('COMFY_VARIABLE_TYPE_INVALID', `${path}.type`, 'Variable type is invalid.'))
+    }
+    const requiredValid = typeof definition.required === 'boolean'
+    if (!requiredValid) {
+      issues.push(issue(
+        'COMFY_VARIABLE_REQUIRED_INVALID', `${path}.required`, 'Variable required must be boolean.',
+      ))
+    }
+    const missingPolicyValid = definition.missingValuePolicy === undefined
+      || definition.missingValuePolicy === 'preserve_original'
+    if (!missingPolicyValid) {
+      issues.push(issue(
+        'COMFY_VARIABLE_MISSING_POLICY_INVALID', `${path}.missingValuePolicy`,
+        'Variable missing value policy is unsupported.',
+      ))
     }
     if (
       definition.defaultValue !== undefined
-      && !matchesComfyVariableType(definition.defaultValue, definition.type)
+      && (!typeValid || !matchesComfyVariableType(
+        definition.defaultValue,
+        definition.type as ComfyVariableType,
+      ))
     ) {
       issues.push(issue(
         'COMFY_VARIABLE_DEFAULT_TYPE_INVALID', `${path}.defaultValue`,
         'Variable default does not match its declared type.',
       ))
     }
+    if (nameValid && !duplicateName && !definitions.has(definition.name as string)
+      && typeValid && requiredValid && missingPolicyValid) {
+      definitions.set(definition.name as string, definition as unknown as ComfyVariableDefinition)
+    }
   })
   return definitions
 }
 
 export function matchesComfyVariableType(
-  value: ComfyVariableValue,
+  value: unknown,
   type: ComfyVariableType,
-): boolean {
+): value is ComfyVariableValue {
   if (type === 'string') return typeof value === 'string'
   if (type === 'number') return typeof value === 'number' && Number.isFinite(value)
   if (type === 'boolean') return typeof value === 'boolean'

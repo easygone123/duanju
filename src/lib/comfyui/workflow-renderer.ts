@@ -9,6 +9,7 @@ import type {
   ComfyApiWorkflow,
   ComfyInputBinding,
   ComfyUploadedFile,
+  ComfyVariableDefinition,
   ComfyVariableValue,
   RenderWorkflowInput,
 } from './types'
@@ -18,6 +19,21 @@ const EMBEDDED_PLACEHOLDER = /\$\{([^{}]+)\}/g
 
 export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflow {
   const rendered = validateComfyApiWorkflow(input.graph)
+  const definitions = buildDefinitionMap(input.variableDefinitions)
+  for (const placeholder of discoverComfyPlaceholders(rendered)) {
+    if (!definitions.has(placeholder)) throw undeclaredVariable(placeholder)
+  }
+  for (const binding of input.bindings) {
+    const definition = definitions.get(binding.variable)
+    if (!definition) throw undeclaredVariable(binding.variable)
+    if (definition.type !== binding.valueType) {
+      throw new ComfyError(
+        COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
+        `Binding type for workflow variable "${binding.variable}" does not match its definition.`,
+        { details: { variable: binding.variable, reason: 'binding_type' } },
+      )
+    }
+  }
   const variables = resolveVariables(input, rendered)
 
   for (const node of Object.values(rendered)) {
@@ -33,7 +49,32 @@ export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflo
     }
   }
 
-  return rendered
+  return validateComfyApiWorkflow(rendered)
+}
+
+function buildDefinitionMap(
+  variableDefinitions: ComfyVariableDefinition[],
+): Map<string, ComfyVariableDefinition> {
+  const definitions = new Map<string, ComfyVariableDefinition>()
+  for (const definition of variableDefinitions) {
+    if (definitions.has(definition.name)) {
+      throw new ComfyError(
+        COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
+        `Workflow variable definition "${definition.name}" is duplicated.`,
+        { details: { variable: definition.name, reason: 'duplicate_definition' } },
+      )
+    }
+    definitions.set(definition.name, definition)
+  }
+  return definitions
+}
+
+function undeclaredVariable(variable: string): ComfyError {
+  return new ComfyError(
+    COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
+    `Workflow variable "${variable}" is undeclared.`,
+    { details: { variable, reason: 'undeclared' } },
+  )
 }
 
 function assertSafeBinding(graph: ComfyApiWorkflow, binding: ComfyInputBinding): void {
@@ -60,8 +101,16 @@ function transformBindingValue(
 
   const upload = uploads[binding.variable]
   if (binding.transform === 'filename_list') {
-    if (!Array.isArray(upload)) {
-      throw bindingError(binding, `Upload list for "${binding.variable}" is missing.`)
+    if (
+      !Array.isArray(value)
+      || !Array.isArray(upload)
+      || upload.length !== value.length
+      || !upload.every(isUploadedFile)
+    ) {
+      throw bindingError(
+        binding,
+        `Upload list for "${binding.variable}" is missing, partial, or malformed.`,
+      )
     }
     return upload.map((file) => file.name)
   }
