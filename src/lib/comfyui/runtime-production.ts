@@ -23,6 +23,7 @@ import { comfyLeaseKey, COMFY_LEASE_RELEASE_SCRIPT, COMFY_LEASE_RENEW_SCRIPT } f
 import { reclaimComfyRecoveryLease } from './submission'
 
 const compatibilityCache: ComfyCompatibilityCache = new Map()
+const compatibilityExpiry = new Map<string, number>()
 
 export async function listProductionComfyHealthOwners() {
   const records = await prisma.comfyConnection.findMany({
@@ -44,11 +45,14 @@ export async function probeProductionComfyOwnerHealth(
       maxOutputBytes: config.outputMaxBytes,
     },
   })
-  await Promise.all(statuses.map(({ connectionId, ...health }) =>
-    cacheComfyHealthIfNewer(
-      redis, connectionId, health,
+  await Promise.all(statuses.map(({ connectionId, ...health }) => {
+    const capabilityFingerprint = [...compatibilityCache.entries()]
+      .find(([key]) => key.startsWith(`${connectionId}:`))?.[1].capabilityFingerprint
+    return cacheComfyHealthIfNewer(
+      redis, connectionId, { ...health, ...(capabilityFingerprint ? { capabilityFingerprint } : {}) },
       Math.min(config.healthIntervalMs * 3, 3_600_000),
-    )))
+    )
+  }))
   return statuses
 }
 
@@ -65,7 +69,7 @@ export async function scheduleProductionComfyRequest(
   config: ComfyRuntimeConfig,
 ) {
   const dependencies = createDefaultComfySchedulerDependencies(
-    async (connectionId, workflowVersionId) => {
+    async (connectionId, workflowVersionId, capabilityFingerprint) => {
       const version = await prisma.comfyWorkflowVersion.findFirst({
         where: {
           id: workflowVersionId,
@@ -77,10 +81,12 @@ export async function scheduleProductionComfyRequest(
       })
       if (!version || !connection) return false
       if (compatibilityCache.size > 10_000) compatibilityCache.clear()
-      const cachedPrefix = `${connectionId}:${version.contentHash}:`
-      const cached = [...compatibilityCache.entries()]
-        .find(([key]) => key.startsWith(cachedPrefix))?.[1]
-      if (cached) return cached.compatible
+      const exactKey = capabilityFingerprint
+        ? `${connectionId}:${version.contentHash}:${capabilityFingerprint}` : null
+      if (exactKey && (compatibilityExpiry.get(exactKey) ?? 0) > Date.now()) {
+        const cached = compatibilityCache.get(exactKey)
+        if (cached) return cached.compatible
+      }
       try {
         const result = await checkComfyCompatibility({
           connectionId,
@@ -97,6 +103,8 @@ export async function scheduleProductionComfyRequest(
           }),
           cache: compatibilityCache,
         })
+        const resultKey = `${connectionId}:${version.contentHash}:${result.capabilityFingerprint}`
+        compatibilityExpiry.set(resultKey, Date.now() + config.healthIntervalMs * 3)
         return result.compatible
       } catch {
         return null

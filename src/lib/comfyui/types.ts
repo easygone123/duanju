@@ -63,6 +63,7 @@ export interface ComfyHealthSummary {
   devices?: ComfyDeviceSummary[]
   runningCount: number
   pendingCount: number
+  capabilityFingerprint?: string
 }
 
 export interface ComfyQueueSnapshot {

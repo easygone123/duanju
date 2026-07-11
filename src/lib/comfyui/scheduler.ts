@@ -37,10 +37,11 @@ export interface ComfySchedulableConnection {
 export interface ComfySchedulerDependencies {
   listSchedulableRequests(userId: string): Promise<ComfySchedulableRequest[]>
   listOwnedEnabledConnections(userId: string): Promise<ComfySchedulableConnection[]>
-  readCachedHealth(connectionId: string): Promise<{ state: ComfyHealthState } | null>
+  readCachedHealth(connectionId: string): Promise<{ state: ComfyHealthState; capabilityFingerprint?: string } | null>
   checkCachedCompatibility(
     connectionId: string,
     workflowVersionId: string,
+    capabilityFingerprint?: string,
   ): Promise<boolean | null>
   acquireLease(owner: ComfyRequestLeaseOwner): Promise<boolean>
   releaseLease(owner: ComfyRequestLeaseOwner): Promise<boolean>
@@ -113,8 +114,9 @@ export async function scheduleNextComfyRequest(
   const compatible: ComfySchedulableConnection[] = []
   let compatibilityUnknown = false
   for (const connection of idle) {
+    const health = await dependencies.readCachedHealth(connection.id)
     const result = await dependencies.checkCachedCompatibility(
-      connection.id, request.workflowVersionId,
+      connection.id, request.workflowVersionId, health?.capabilityFingerprint,
     )
     if (result === true) compatible.push(connection)
     else if (result === null) compatibilityUnknown = true
@@ -203,7 +205,11 @@ export function createDefaultComfySchedulerDependencies(
       try {
         const parsed = JSON.parse(value) as unknown
         if (!isRecord(parsed) || !isHealthState(parsed.state)) return null
-        return { state: parsed.state }
+        return {
+          state: parsed.state,
+          ...(typeof parsed.capabilityFingerprint === 'string'
+            ? { capabilityFingerprint: parsed.capabilityFingerprint } : {}),
+        }
       } catch {
         return null
       }
