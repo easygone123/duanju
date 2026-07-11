@@ -5,7 +5,12 @@ import { prisma } from '@/lib/prisma'
 
 import { formatComfyExternalId } from './external-id'
 import { createComfyGenerationRequest } from './request-service'
-import type { ComfyMediaType, ComfyStoredOutputRef, ComfyVariableValue } from './types'
+import type {
+  ComfyMediaRef,
+  ComfyMediaType,
+  ComfyStoredOutputRef,
+  ComfyVariableValue,
+} from './types'
 
 export interface ComfyGenerationContext {
   projectId: string
@@ -16,6 +21,9 @@ export interface ComfyGenerationContext {
 export interface ComfyProviderInvocation {
   context: ComfyGenerationContext
   variables?: Record<string, ComfyVariableValue>
+  inputImages?: ComfyMediaRef[]
+  firstFrame?: ComfyMediaRef
+  lastFrame?: ComfyMediaRef
 }
 
 interface SubmitComfyGenerationInput {

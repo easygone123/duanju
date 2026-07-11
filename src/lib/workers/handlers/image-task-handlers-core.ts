@@ -106,7 +106,9 @@ export async function handleModifyAssetImageTask(job: Job<TaskJobData>) {
     const source = await resolveImageSourceFromGeneration(job, {
       userId: job.data.userId,
       modelId: editModel,
+      invocationKey: `${job.data.taskId}:character:${appearance.id}:image:${imageIndex}`,
       prompt,
+      comfyReferenceImages: [currentKey, ...extraReferenceInputs].filter((value): value is string => !!value),
       options: {
         referenceImages,
         aspectRatio: '3:2',
@@ -213,7 +215,9 @@ export async function handleModifyAssetImageTask(job: Job<TaskJobData>) {
     const source = await resolveImageSourceFromGeneration(job, {
       userId: job.data.userId,
       modelId: editModel,
+      invocationKey: `${job.data.taskId}:location:${locationImage.id}:image:${Number(payload.imageIndex ?? 0)}`,
       prompt,
+      comfyReferenceImages: [locationImage.imageUrl, ...extraReferenceInputs],
       options: {
         referenceImages,
         aspectRatio,
@@ -339,7 +343,9 @@ export async function handleModifyAssetImageTask(job: Job<TaskJobData>) {
     const source = await resolveImageSourceFromGeneration(job, {
       userId: job.data.userId,
       modelId: editModel,
+      invocationKey: `${job.data.taskId}:panel:${panel.id}:modify`,
       prompt,
+      comfyReferenceImages: [panel.imageUrl, ...extraReferenceInputs],
       options: {
         referenceImages: uniqueReferences,
         aspectRatio,

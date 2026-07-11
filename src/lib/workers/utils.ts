@@ -23,6 +23,13 @@ import { isTaskActive, trySetTaskExternalId } from '@/lib/task/service'
 import { type TaskJobData } from '@/lib/task/types'
 import { reportTaskProgress } from './shared'
 import { prisma } from '@/lib/prisma'
+import { parseModelKeyStrict } from '@/lib/model-config-contract'
+import {
+  resolveOwnedComfyMediaRefFromValue,
+  type ResolveOwnedComfyMediaRefDependencies,
+} from '@/lib/comfyui/media-ownership'
+import type { ComfyMediaRef } from '@/lib/comfyui/types'
+import type { ComfyProviderInvocation } from '@/lib/comfyui/provider'
 
 const DEFAULT_POLL_TIMEOUT_MS = Number.parseInt(process.env.WORKER_EXTERNAL_TIMEOUT_MS || String(20 * 60 * 1000), 10)
 const DEFAULT_POLL_INTERVAL_MS = Number.parseInt(process.env.WORKER_EXTERNAL_POLL_MS || '3000', 10)
@@ -70,6 +77,48 @@ export async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+export async function buildComfyProviderInvocation(
+  input: {
+    userId: string
+    projectId: string
+    taskId: string
+    modelKey: string
+    invocationKey: string
+    inputImages?: string[]
+    firstFrame?: string
+    lastFrame?: string
+  },
+  mediaDependencies?: ResolveOwnedComfyMediaRefDependencies,
+): Promise<ComfyProviderInvocation | undefined> {
+  if (parseModelKeyStrict(input.modelKey)?.provider !== 'comfyui') return undefined
+  if (!input.invocationKey.trim()) throw new Error('COMFY_INVOCATION_KEY_REQUIRED')
+  const resolveImage = async (value: string): Promise<ComfyMediaRef> => {
+    const ref = await resolveOwnedComfyMediaRefFromValue({
+      userId: input.userId,
+      projectId: input.projectId,
+      value,
+      mediaType: 'image',
+    }, mediaDependencies)
+    if (!ref) throw new Error('COMFY_MEDIA_NOT_OWNED')
+    return ref
+  }
+  const inputImages = input.inputImages?.length
+    ? await Promise.all(input.inputImages.map(resolveImage))
+    : undefined
+  const firstFrame = input.firstFrame ? await resolveImage(input.firstFrame) : undefined
+  const lastFrame = input.lastFrame ? await resolveImage(input.lastFrame) : undefined
+  return {
+    context: {
+      projectId: input.projectId,
+      taskId: input.taskId,
+      invocationKey: input.invocationKey,
+    },
+    ...(inputImages ? { inputImages } : {}),
+    ...(firstFrame ? { firstFrame } : {}),
+    ...(lastFrame ? { lastFrame } : {}),
+  }
+}
+
 export async function assertTaskActive(job: Job<TaskJobData>, stage: string) {
   const active = await isTaskActive(job.data.taskId)
   if (active) return
@@ -113,7 +162,7 @@ export async function waitExternalResult(
 
   await trySetTaskExternalId(job.data.taskId, externalId)
 
-  while (executionClock.startedAt === undefined || Date.now() - executionClock.startedAt <= timeoutMs) {
+  while (true) {
     await assertTaskActive(job, 'polling_external')
     const status = await pollAsyncTask(externalId, userId)
 
@@ -151,6 +200,7 @@ export async function waitExternalResult(
     }
 
     const executionElapsed = advanceExternalExecutionClock(executionClock, status, Date.now())
+    if (executionElapsed !== null && executionElapsed > timeoutMs) break
     const progressUpdate = externalPollProgress({
       result: status, executionElapsed, timeoutMs, progressStart, progressEnd,
     })
@@ -181,6 +231,7 @@ export async function resolveImageSourceFromGeneration(
   params: {
     userId: string
     modelId: string
+    invocationKey: string
     prompt: string
     options?: {
       referenceImages?: string[]
@@ -190,6 +241,7 @@ export async function resolveImageSourceFromGeneration(
       provider?: string
     }
     allowTaskExternalIdResume?: boolean
+    comfyReferenceImages?: string[]
     pollProgress?: { start?: number; end?: number }
   },
 ): Promise<string> {
@@ -244,18 +296,21 @@ export async function resolveImageSourceFromGeneration(
     },
   })
 
+  const comfy = await buildComfyProviderInvocation({
+    userId: params.userId,
+    projectId: job.data.projectId,
+    taskId: job.data.taskId,
+    modelKey: params.modelId,
+    invocationKey: params.invocationKey,
+    inputImages: params.comfyReferenceImages ?? params.options?.referenceImages,
+  })
+
   const result = await withLogContext(
     { projectId: job.data.projectId, taskId: job.data.taskId, userId: params.userId },
     () => generateImage(params.userId, params.modelId, params.prompt, {
       ...params.options,
       ...capabilityOptions,
-      comfy: {
-        context: {
-          projectId: job.data.projectId,
-          taskId: job.data.taskId,
-          invocationKey: `${job.data.taskId}:image:0`,
-        },
-      },
+      ...(comfy ? { comfy } : {}),
     }),
   )
   if (!result.success) {
@@ -314,6 +369,7 @@ export async function resolveImageSourcesFromGeneration(
   params: {
     userId: string
     modelId: string
+    invocationKey: string
     prompt: string
     options?: {
       referenceImages?: string[]
@@ -323,6 +379,7 @@ export async function resolveImageSourcesFromGeneration(
       provider?: string
     }
     allowTaskExternalIdResume?: boolean
+    comfyReferenceImages?: string[]
     pollProgress?: { start?: number; end?: number }
   },
 ): Promise<string[]> {
@@ -365,18 +422,21 @@ export async function resolveImageSourcesFromGeneration(
     runtimeSelections,
   })
 
+  const comfy = await buildComfyProviderInvocation({
+    userId: params.userId,
+    projectId: job.data.projectId,
+    taskId: job.data.taskId,
+    modelKey: params.modelId,
+    invocationKey: params.invocationKey,
+    inputImages: params.comfyReferenceImages ?? params.options?.referenceImages,
+  })
+
   const result = await withLogContext(
     { projectId: job.data.projectId, taskId: job.data.taskId, userId: params.userId },
     () => generateImage(params.userId, params.modelId, params.prompt, {
       ...params.options,
       ...capabilityOptions,
-      comfy: {
-        context: {
-          projectId: job.data.projectId,
-          taskId: job.data.taskId,
-          invocationKey: `${job.data.taskId}:image:0`,
-        },
-      },
+      ...(comfy ? { comfy } : {}),
     }),
   )
   if (!result.success) {
@@ -435,7 +495,10 @@ export async function resolveVideoSourceFromGeneration(
   params: {
     userId: string
     modelId: string
+    invocationKey: string
     imageUrl: string
+    comfyFirstFrameSource?: string
+    comfyLastFrameSource?: string
     options?: {
       prompt?: string
       duration?: number
@@ -516,18 +579,22 @@ export async function resolveVideoSourceFromGeneration(
     providerRequestOptions[key] = value
   }
 
+  const comfy = await buildComfyProviderInvocation({
+    userId: params.userId,
+    projectId: job.data.projectId,
+    taskId: job.data.taskId,
+    modelKey: params.modelId,
+    invocationKey: params.invocationKey,
+    firstFrame: params.comfyFirstFrameSource ?? params.imageUrl,
+    lastFrame: params.comfyLastFrameSource ?? params.options?.lastFrameImageUrl,
+  })
+
   const result = await withLogContext(
     { projectId: job.data.projectId, taskId: job.data.taskId, userId: params.userId },
     () => generateVideo(params.userId, params.modelId, params.imageUrl, {
       ...providerRequestOptions,
       ...providerCapabilityOptions,
-      comfy: {
-        context: {
-          projectId: job.data.projectId,
-          taskId: job.data.taskId,
-          invocationKey: `${job.data.taskId}:video:0`,
-        },
-      },
+      ...(comfy ? { comfy } : {}),
     }),
   )
   if (!result.success) {

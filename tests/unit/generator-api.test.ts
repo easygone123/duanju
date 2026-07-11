@@ -112,13 +112,17 @@ describe('generator-api gateway routing', () => {
       comfy: {
         context: { projectId: 'project-1', taskId: 'task-1', invocationKey: 'task-1:image:0' },
         variables: { seed: 42 },
+        inputImages: [{ storageKey: 'owned/input.png', mimeType: 'image/png' }],
       },
     })
     expect(result).toEqual({ success: true, async: true, externalId: 'COMFY:IMAGE:request-1' })
     expect(submitComfyImageGenerationMock).toHaveBeenCalledWith({
       userId: 'user-1', workflowId: 'wf-image', prompt: 'rain',
       context: { projectId: 'project-1', taskId: 'task-1', invocationKey: 'task-1:image:0' },
-      variables: { seed: 42 },
+      variables: {
+        seed: 42,
+        input_images: [{ storageKey: 'owned/input.png', mimeType: 'image/png' }],
+      },
     })
     expect(getProviderConfigMock).not.toHaveBeenCalled()
   })
@@ -132,13 +136,19 @@ describe('generator-api gateway routing', () => {
       comfy: {
         context: { projectId: 'project-1', taskId: 'task-2', invocationKey: 'task-2:video:0' },
         variables: { duration_seconds: 5 },
+        firstFrame: { storageKey: 'owned/first.png', mimeType: 'image/png' },
+        lastFrame: { storageKey: 'owned/last.png', mimeType: 'image/png' },
       },
     })
     expect(result).toEqual({ success: true, async: true, externalId: 'COMFY:VIDEO:request-2' })
     expect(submitComfyVideoGenerationMock).toHaveBeenCalledWith({
       userId: 'user-1', workflowId: 'wf-video', prompt: 'move',
       context: { projectId: 'project-1', taskId: 'task-2', invocationKey: 'task-2:video:0' },
-      variables: { duration_seconds: 5 },
+      variables: {
+        duration_seconds: 5,
+        first_frame: { storageKey: 'owned/first.png', mimeType: 'image/png' },
+        last_frame: { storageKey: 'owned/last.png', mimeType: 'image/png' },
+      },
     })
     expect(getProviderConfigMock).not.toHaveBeenCalled()
   })

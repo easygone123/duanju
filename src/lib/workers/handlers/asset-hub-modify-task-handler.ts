@@ -135,7 +135,9 @@ export async function handleAssetHubModifyTask(job: Job<TaskJobData>) {
     const source = await resolveImageSourceFromGeneration(job, {
       userId,
       modelId: editModel,
+      invocationKey: `${job.data.taskId}:global-character:${appearance.id}:image:${targetImageIndex}`,
       prompt,
+      comfyReferenceImages: [currentKey, ...extraReferenceInputs].filter((value): value is string => !!value),
       options: {
         referenceImages,
         aspectRatio: '3:2',
@@ -224,7 +226,9 @@ export async function handleAssetHubModifyTask(job: Job<TaskJobData>) {
     const source = await resolveImageSourceFromGeneration(job, {
       userId,
       modelId: editModel,
+      invocationKey: `${job.data.taskId}:global-location:${locationImage.id}:image:${targetImageIndex}`,
       prompt,
+      comfyReferenceImages: [locationImage.imageUrl, ...extraReferenceInputs],
       options: {
         referenceImages,
         aspectRatio,

@@ -76,6 +76,7 @@ describe('worker utils video generation resume', () => {
     const result = await resolveVideoSourceFromGeneration(buildJob(), {
       userId: 'user-1',
       modelId: 'openai-compatible:oa-1::sora-2',
+      invocationKey: 'task-1:video:0',
       imageUrl: 'data:image/png;base64,QQ==',
       options: {
         prompt: 'animate this frame',
@@ -102,6 +103,7 @@ describe('worker utils video generation resume', () => {
     const result = await resolveImageSourceFromGeneration(buildJob(), {
       userId: 'user-1',
       modelId: 'fal::banana',
+      invocationKey: 'task-1:image:0',
       prompt: 'a cinematic portrait',
       options: {
         aspectRatio: '16:9',

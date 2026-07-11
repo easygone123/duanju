@@ -152,6 +152,14 @@ describe('worker panel-image-task-handler behavior', () => {
         }),
       }),
     )
+    expect(utilsMock.resolveImageSourceFromGeneration.mock.calls[0]?.[1]).toMatchObject({
+      invocationKey: 'task-panel-image-1:panel:panel-1:candidate:0',
+      comfyReferenceImages: ['https://signed.example/ref-1.png'],
+    })
+    expect(utilsMock.resolveImageSourceFromGeneration.mock.calls[1]?.[1]).toMatchObject({
+      invocationKey: 'task-panel-image-1:panel:panel-1:candidate:1',
+      comfyReferenceImages: ['https://signed.example/ref-1.png'],
+    })
     expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
       variables: expect.objectContaining({
         storyboard_text_json_input: expect.stringContaining('"slot": "街道左侧靠墙的留白位置"'),

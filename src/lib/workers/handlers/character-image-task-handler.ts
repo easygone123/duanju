@@ -160,6 +160,7 @@ export async function handleCharacterImageTask(job: Job<TaskJobData>) {
       label,
       targetId: `${appearance.id}-${index}`,
       keyPrefix: 'character',
+      comfyReferenceImages: primaryReferenceInputs,
       options: {
         referenceImages: primaryReferenceImages.length > 0 ? primaryReferenceImages : undefined,
         aspectRatio: CHARACTER_ASSET_IMAGE_RATIO,

@@ -246,7 +246,9 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
     const source = await resolveImageSourceFromGeneration(job, {
       userId: job.data.userId,
       modelId: modelKey,
+      invocationKey: `${job.data.taskId}:panel:${panel.id}:candidate:${i}`,
       prompt,
+      comfyReferenceImages: refs,
       options: {
         referenceImages: normalizedRefs,
         aspectRatio,

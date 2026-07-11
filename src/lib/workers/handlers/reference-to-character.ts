@@ -5,6 +5,7 @@ import { generateImage } from '@/lib/generator-api'
 import { queryFalStatus } from '@/lib/async-submit'
 import { fetchWithTimeoutAndRetry } from '@/lib/ark-api'
 import { getProviderConfig } from '@/lib/api-config'
+import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { executeAiVisionStep } from '@/lib/ai-runtime'
 import { getUserModelConfig } from '@/lib/config-service'
 import {
@@ -16,7 +17,7 @@ import { encodeImageUrls } from '@/lib/contracts/image-urls-contract'
 import { generateUniqueKey, getSignedUrl, uploadObject } from '@/lib/storage'
 import { initializeFonts, createLabelSVG } from '@/lib/fonts'
 import { reportTaskProgress } from '@/lib/workers/shared'
-import { assertTaskActive } from '@/lib/workers/utils'
+import { assertTaskActive, resolveImageSourceFromGeneration } from '@/lib/workers/utils'
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
 import { normalizeImageGenerationCount } from '@/lib/image-generation/count'
@@ -52,39 +53,51 @@ async function generateReferenceImage(params: {
 
   try {
     await assertTaskActive(job, `reference_to_character_generate_${imageIndex + 1}`)
-    const result = await generateImage(
-      userId,
-      imageModel,
-      prompt,
-      {
-        referenceImages,
-        aspectRatio: CHARACTER_IMAGE_BANANA_RATIO,
-      },
-    )
+    let finalImageUrl: string | undefined
+    if (parseModelKeyStrict(imageModel)?.provider === 'comfyui') {
+      finalImageUrl = await resolveImageSourceFromGeneration(job, {
+        userId,
+        modelId: imageModel,
+        invocationKey: `${job.data.taskId}:reference-character:${keyPrefix}:image:${imageIndex}`,
+        prompt,
+        comfyReferenceImages: referenceImages,
+        options: { referenceImages, aspectRatio: CHARACTER_IMAGE_BANANA_RATIO },
+      })
+    } else {
+      const result = await generateImage(
+        userId,
+        imageModel,
+        prompt,
+        {
+          referenceImages,
+          aspectRatio: CHARACTER_IMAGE_BANANA_RATIO,
+        },
+      )
 
-    let finalImageUrl = result.imageUrl
-    const requestId = typeof result.requestId === 'string' ? result.requestId : ''
-    const endpoint = typeof result.endpoint === 'string' ? result.endpoint : ''
-    if (result.async && requestId && endpoint) {
-      if (!falApiKey) {
-        throw new Error('reference_to_character async result requires falApiKey')
-      }
-      for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
-        await assertTaskActive(job, `reference_to_character_poll_${imageIndex + 1}_${attempt + 1}`)
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
-        const status = await queryFalStatus(endpoint, requestId, falApiKey)
-        if (status.completed && status.resultUrl) {
-          finalImageUrl = status.resultUrl
-          break
+      finalImageUrl = result.imageUrl
+      const requestId = typeof result.requestId === 'string' ? result.requestId : ''
+      const endpoint = typeof result.endpoint === 'string' ? result.endpoint : ''
+      if (result.async && requestId && endpoint) {
+        if (!falApiKey) {
+          throw new Error('reference_to_character async result requires falApiKey')
         }
-        if (status.failed) {
-          return null
+        for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
+          await assertTaskActive(job, `reference_to_character_poll_${imageIndex + 1}_${attempt + 1}`)
+          await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+          const status = await queryFalStatus(endpoint, requestId, falApiKey)
+          if (status.completed && status.resultUrl) {
+            finalImageUrl = status.resultUrl
+            break
+          }
+          if (status.failed) {
+            return null
+          }
         }
       }
-    }
 
-    if (!result.success || !finalImageUrl) {
-      return null
+      if (!result.success || !finalImageUrl) {
+        return null
+      }
     }
 
     const imgRes = await fetchWithTimeoutAndRetry(finalImageUrl, {
@@ -209,7 +222,9 @@ export async function handleReferenceToCharacterTask(job: Job<TaskJobData>) {
   }
 
   const useReferenceImages = !customDescription
-  const { apiKey: falApiKey } = await getProviderConfig(job.data.userId, 'fal')
+  const falApiKey = parseModelKeyStrict(imageModel)?.provider === 'comfyui'
+    ? null
+    : (await getProviderConfig(job.data.userId, 'fal')).apiKey
   const keyPrefix = isAssetHub ? 'ref-char' : `proj-ref-char-${job.data.projectId}`
   const count = normalizeImageGenerationCount('reference-to-character', payload.count)
 

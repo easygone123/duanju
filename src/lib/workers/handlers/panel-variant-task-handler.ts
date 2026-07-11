@@ -271,7 +271,9 @@ export async function handlePanelVariantTask(job: Job<TaskJobData>) {
   const source = await resolveImageSourceFromGeneration(job, {
     userId: job.data.userId,
     modelId: storyboardModel,
+    invocationKey: `${job.data.taskId}:panel-variant:${newPanel.id}`,
     prompt,
+    comfyReferenceImages: refs,
     options: {
       referenceImages: normalizedRefs,
       aspectRatio,

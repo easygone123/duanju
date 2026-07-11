@@ -108,6 +108,7 @@ async function generateVideoForPanel(
   const sourceImageBase64 = await normalizeToBase64ForGeneration(sourceImageUrl)
 
   let lastFrameImageBase64: string | undefined
+  let lastFrameStorageValue: string | undefined
   const generationMode: VideoGenerationMode = firstLastFramePayload ? 'firstlastframe' : 'normal'
   const requestedGenerateAudio = typeof generationOptions.generateAudio === 'boolean'
     ? generationOptions.generateAudio
@@ -133,6 +134,7 @@ async function generateVideoForPanel(
         Number(firstLastFramePayload.lastFramePanelIndex),
       )
       if (lastPanel?.imageUrl) {
+        lastFrameStorageValue = lastPanel.imageUrl
         const lastFrameUrl = toSignedUrlIfCos(lastPanel.imageUrl, 3600)
         if (lastFrameUrl) {
           lastFrameImageBase64 = await normalizeToBase64ForGeneration(lastFrameUrl)
@@ -144,7 +146,10 @@ async function generateVideoForPanel(
   const generatedVideo = await resolveVideoSourceFromGeneration(job, {
     userId: job.data.userId,
     modelId: model,
+    invocationKey: `${job.data.taskId}:panel:${panel.id}:video`,
     imageUrl: sourceImageBase64,
+    comfyFirstFrameSource: panel.imageUrl,
+    comfyLastFrameSource: lastFrameStorageValue,
     options: {
       prompt,
       ...(projectVideoRatio ? { aspectRatio: projectVideoRatio } : {}),

@@ -81,6 +81,7 @@ export async function generateImage(
             variables: {
                 ...(options?.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
                 ...(size ? { width: Number(size[1]), height: Number(size[2]) } : {}),
+                ...(comfy.inputImages?.length ? { input_images: comfy.inputImages } : {}),
                 ...(comfy.variables ?? {}),
             },
         })
@@ -233,6 +234,8 @@ export async function generateVideo(
                 ...(typeof options?.duration === 'number' ? { duration_seconds: options.duration } : {}),
                 ...(typeof options?.fps === 'number' ? { fps: options.fps } : {}),
                 ...(options?.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
+                ...(comfy.firstFrame ? { first_frame: comfy.firstFrame } : {}),
+                ...(comfy.lastFrame ? { last_frame: comfy.lastFrame } : {}),
                 ...(comfy.variables ?? {}),
             },
         })

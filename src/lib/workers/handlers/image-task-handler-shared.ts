@@ -107,13 +107,16 @@ async function generateImageToStorage(params: {
     aspectRatio?: string
     size?: string
   }
+  comfyReferenceImages?: string[]
   label?: string
 }) {
   const source = await resolveImageSourceFromGeneration(params.job, {
     userId: params.userId,
     modelId: params.modelId,
+    invocationKey: `${params.job.data.taskId}:image:${params.keyPrefix}:${params.targetId}`,
     prompt: params.prompt,
     options: params.options,
+    comfyReferenceImages: params.comfyReferenceImages,
   })
 
   const uploadSource = params.label
@@ -135,6 +138,7 @@ export async function generateCleanImageToStorage(params: {
     aspectRatio?: string
     size?: string
   }
+  comfyReferenceImages?: string[]
 }) {
   return await generateImageToStorage(params)
 }
@@ -152,6 +156,7 @@ export async function generateProjectLabeledImageToStorage(params: {
     aspectRatio?: string
     size?: string
   }
+  comfyReferenceImages?: string[]
 }) {
   return await generateImageToStorage(params)
 }
