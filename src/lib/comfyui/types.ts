@@ -183,13 +183,12 @@ export type ComfyExecutionEvent =
   | { type: 'execution_start'; promptId: string }
   | { type: 'executing'; promptId: string; nodeId: string | null }
   | { type: 'progress'; promptId: string; nodeId?: string; value: number; max: number }
-  | { type: 'executed'; promptId: string; nodeId: string; output?: unknown }
+  | { type: 'executed'; promptId: string; nodeId: string | null }
   | {
       type: 'execution_error'
       promptId: string
       nodeId?: string
       message: string
-      nodeErrors?: unknown
     }
 
 export interface ComfyGenerationRequestSnapshot {

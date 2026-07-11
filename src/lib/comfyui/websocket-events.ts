@@ -3,11 +3,14 @@ import type { ClientRequest, IncomingMessage } from 'node:http'
 import WebSocket, { type RawData } from 'ws'
 
 import { COMFY_ERROR_CODE, ComfyError } from './errors'
-import {
-  sanitizeComfyExecutionNodeErrors,
-  sanitizeComfyExecutionNodeId,
-} from './http-response'
+import { sanitizeComfyExecutionNodeId } from './http-response'
 import type { ComfyConnectionAuth, ComfyExecutionEvent } from './types'
+
+interface QueuedExecutionEvent {
+  event: ComfyExecutionEvent
+  bytes: number
+  replacementKey?: string
+}
 
 export async function* iterateComfyWebSocket(
   websocket: WebSocket,
@@ -15,8 +18,11 @@ export async function* iterateComfyWebSocket(
   signal: AbortSignal,
   idleTimeoutMs: number,
   auth: ComfyConnectionAuth,
+  maxQueuedEvents: number,
+  maxQueuedBytes: number,
 ): AsyncIterable<ComfyExecutionEvent> {
-  const values: ComfyExecutionEvent[] = []
+  const values: QueuedExecutionEvent[] = []
+  let queuedBytes = 0
   let wake: (() => void) | undefined
   let ended = false
   let failure: ComfyError | undefined
@@ -30,6 +36,46 @@ export async function* iterateComfyWebSocket(
     if (!failure && !signal.aborted) failure = error
     ended = true
     notify()
+  }
+  const clearQueue = () => {
+    values.length = 0
+    queuedBytes = 0
+  }
+  const overflow = (reason: 'queue_count_limit' | 'queue_bytes_limit') => {
+    clearQueue()
+    failure = new ComfyError(
+      COMFY_ERROR_CODE.EXECUTION_FAILED,
+      'ComfyUI WebSocket event queue exceeded its limit',
+      { details: { reason }, retryable: true },
+    )
+    ended = true
+    cleanup()
+    if (websocket.readyState === WebSocket.OPEN) websocket.terminate()
+    notify()
+  }
+  const enqueue = (event: ComfyExecutionEvent): boolean => {
+    const bytes = Buffer.byteLength(JSON.stringify(event), 'utf8')
+    const replacementKey = replaceableEventKey(event)
+    const replaceIndex = replacementKey
+      ? values.findIndex((queued) => queued.replacementKey === replacementKey)
+      : -1
+    if (replaceIndex >= 0) {
+      queuedBytes -= values[replaceIndex].bytes
+      values[replaceIndex] = { event, bytes, replacementKey }
+    } else {
+      values.push({ event, bytes, replacementKey })
+    }
+    queuedBytes += bytes
+    if (values.length > maxQueuedEvents) {
+      overflow('queue_count_limit')
+      return false
+    }
+    if (queuedBytes > maxQueuedBytes) {
+      overflow('queue_bytes_limit')
+      return false
+    }
+    notify()
+    return true
   }
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer)
@@ -47,9 +93,8 @@ export async function* iterateComfyWebSocket(
     if (isBinary || signal.aborted) return
     const event = mapExecutionEvent(raw, promptId, auth)
     if (!event) return
-    values.push(event)
+    if (!enqueue(event)) return
     resetIdleTimer()
-    notify()
   }
   const onError = (error: Error) => {
     fail(new ComfyError(
@@ -84,7 +129,7 @@ export async function* iterateComfyWebSocket(
   }
   const onAbort = () => {
     ended = true
-    values.length = 0
+    clearQueue()
     cleanup()
     if (websocket.readyState === WebSocket.OPEN) websocket.close()
     else if (websocket.readyState === WebSocket.CONNECTING) {
@@ -116,7 +161,9 @@ export async function* iterateComfyWebSocket(
   try {
     while (!ended || values.length > 0) {
       if (values.length > 0) {
-        yield values.shift()!
+        const next = values.shift()!
+        queuedBytes -= next.bytes
+        yield next.event
         continue
       }
       await new Promise<void>((resolve) => { wake = resolve })
@@ -144,33 +191,68 @@ function mapExecutionEvent(
   }
   const data = message.data ?? {}
   if (message.type !== 'status' && data.prompt_id !== promptId) return undefined
+  const publicPromptId = safePromptId(promptId)
   if (message.type === 'status') {
     const status = data.status as { exec_info?: { queue_remaining?: unknown } } | undefined
     const queueRemaining = status?.exec_info?.queue_remaining
-    return { type: 'status', queueRemaining: typeof queueRemaining === 'number' ? queueRemaining : undefined }
-  }
-  if (message.type === 'execution_start') return { type: 'execution_start', promptId }
-  if (message.type === 'executing') {
-    return { type: 'executing', promptId, nodeId: typeof data.node === 'string' ? data.node : null }
-  }
-  if (message.type === 'progress' && typeof data.value === 'number' && typeof data.max === 'number') {
     return {
-      type: 'progress', promptId,
-      nodeId: typeof data.node === 'string' ? data.node : undefined,
-      value: data.value, max: data.max,
+      type: 'status',
+      ...(isBoundedCount(queueRemaining) ? { queueRemaining } : {}),
     }
   }
-  if (message.type === 'executed' && typeof data.node === 'string') {
-    return { type: 'executed', promptId, nodeId: data.node, output: data.output }
+  if (message.type === 'execution_start') return { type: 'execution_start', promptId: publicPromptId }
+  if (message.type === 'executing') {
+    return {
+      type: 'executing',
+      promptId: publicPromptId,
+      nodeId: sanitizeComfyExecutionNodeId(data.node, auth) ?? null,
+    }
+  }
+  if (message.type === 'progress' && isBoundedProgress(data.value, data.max)) {
+    const nodeId = sanitizeComfyExecutionNodeId(data.node, auth)
+    return {
+      type: 'progress', promptId: publicPromptId,
+      ...(nodeId ? { nodeId } : {}),
+      value: Number(data.value), max: Number(data.max),
+    }
+  }
+  if (message.type === 'executed') {
+    return {
+      type: 'executed',
+      promptId: publicPromptId,
+      nodeId: sanitizeComfyExecutionNodeId(data.node, auth) ?? null,
+    }
   }
   if (message.type === 'execution_error') {
     const nodeId = sanitizeComfyExecutionNodeId(data.node_id, auth)
     return {
-      type: 'execution_error', promptId,
+      type: 'execution_error', promptId: publicPromptId,
       ...(nodeId ? { nodeId } : {}),
       message: 'Execution failed',
-      nodeErrors: sanitizeComfyExecutionNodeErrors(data.node_errors, auth),
     }
   }
+  return undefined
+}
+
+function safePromptId(value: string): string {
+  return /^[A-Za-z0-9_.:-]{1,128}$/.test(value) ? value : '[REDACTED]'
+}
+
+function isBoundedCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= 1_000_000_000
+}
+
+function isBoundedProgress(value: unknown, max: unknown): value is number {
+  return (
+    isBoundedCount(value) &&
+    isBoundedCount(max) &&
+    Number(max) > 0 &&
+    Number(value) <= Number(max)
+  )
+}
+
+function replaceableEventKey(event: ComfyExecutionEvent): string | undefined {
+  if (event.type === 'status') return 'status'
+  if (event.type === 'progress') return `progress:${event.nodeId ?? ''}`
   return undefined
 }

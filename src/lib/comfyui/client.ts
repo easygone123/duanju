@@ -45,6 +45,8 @@ export interface ComfyClientOptions {
   maxWorkflowBytes?: number
   maxInputBytes?: number
   wsIdleTimeoutMs?: number
+  maxWsQueuedEvents?: number
+  maxWsQueuedBytes?: number
   maxRedirects?: number
   resolveHost?: ComfyResolver
   fetchImpl?: ComfyFetch
@@ -58,6 +60,10 @@ const DEFAULT_MAX_ERROR_BYTES = 8 * 1024
 const DEFAULT_MAX_WORKFLOW_BYTES = 4 * 1024 * 1024
 const DEFAULT_MAX_INPUT_BYTES = 256 * 1024 * 1024
 const DEFAULT_MAX_REDIRECTS = 3
+const DEFAULT_MAX_WS_QUEUED_EVENTS = 256
+const DEFAULT_MAX_WS_QUEUED_BYTES = 1024 * 1024
+const MAX_WS_QUEUED_EVENTS = 10_000
+const MAX_WS_QUEUED_BYTES = 16 * 1024 * 1024
 
 export class ComfyClient {
   private readonly baseUrl: URL
@@ -68,6 +74,8 @@ export class ComfyClient {
   private readonly maxWorkflowBytes: number
   private readonly maxInputBytes: number
   private readonly wsIdleTimeoutMs: number
+  private readonly maxWsQueuedEvents: number
+  private readonly maxWsQueuedBytes: number
   private readonly maxRedirects: number
   private readonly resolveHost: ComfyResolver
   private readonly fetchImpl: ComfyFetch
@@ -82,6 +90,14 @@ export class ComfyClient {
     this.maxWorkflowBytes = options.maxWorkflowBytes ?? DEFAULT_MAX_WORKFLOW_BYTES
     this.maxInputBytes = options.maxInputBytes ?? DEFAULT_MAX_INPUT_BYTES
     this.wsIdleTimeoutMs = options.wsIdleTimeoutMs ?? this.timeoutMs
+    this.maxWsQueuedEvents = validateQueueLimit(
+      options.maxWsQueuedEvents ?? DEFAULT_MAX_WS_QUEUED_EVENTS,
+      MAX_WS_QUEUED_EVENTS,
+    )
+    this.maxWsQueuedBytes = validateQueueLimit(
+      options.maxWsQueuedBytes ?? DEFAULT_MAX_WS_QUEUED_BYTES,
+      MAX_WS_QUEUED_BYTES,
+    )
     this.maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS
     this.resolveHost = options.resolveHost ?? resolveComfyHost
     this.fetchImpl = options.fetchImpl ?? (undiciFetch as unknown as ComfyFetch)
@@ -191,6 +207,8 @@ export class ComfyClient {
         signal,
         this.wsIdleTimeoutMs,
         this.options.auth,
+        this.maxWsQueuedEvents,
+        this.maxWsQueuedBytes,
       )) {
         yield event
       }
@@ -254,8 +272,8 @@ export class ComfyClient {
     const bytes = await this.requestBytes(endpoint, init, code, this.maxJsonBytes, errorContext)
     try {
       return JSON.parse(bytes.toString('utf8')) as T
-    } catch (cause) {
-      throw new ComfyError(code, 'ComfyUI returned invalid JSON', { cause, retryable: true })
+    } catch {
+      throw new ComfyError(code, 'ComfyUI returned invalid JSON', { retryable: true })
     }
   }
 
@@ -413,6 +431,13 @@ function isRedirect(status: number): boolean {
 
 function ignoreWebSocketCleanupError(): void {
   // ws emits an expected asynchronous error when a CONNECTING socket is terminated.
+}
+
+function validateQueueLimit(value: number, maximum: number): number {
+  if (!Number.isInteger(value) || value <= 0 || value > maximum) {
+    throw new RangeError(`WebSocket queue limit must be an integer between 1 and ${maximum}`)
+  }
+  return value
 }
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

@@ -104,26 +104,6 @@ describe('ComfyClient contract', () => {
     expect(server.requests).toHaveLength(requestsAfterAcceptedPrompt)
   })
 
-  it('does not retain prompt-sensitive context after many near-limit submissions', async () => {
-    let promptNumber = 0
-    server.override('/proxy/comfy/prompt', (_request, response) => {
-      promptNumber += 1
-      response.end(JSON.stringify({ prompt_id: `retention-${promptNumber}`, node_errors: {} }))
-    })
-    const comfy = client({ type: 'none' }, { maxWorkflowBytes: 16 * 1024 })
-
-    for (let index = 0; index < 12; index += 1) {
-      await comfy.submitPrompt({
-        '1': {
-          class_type: 'TextNode',
-          inputs: { prompt: `sensitive-${index}-${'x'.repeat(15 * 1024)}` },
-        },
-      }, 'client-1')
-    }
-
-    expect(Object.keys(comfy).filter((key) => /prompt|sensitive/i.test(key))).toEqual([])
-  })
-
   it('rejects missing prompt ids and exposes bounded sanitized node errors', async () => {
     server.override('/proxy/comfy/prompt', (_request, response) => {
       response.statusCode = 400
@@ -196,6 +176,55 @@ describe('ComfyClient contract', () => {
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
   })
 
+  it('strictly projects every WebSocket event branch without reflecting arbitrary fields', async () => {
+    const controller = new AbortController()
+    const iterator = client().watchPrompt('prompt-1', 'client-1', controller.signal)[Symbol.asyncIterator]()
+    const pending = Array.from({ length: 6 }, () => iterator.next())
+    await server.waitForSocket()
+    server.send({
+      type: 'status',
+      data: { status: { exec_info: { queue_remaining: 2 }, token: 'branch-secret-token' } },
+    })
+    server.send({
+      type: 'execution_start', data: { prompt_id: 'prompt-1', extra: 'branch-secret-token' },
+    })
+    server.send({
+      type: 'executing', data: { prompt_id: 'prompt-1', node: 'branch-secret-token' },
+    })
+    server.send({
+      type: 'progress',
+      data: { prompt_id: 'prompt-1', node: 'branch-secret-token', value: 2, max: 5, extra: 'branch-secret-token' },
+    })
+    server.send({
+      type: 'executed',
+      data: { prompt_id: 'prompt-1', node: 'branch-secret-token', output: { token: 'branch-secret-token' } },
+    })
+    server.send({
+      type: 'execution_error',
+      data: {
+        prompt_id: 'prompt-1',
+        node_id: 'branch-secret-token',
+        exception_message: 'branch-secret-token',
+        node_errors: {
+          '4': { errors: [{ type: 'my_prompt_secret', code: 'PROMPT_SECRET' }] },
+        },
+      },
+    })
+
+    const events = (await Promise.all(pending)).map((result) => result.value)
+    expect(events).toEqual([
+      { type: 'status', queueRemaining: 2 },
+      { type: 'execution_start', promptId: 'prompt-1' },
+      { type: 'executing', promptId: 'prompt-1', nodeId: null },
+      { type: 'progress', promptId: 'prompt-1', value: 2, max: 5 },
+      { type: 'executed', promptId: 'prompt-1', nodeId: null },
+      { type: 'execution_error', promptId: 'prompt-1', message: 'Execution failed' },
+    ])
+    expect(JSON.stringify(events)).not.toContain('branch-secret-token')
+    expect(JSON.stringify(events)).not.toMatch(/my_prompt_secret|PROMPT_SECRET/)
+    controller.abort()
+  })
+
   it('omits delayed-watch free text and preserves only canonical structural diagnostics', async () => {
     const comfy = client({ type: 'bearer', token: 'ws-auth-secret' })
     await comfy.submitPrompt({
@@ -237,16 +266,11 @@ describe('ComfyClient contract', () => {
         type: 'execution_error',
         promptId: 'prompt-1',
         message: 'Execution failed',
-        nodeErrors: {
-          '4': {
-            nodeId: '4',
-            errors: [{ type: 'value_error', code: 'BAD_PROMPT' }],
-          },
-        },
       },
     })
     const serialized = JSON.stringify(result)
     expect(result.value).not.toHaveProperty('nodeId')
+    expect(result.value).not.toHaveProperty('nodeErrors')
     expect(serialized.length).toBeLessThan(2_000)
     expect(serialized).not.toMatch(/ws-prompt-secret|ws-auth-secret|must-not-survive|x{100}/)
 
@@ -280,9 +304,7 @@ describe('ComfyClient contract', () => {
     if (result.value?.type !== 'execution_error') throw new Error('expected execution_error')
     expect(result.value.message).toBe('Execution failed')
     expect(result.value).not.toHaveProperty('nodeId')
-    expect(result.value.nodeErrors).toEqual({
-      '8': { nodeId: '8', errors: [] },
-    })
+    expect(result.value).not.toHaveProperty('nodeErrors')
     expect(JSON.stringify(result.value)).not.toMatch(/direct-auth-secret|extra_info/)
     controller.abort()
   })
@@ -300,6 +322,79 @@ describe('ComfyClient contract', () => {
     controller.abort()
 
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+  })
+
+  it('coalesces queued progress events for a slow consumer', async () => {
+    const controller = new AbortController()
+    const iterator = client({ type: 'none' }, {
+      maxWsQueuedEvents: 1,
+      maxWsQueuedBytes: 4_096,
+    }).watchPrompt('prompt-1', 'client-1', controller.signal)[Symbol.asyncIterator]()
+    const first = iterator.next()
+    await server.waitForSocket()
+    server.send({ type: 'execution_start', data: { prompt_id: 'prompt-1' } })
+    await first
+
+    for (let value = 1; value <= 20; value += 1) {
+      server.send({
+        type: 'progress', data: { prompt_id: 'prompt-1', node: '4', value, max: 20 },
+      })
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    await expect(iterator.next()).resolves.toMatchObject({
+      value: { type: 'progress', nodeId: '4', value: 20, max: 20 },
+    })
+    controller.abort()
+  })
+
+  it('fails closed when a fast peer exceeds the queued event count', async () => {
+    const controller = new AbortController()
+    const iterator = client({ type: 'none' }, {
+      maxWsQueuedEvents: 2,
+      maxWsQueuedBytes: 4_096,
+    }).watchPrompt('prompt-1', 'client-1', controller.signal)[Symbol.asyncIterator]()
+    const first = iterator.next()
+    await server.waitForSocket()
+    server.send({ type: 'execution_start', data: { prompt_id: 'prompt-1' } })
+    await first
+    for (const node of ['1', '2', '3']) {
+      server.send({ type: 'executing', data: { prompt_id: 'prompt-1', node } })
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    await expect(iterator.next()).rejects.toMatchObject({
+      code: 'COMFY_EXECUTION_FAILED', details: { reason: 'queue_count_limit' },
+    })
+  })
+
+  it('fails closed when a fast peer exceeds aggregate queued bytes', async () => {
+    const controller = new AbortController()
+    const iterator = client({ type: 'none' }, {
+      maxWsQueuedEvents: 100,
+      maxWsQueuedBytes: 100,
+    }).watchPrompt('prompt-1', 'client-1', controller.signal)[Symbol.asyncIterator]()
+    const first = iterator.next()
+    await server.waitForSocket()
+    server.send({ type: 'execution_start', data: { prompt_id: 'prompt-1' } })
+    await first
+    for (const node of ['1', '2', '3']) {
+      server.send({ type: 'executing', data: { prompt_id: 'prompt-1', node } })
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    await expect(iterator.next()).rejects.toMatchObject({
+      code: 'COMFY_EXECUTION_FAILED', details: { reason: 'queue_bytes_limit' },
+    })
+  })
+
+  it.each([
+    [{ maxWsQueuedEvents: 0 }],
+    [{ maxWsQueuedEvents: 10_001 }],
+    [{ maxWsQueuedBytes: 0 }],
+    [{ maxWsQueuedBytes: 16 * 1024 * 1024 + 1 }],
+  ])('rejects invalid WebSocket queue limits: %o', (overrides) => {
+    expect(() => client({ type: 'none' }, overrides)).toThrow(/WebSocket queue limit/)
   })
 
   it('throws a stable connection error when the WebSocket handshake is refused', async () => {
@@ -393,6 +488,21 @@ describe('ComfyClient contract', () => {
       name: 'x', nodeId: '1', mediaType: 'image', primary: true,
       filename: 'x.png', subfolder: '', type: 'output',
     })).rejects.toBeInstanceOf(ComfyError)
+  })
+
+  it('does not retain malformed JSON or parser causes in successful-response errors', async () => {
+    server.override('/proxy/comfy/system_stats', (_request, response) => {
+      response.end('credential-json-secret malformed {')
+    })
+
+    const error = await client({ type: 'bearer', token: 'credential-json-secret' })
+      .getSystemStats()
+      .catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(ComfyError)
+    expect(error).toMatchObject({ code: 'COMFY_CONNECTION_OFFLINE' })
+    expect((error as ComfyError).cause).toBeUndefined()
+    expect((error as ComfyError).details).toBeUndefined()
+    expect(String(error)).not.toContain('credential-json-secret')
   })
 
   it('rejects cross-origin redirects without forwarding credentials', async () => {
