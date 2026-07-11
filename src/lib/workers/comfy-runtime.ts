@@ -1,5 +1,10 @@
 import { createProductionComfyRuntimeDeps } from '@/lib/comfyui/runtime-deps'
-import { startComfyRuntime, type ComfyRuntime } from '@/lib/comfyui/runtime'
+import {
+  readComfyRuntimeConfig,
+  startComfyRuntime,
+  type ComfyRuntime,
+  type ComfyRuntimeConfig,
+} from '@/lib/comfyui/runtime'
 
 interface ClosableWorker {
   close(): Promise<unknown>
@@ -17,6 +22,17 @@ export function createWorkerComfyRuntimeManager(
       return runtime
     },
   }
+}
+
+export async function bootstrapWorkerProcesses<T extends ClosableWorker>(input: {
+  env: Record<string, string | undefined>
+  createWorkers(): Promise<T[]> | T[]
+  startRuntime(config: ComfyRuntimeConfig): ComfyRuntime
+}) {
+  const config = readComfyRuntimeConfig(input.env)
+  const workers = await input.createWorkers()
+  const runtime = createWorkerComfyRuntimeManager(() => input.startRuntime(config)).start()
+  return { config, workers, runtime }
 }
 
 export async function closeWorkerProcesses(

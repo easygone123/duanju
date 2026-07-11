@@ -134,6 +134,35 @@ describe('ComfyUI private connection routes', () => {
     expect(JSON.stringify(body)).not.toContain('userId')
   })
 
+  it('uses explicit runtime policy and client limits instead of rereading conflicting env', async () => {
+    process.env.COMFYUI_NETWORK_MODE = 'allowlist'
+    process.env.COMFYUI_ALLOWED_HOSTS = 'wrong.example'
+    prismaMock.comfyConnection.findMany.mockResolvedValue([connection()])
+    const service = await import('@/lib/comfyui/connection-service')
+    const policy = { mode: 'trusted' as const, allowedHosts: ['explicit.example'], allowedCidrs: [] }
+
+    await service.probeOwnedConnectionStatuses('user-1', {
+      networkPolicy: policy,
+      clientLimits: {
+        timeoutMs: 1_234,
+        maxWorkflowBytes: 2_345,
+        maxInputBytes: 3_456,
+        maxOutputBytes: 4_567,
+      },
+    })
+
+    expect(authorizeComfyTargetMock).toHaveBeenCalledWith(
+      'http://example.com/comfy', policy,
+    )
+    expect(clientConstructedMock).toHaveBeenCalledWith(expect.objectContaining({
+      networkPolicy: policy,
+      timeoutMs: 1_234,
+      maxWorkflowBytes: 2_345,
+      maxInputBytes: 3_456,
+      maxOutputBytes: 4_567,
+    }))
+  })
+
   it('normalizes the URL, encrypts credential JSON, and returns only hasCredentials', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')

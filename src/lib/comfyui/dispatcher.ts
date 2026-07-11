@@ -19,6 +19,7 @@ import type {
   ComfyStoredOutputRef,
   ComfyVariableDefinition,
   ComfyVariableValue,
+  ComfyWorkflowRequirements,
 } from './types'
 import { extractComfyOutputs } from './workflow-output'
 import { renderComfyWorkflow } from './workflow-renderer'
@@ -63,6 +64,8 @@ type ExecutionContext = {
     variableDefinitions?: ComfyVariableDefinition[]
     bindings?: ComfyInputBinding[]
     outputs: ComfyOutputBinding[]
+    requirements?: ComfyWorkflowRequirements
+    contentHash?: string
   }
 }
 
@@ -82,6 +85,11 @@ export interface ComfyDispatcherDependencies extends ComfyMediaDependencies {
   heartbeat(owner: OwnerInput & { ttlMs: number }): Promise<boolean>
   release(owner: OwnerInput & { ttlMs: number }): Promise<boolean>
   transition(input: OwnerInput & { from: ComfyRequestStatus; to: ComfyRequestStatus }): Promise<boolean>
+  preSubmitGate(
+    context: ExecutionContext,
+    owner: OwnerInput,
+  ): Promise<'ready' | 'external_busy' | 'incompatible' | 'lost'>
+  blockIncompatible(input: OwnerInput): Promise<boolean>
   claimSubmissionFence(input: OwnerInput & {
     attemptId: string; clientId: string
   }): Promise<ComfySubmissionFenceResult>
@@ -98,7 +106,7 @@ export interface ComfyDispatcherDependencies extends ComfyMediaDependencies {
   persistStoredOutputReceipt(input: OwnerInput & {
     promptId: string; output: ComfyStoredOutputRef
   }): Promise<boolean>
-  returnToWaiting(input: OwnerInput & { errorCode: string }): Promise<boolean>
+  returnToWaiting(input: OwnerInput & { errorCode?: string }): Promise<boolean>
   markReconciling(input: OwnerInput & { promptId: string; errorCode: string }): Promise<boolean>
   markFailed(input: OwnerInput & { promptId?: string; errorCode: string; errorMessage: string }): Promise<boolean>
   client: ComfyExecutionClient
@@ -114,6 +122,7 @@ export interface ComfyDispatcherDependencies extends ComfyMediaDependencies {
 export type ComfyDispatchResult =
   | { outcome: 'completed'; primary: ComfyStoredOutputRef; outputs: ComfyStoredOutputRef[] }
   | { outcome: 'waiting_capacity' }
+  | { outcome: 'blocked_no_compatible_instance' }
   | { outcome: 'reconciling'; promptId: string }
   | { outcome: 'failed'; code: string }
   | { outcome: 'canceled' }
@@ -186,6 +195,28 @@ export async function dispatchComfyRequest(
       uploads,
     })
     await heartbeat.assertOwned()
+    let gate: Awaited<ReturnType<ComfyDispatcherDependencies['preSubmitGate']>>
+    try {
+      gate = await dependencies.preSubmitGate(context, owner)
+    } catch (error) {
+      if (!(error instanceof ComfyError)
+        || (error.code !== COMFY_ERROR_CODE.AUTH_FAILED
+          && error.code !== COMFY_ERROR_CODE.CONNECTION_OFFLINE)) throw error
+      await mustOwn(dependencies.returnToWaiting({ ...owner, errorCode: error.code }))
+      terminal = true
+      return { outcome: 'waiting_capacity' }
+    }
+    if (gate === 'external_busy') {
+      await mustOwn(dependencies.returnToWaiting(owner))
+      terminal = true
+      return { outcome: 'waiting_capacity' }
+    }
+    if (gate === 'incompatible') {
+      await mustOwn(dependencies.blockIncompatible(owner))
+      terminal = true
+      return { outcome: 'blocked_no_compatible_instance' }
+    }
+    if (gate === 'lost') throw lostLease()
     if (!await dependencies.recheckClaim(context, owner)) {
       dependencies.observation?.increment('lease_contention', { outcome: 'claim_recheck' })
       throw lostLease()

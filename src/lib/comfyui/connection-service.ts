@@ -5,7 +5,7 @@ import { decryptApiKey, encryptApiKey } from '@/lib/crypto-utils'
 import { prisma } from '@/lib/prisma'
 import { randomUUID } from 'node:crypto'
 
-import { ComfyClient } from './client'
+import { ComfyClient, type ComfyClientOptions } from './client'
 import { deriveComfyHealth, sanitizeComfyHealthDiagnostic } from './health'
 import { authorizeComfyTarget, type ComfyNetworkPolicyConfig } from './network-policy'
 import type { ComfyAuthType, ComfyConnectionAuth, ComfyHealthSummary } from './types'
@@ -36,6 +36,14 @@ export interface UpdateComfyConnectionInput {
   authType?: ComfyAuthType
   credentials?: ComfyCredentialInput
   enabled?: boolean
+}
+
+export interface ComfyProbeOptions {
+  networkPolicy: ComfyNetworkPolicyConfig
+  clientLimits: Pick<
+    ComfyClientOptions,
+    'timeoutMs' | 'maxWorkflowBytes' | 'maxInputBytes' | 'maxOutputBytes'
+  >
 }
 
 export function normalizeComfyBaseUrl(rawValue: string): string {
@@ -187,7 +195,10 @@ export async function probeOwnedConnection(
   return summary
 }
 
-export async function probeOwnedConnectionStatuses(userId: string) {
+export async function probeOwnedConnectionStatuses(
+  userId: string,
+  options?: ComfyProbeOptions,
+) {
   const records = await prisma.comfyConnection.findMany({
     where: { userId, enabled: true },
     orderBy: { createdAt: 'asc' },
@@ -197,7 +208,7 @@ export async function probeOwnedConnectionStatuses(userId: string) {
     readStatusProbeConcurrency(),
     async (record) => {
       try {
-        const summary = await probeStableConnection(record, userId, true)
+        const summary = await probeStableConnection(record, userId, true, options)
         if (!summary) return null
         return {
           connectionId: record.id,
@@ -217,10 +228,11 @@ async function probeStableConnection(
   initialRecord: ComfyConnection,
   userId: string,
   discardWhenDisabled: boolean,
+  options?: ComfyProbeOptions,
 ): Promise<ComfyHealthSummary | null> {
   let record = initialRecord
   for (let attempt = 1; attempt <= MAX_STABLE_PROBE_ATTEMPTS; attempt += 1) {
-    const summary = await collectProbe(record, userId)
+    const summary = await collectProbe(record, userId, options)
     const persisted = await prisma.comfyConnection.updateMany({
       where: {
         id: record.id,
@@ -243,8 +255,12 @@ async function probeStableConnection(
   throw new ApiError('CONFLICT')
 }
 
-async function collectProbe(record: ComfyConnection, userId: string) {
-  const policy = readNetworkPolicy()
+async function collectProbe(
+  record: ComfyConnection,
+  userId: string,
+  options?: ComfyProbeOptions,
+) {
+  const policy = options?.networkPolicy ?? readNetworkPolicy()
   const checkedAt = new Date()
   let summary: ComfyHealthSummary
   try {
@@ -253,6 +269,7 @@ async function collectProbe(record: ComfyConnection, userId: string) {
       baseUrl: record.normalizedBaseUrl,
       auth: decodeCredentials(record),
       networkPolicy: policy,
+      ...(options?.clientLimits ?? {}),
     })
     const [systemStats, queue, ownedNonterminalCount] = await Promise.all([
       client.getSystemStats(),

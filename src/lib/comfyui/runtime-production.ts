@@ -32,7 +32,15 @@ export async function probeProductionComfyOwnerHealth(
   userId: string,
   config: ComfyRuntimeConfig,
 ) {
-  const statuses = await probeOwnedConnectionStatuses(userId)
+  const statuses = await probeOwnedConnectionStatuses(userId, {
+    networkPolicy: config.networkPolicy,
+    clientLimits: {
+      timeoutMs: Math.min(config.healthIntervalMs, 30_000),
+      maxWorkflowBytes: config.workflowMaxBytes,
+      maxInputBytes: config.inputMaxBytes,
+      maxOutputBytes: config.outputMaxBytes,
+    },
+  })
   await Promise.all(statuses.map(({ connectionId, ...health }) =>
     cacheComfyHealthIfNewer(
       redis, connectionId, health,

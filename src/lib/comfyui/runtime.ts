@@ -148,6 +148,7 @@ export function readComfyRuntimeConfig(
   env: Record<string, string | undefined>,
 ): ComfyRuntimeConfig {
   const enabled = parseBoolean(env, 'COMFYUI_ENABLED', false)
+  if (!enabled) return defaultRuntimeConfig()
   const mode = parseNetworkMode(env.COMFYUI_NETWORK_MODE)
   const allowedHosts = parseHosts(env.COMFYUI_ALLOWED_HOSTS)
   const allowedCidrs = parseCidrs(env.COMFYUI_ALLOWED_CIDRS)
@@ -166,6 +167,14 @@ export function readComfyRuntimeConfig(
     workflowMaxBytes: parseInteger(env, 'COMFYUI_WORKFLOW_MAX_BYTES', DEFAULTS.workflowMaxBytes, 1_024, 100 * 1024 * 1024),
     inputMaxBytes: parseInteger(env, 'COMFYUI_INPUT_MAX_BYTES', DEFAULTS.inputMaxBytes, 1_024, 2 * 1024 * 1024 * 1024),
     outputMaxBytes: parseInteger(env, 'COMFYUI_OUTPUT_MAX_BYTES', DEFAULTS.outputMaxBytes, 1_024, 2 * 1024 * 1024 * 1024),
+  }
+}
+
+function defaultRuntimeConfig(): ComfyRuntimeConfig {
+  return {
+    enabled: false,
+    networkPolicy: { mode: 'allowlist', allowedHosts: [], allowedCidrs: [] },
+    ...DEFAULTS,
   }
 }
 

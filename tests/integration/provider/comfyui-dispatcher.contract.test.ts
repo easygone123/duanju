@@ -56,6 +56,8 @@ function dependencies(overrides: Partial<ComfyDispatcherDependencies> = {}): Com
     returnToWaiting: vi.fn().mockResolvedValue(true),
     markReconciling: vi.fn().mockResolvedValue(true),
     markFailed: vi.fn().mockResolvedValue(true),
+    preSubmitGate: vi.fn().mockResolvedValue('ready'),
+    blockIncompatible: vi.fn().mockResolvedValue(true),
     client: {
       uploadImage: vi.fn().mockResolvedValue({ name: 'uploaded.png', subfolder: 'waoowaoo/user-1/request-1', type: 'input' }),
       submitPrompt: vi.fn().mockResolvedValue({ promptId: 'prompt-1' }),
@@ -163,6 +165,55 @@ describe('ComfyUI dispatcher contract', () => {
     await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({ outcome: 'canceled' })
     expect(deps.client.submitPrompt).not.toHaveBeenCalled()
     expect(deps.returnToWaiting).not.toHaveBeenCalled()
+  })
+
+  it('does not submit when fresh pre-submit queue state becomes externally busy', async () => {
+    const deps = dependencies({
+      preSubmitGate: vi.fn().mockResolvedValue('external_busy'),
+    })
+
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({
+      outcome: 'waiting_capacity',
+    })
+    expect(deps.client.submitPrompt).not.toHaveBeenCalled()
+    expect(deps.claimSubmissionFence).not.toHaveBeenCalled()
+    expect(deps.returnToWaiting).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'request-1', connectionId: 'connection-1', leaseId: 'lease-1',
+    }))
+    expect(deps.release).toHaveBeenCalledOnce()
+  })
+
+  it('does not submit when fresh capability state makes the pinned workflow incompatible', async () => {
+    const deps = dependencies({
+      preSubmitGate: vi.fn().mockResolvedValue('incompatible'),
+    })
+
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({
+      outcome: 'blocked_no_compatible_instance',
+    })
+    expect(deps.client.submitPrompt).not.toHaveBeenCalled()
+    expect(deps.claimSubmissionFence).not.toHaveBeenCalled()
+    expect(deps.blockIncompatible).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'request-1', connectionId: 'connection-1', leaseId: 'lease-1',
+    }))
+    expect(deps.release).toHaveBeenCalledOnce()
+  })
+
+  it('returns to capacity with a stable auth code when the fresh gate cannot authenticate', async () => {
+    const deps = dependencies({
+      preSubmitGate: vi.fn().mockRejectedValue(new ComfyError(
+        'COMFY_AUTH_FAILED', 'Authentication failed', { retryable: false },
+      )),
+    })
+
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({
+      outcome: 'waiting_capacity',
+    })
+    expect(deps.client.submitPrompt).not.toHaveBeenCalled()
+    expect(deps.returnToWaiting).toHaveBeenCalledWith(expect.objectContaining({
+      errorCode: 'COMFY_AUTH_FAILED',
+    }))
+    expect(deps.release).toHaveBeenCalledOnce()
   })
 
   it('keeps an accepted prompt recoverable when request ownership changes after POST', async () => {

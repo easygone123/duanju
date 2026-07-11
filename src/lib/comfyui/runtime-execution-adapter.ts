@@ -6,6 +6,7 @@ import { redis } from '@/lib/redis'
 import { getObjectBuffer, getSignedUrl, uploadObject } from '@/lib/storage'
 
 import { ComfyClient } from './client'
+import { checkComfyCompatibility, type ComfyCompatibilityClient } from './compatibility'
 import {
   findComfyPromptByClientId,
   type ComfyDispatcherDependencies,
@@ -27,6 +28,7 @@ import {
 import { comfyLeaseKey } from './test-lease'
 import type {
   ComfyConnectionAuth,
+  ComfyApiWorkflow,
   ComfyInputBinding,
   ComfyOutputBinding,
   ComfyOutputRef,
@@ -34,6 +36,7 @@ import type {
   ComfyStoredOutputRef,
   ComfyVariableDefinition,
   ComfyVariableValue,
+  ComfyWorkflowRequirements,
 } from './types'
 import type { ComfyRuntimeOperationLimits } from './runtime-deps'
 
@@ -72,6 +75,23 @@ export async function createProductionDispatcherDependencies(
     transition: ({ from, to }) => updateOwned(
       { status: from }, { status: to, ...timestampFor(to) },
     ),
+    preSubmitGate: (freshContext) => runFreshComfyPreSubmitGate({
+      connectionId: owner.connectionId,
+      workflowHash: freshContext.version.contentHash ?? '',
+      graph: freshContext.version.graph ?? {},
+      requirements: freshContext.version.requirements ?? {
+        nodeClasses: [], candidateLoaderInputs: [],
+      },
+      client,
+      verifyOwner: () => verifyOwner(owner),
+    }),
+    blockIncompatible: () => updateOwned({
+      status: { in: ['leased', 'uploading'] }, promptId: null,
+    }, {
+      status: 'blocked_no_compatible_instance', connectionId: null,
+      leaseId: null, leaseExpiresAt: null,
+      errorCode: COMFY_ERROR_CODE.WORKFLOW_INCOMPATIBLE,
+    }),
     claimSubmissionFence: claimComfySubmissionFenceWithStore,
     recordAcceptedPrompt: recordComfyAcceptedPromptWithStore,
     cancelIfRequested: async ({ promptId }) => {
@@ -111,7 +131,7 @@ export async function createProductionDispatcherDependencies(
       status: { in: ['leased', 'uploading'] }, promptId: null,
     }, {
       status: 'waiting_capacity', connectionId: null, leaseId: null,
-      leaseExpiresAt: null, errorCode,
+      leaseExpiresAt: null, errorCode: errorCode ?? null,
     }),
     markReconciling: ({ promptId, errorCode }) => updateOwned({
       status: { notIn: ['completed', 'failed', 'canceled'] },
@@ -228,6 +248,8 @@ async function loadRuntimeContext(requestId: string, limits: ComfyRuntimeOperati
       variableDefinitions: version.variableDefinitions as unknown as ComfyVariableDefinition[],
       bindings: version.bindingSpec as unknown as ComfyInputBinding[],
       outputs: version.outputSpec as unknown as ComfyOutputBinding[],
+      requirements: version.requirements as unknown as ComfyWorkflowRequirements,
+      contentHash: version.contentHash,
     },
   }
   return { bundle, client, context }
@@ -247,6 +269,37 @@ export function createProductionComfyClient(
     maxInputBytes: limits.inputMaxBytes,
     maxOutputBytes: limits.outputMaxBytes,
   })
+}
+
+export async function runFreshComfyPreSubmitGate(input: {
+  connectionId: string
+  workflowHash: string
+  graph: ComfyApiWorkflow
+  requirements: ComfyWorkflowRequirements
+  client: ComfyCompatibilityClient & {
+    getSystemStats(): Promise<unknown>
+    getQueue(): Promise<{ running: unknown[]; pending: unknown[] }>
+  }
+  verifyOwner(): Promise<boolean>
+}): Promise<'ready' | 'external_busy' | 'incompatible' | 'lost'> {
+  await input.client.getSystemStats()
+  const queue = await input.client.getQueue()
+  if (queue.running.length > 0 || queue.pending.length > 0) {
+    return await input.verifyOwner() ? 'external_busy' : 'lost'
+  }
+  const compatibility = await checkComfyCompatibility({
+    connectionId: input.connectionId,
+    workflowHash: input.workflowHash,
+    graph: input.graph,
+    requirements: input.requirements,
+    client: input.client,
+  })
+  const finalQueue = await input.client.getQueue()
+  if (finalQueue.running.length > 0 || finalQueue.pending.length > 0) {
+    return await input.verifyOwner() ? 'external_busy' : 'lost'
+  }
+  if (!await input.verifyOwner()) return 'lost'
+  return compatibility.compatible ? 'ready' : 'incompatible'
 }
 
 async function verifyOwner(input: {

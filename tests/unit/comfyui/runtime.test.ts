@@ -232,12 +232,29 @@ describe('ComfyUI runtime configuration', () => {
       vi.spyOn(console, 'warn').mockImplementation(() => undefined),
       vi.spyOn(console, 'error').mockImplementation(() => undefined),
     ]
-    expect(() => readComfyRuntimeConfig({ [key]: value })).toThrow(`Invalid ${key}`)
+    expect(() => readComfyRuntimeConfig({
+      COMFYUI_ENABLED: 'true',
+      COMFYUI_NETWORK_MODE: 'trusted',
+      [key]: value,
+    })).toThrow(`Invalid ${key}`)
     for (const spy of consoleSpies) expect(spy).not.toHaveBeenCalled()
   })
 
   it('fails fast when enabled allowlist mode has no permitted hosts or networks', () => {
     expect(() => readComfyRuntimeConfig({ COMFYUI_ENABLED: 'true' }))
       .toThrow('Invalid COMFYUI_ALLOWED_HOSTS/COMFYUI_ALLOWED_CIDRS')
+  })
+
+  it('keeps disabled ComfyUI inert without validating unused Comfy-only settings', () => {
+    expect(readComfyRuntimeConfig({
+      COMFYUI_ENABLED: 'false',
+      COMFYUI_NETWORK_MODE: 'not-a-mode',
+      COMFYUI_ALLOWED_HOSTS: 'https://invalid',
+      COMFYUI_ALLOWED_CIDRS: 'invalid',
+      COMFYUI_HEALTH_INTERVAL_MS: 'invalid',
+    })).toMatchObject({
+      enabled: false,
+      networkPolicy: { mode: 'allowlist', allowedHosts: [], allowedCidrs: [] },
+    })
   })
 })
