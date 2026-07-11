@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { redis } from '@/lib/redis'
 
-import { comfyRequestLeaseValue, releaseComfyRequestLease } from './lease'
+import { releaseComfyRequestLease } from './lease'
 import { comfyLeaseKey } from './test-lease'
 import { COMFY_ACTIVE_REQUEST_STATUSES } from './types'
 
@@ -79,9 +79,6 @@ export async function scanExpiredPreSubmitComfyRequests(
   const candidates = await dependencies.listExpiredCandidates({ now, limit })
   const result = { scanned: candidates.length, recovered: 0, contended: 0, lost: 0 }
   for (const candidate of candidates) {
-    const expectedOwner = comfyRequestLeaseValue({
-      requestId: candidate.id, leaseId: candidate.leaseId,
-    })
     let redisOwner: string | null
     try {
       redisOwner = await dependencies.readLeaseValue(candidate.connectionId)
@@ -89,7 +86,7 @@ export async function scanExpiredPreSubmitComfyRequests(
       result.contended += 1
       continue
     }
-    if (redisOwner !== null && redisOwner !== expectedOwner) {
+    if (redisOwner !== null) {
       result.contended += 1
       continue
     }

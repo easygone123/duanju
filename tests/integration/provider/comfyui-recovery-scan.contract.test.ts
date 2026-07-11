@@ -15,14 +15,11 @@ function candidate(status: ExpiredPreSubmitCandidate['status'] = 'uploading'): E
 }
 
 describe('ComfyUI expired pre-submit recovery scan', () => {
-  it('recovers expired pre-submit phases with absent or exact Redis ownership', async () => {
+  it('recovers expired pre-submit phases only after Redis TTL ownership disappears', async () => {
     const candidates = [candidate('leased'), candidate('uploading'), candidate('submitting')]
     const recoverCandidate = vi.fn().mockResolvedValue(true)
     const releaseLease = vi.fn().mockResolvedValue(true)
-    const readLeaseValue = vi.fn(async (connectionId: string) => {
-      const item = candidates.find((value) => value.connectionId === connectionId)
-      return item ? comfyRequestLeaseValue({ requestId: item.id, leaseId: item.leaseId }) : null
-    })
+    const readLeaseValue = vi.fn().mockResolvedValue(null)
 
     const result = await scanExpiredPreSubmitComfyRequests({ now: new Date(2_000), limit: 10 }, {
       listExpiredCandidates: vi.fn().mockResolvedValue(candidates), readLeaseValue,
@@ -32,6 +29,31 @@ describe('ComfyUI expired pre-submit recovery scan', () => {
     expect(result).toEqual({ scanned: 3, recovered: 3, contended: 0, lost: 0 })
     expect(recoverCandidate).toHaveBeenCalledTimes(3)
     expect(releaseLease).toHaveBeenCalledTimes(3)
+  })
+
+  it('waits for an exact heartbeat owner to expire before entering DB recovery', async () => {
+    const expired = candidate('uploading')
+    const recoverCandidate = vi.fn().mockResolvedValue(true)
+    const releaseLease = vi.fn().mockResolvedValue(true)
+    const readLeaseValue = vi.fn()
+      .mockResolvedValueOnce(comfyRequestLeaseValue({
+        requestId: expired.id, leaseId: expired.leaseId,
+      }))
+      .mockResolvedValueOnce(null)
+    const dependencies = {
+      listExpiredCandidates: vi.fn().mockResolvedValue([expired]),
+      readLeaseValue, recoverCandidate, releaseLease,
+    }
+
+    await expect(scanExpiredPreSubmitComfyRequests({ now: new Date(2_000) }, dependencies))
+      .resolves.toEqual({ scanned: 1, recovered: 0, contended: 1, lost: 0 })
+    expect(recoverCandidate).not.toHaveBeenCalled()
+    expect(releaseLease).not.toHaveBeenCalled()
+
+    await expect(scanExpiredPreSubmitComfyRequests({ now: new Date(2_000) }, dependencies))
+      .resolves.toEqual({ scanned: 1, recovered: 1, contended: 0, lost: 0 })
+    expect(recoverCandidate).toHaveBeenCalledOnce()
+    expect(releaseLease).toHaveBeenCalledOnce()
   })
 
   it('fails closed when Redis has a new owner and never touches the DB', async () => {
