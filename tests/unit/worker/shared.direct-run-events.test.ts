@@ -3,10 +3,16 @@ import { DelayedError, type Job } from 'bullmq'
 import type { TaskJobData } from '@/lib/task/types'
 
 const tryUpdateTaskProgressMock = vi.hoisted(() => vi.fn(async () => true))
-const publishTaskEventMock = vi.hoisted(() => vi.fn(async () => ({})))
+const publishTaskEventMock = vi.hoisted(() =>
+  vi.fn<(event: Record<string, unknown>) => Promise<Record<string, never>>>().mockResolvedValue({}),
+)
 const publishTaskStreamEventMock = vi.hoisted(() => vi.fn(async () => ({})))
 const publishRunEventMock = vi.hoisted(() => vi.fn(async () => undefined))
 const tryMarkTaskFailedMock = vi.hoisted(() => vi.fn(async () => true))
+const tryMarkTaskCompletedMock = vi.hoisted(() => vi.fn(async () => true))
+const tryMarkTaskProcessingMock = vi.hoisted(() => vi.fn(async () => true))
+const tryResumeTaskFromComfyCapacityWaitMock = vi.hoisted(() => vi.fn(async () => false))
+const touchTaskHeartbeatMock = vi.hoisted(() => vi.fn(async () => true))
 const mapTaskSSEEventToRunEventsMock = vi.hoisted(() =>
   vi.fn(() => [{
     runId: 'run-1',
@@ -38,10 +44,11 @@ vi.mock('@/lib/logging/core', () => ({
 
 vi.mock('@/lib/task/service', () => ({
   rollbackTaskBillingForTask: vi.fn(async () => ({ attempted: false, rolledBack: false, billingInfo: null })),
-  touchTaskHeartbeat: vi.fn(async () => undefined),
-  tryMarkTaskCompleted: vi.fn(async () => true),
+  touchTaskHeartbeat: touchTaskHeartbeatMock,
+  tryMarkTaskCompleted: tryMarkTaskCompletedMock,
   tryMarkTaskFailed: tryMarkTaskFailedMock,
-  tryMarkTaskProcessing: vi.fn(async () => true),
+  tryMarkTaskProcessing: tryMarkTaskProcessingMock,
+  tryResumeTaskFromComfyCapacityWait: tryResumeTaskFromComfyCapacityWaitMock,
   tryUpdateTaskProgress: tryUpdateTaskProgressMock,
   updateTaskBillingInfo: vi.fn(async () => undefined),
 }))
@@ -92,7 +99,7 @@ vi.mock('@/lib/run-runtime/publisher', () => ({
 import { reportTaskProgress, reportTaskStreamChunk, withTaskLifecycle } from '@/lib/workers/shared'
 
 function buildJob(taskType: TaskJobData['type']): Job<TaskJobData> {
-  return {
+  const job = {
     data: {
       taskId: 'task-1',
       type: taskType,
@@ -108,7 +115,12 @@ function buildJob(taskType: TaskJobData['type']): Job<TaskJobData> {
       trace: null,
     },
     queueName: 'text',
+    opts: { attempts: 5 },
   } as unknown as Job<TaskJobData>
+  job.updateData = vi.fn(async (nextData: TaskJobData) => {
+    job.data = nextData
+  })
+  return job
 }
 
 describe('worker shared direct run events', () => {
@@ -120,6 +132,12 @@ describe('worker shared direct run events', () => {
     publishRunEventMock.mockReset()
     mapTaskSSEEventToRunEventsMock.mockClear()
     tryMarkTaskFailedMock.mockClear()
+    tryMarkTaskCompletedMock.mockClear()
+    tryMarkTaskProcessingMock.mockClear()
+    tryMarkTaskProcessingMock.mockResolvedValue(true)
+    tryResumeTaskFromComfyCapacityWaitMock.mockClear()
+    tryResumeTaskFromComfyCapacityWaitMock.mockResolvedValue(false)
+    touchTaskHeartbeatMock.mockClear()
   })
 
   it('publishes run events directly for core analysis progress updates', async () => {
@@ -180,5 +198,57 @@ describe('worker shared direct run events', () => {
       throw new DelayedError()
     })).rejects.toMatchObject({ name: 'DelayedError' })
     expect(tryMarkTaskFailedMock).not.toHaveBeenCalled()
+  })
+
+  it('resumes repeated verified ComfyUI capacity delays without restarting task lifecycle', async () => {
+    const job = buildJob('image_panel')
+    const initialData = job.data
+    const marker = {
+      version: 1 as const,
+      taskId: initialData.taskId,
+      externalId: 'COMFY:IMAGE:req-1',
+    }
+
+    await expect(withTaskLifecycle(job, async () => {
+      job.data = { ...job.data, comfyCapacityResume: marker }
+      throw new DelayedError()
+    })).rejects.toMatchObject({ name: 'DelayedError' })
+
+    tryResumeTaskFromComfyCapacityWaitMock.mockResolvedValue(true)
+    expect(7).toBeGreaterThan(job.opts.attempts as number)
+    for (let cycle = 0; cycle < 7; cycle += 1) {
+      await expect(withTaskLifecycle(job, async () => {
+        expect(job.data.comfyCapacityResume).toBeUndefined()
+        job.data = { ...job.data, comfyCapacityResume: marker }
+        throw new DelayedError()
+      })).rejects.toMatchObject({ name: 'DelayedError' })
+    }
+
+    await withTaskLifecycle(job, async () => {
+      expect(job.data.comfyCapacityResume).toBeUndefined()
+      return { ok: true }
+    })
+
+    expect(tryMarkTaskProcessingMock).toHaveBeenCalledTimes(1)
+    expect(tryResumeTaskFromComfyCapacityWaitMock).toHaveBeenCalledTimes(8)
+    expect(tryMarkTaskCompletedMock).toHaveBeenCalledTimes(1)
+    expect(publishTaskEventMock.mock.calls.filter(([event]) => event.type === 'task.processing')).toHaveLength(1)
+  })
+
+  it.each([
+    ['forged Comfy marker', 'COMFY:IMAGE:req-forged'],
+    ['cloud marker', 'FAL:IMAGE:req-cloud'],
+  ])('does not let a %s bypass the normal attempt lifecycle', async (_case, externalId) => {
+    const job = buildJob('image_panel')
+    job.data = {
+      ...job.data,
+      comfyCapacityResume: { version: 1, taskId: job.data.taskId, externalId },
+    }
+
+    await withTaskLifecycle(job, async () => ({ ok: true }))
+
+    expect(tryResumeTaskFromComfyCapacityWaitMock).toHaveBeenCalledTimes(1)
+    expect(tryMarkTaskProcessingMock).toHaveBeenCalledTimes(1)
+    expect(publishTaskEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'task.processing' }))
   })
 })

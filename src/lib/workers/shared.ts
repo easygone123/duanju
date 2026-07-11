@@ -9,6 +9,7 @@ import {
   tryMarkTaskCompleted,
   tryMarkTaskFailed,
   tryMarkTaskProcessing,
+  tryResumeTaskFromComfyCapacityWait,
   tryUpdateTaskProgress,
   updateTaskBillingInfo,
 } from '@/lib/task/service'
@@ -342,7 +343,10 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
         episodeId: data.episodeId || null,
       },
     })
-    const markedProcessing = await tryMarkTaskProcessing(taskId)
+    const resumedFromCapacityWait = data.comfyCapacityResume
+      ? await tryResumeTaskFromComfyCapacityWait(taskId, data.comfyCapacityResume)
+      : false
+    const markedProcessing = resumedFromCapacityWait || await tryMarkTaskProcessing(taskId)
     if (!markedProcessing) {
       const rollbackResult = await rollbackTaskBillingForTask({
         taskId,
@@ -364,52 +368,62 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
       })
       return
     }
-    const processingPayload = withFlowFields(data, {
-      queue: job.queueName,
-      stage: 'received',
-      stageLabel: getTaskStageLabel('received'),
-      displayMode: 'loading',
-      trace: {
-        requestId: data.trace?.requestId || null,
-      },
-    })
-    if (shouldDirectPublishRunEvents(data.type)) {
-      const runId = resolveRunId(data)
-      if (runId) {
-        await publishRunEvent({
-          runId,
-          projectId: data.projectId,
-          userId: data.userId,
-          eventType: RUN_EVENT_TYPE.RUN_START,
-          payload: {
-            ...processingPayload,
-            message: buildTaskProgressMessage({
-              eventType: TASK_EVENT_TYPE.PROCESSING,
-              taskType: data.type,
-              payload: processingPayload,
-            }),
-          },
-        })
+    if (resumedFromCapacityWait) {
+      if (typeof job.updateData !== 'function') {
+        throw new Error('COMFY_CAPACITY_RESUME_MARKER_UNAVAILABLE')
       }
+      const nextData = { ...job.data }
+      delete nextData.comfyCapacityResume
+      await job.updateData(nextData)
     }
-    await publishLifecycleEvent({
-      taskId,
-      projectId: data.projectId,
-      userId: data.userId,
-      type: TASK_EVENT_TYPE.PROCESSING,
-      taskType: data.type,
-      targetType: data.targetType,
-      targetId: data.targetId,
-      episodeId: data.episodeId || null,
-      payload: {
-        ...processingPayload,
-        message: buildTaskProgressMessage({
-          eventType: TASK_EVENT_TYPE.PROCESSING,
-          taskType: data.type,
-          payload: processingPayload,
-        }),
-      },
-    })
+    if (!resumedFromCapacityWait) {
+      const processingPayload = withFlowFields(data, {
+        queue: job.queueName,
+        stage: 'received',
+        stageLabel: getTaskStageLabel('received'),
+        displayMode: 'loading',
+        trace: {
+          requestId: data.trace?.requestId || null,
+        },
+      })
+      if (shouldDirectPublishRunEvents(data.type)) {
+        const runId = resolveRunId(data)
+        if (runId) {
+          await publishRunEvent({
+            runId,
+            projectId: data.projectId,
+            userId: data.userId,
+            eventType: RUN_EVENT_TYPE.RUN_START,
+            payload: {
+              ...processingPayload,
+              message: buildTaskProgressMessage({
+                eventType: TASK_EVENT_TYPE.PROCESSING,
+                taskType: data.type,
+                payload: processingPayload,
+              }),
+            },
+          })
+        }
+      }
+      await publishLifecycleEvent({
+        taskId,
+        projectId: data.projectId,
+        userId: data.userId,
+        type: TASK_EVENT_TYPE.PROCESSING,
+        taskType: data.type,
+        targetType: data.targetType,
+        targetId: data.targetId,
+        episodeId: data.episodeId || null,
+        payload: {
+          ...processingPayload,
+          message: buildTaskProgressMessage({
+            eventType: TASK_EVENT_TYPE.PROCESSING,
+            taskType: data.type,
+            payload: processingPayload,
+          }),
+        },
+      })
+    }
 
     const { result, textUsage } = await withTextUsageCollection(async () => await handler(job))
     if (billingInfo?.billable) {

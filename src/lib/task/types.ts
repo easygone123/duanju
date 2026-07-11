@@ -125,6 +125,11 @@ export type TaskJobData = {
   trace?: {
     requestId?: string | null
   } | null
+  comfyCapacityResume?: {
+    version: 1
+    taskId: string
+    externalId: string
+  }
 }
 
 export type SSEEvent = {

@@ -3,7 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { withPrismaRetry } from '@/lib/prisma-retry'
 import { rollbackTaskBilling } from '@/lib/billing'
 import { locales } from '@/i18n/routing'
-import { TASK_STATUS, type CreateTaskInput, type TaskBillingInfo, type TaskStatus } from './types'
+import { parseComfyExternalId } from '@/lib/comfyui/external-id'
+import { TASK_STATUS, type CreateTaskInput, type TaskBillingInfo, type TaskJobData, type TaskStatus } from './types'
 
 const ACTIVE_STATUSES: TaskStatus[] = [TASK_STATUS.QUEUED, TASK_STATUS.PROCESSING]
 const taskModel = prisma.task
@@ -400,6 +401,40 @@ export async function tryMarkTaskProcessing(taskId: string, externalId?: string 
       externalId: externalId || null,
       attempt: { increment: 1 },
     },
+  })
+  return result.count > 0
+}
+
+export async function tryResumeTaskFromComfyCapacityWait(
+  taskId: string,
+  marker: TaskJobData['comfyCapacityResume'],
+) {
+  if (!marker || marker.version !== 1 || marker.taskId !== taskId) return false
+  try {
+    parseComfyExternalId(marker.externalId)
+  } catch {
+    return false
+  }
+
+  const task = await taskModel.findUnique({
+    where: { id: taskId },
+    select: { status: true, externalId: true, payload: true },
+  })
+  const payload = toObject(task?.payload)
+  if (
+    task?.status !== TASK_STATUS.PROCESSING
+    || task.externalId !== marker.externalId
+    || payload.waitingForCapacity !== true
+    || payload.externalId !== marker.externalId
+  ) return false
+
+  const result = await taskModel.updateMany({
+    where: {
+      id: taskId,
+      status: TASK_STATUS.PROCESSING,
+      externalId: marker.externalId,
+    },
+    data: { heartbeatAt: new Date() },
   })
   return result.count > 0
 }

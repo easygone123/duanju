@@ -19,7 +19,7 @@ import {
   resolveProjectModelCapabilityGenerationOptions,
 } from '@/lib/config-service'
 import { TaskTerminatedError } from '@/lib/task/errors'
-import { isTaskActive, trySetTaskExternalId } from '@/lib/task/service'
+import { isTaskActive, touchTaskHeartbeat, trySetTaskExternalId } from '@/lib/task/service'
 import { type TaskJobData } from '@/lib/task/types'
 import { reportTaskProgress } from './shared'
 import { prisma } from '@/lib/prisma'
@@ -174,6 +174,7 @@ export async function waitExternalResult(
     const status = await pollAsyncTask(externalId, userId)
 
     if (status.status === 'completed') {
+      await clearComfyCapacityResumeMarker(job)
       const url = status.resultUrl || status.imageUrl || status.videoUrl
       if (!url) {
         throw new Error(`External task completed but no result URL: ${externalId}`)
@@ -194,6 +195,7 @@ export async function waitExternalResult(
     }
 
     if (status.status === 'failed') {
+      await clearComfyCapacityResumeMarker(job)
       logger.error({
         message: status.error || 'external task failed',
         errorCode: 'EXTERNAL_ERROR',
@@ -215,8 +217,10 @@ export async function waitExternalResult(
         externalId,
         waitingForCapacity: true,
       })
-      await yieldComfyCapacityWait(job, opts)
+      await yieldComfyCapacityWait(job, externalId, opts)
     }
+
+    await clearComfyCapacityResumeMarker(job)
 
     const executionElapsed = advanceExternalExecutionClock(executionClock, status, Date.now())
     if (executionElapsed !== null && executionElapsed > timeoutMs) break
@@ -247,6 +251,7 @@ export async function waitExternalResult(
 
 async function yieldComfyCapacityWait(
   job: Job<TaskJobData>,
+  externalId: string,
   opts: { capacityWaitBaseMs?: number; capacityWaitJitter?: () => number } | undefined,
 ): Promise<never> {
   const configured = opts?.capacityWaitBaseMs
@@ -254,11 +259,34 @@ async function yieldComfyCapacityWait(
   const baseMs = Number.isFinite(configured) ? Math.max(1_000, Math.min(30_000, configured)) : 3_000
   const random = Math.max(0, Math.min(1, opts?.capacityWaitJitter?.() ?? Math.random()))
   const delayMs = baseMs + Math.floor(baseMs * 0.25 * random)
-  if (typeof job.moveToDelayed !== 'function' || !job.token) {
+  if (typeof job.moveToDelayed !== 'function' || typeof job.updateData !== 'function' || !job.token) {
     throw new Error('COMFY_CAPACITY_DELAY_UNAVAILABLE')
   }
-  await job.moveToDelayed(Date.now() + delayMs, job.token)
+  const previousData = job.data
+  const nextData: TaskJobData = {
+    ...previousData,
+    comfyCapacityResume: {
+      version: 1,
+      taskId: previousData.taskId,
+      externalId,
+    },
+  }
+  await job.updateData(nextData)
+  await touchTaskHeartbeat(previousData.taskId)
+  try {
+    await job.moveToDelayed(Date.now() + delayMs, job.token)
+  } catch (error) {
+    await job.updateData(previousData)
+    throw error
+  }
   throw new DelayedError()
+}
+
+async function clearComfyCapacityResumeMarker(job: Job<TaskJobData>) {
+  if (!job.data.comfyCapacityResume || typeof job.updateData !== 'function') return
+  const nextData = { ...job.data }
+  delete nextData.comfyCapacityResume
+  await job.updateData(nextData)
 }
 
 export async function resolveImageSourceFromGeneration(

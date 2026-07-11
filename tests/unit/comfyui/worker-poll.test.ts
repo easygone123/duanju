@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const pollMock = vi.hoisted(() => vi.fn())
 const progressMock = vi.hoisted(() => vi.fn())
+const heartbeatMock = vi.hoisted(() => vi.fn(async () => true))
 
 vi.mock('@/lib/async-poll', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/async-poll')>(),
@@ -9,6 +10,7 @@ vi.mock('@/lib/async-poll', async (importOriginal) => ({
 }))
 vi.mock('@/lib/task/service', () => ({
   isTaskActive: vi.fn(async () => true),
+  touchTaskHeartbeat: heartbeatMock,
   trySetTaskExternalId: vi.fn(async () => true),
 }))
 vi.mock('@/lib/workers/shared', () => ({ reportTaskProgress: progressMock }))
@@ -36,9 +38,10 @@ describe('ComfyUI worker polling deadline', () => {
     progressMock.mockImplementationOnce(async () => { now = 200 })
 
     const moveToDelayed = vi.fn(async () => undefined)
+    const updateData = vi.fn(async () => undefined)
     const job = {
       data: { taskId: 'task-1', projectId: 'project-1', userId: 'user-1' },
-      token: 'worker-token', moveToDelayed,
+      token: 'worker-token', moveToDelayed, updateData,
     } as never
     await expect(waitExternalResult(job, 'COMFY:IMAGE:req-1', 'user-1', {
       timeoutMs: 100,
@@ -47,6 +50,14 @@ describe('ComfyUI worker polling deadline', () => {
       capacityWaitJitter: () => 0,
     })).rejects.toMatchObject({ name: 'DelayedError' })
     expect(pollMock).toHaveBeenCalledTimes(2)
+    expect(updateData).toHaveBeenCalledWith(expect.objectContaining({
+      comfyCapacityResume: {
+        version: 1,
+        taskId: 'task-1',
+        externalId: 'COMFY:IMAGE:req-1',
+      },
+    }))
+    expect(heartbeatMock).toHaveBeenCalledWith('task-1')
     expect(moveToDelayed).toHaveBeenCalledWith(2_200, 'worker-token')
   })
 
@@ -61,9 +72,10 @@ describe('ComfyUI worker polling deadline', () => {
       for (let index = 0; index < count; index += 1) {
         pollMock.mockResolvedValueOnce({ status: 'pending', stage, waitingForCapacity: true })
         const moveToDelayed = vi.fn(async () => undefined)
+        const updateData = vi.fn(async () => undefined)
         const job = {
           data: { taskId: `task-${index}`, projectId: 'project-1', userId: 'user-1' },
-          token: `token-${index}`, moveToDelayed,
+          token: `token-${index}`, moveToDelayed, updateData,
         } as never
         await expect(waitExternalResult(job, `COMFY:${mediaType}:req-${index}`, 'user-1', {
           capacityWaitBaseMs: 1_000, capacityWaitJitter: () => 0,
@@ -78,14 +90,21 @@ describe('ComfyUI worker polling deadline', () => {
       .mockResolvedValueOnce({ status: 'pending', stage: 'comfy_running', waitingForCapacity: false })
       .mockResolvedValueOnce({ status: 'completed', resultUrl: 'https://store/result.png' })
     const moveToDelayed = vi.fn(async () => undefined)
+    const updateData = vi.fn(async () => undefined)
     const job = {
-      data: { taskId: 'task-1', projectId: 'project-1', userId: 'user-1' },
-      token: 'token', moveToDelayed,
+      data: {
+        taskId: 'task-1', projectId: 'project-1', userId: 'user-1',
+        comfyCapacityResume: {
+          version: 1, taskId: 'task-1', externalId: 'COMFY:IMAGE:req-1',
+        },
+      },
+      token: 'token', moveToDelayed, updateData,
     } as never
     await expect(waitExternalResult(job, 'COMFY:IMAGE:req-1', 'user-1', {
       intervalMs: 0,
     })).resolves.toMatchObject({ url: 'https://store/result.png' })
     expect(moveToDelayed).not.toHaveBeenCalled()
+    expect(updateData).toHaveBeenCalledWith(expect.not.objectContaining({ comfyCapacityResume: expect.anything() }))
   })
 
   it('maps owned edit and first/last-frame inputs without exposing source URLs', async () => {
