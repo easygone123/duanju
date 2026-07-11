@@ -9,6 +9,8 @@ const config = {
   healthIntervalMs: 1000, dispatchIntervalMs: 500, reconcileIntervalMs: 2000,
   leaseTtlMs: 30000, imageTimeoutMs: 300000, videoTimeoutMs: 1200000,
   workflowMaxBytes: 2097152, inputMaxBytes: 26214400, outputMaxBytes: 536870912,
+  dispatchConcurrency: 8, pageSize: 100,
+  failureBackoffBaseMs: 1000, failureBackoffMaxMs: 60000,
 } satisfies ComfyRuntimeConfig
 
 describe('production ComfyUI runtime dependency composition', () => {
@@ -28,7 +30,7 @@ describe('production ComfyUI runtime dependency composition', () => {
 
   it('schedules then dispatches each leased request with runtime limits', async () => {
     const services = fixture()
-    services.listDispatchOwners.mockResolvedValue(['u1'])
+    services.listDispatchOwners.mockResolvedValue(['u1', 'u2'])
     services.scheduleNext.mockResolvedValueOnce({
       outcome: 'leased', requestId: 'r1', connectionId: 'c1', leaseId: 'l1', mediaType: 'image',
     }).mockResolvedValueOnce({ outcome: 'empty' })
@@ -64,7 +66,7 @@ describe('production ComfyUI runtime dependency composition', () => {
   it('uses multiple idle connections without waiting for the first execution to finish', async () => {
     const services = fixture()
     const first = Promise.withResolvers<void>()
-    services.listDispatchOwners.mockResolvedValue(['u1'])
+    services.listDispatchOwners.mockResolvedValue(['u1', 'u2'])
     services.scheduleNext
       .mockResolvedValueOnce({
         outcome: 'leased', requestId: 'r1', connectionId: 'c1', leaseId: 'l1', mediaType: 'image',
@@ -72,7 +74,6 @@ describe('production ComfyUI runtime dependency composition', () => {
       .mockResolvedValueOnce({
         outcome: 'leased', requestId: 'r2', connectionId: 'c2', leaseId: 'l2', mediaType: 'video',
       })
-      .mockResolvedValueOnce({ outcome: 'empty' })
     services.dispatch.mockReturnValueOnce(first.promise).mockResolvedValueOnce(undefined)
 
     const tick = createProductionComfyRuntimeDeps(services)

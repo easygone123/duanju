@@ -104,9 +104,15 @@ export async function scheduleNextComfyRequest(
   const connections = (await dependencies.listOwnedEnabledConnections(userId))
     .filter((connection) => connection.enabled && connection.userId === userId)
     .sort(compareConnections)
+  const idle: ComfySchedulableConnection[] = []
+  for (const connection of connections) {
+    const health = await dependencies.readCachedHealth(connection.id)
+    if (health?.state === 'online_idle') idle.push(connection)
+  }
+  if (idle.length === 0) return { outcome: 'waiting_capacity', requestId: request.id }
   const compatible: ComfySchedulableConnection[] = []
   let compatibilityUnknown = false
-  for (const connection of connections) {
+  for (const connection of idle) {
     const result = await dependencies.checkCachedCompatibility(
       connection.id, request.workflowVersionId,
     )
@@ -128,16 +134,9 @@ export async function scheduleNextComfyRequest(
     return { outcome: 'lost_race', requestId: request.id }
   }
 
-  const idle: ComfySchedulableConnection[] = []
-  for (const connection of compatible) {
-    const health = await dependencies.readCachedHealth(connection.id)
-    if (health?.state === 'online_idle') idle.push(connection)
-  }
-  if (idle.length === 0) return { outcome: 'waiting_capacity', requestId: request.id }
-
   const now = options.now?.() ?? new Date()
   const ttlMs = options.leaseTtlMs ?? 30_000
-  for (const connection of idle) {
+  for (const connection of compatible) {
     const owner = {
       connectionId: connection.id,
       requestId: request.id,

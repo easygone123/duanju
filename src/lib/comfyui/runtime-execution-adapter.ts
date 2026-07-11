@@ -83,7 +83,7 @@ export async function createProductionDispatcherDependencies(
         nodeClasses: [], candidateLoaderInputs: [],
       },
       client,
-      verifyOwner: () => verifyOwner(owner),
+      verifyOwner: () => verifyFreshConnectionOwner(owner, bundle.connection!),
     }),
     blockIncompatible: () => updateOwned({
       status: { in: ['leased', 'uploading'] }, promptId: null,
@@ -141,7 +141,8 @@ export async function createProductionDispatcherDependencies(
       ...(promptId ? { promptId } : {}),
     }, { status: 'failed', failedAt: new Date(), errorCode, errorMessage }),
     client,
-    signal: timeoutSignal(signal, limits.executionTimeoutMs),
+    signal,
+    startExecutionTimeout: () => createExecutionDeadline(signal, limits.executionTimeoutMs),
     leaseTtlMs: limits.leaseTtlMs,
     maxInputBytes: limits.inputMaxBytes,
     maxOutputBytes: limits.outputMaxBytes,
@@ -166,6 +167,7 @@ export async function createProductionDispatcherDependencies(
 export async function createProductionReconciliationDependencies(
   requestId: string,
   limits: ComfyRuntimeOperationLimits,
+  reconciliationFence: () => Promise<boolean> = async () => true,
 ): Promise<ComfyReconciliationDependencies> {
   const { bundle, client, context } = await loadRuntimeContext(requestId, limits)
   const owner = ownerOf(bundle)
@@ -173,14 +175,16 @@ export async function createProductionReconciliationDependencies(
     id: owner.requestId, userId: owner.userId, connectionId: owner.connectionId,
     leaseId: owner.leaseId,
   }
-  const updateOwned = async (data: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
-    (await prisma.comfyGenerationRequest.updateMany({
+  const updateOwned = async (data: Record<string, unknown>, extra: Record<string, unknown> = {}) => {
+    if (!await reconciliationFence()) return false
+    return (await prisma.comfyGenerationRequest.updateMany({
       where: { ...ownerWhere, ...extra }, data,
     })).count === 1
+  }
 
   return {
     loadContext: async () => context,
-    verifyLeaseOwner: verifyOwner,
+    verifyLeaseOwner: async (input) => await reconciliationFence() && await verifyOwner(input),
     getQueue: () => client.getQueue(),
     getHistory: (promptId) => client.getHistory(promptId),
     findPromptByClientId: async (clientId) => findComfyPromptByClientId(
@@ -318,6 +322,25 @@ async function verifyOwner(input: {
   return count === 1 && lease === comfyRequestLeaseValue(input)
 }
 
+async function verifyFreshConnectionOwner(
+  input: { requestId: string; userId: string; connectionId: string; leaseId: string },
+  snapshot: ComfyConnection,
+) {
+  const [owned, connection] = await Promise.all([
+    verifyOwner(input),
+    prisma.comfyConnection.findFirst({
+      where: { id: input.connectionId, userId: input.userId },
+      select: {
+        enabled: true, normalizedBaseUrl: true, authType: true, authSecretEncrypted: true,
+      },
+    }),
+  ])
+  return owned && !!connection && connection.enabled
+    && connection.normalizedBaseUrl === snapshot.normalizedBaseUrl
+    && connection.authType === snapshot.authType
+    && connection.authSecretEncrypted === snapshot.authSecretEncrypted
+}
+
 function ownerOf(bundle: Bundle) {
   if (!bundle.connectionId || !bundle.leaseId) throw new Error('Invalid ComfyUI request owner')
   return {
@@ -351,7 +374,7 @@ function timestampFor(status: ComfyRequestStatus) {
     : {}
 }
 
-function timeoutSignal(parent: AbortSignal, timeoutMs: number) {
+function createExecutionDeadline(parent: AbortSignal, timeoutMs: number) {
   const controller = new AbortController()
   const abort = () => controller.abort()
   if (parent.aborted) abort()
@@ -362,7 +385,16 @@ function timeoutSignal(parent: AbortSignal, timeoutMs: number) {
     clearTimeout(timer)
     parent.removeEventListener('abort', abort)
   }, { once: true })
-  return controller.signal
+  let disposed = false
+  return {
+    signal: controller.signal,
+    dispose() {
+      if (disposed) return
+      disposed = true
+      clearTimeout(timer)
+      parent.removeEventListener('abort', abort)
+    },
+  }
 }
 
 function mediaType(value: string): 'image' | 'video' {

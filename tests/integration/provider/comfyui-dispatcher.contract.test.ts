@@ -254,6 +254,22 @@ describe('ComfyUI dispatcher contract', () => {
     expect(deps.release).toHaveBeenCalledTimes(1)
   })
 
+  it('captures a rejected heartbeat and propagates it without an unhandled rejection', async () => {
+    const failure = new Error('heartbeat transport failed')
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    const deps = dependencies({ heartbeat: vi.fn().mockRejectedValue(failure) })
+    try {
+      await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({
+        outcome: 'waiting_capacity',
+      })
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
+  })
+
   it('clamps an oversized heartbeat tick below TTL while staying non-reentrant', async () => {
     const heartbeat = vi.fn().mockResolvedValue(true)
     const deps = dependencies({

@@ -3,8 +3,6 @@ import { logError as _ulogError } from '@/lib/logging/core'
 import type { ComfyRuntimeConfig, ComfyRuntimeDeps } from './runtime'
 import type { ComfyHealthState } from './types'
 
-const MAX_ASSIGNMENTS_PER_OWNER_TICK = 100
-
 export interface ComfyRuntimeOperationLimits {
   leaseTtlMs: number
   workflowMaxBytes: number
@@ -59,28 +57,54 @@ export function createProductionComfyRuntimeDeps(
   overrides: Partial<ProductionComfyRuntimeServices> = {},
 ): ComfyRuntimeDeps {
   const services = { ...productionServices, ...overrides }
+  let ownerCursor = 0
+  const failures = new Map<string, { attempts: number; retryAt: number }>()
+  const allowed = (key: string) => (failures.get(key)?.retryAt ?? 0) <= Date.now()
+  const failed = (key: string, config: ComfyRuntimeConfig) => {
+    const attempts = (failures.get(key)?.attempts ?? 0) + 1
+    const exponential = Math.min(
+      config.failureBackoffMaxMs,
+      config.failureBackoffBaseMs * 2 ** Math.min(attempts - 1, 16),
+    )
+    failures.set(key, { attempts, retryAt: Date.now() + exponential * (0.75 + Math.random() * 0.5) })
+  }
+  const succeeded = (key: string) => failures.delete(key)
   return {
     onError: services.onError,
     async healthTick(signal, config) {
       let idle = false
       for (const userId of await services.listHealthOwners()) {
         if (signal.aborted) break
-        const statuses = await services.probeOwnerHealth(userId, config)
-        if (statuses.some((status) => status.state === 'online_idle')) idle = true
+        const key = `health:${userId}`
+        if (!allowed(key)) continue
+        try {
+          const statuses = await services.probeOwnerHealth(userId, config)
+          if (statuses.some((status) => status.state === 'online_idle')) idle = true
+          succeeded(key)
+        } catch (error) {
+          failed(key, config); services.onError(error, 'health')
+        }
       }
       return { idle }
     },
     async dispatchTick(signal, config) {
+      const owners = await services.listDispatchOwners()
+      const rotated = [...owners.slice(ownerCursor), ...owners.slice(0, ownerCursor)]
+        .slice(0, config.pageSize)
+      ownerCursor = owners.length === 0 ? 0 : (ownerCursor + rotated.length) % owners.length
       const executions: Promise<unknown>[] = []
-      for (const userId of await services.listDispatchOwners()) {
-        for (let count = 0; count < MAX_ASSIGNMENTS_PER_OWNER_TICK && !signal.aborted; count += 1) {
+      for (const userId of rotated) {
+        if (executions.length >= config.dispatchConcurrency || signal.aborted) break
+        const key = `dispatch:${userId}`
+        if (!allowed(key)) continue
+        try {
           const result = await services.scheduleNext(userId, config)
-          if (result.outcome !== 'leased') break
-          executions.push(services.dispatch(
-            result.requestId,
-            limitsFor(result.mediaType, config),
-            signal,
-          ).catch((error) => services.onError(error, 'dispatch')))
+          succeeded(key)
+          if (result.outcome === 'leased') executions.push(services.dispatch(
+            result.requestId, limitsFor(result.mediaType, config), signal,
+          ).catch((error) => { failed(key, config); services.onError(error, 'dispatch') }))
+        } catch (error) {
+          failed(key, config); services.onError(error, 'dispatch')
         }
       }
       await Promise.all(executions)
@@ -88,11 +112,14 @@ export function createProductionComfyRuntimeDeps(
     async reconcileTick(signal, config) {
       for (const request of await services.listReconcileRequests()) {
         if (signal.aborted) break
-        await services.reconcile(
-          request.requestId,
-          limitsFor(request.mediaType, config),
-          signal,
-        )
+        const key = `reconcile:${request.requestId}`
+        if (!allowed(key)) continue
+        try {
+          await services.reconcile(request.requestId, limitsFor(request.mediaType, config), signal)
+          succeeded(key)
+        } catch (error) {
+          failed(key, config); services.onError(error, 'reconcile')
+        }
       }
     },
     async preSubmitRecoveryTick(signal) {

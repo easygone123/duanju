@@ -19,6 +19,10 @@ const config: ComfyRuntimeConfig = {
   workflowMaxBytes: 2_097_152,
   inputMaxBytes: 26_214_400,
   outputMaxBytes: 536_870_912,
+  dispatchConcurrency: 8,
+  pageSize: 100,
+  failureBackoffBaseMs: 1_000,
+  failureBackoffMaxMs: 60_000,
 }
 
 function deps(overrides: Partial<ComfyRuntimeDeps> = {}): ComfyRuntimeDeps {
@@ -193,6 +197,10 @@ describe('ComfyUI runtime configuration', () => {
       COMFYUI_WORKFLOW_MAX_BYTES: '2097153',
       COMFYUI_INPUT_MAX_BYTES: '26214401',
       COMFYUI_OUTPUT_MAX_BYTES: '536870913',
+      COMFYUI_DISPATCH_CONCURRENCY: '9',
+      COMFYUI_PAGE_SIZE: '101',
+      COMFYUI_FAILURE_BACKOFF_BASE_MS: '1100',
+      COMFYUI_FAILURE_BACKOFF_MAX_MS: '61000',
     })).toEqual({
       enabled: true,
       networkPolicy: {
@@ -209,6 +217,10 @@ describe('ComfyUI runtime configuration', () => {
       workflowMaxBytes: 2097153,
       inputMaxBytes: 26214401,
       outputMaxBytes: 536870913,
+      dispatchConcurrency: 9,
+      pageSize: 101,
+      failureBackoffBaseMs: 1100,
+      failureBackoffMaxMs: 61000,
     })
   })
 

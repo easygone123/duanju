@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { redis } from '@/lib/redis'
+import { randomUUID } from 'node:crypto'
 
 import { probeOwnedConnectionStatuses } from './connection-service'
 import { cacheComfyHealthIfNewer } from './health'
@@ -18,6 +19,8 @@ import {
   createProductionReconciliationDependencies,
 } from './runtime-execution-adapter'
 import type { ComfyApiWorkflow, ComfyWorkflowRequirements } from './types'
+import { comfyLeaseKey, COMFY_LEASE_RELEASE_SCRIPT, COMFY_LEASE_RENEW_SCRIPT } from './test-lease'
+import { reclaimComfyRecoveryLease } from './submission'
 
 const compatibilityCache: ComfyCompatibilityCache = new Map()
 
@@ -74,6 +77,10 @@ export async function scheduleProductionComfyRequest(
       })
       if (!version || !connection) return false
       if (compatibilityCache.size > 10_000) compatibilityCache.clear()
+      const cachedPrefix = `${connectionId}:${version.contentHash}:`
+      const cached = [...compatibilityCache.entries()]
+        .find(([key]) => key.startsWith(cachedPrefix))?.[1]
+      if (cached) return cached.compatible
       try {
         const result = await checkComfyCompatibility({
           connectionId,
@@ -130,11 +137,21 @@ export async function listProductionComfyReconcileRequests() {
     },
     orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
     take: 100,
-    select: { id: true, mediaType: true },
+    select: {
+      id: true, mediaType: true, status: true, connectionId: true,
+      leaseId: true, leaseExpiresAt: true,
+    },
   })
-  return records.flatMap((record) => record.mediaType === 'image' || record.mediaType === 'video'
-    ? [{ requestId: record.id, mediaType: record.mediaType as 'image' | 'video' }]
-    : [])
+  const now = Date.now()
+  const candidates = [] as Array<{ requestId: string; mediaType: 'image' | 'video' }>
+  for (const record of records) {
+    if ((record.mediaType !== 'image' && record.mediaType !== 'video') || !record.connectionId) continue
+    const redisOwner = await redis.get(comfyLeaseKey(record.connectionId))
+    const recoverable = record.status === 'reconciling' || redisOwner === null
+      || !record.leaseExpiresAt || record.leaseExpiresAt.getTime() <= now
+    if (recoverable) candidates.push({ requestId: record.id, mediaType: record.mediaType })
+  }
+  return candidates
 }
 
 export async function reconcileProductionComfyRequest(
@@ -143,17 +160,60 @@ export async function reconcileProductionComfyRequest(
   signal: AbortSignal,
 ) {
   if (signal.aborted) return
-  const result = await reconcileComfyRequest(
-    requestId,
-    await createProductionReconciliationDependencies(requestId, limits),
-  )
-  if (result.outcome === 'transferring' && !signal.aborted) {
-    return dispatchComfyRequest(
+  const lockKey = `comfy:reconcile:${requestId}`
+  const lockValue = randomUUID()
+  if (await redis.set(lockKey, lockValue, 'PX', limits.leaseTtlMs, 'NX') !== 'OK') return
+  let lockLost = false
+  const heartbeat = setInterval(() => {
+    void redis.eval(COMFY_LEASE_RENEW_SCRIPT, 1, lockKey, lockValue, limits.leaseTtlMs)
+      .then((value) => { if (value !== 1) lockLost = true })
+      .catch(() => { lockLost = true })
+  }, Math.max(100, Math.floor(limits.leaseTtlMs / 3)))
+  heartbeat.unref?.()
+  try {
+    await reclaimProductionRequestIfNeeded(requestId, limits.leaseTtlMs)
+    if (lockLost || signal.aborted) return
+    const result = await reconcileComfyRequest(
       requestId,
-      await createProductionDispatcherDependencies(requestId, limits, signal),
+      await createProductionReconciliationDependencies(requestId, limits, async () =>
+        !lockLost && await redis.get(lockKey) === lockValue),
     )
+    if (result.outcome === 'transferring' && !signal.aborted && !lockLost) {
+      return dispatchComfyRequest(
+        requestId,
+        await createProductionDispatcherDependencies(requestId, limits, signal),
+      )
+    }
+    return result
+  } finally {
+    clearInterval(heartbeat)
+    await redis.eval(COMFY_LEASE_RELEASE_SCRIPT, 1, lockKey, lockValue).catch(() => 0)
   }
-  return result
+}
+
+async function reclaimProductionRequestIfNeeded(requestId: string, ttlMs: number) {
+  const record = await prisma.comfyGenerationRequest.findUnique({
+    where: { id: requestId },
+    select: {
+      id: true, userId: true, connectionId: true, leaseId: true,
+      leaseExpiresAt: true, status: true,
+      submissionAttempts: { select: { id: true }, take: 1 },
+    },
+  })
+  if (!record?.connectionId || !record.leaseId || !record.leaseExpiresAt) return
+  const redisOwner = await redis.get(comfyLeaseKey(record.connectionId))
+  if (redisOwner !== null && record.leaseExpiresAt.getTime() > Date.now()) return
+  const now = new Date()
+  if (record.leaseExpiresAt.getTime() > now.getTime()) {
+    await prisma.comfyGenerationRequest.updateMany({
+      where: { id: record.id, leaseId: record.leaseId }, data: { leaseExpiresAt: now },
+    })
+  }
+  await reclaimComfyRecoveryLease({
+    requestId: record.id, userId: record.userId, connectionId: record.connectionId,
+    previousLeaseId: record.leaseId, newLeaseId: randomUUID(), ttlMs,
+    leaseExpiredAt: now, now, hasSubmissionAttempt: record.submissionAttempts.length > 0,
+  })
 }
 
 export async function scanProductionExpiredPreSubmit() {

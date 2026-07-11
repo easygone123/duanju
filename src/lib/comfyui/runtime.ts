@@ -12,6 +12,10 @@ const DEFAULTS = {
   workflowMaxBytes: 2 * 1024 * 1024,
   inputMaxBytes: 25 * 1024 * 1024,
   outputMaxBytes: 512 * 1024 * 1024,
+  dispatchConcurrency: 8,
+  pageSize: 100,
+  failureBackoffBaseMs: 1_000,
+  failureBackoffMaxMs: 60_000,
 } as const
 
 export interface ComfyRuntimeConfig {
@@ -26,6 +30,10 @@ export interface ComfyRuntimeConfig {
   workflowMaxBytes: number
   inputMaxBytes: number
   outputMaxBytes: number
+  dispatchConcurrency: number
+  pageSize: number
+  failureBackoffBaseMs: number
+  failureBackoffMaxMs: number
 }
 
 export interface ComfyRuntimeDeps {
@@ -167,6 +175,10 @@ export function readComfyRuntimeConfig(
     workflowMaxBytes: parseInteger(env, 'COMFYUI_WORKFLOW_MAX_BYTES', DEFAULTS.workflowMaxBytes, 1_024, 100 * 1024 * 1024),
     inputMaxBytes: parseInteger(env, 'COMFYUI_INPUT_MAX_BYTES', DEFAULTS.inputMaxBytes, 1_024, 2 * 1024 * 1024 * 1024),
     outputMaxBytes: parseInteger(env, 'COMFYUI_OUTPUT_MAX_BYTES', DEFAULTS.outputMaxBytes, 1_024, 2 * 1024 * 1024 * 1024),
+    dispatchConcurrency: parseInteger(env, 'COMFYUI_DISPATCH_CONCURRENCY', DEFAULTS.dispatchConcurrency, 1, 64),
+    pageSize: parseInteger(env, 'COMFYUI_PAGE_SIZE', DEFAULTS.pageSize, 1, 1_000),
+    failureBackoffBaseMs: parseInteger(env, 'COMFYUI_FAILURE_BACKOFF_BASE_MS', DEFAULTS.failureBackoffBaseMs, 100, 60_000),
+    failureBackoffMaxMs: parseInteger(env, 'COMFYUI_FAILURE_BACKOFF_MAX_MS', DEFAULTS.failureBackoffMaxMs, 100, 3_600_000),
   }
 }
 

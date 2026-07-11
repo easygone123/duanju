@@ -111,6 +111,7 @@ export interface ComfyDispatcherDependencies extends ComfyMediaDependencies {
   markFailed(input: OwnerInput & { promptId?: string; errorCode: string; errorMessage: string }): Promise<boolean>
   client: ComfyExecutionClient
   signal: AbortSignal
+  startExecutionTimeout?: () => { signal: AbortSignal; dispose(): void }
   leaseTtlMs: number
   maxInputBytes?: number
   maxOutputBytes?: number
@@ -137,6 +138,7 @@ export async function dispatchComfyRequest(
   const heartbeat = startHeartbeat(owner, dependencies)
   let promptId = request.promptId ?? undefined
   let submissionAttemptId: string | undefined
+  let executionDeadline: { signal: AbortSignal; dispose(): void } | undefined
   let terminal = false
   try {
     assertContext(context, owner)
@@ -244,10 +246,12 @@ export async function dispatchComfyRequest(
       return { outcome: 'canceled' }
     }
 
+    executionDeadline = dependencies.startExecutionTimeout?.()
     const executionStartedAt = Date.now()
     try {
       await consumePromptEvents(
         dependencies.client, promptId, clientId, owner, dependencies,
+        executionDeadline?.signal ?? dependencies.signal,
       )
     } catch (error) {
       if (error instanceof ComfyError && !error.retryable) throw error
@@ -308,6 +312,7 @@ export async function dispatchComfyRequest(
     terminal = true
     return { outcome: 'waiting_capacity' }
   } finally {
+    executionDeadline?.dispose()
     await heartbeat.stop()
     if (terminal) await dependencies.release(owner).catch(() => false)
   }
@@ -360,9 +365,10 @@ async function consumePromptEvents(
   clientId: string,
   owner: OwnerInput & { ttlMs: number },
   dependencies: ComfyDispatcherDependencies,
+  signal: AbortSignal,
 ) {
   let completed = false
-  for await (const event of client.watchPrompt(promptId, clientId, dependencies.signal)) {
+  for await (const event of client.watchPrompt(promptId, clientId, signal)) {
     if (event.type === 'execution_error') {
       throw new ComfyError(COMFY_ERROR_CODE.EXECUTION_FAILED, 'ComfyUI execution failed')
     }
@@ -406,9 +412,13 @@ function startHeartbeat(
   let stopped = false
   let inFlight: Promise<void> | null = null
   let lost = false
+  let failure: unknown
   const beat = () => {
     if (stopped || inFlight) return
-    inFlight = dependencies.heartbeat(owner).then((owned) => { if (!owned) lost = true }).finally(() => { inFlight = null })
+    inFlight = dependencies.heartbeat(owner)
+      .then((owned) => { if (!owned) lost = true })
+      .catch((error) => { failure = error })
+      .finally(() => { inFlight = null })
   }
   beat()
   const maximumInterval = Math.max(1, Math.floor(owner.ttlMs / 3))
@@ -421,6 +431,7 @@ function startHeartbeat(
   return {
     async assertOwned() {
       await inFlight
+      if (failure) throw failure
       if (lost) throw lostLease()
     },
     async stop() {
