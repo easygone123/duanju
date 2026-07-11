@@ -113,7 +113,7 @@ waoowaoo image/video business task
 `ComfyClient`
 
 - Encapsulates connection probing, input upload, prompt submission, WebSocket
-  events, queue/history polling, output download, queue deletion, and interrupt.
+  events, queue/history polling, output download, and exact queued-prompt deletion.
 - Applies authentication, URL policy, timeouts, response limits, and log redaction
   in one place.
 
@@ -415,7 +415,10 @@ The client uses the self-hosted ComfyUI server contracts documented at
 - `GET /history/{promptId}`
 - `GET /view`
 - `POST /queue` for deleting a queued owned prompt
-- `POST /interrupt` for an executing owned prompt
+
+The production client deliberately does not expose standard `POST /interrupt`.
+That endpoint interrupts ComfyUI's global current execution and is not a
+prompt-scoped cancellation primitive, even if a caller sends a prompt ID.
 
 `baseUrl` may include a reverse-proxy path prefix. URL joining preserves that
 prefix. WebSocket URLs use `ws` or `wss` to match HTTP or HTTPS.
@@ -502,13 +505,20 @@ transfer retries without rerunning the workflow.
 
 - `waiting_capacity` or `blocked_no_compatible_instance`: cancel locally.
 - `leased` or `uploading`: stop before prompt submission and release the lease.
-- queued in ComfyUI: delete only the recorded prompt ID owned by the current lease.
-- executing in ComfyUI: call `/interrupt` only after verifying the running prompt
-  ID and lease ownership.
+- queued in ComfyUI: after a second queue read and lease-owner check, delete only
+  the exact recorded pending prompt ID; if it moved to running or disappeared,
+  treat the result as uncertain rather than deleting anything.
+- running or uncertain in ComfyUI: persist `cancelRequestedAt`, move to
+  `reconciling`, retain the durable lease, and wait for queue/history to reach a
+  natural terminal state. Reconciliation stores safe diagnostics and declared
+  output references, then marks the request canceled and releases the lease.
 - transferring: stop transfer, preserve diagnostic output references, and mark the
   task canceled according to the existing task contract.
 
-Manual or third-party ComfyUI prompts are never deleted or interrupted.
+Production never calls standard global `/interrupt`. This is required because a
+queue observation has a TOCTOU window: the observed owned prompt may finish and a
+manual or third-party prompt may become current before an interrupt arrives.
+Manual or third-party ComfyUI prompts are therefore never deleted or interrupted.
 
 ## 10. Failure Codes
 

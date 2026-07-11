@@ -195,7 +195,7 @@ Authorize every DNS answer. Pin the approved address through undici Agent and ws
 
 - [ ] **Step 4: Implement fake server and client**
 
-Fake routes: `/system_stats`, `/queue`, `/object_info`, `/models/checkpoints`, `/upload/image`, `/prompt`, `/history/:promptId`, `/view`, POST `/queue`, POST `/interrupt`, `/ws`.
+Fake routes: `/system_stats`, `/queue`, `/object_info`, `/models/checkpoints`, `/upload/image`, `/prompt`, `/history/:promptId`, `/view`, POST `/queue`, `/ws`. A fake global `/interrupt` sentinel may exist only to prove production never calls it.
 
 ```ts
 class ComfyClient {
@@ -210,7 +210,6 @@ class ComfyClient {
   getHistory(promptId: string): Promise<unknown>
   downloadOutput(ref: ComfyOutputRef): Promise<Buffer>
   deleteQueuedPrompt(promptId: string): Promise<void>
-  interruptPrompt(promptId: string): Promise<void>
 }
 ```
 
@@ -399,7 +398,7 @@ git commit -m "feat: schedule ComfyUI requests"
 
 - [ ] **Step 1: Write failing dispatcher tests**
 
-Cover upload, render after upload, prompt-ID persistence, WebSocket progress, history fallback, every declared output, primary output, storage retry without resubmit, pre-submit failover, post-submit pinning, restart, queued cancel, running interrupt, refusal to interrupt external work, correlation IDs, metric increments, and credential/prompt redaction.
+Cover upload, render after upload, prompt-ID persistence, WebSocket progress, history fallback, every declared output, primary output, storage retry without resubmit, pre-submit failover, post-submit pinning, restart, exact queued cancel, running reconciliation without global interrupt, correlation IDs, metric increments, and credential/prompt redaction.
 
 - [ ] **Step 2: Verify red**
 
@@ -420,7 +419,7 @@ service.
 
 - [ ] **Step 4: Implement reconcile/cancel**
 
-A recorded prompt never resubmits. Reconcile queue/history to running, transfer, completed, or failed. Before submit, cancel locally. After submit, compare prompt and lease ownership before delete/interrupt. Never affect manual prompts.
+A recorded prompt never resubmits. Reconcile queue/history to running, transfer, completed, or failed. Before submit, cancel locally. After submit, double-check prompt and lease ownership before deleting an exact pending prompt. Running or uncertain prompts reconcile to a natural terminal state; production never calls global `/interrupt` or affects manual prompts.
 
 - [ ] **Step 5: Verify and commit**
 

@@ -500,13 +500,12 @@ describe('ComfyClient contract', () => {
     )
   })
 
-  it('deletes only the requested queued prompt and interrupts with the prompt id', async () => {
+  it('deletes only the requested queued prompt and exposes no global interrupt API', async () => {
     const comfy = client()
     await comfy.deleteQueuedPrompt('prompt-1')
-    await comfy.interruptPrompt('prompt-1')
 
-    expect(JSON.parse(server.requests.at(-2)!.body.toString())).toEqual({ delete: ['prompt-1'] })
-    expect(JSON.parse(server.requests.at(-1)!.body.toString())).toEqual({ prompt_id: 'prompt-1' })
+    expect(JSON.parse(server.requests.at(-1)!.body.toString())).toEqual({ delete: ['prompt-1'] })
+    expect(comfy).not.toHaveProperty('interruptPrompt')
   })
 
   it('times out stalled phases with a stable error', async () => {
