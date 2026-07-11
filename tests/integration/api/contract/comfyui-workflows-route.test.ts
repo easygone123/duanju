@@ -52,9 +52,9 @@ vi.mock('@/lib/comfyui/client', () => ({
     }
 
     getQueue = getQueueMock
-    getSystemStats = () => getSystemStatsMock(this.baseUrl)
-    getObjectInfo = getObjectInfoMock
-    getModels = getModelsMock
+    getSystemStats = (signal?: AbortSignal) => getSystemStatsMock(this.baseUrl, signal)
+    getObjectInfo = (signal?: AbortSignal) => getObjectInfoMock(signal)
+    getModels = (folder: string, signal?: AbortSignal) => getModelsMock(folder, signal)
     submitPrompt = submitPromptMock
     watchPrompt = watchPromptMock
     getHistory = getHistoryMock
@@ -402,7 +402,7 @@ describe('ComfyUI workflow library', () => {
       expect.objectContaining({ connectionId: 'connection-1', status: 'online', compatible: true,
         missingNodes: [], missingModels: [], workflowHash: 'hash', capabilityFingerprint: expect.any(String) }),
       expect.objectContaining({ connectionId: 'connection-2', status: 'online', compatible: true }),
-    ] })
+    ], nextCursor: null })
     expect(prismaMock.comfyConnection.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { userId: 'user-1' },
     }))
@@ -424,12 +424,47 @@ describe('ComfyUI workflow library', () => {
     expect(response.status).toBe(200)
     expect(await body(response)).toEqual({ compatibility: [expect.objectContaining({
       connectionId: 'disabled-1', connectionName: 'Paused GPU', status: 'disabled', compatible: false,
-    })] })
+    })], nextCursor: null })
     expect(prismaMock.comfyConnection.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { userId: 'user-1' },
     }))
     expect(getSystemStatsMock).not.toHaveBeenCalled()
     expect(authorizeComfyTargetMock).not.toHaveBeenCalled()
+  })
+
+  it('paginates compatibility probes with a bounded stable cursor page', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
+    prismaMock.comfyConnection.findMany.mockResolvedValue([
+      connection({ id: 'connection-1' }),
+      connection({ id: 'connection-2' }),
+      connection({ id: 'connection-3' }),
+    ])
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/versions/[versionId]/compatibility/route')
+    const response = await route.GET(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/versions/version-1/compatibility', method: 'GET', query: { limit: 2 },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1', versionId: 'version-1' }) })
+    const payload = await body(response)
+    expect((payload.compatibility as Array<{ connectionId: string }>).map((item) => item.connectionId))
+      .toEqual(['connection-1', 'connection-2'])
+    expect(payload.nextCursor).toBe('connection-2')
+    expect(prismaMock.comfyConnection.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 3 }))
+  })
+
+  it('returns a bounded timeout row when the request-level compatibility deadline aborts a probe', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
+    prismaMock.comfyConnection.findMany.mockResolvedValue([connection()])
+    getSystemStatsMock.mockImplementation((_url: string, signal: AbortSignal) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    }))
+    const { listOwnedWorkflowCompatibility } = await import('@/lib/comfyui/workflow-compatibility-service')
+    const page = await listOwnedWorkflowCompatibility('user-1', 'workflow-1', 'version-1', { limit: 1, deadlineMs: 5 })
+    expect(page.compatibility).toEqual([expect.objectContaining({ connectionId: 'connection-1', status: 'timeout' })])
   })
 
   it('rejects cross-workflow version pairing before probing connections', async () => {
@@ -477,7 +512,7 @@ describe('ComfyUI workflow library', () => {
         missingNodes: ['SaveImage'], missingModels: [{ nodeId: '1', field: 'ckpt_name', value: 'model.safetensors' }] }),
       expect.objectContaining({ connectionId: 'auth', status: 'auth_failed', compatible: false }),
       expect.objectContaining({ connectionId: 'offline', status: 'offline', compatible: false }),
-    ] })
+    ], nextCursor: null })
   })
 
   it('live-tests an owned compatible version on an idle owned connection and always releases its lease', async () => {

@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl'
 import type { ComfyInputBinding, ComfyOutputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
-import { setPrimaryOutput } from './workflow-ui'
+import { removeWorkflowOutput, setPrimaryOutput } from './workflow-ui'
 
 const TRANSFORMS = ['filename', 'image_ref', 'filename_list'] as const
 
@@ -56,7 +56,7 @@ export default function WorkflowMappingTable({ variables, bindings, outputs, med
         <label className="text-xs">{t('nodeId')}<input className={inputClass} value={output.nodeId} onChange={(event) => updateOutput(index, { nodeId: event.target.value })} /></label>
         <label className="text-xs">{t('fieldPath')}<input className={inputClass} value={output.fieldPath} onChange={(event) => updateOutput(index, { fieldPath: event.target.value })} /></label>
         <label className="flex items-center gap-2 self-end text-xs"><input type="radio" name="primary-output" checked={output.primary} onChange={() => onOutputsChange(setPrimaryOutput(outputs, index))} />{t('primaryOutput')}</label>
-        <button type="button" className="self-end text-xs text-[var(--glass-danger)]" onClick={() => onOutputsChange(setPrimaryOutput(outputs.filter((_, itemIndex) => itemIndex !== index), 0))}>{t('remove')}</button>
+        <button type="button" disabled={outputs.length <= 1} className="self-end text-xs text-[var(--glass-danger)] disabled:cursor-not-allowed disabled:opacity-40" onClick={() => onOutputsChange(removeWorkflowOutput(outputs, index))}>{t('remove')}</button>
       </div>)}</div>
     </section>
   </div>

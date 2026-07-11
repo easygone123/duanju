@@ -1,14 +1,21 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   discoverPlaceholderNames,
   draftFromWorkflow,
   mapWorkflowCompatibility,
+  removeWorkflowOutput,
   parseWorkflowImportText,
+  safeWorkflowErrorKey,
   setPrimaryOutput,
+  WorkflowRequestError,
   type WorkflowView,
 } from '@/app/[locale]/profile/components/comfyui/workflow-ui'
-import { buildWorkflowTestPayload } from '@/app/[locale]/profile/components/comfyui/WorkflowTestForm'
+import {
+  buildWorkflowTestPayload,
+  createWorkflowUploadSelectionController,
+  type LiveTestUploadPayload,
+} from '@/app/[locale]/profile/components/comfyui/WorkflowTestForm'
 
 const read = (path: string) => existsSync(path) ? readFileSync(path, 'utf8') : ''
 const base = 'src/app/[locale]/profile/components/comfyui'
@@ -30,6 +37,46 @@ describe('ComfyUI workflow settings UI contract', () => {
     const updated = setPrimaryOutput(outputs, 1)
     expect(updated.map((item) => item.primary)).toEqual([false, true])
     expect(outputs.map((item) => item.primary)).toEqual([true, false])
+  })
+
+  it('preserves the current primary unless that output is removed and keeps the last output', () => {
+    const outputs = [
+      { name: 'a', nodeId: '1', fieldPath: 'images', mediaType: 'image' as const, primary: true },
+      { name: 'b', nodeId: '2', fieldPath: 'images', mediaType: 'image' as const, primary: false },
+    ]
+    expect(removeWorkflowOutput(outputs, 1)).toEqual([outputs[0]])
+    expect(removeWorkflowOutput(outputs, 0)).toEqual([{ ...outputs[1], primary: true }])
+    expect(removeWorkflowOutput([outputs[0]], 0)).toEqual([outputs[0]])
+  })
+
+  it('clears stale uploads immediately and lets only the latest async selection commit', async () => {
+    const pending = new Map<string, (value: LiveTestUploadPayload[]) => void>()
+    const commits: LiveTestUploadPayload[][] = []
+    const controller = createWorkflowUploadSelectionController((files) => new Promise((resolve) => {
+      pending.set(files[0].name, resolve)
+    }))
+    const fileA = new File(['a'], 'a.png', { type: 'image/png' })
+    const fileB = new File(['b'], 'b.png', { type: 'image/png' })
+    const first = controller.select('image', [fileA], 'image_ref', (value) => commits.push(value), vi.fn())
+    const second = controller.select('image', [fileB], 'image_ref', (value) => commits.push(value), vi.fn())
+    expect(commits).toEqual([[], []])
+    pending.get('a.png')!([{ filename: 'a.png', contentType: 'image/png', base64: 'YQ==' }])
+    await first
+    pending.get('b.png')!([{ filename: 'b.png', contentType: 'image/png', base64: 'Yg==' }])
+    await second
+    expect(commits).toEqual([[], [], [{ filename: 'b.png', contentType: 'image/png', base64: 'Yg==' }]])
+  })
+
+  it('does not commit a completed upload after unmount', async () => {
+    let finish!: (value: LiveTestUploadPayload[]) => void
+    const commit = vi.fn()
+    const controller = createWorkflowUploadSelectionController(() => new Promise((resolve) => { finish = resolve }))
+    const selecting = controller.select('image', [new File(['a'], 'a.png', { type: 'image/png' })], 'image_ref', commit, vi.fn())
+    controller.dispose()
+    finish([{ filename: 'a.png', contentType: 'image/png', base64: 'YQ==' }])
+    await selecting
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(commit).toHaveBeenLastCalledWith([])
   })
 
   it('copies a saved version into an independent author draft', () => {
@@ -133,6 +180,12 @@ describe('ComfyUI workflow settings UI contract', () => {
     })
   })
 
+  it('maps only trusted API codes to localized errors and never renders raw server text', () => {
+    expect(safeWorkflowErrorKey(new WorkflowRequestError('INVALID_PARAMS'))).toBe('workflowRequestInvalid')
+    expect(safeWorkflowErrorKey(new WorkflowRequestError('GENERATION_TIMEOUT'))).toBe('workflowTimedOut')
+    expect(safeWorkflowErrorKey(new Error('<script>server secret</script>'))).toBe('requestFailed')
+  })
+
   it('localizes the responsive workflow controls in both languages', () => {
     const en = JSON.parse(readFileSync('messages/en/comfyui.json', 'utf8'))
     const zh = JSON.parse(readFileSync('messages/zh/comfyui.json', 'utf8'))
@@ -144,6 +197,8 @@ describe('ComfyUI workflow settings UI contract', () => {
       expect(messages.workflows.primaryOutput).toBeTruthy()
       expect(messages.workflows.compatibility).toBeTruthy()
       expect(messages.workflows.compatibilityStates.disabled).toBeTruthy()
+      expect(messages.workflows.workflowRequestInvalid).toBeTruthy()
+      expect(messages.workflows.projectDefaultsSaveFailed).toBeTruthy()
     }
   })
 })

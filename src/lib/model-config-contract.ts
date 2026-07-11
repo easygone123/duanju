@@ -32,6 +32,7 @@ export interface LLMCapabilities {
 
 export interface ImageCapabilities {
   resolutionOptions?: string[]
+  aspectRatioOptions?: string[]
   fieldI18n?: CapabilityFieldI18nMap
 }
 
@@ -86,6 +87,7 @@ const LLM_ALLOWED_FIELDS = new Set<keyof LLMCapabilities>([
 
 const IMAGE_ALLOWED_FIELDS = new Set<keyof ImageCapabilities>([
   'resolutionOptions',
+  'aspectRatioOptions',
   'fieldI18n',
 ])
 
@@ -289,8 +291,18 @@ function validateImageCapabilities(issues: CapabilityValidationIssue[], raw: unk
     })
   }
 
+  const aspectRatioOptions = raw.aspectRatioOptions
+  if (aspectRatioOptions !== undefined && !isStringArray(aspectRatioOptions)) {
+    issues.push({
+      code: 'CAPABILITY_FIELD_INVALID',
+      field: 'capabilities.image.aspectRatioOptions',
+      message: 'aspectRatioOptions must be a non-empty string array',
+    })
+  }
+
   validateFieldI18nMap(issues, 'image', raw.fieldI18n, {
     resolution: isStringArray(resolutionOptions) ? resolutionOptions : undefined,
+    aspectRatio: isStringArray(aspectRatioOptions) ? aspectRatioOptions : undefined,
   })
 }
 

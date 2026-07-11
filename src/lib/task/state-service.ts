@@ -328,9 +328,19 @@ export async function queryTaskTargetStates(params: {
     group.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
   }
 
+  const taskById = new Map(allRows.map((row) => [row.id, row]))
+  const resolvedStates = params.targets.map((target) => resolveTargetState(
+    target,
+    grouped.get(pairKey(target.targetType, target.targetId)) || [],
+  ))
+
+  // Only fetch diagnostics for the task selected for each requested target. Scanning
+  // historical active rows first could exhaust the safety cap before the current task.
   const requestIds = new Set<string>()
-  for (const row of allRows) {
-    if (!row.externalId || !ACTIVE_STATUS.has(row.status) || requestIds.size >= 500) continue
+  for (const state of resolvedStates) {
+    if (!state.runningTaskId || requestIds.size >= 500) continue
+    const row = taskById.get(state.runningTaskId)
+    if (!row?.externalId) continue
     try {
       const requestId = parseComfyExternalId(row.externalId).requestId
       if (SAFE_DIAGNOSTIC_ID.test(requestId)) requestIds.add(requestId)
@@ -345,13 +355,9 @@ export async function queryTaskTargetStates(params: {
     },
   }) : []
   const requestsByTaskId = new Map(requests.map((request) => [request.taskId, request]))
-  return params.targets.map((target) => {
-    const state = resolveTargetState(
-      target,
-      grouped.get(pairKey(target.targetType, target.targetId)) || [],
-    )
+  return resolvedStates.map((state) => {
     if (!state.runningTaskId) return state
-    const task = allRows.find((row) => row.id === state.runningTaskId)
+    const task = taskById.get(state.runningTaskId)
     return { ...state, comfyDiagnostics: projectComfyTaskDiagnostics(task?.externalId, requestsByTaskId.get(state.runningTaskId) ?? null) }
   })
 }

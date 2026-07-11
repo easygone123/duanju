@@ -12,8 +12,8 @@ export interface ComfyCompatibilityResult {
 }
 
 export interface ComfyCompatibilityClient {
-  getObjectInfo(): Promise<Record<string, unknown>>
-  getModels(folder: string): Promise<string[]>
+  getObjectInfo(signal?: AbortSignal): Promise<Record<string, unknown>>
+  getModels(folder: string, signal?: AbortSignal): Promise<string[]>
 }
 
 export type ComfyCompatibilityCache = Map<string, ComfyCompatibilityResult>
@@ -24,6 +24,7 @@ export interface CheckComfyCompatibilityInput {
   graph: ComfyApiWorkflow
   requirements: ComfyWorkflowRequirements
   client: ComfyCompatibilityClient
+  signal?: AbortSignal
   cache?: ComfyCompatibilityCache
   parseInputEnum?: typeof parseComfyInputEnum
 }
@@ -50,7 +51,9 @@ export async function checkComfyCompatibility(
   if (input.requirements.candidateLoaderInputs.length > MAX_COMFY_COMPATIBILITY_CANDIDATES) {
     throw incompatible('Too many workflow model candidates')
   }
-  const objectInfo = await input.client.getObjectInfo()
+  const objectInfo = input.signal
+    ? await input.client.getObjectInfo(input.signal)
+    : await input.client.getObjectInfo()
   const candidateEnums = buildCandidateEnumIndex(
     objectInfo,
     input.graph,
@@ -65,7 +68,9 @@ export async function checkComfyCompatibility(
   const folderEntries = await mapWithConcurrency(
     modelFolders,
     MAX_COMFY_MODEL_PROBE_CONCURRENCY,
-    async (folder) => [folder, validateModelCatalog(await input.client.getModels(folder))] as const,
+    async (folder) => [folder, validateModelCatalog(input.signal
+      ? await input.client.getModels(folder, input.signal)
+      : await input.client.getModels(folder))] as const,
   )
   const modelsByFolder = Object.fromEntries(folderEntries)
   const capabilityFingerprint = fingerprint({ objectInfo, modelsByFolder })

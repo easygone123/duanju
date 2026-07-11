@@ -292,10 +292,18 @@ export function resolveModelCapabilityGenerationOptions(input: {
   }
 
   const capabilities = findBuiltinCapabilities(input.modelType, parsed.provider, parsed.modelId)
+  // Image aspect ratio is project/layout driven in the shared capability resolver.
+  // Task-level overrides are validated separately against the same catalog below.
+  const resolverCapabilities = input.modelType === 'image' && capabilities?.image
+    ? {
+      ...capabilities,
+      image: { ...capabilities.image, aspectRatioOptions: undefined },
+    }
+    : capabilities
   const resolved = resolveGenerationOptionsForModel({
     modelType: input.modelType,
     modelKey: input.modelKey,
-    capabilities,
+    capabilities: resolverCapabilities,
     capabilityDefaults: input.capabilityDefaults,
     capabilityOverrides: input.capabilityOverrides,
     runtimeSelections: input.runtimeSelections,
@@ -331,6 +339,7 @@ export function resolveImageTaskGenerationOptions(input: {
   imageModel: string
   projectModelConfig: Pick<ProjectModelConfig, 'capabilityDefaults' | 'capabilityOverrides'>
   taskSelections?: ImageTaskCapabilityOverrides
+  comfyAspectRatioOptions?: readonly string[]
 }): Record<string, CapabilityValue> {
   const taskSelections = input.taskSelections ?? {}
   for (const key of Object.keys(taskSelections)) {
@@ -341,6 +350,15 @@ export function resolveImageTaskGenerationOptions(input: {
   const aspectRatio = taskSelections.aspectRatio
   if (aspectRatio !== undefined && (typeof aspectRatio !== 'string' || !/^[1-9]\d{0,2}:[1-9]\d{0,2}$/.test(aspectRatio))) {
     throw new Error('CAPABILITY_VALUE_NOT_ALLOWED: aspectRatio')
+  }
+  if (aspectRatio !== undefined) {
+    const parsed = parseModelKeyStrict(input.imageModel)
+    const allowed = parsed?.provider === 'comfyui'
+      ? input.comfyAspectRatioOptions
+      : parsed && findBuiltinCapabilities('image', parsed.provider, parsed.modelId)?.image?.aspectRatioOptions
+    if (!allowed?.includes(aspectRatio)) {
+      throw new Error('CAPABILITY_VALUE_NOT_ALLOWED: aspectRatio')
+    }
   }
   const runtimeSelections: Record<string, CapabilityValue> = {}
   if (taskSelections.resolution !== undefined) runtimeSelections.resolution = taskSelections.resolution
@@ -355,6 +373,38 @@ export function resolveImageTaskGenerationOptions(input: {
     ...capabilityOptions,
     ...(aspectRatio !== undefined ? { aspectRatio } : {}),
   }
+}
+
+function readComfyAspectRatioOptions(variableDefinitions: unknown): string[] {
+  if (!Array.isArray(variableDefinitions)) return []
+  for (const raw of variableDefinitions) {
+    if (!isRecord(raw) || typeof raw.name !== 'string') continue
+    const canonicalName = raw.name.replace(/[-_]/g, '').toLowerCase()
+    if (canonicalName !== 'aspectratio') continue
+    if (!Array.isArray(raw.options)) return []
+    return raw.options.filter((value): value is string => typeof value === 'string')
+  }
+  return []
+}
+
+async function loadOwnedPublishedComfyAspectRatioOptions(input: {
+  userId: string
+  workflowVersionId: string | null
+}): Promise<string[]> {
+  if (!input.workflowVersionId) return []
+  const version = await prisma.comfyWorkflowVersion.findFirst({
+    where: {
+      id: input.workflowVersionId,
+      workflow: {
+        userId: input.userId,
+        mediaType: 'image',
+        status: 'published',
+        currentVersionId: input.workflowVersionId,
+      },
+    },
+    select: { variableDefinitions: true },
+  })
+  return readComfyAspectRatioOptions(version?.variableDefinitions)
 }
 
 /**
@@ -419,10 +469,19 @@ export async function buildImageBillingPayload(input: {
   const projectModelConfig = input.projectModelConfig
     ?? await getProjectModelConfig(projectId, userId)
   try {
+    const parsedImageModel = parseModelKeyStrict(imageModel)
+    const comfyAspectRatioOptions = input.taskSelections?.aspectRatio !== undefined
+      && parsedImageModel?.provider === 'comfyui'
+      ? await loadOwnedPublishedComfyAspectRatioOptions({
+        userId,
+        workflowVersionId: projectModelConfig.comfyImageWorkflowVersionId,
+      })
+      : undefined
     capabilityOptions = resolveImageTaskGenerationOptions({
       imageModel,
       projectModelConfig,
       taskSelections: input.taskSelections,
+      comfyAspectRatioOptions,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Image model capability not configured'

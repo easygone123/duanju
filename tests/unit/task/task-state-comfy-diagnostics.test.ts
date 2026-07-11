@@ -48,4 +48,24 @@ describe('task state ComfyUI diagnostics query', () => {
     expect(prismaMock.comfyGenerationRequest.findMany).not.toHaveBeenCalled()
     expect(state.comfyDiagnostics).toBeNull()
   })
+
+  it('does not let hundreds of superseded active rows displace the displayed running task diagnostics', async () => {
+    const older = Array.from({ length: 500 }, (_, index) => ({
+      id: `old-${index}`, type: 'image_panel', status: 'processing', progress: 10, payload: {},
+      errorCode: null, errorMessage: null, targetType: 'NovelPromotionPanel', targetId: 'panel-1',
+      externalId: `COMFY:IMAGE:old-request-${index}`, updatedAt: new Date(index),
+    }))
+    prismaMock.task.findMany.mockResolvedValue([...older, {
+      id: 'task-current', type: 'image_panel', status: 'processing', progress: 80, payload: {},
+      errorCode: null, errorMessage: null, targetType: 'NovelPromotionPanel', targetId: 'panel-1',
+      externalId: 'COMFY:IMAGE:request-current', updatedAt: new Date('2026-07-12T00:00:00Z'),
+    }])
+    prismaMock.comfyGenerationRequest.findMany.mockResolvedValue([])
+    await queryTaskTargetStates({
+      projectId: 'project-1', userId: 'user-1', targets: [{ targetType: 'NovelPromotionPanel', targetId: 'panel-1' }],
+    })
+    expect(prismaMock.comfyGenerationRequest.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: { in: ['request-current'] }, userId: 'user-1', projectId: 'project-1' },
+    }))
+  })
 })

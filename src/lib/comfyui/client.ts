@@ -104,8 +104,8 @@ export class ComfyClient {
     this.webSocketFactory = options.webSocketFactory ?? ((url, wsOptions) => new WebSocket(url, wsOptions))
   }
 
-  getSystemStats(): Promise<ComfySystemStats> {
-    return this.requestJson('system_stats', { method: 'GET' }, COMFY_ERROR_CODE.CONNECTION_OFFLINE)
+  getSystemStats(signal?: AbortSignal): Promise<ComfySystemStats> {
+    return this.requestJson('system_stats', { method: 'GET', signal }, COMFY_ERROR_CODE.CONNECTION_OFFLINE)
   }
 
   async getQueue(): Promise<ComfyQueueSnapshot> {
@@ -118,14 +118,14 @@ export class ComfyClient {
     }
   }
 
-  getObjectInfo(): Promise<Record<string, unknown>> {
-    return this.requestJson('object_info', { method: 'GET' }, COMFY_ERROR_CODE.CONNECTION_OFFLINE)
+  getObjectInfo(signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestJson('object_info', { method: 'GET', signal }, COMFY_ERROR_CODE.CONNECTION_OFFLINE)
   }
 
-  getModels(folder: string): Promise<string[]> {
+  getModels(folder: string, signal?: AbortSignal): Promise<string[]> {
     return this.requestJson(
       `models/${encodeURIComponent(folder)}`,
-      { method: 'GET' },
+      { method: 'GET', signal },
       COMFY_ERROR_CODE.CONNECTION_OFFLINE,
     )
   }
@@ -295,13 +295,14 @@ export class ComfyClient {
     let url = this.endpoint(endpoint)
     for (let redirects = 0; ; redirects += 1) {
       const controller = new AbortController()
+      const signal = init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
       let agent: Agent | undefined
       let failed = false
       try {
         const authorized = await abortable(
           authorizeComfyTarget(url, this.options.networkPolicy, this.resolveHost),
-          controller.signal,
+          signal,
         )
         agent = new Agent({
           connect: {
@@ -317,11 +318,11 @@ export class ComfyClient {
           headers,
           dispatcher: agent,
           redirect: 'manual',
-          signal: controller.signal,
+          signal,
         })
         if (isRedirect(response.status)) {
           const cancellation = response.body?.cancel()
-          if (cancellation) await abortable(cancellation, controller.signal)
+          if (cancellation) await abortable(cancellation, signal)
           const location = response.headers.get('location')
           if (!location || redirects >= this.maxRedirects) throw this.networkBlocked()
           const redirected = new URL(location, authorized.url)
@@ -341,7 +342,7 @@ export class ComfyClient {
       } catch (error) {
         failed = true
         if (error instanceof ComfyError) throw error
-        if (controller.signal.aborted) {
+        if (signal.aborted) {
           throw new ComfyError(COMFY_ERROR_CODE.EXECUTION_TIMEOUT, 'ComfyUI request timed out', {
             cause: error,
             retryable: true,

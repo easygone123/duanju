@@ -14,18 +14,23 @@ import {
   emptyWorkflowDraft,
   mapWorkflowCompatibility,
   safeWorkflowErrorKey,
+  workflowRequestErrorFromPayload,
   workflowPayload,
   type WorkflowAuthorDraft,
   type WorkflowCompatibilityResponseItem,
   type WorkflowVersionView,
   type WorkflowView,
+  type WorkflowErrorKey,
 } from './workflow-ui'
 
-type ErrorKey = 'requestFailed' | 'workflowInvalidJson' | 'workflowTooLarge' | 'testUploadInvalid'
+type ErrorKey = WorkflowErrorKey | 'testUploadInvalid' | 'testUploadTotalTooLarge'
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(url, init)
-  if (!response.ok) throw new Error('requestFailed')
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null)
+    throw workflowRequestErrorFromPayload(payload)
+  }
   return response.json() as Promise<T>
 }
 
@@ -41,6 +46,9 @@ export default function WorkflowLibraryPanel() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ErrorKey | null>(null)
   const [compatibility, setCompatibility] = useState<WorkflowCompatibilityView[]>([])
+  const [compatibilityCursor, setCompatibilityCursor] = useState<string | null>(null)
+  const [compatibilityError, setCompatibilityError] = useState(false)
+  const [compatibilityLoadingMore, setCompatibilityLoadingMore] = useState(false)
   const [testPayload, setTestPayload] = useState<WorkflowTestPayload | null>(emptyWorkflowTestPayload)
   const connectionsQuery = useComfyConnections()
 
@@ -94,11 +102,12 @@ export default function WorkflowLibraryPanel() {
   })
 
   useEffect(() => {
-    if (selectedId === 'new' || !savedVersion) { setCompatibility([]); return }
+    if (selectedId === 'new' || !savedVersion) { setCompatibility([]); setCompatibilityCursor(null); return }
     const controller = new AbortController()
-    requestJson<{ compatibility: WorkflowCompatibilityResponseItem[] }>(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(savedVersion.id)}/compatibility`, { signal: controller.signal })
-      .then((payload) => setCompatibility(payload.compatibility.map(mapWorkflowCompatibility)))
-      .catch(() => { if (!controller.signal.aborted) setCompatibility([]) })
+    setCompatibilityError(false)
+    requestJson<{ compatibility: WorkflowCompatibilityResponseItem[]; nextCursor: string | null }>(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(savedVersion.id)}/compatibility?limit=20`, { signal: controller.signal })
+      .then((payload) => { setCompatibility(payload.compatibility.map(mapWorkflowCompatibility)); setCompatibilityCursor(payload.nextCursor) })
+      .catch(() => { if (!controller.signal.aborted) setCompatibilityError(true) })
     return () => controller.abort()
   }, [savedVersion, selectedId])
   const publishVersion = () => runAction(async () => {
@@ -117,6 +126,15 @@ export default function WorkflowLibraryPanel() {
     })
     await load(selectedId)
   })
+  const loadMoreCompatibility = async () => {
+    if (selectedId === 'new' || !savedVersion || !compatibilityCursor || compatibilityLoadingMore) return
+    setCompatibilityLoadingMore(true); setCompatibilityError(false)
+    try {
+      const payload = await requestJson<{ compatibility: WorkflowCompatibilityResponseItem[]; nextCursor: string | null }>(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/versions/${encodeURIComponent(savedVersion.id)}/compatibility?limit=20&cursor=${encodeURIComponent(compatibilityCursor)}`)
+      setCompatibility((current) => [...current, ...payload.compatibility.map(mapWorkflowCompatibility)])
+      setCompatibilityCursor(payload.nextCursor)
+    } catch { setCompatibilityError(true) } finally { setCompatibilityLoadingMore(false) }
+  }
 
   const issues = savedVersion?.validation.issues ?? []
 
@@ -143,7 +161,9 @@ export default function WorkflowLibraryPanel() {
         </div>
         {savedVersion && <WorkflowTestForm key={savedVersion.id} definitions={savedVersion.variableDefinitions} onChange={setTestPayload} onError={(key) => setError(key as ErrorKey)} />}
         {error && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t(error)}</p>}
-        <WorkflowCompatibilityTable issues={issues} compatibility={compatibility} />
+      <WorkflowCompatibilityTable issues={issues} compatibility={compatibility} />
+      {compatibilityError && <p role="alert" className="text-xs text-[var(--glass-danger)]">{t('compatibilityLoadFailed')}</p>}
+      {compatibilityCursor && <button type="button" disabled={compatibilityLoadingMore} className="glass-btn-base px-3 py-2 text-xs disabled:opacity-50" onClick={() => void loadMoreCompatibility()}>{compatibilityLoadingMore ? t('loading') : t('loadMore')}</button>}
         <p className="text-xs text-[var(--glass-text-tertiary)]">{t('defaultEligibility', { status: savedVersion?.lastSuccessfulTestAt ? t('eligible') : t('ineligible') })}</p>
       </div>
     </div>

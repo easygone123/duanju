@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import type { ComfyVariableDefinition, ComfyVariableValue } from '@/lib/comfyui/types'
 
@@ -53,23 +53,56 @@ export function buildWorkflowTestPayload(
 
 export async function fileToLiveTestUpload(file: File): Promise<LiveTestUploadPayload> {
   if (!ALLOWED_MEDIA_TYPES.has(file.type) || file.size <= 0 || file.size > MAX_LIVE_TEST_UPLOAD_BYTES) throw new Error('testUploadInvalid')
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  const chunks: string[] = []
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)))
-  }
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('testUploadInvalid'))
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('testUploadInvalid'))
+    reader.readAsDataURL(file)
+  })
   const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^[^A-Za-z0-9]+/, '') || 'upload.bin'
-  return { filename: safeName.slice(0, 255), contentType: file.type, base64: btoa(chunks.join('')) }
+  return { filename: safeName.slice(0, 255), contentType: file.type, base64: dataUrl.slice(dataUrl.indexOf(',') + 1) }
 }
 
 export async function filesToLiveTestUploads(files: File[], variableType: ComfyVariableDefinition['type']) {
   if (files.length === 0 || files.length > (variableType === 'image_ref_list' ? 8 : 1)
-    || files.reduce((sum, file) => sum + file.size, 0) > 32 * 1024 * 1024
     || files.some((file) => variableType === 'video_ref'
       ? !file.type.startsWith('video/') : !file.type.startsWith('image/'))) {
     throw new Error('testUploadInvalid')
   }
-  return Promise.all(files.map(fileToLiveTestUpload))
+  if (files.reduce((sum, file) => sum + file.size, 0) > 32 * 1024 * 1024) throw new Error('testUploadTotalTooLarge')
+  const uploads: LiveTestUploadPayload[] = []
+  for (const file of files) uploads.push(await fileToLiveTestUpload(file))
+  return uploads
+}
+
+type UploadConverter = (files: File[], variableType: ComfyVariableDefinition['type']) => Promise<LiveTestUploadPayload[]>
+
+export function createWorkflowUploadSelectionController(convert: UploadConverter = filesToLiveTestUploads) {
+  const generations = new Map<string, number>()
+  let mounted = true
+  return {
+    async select(
+      variableName: string,
+      files: File[],
+      variableType: ComfyVariableDefinition['type'],
+      commit: (value: LiveTestUploadPayload[]) => void,
+      onError: (key: string) => void,
+    ) {
+      const generation = (generations.get(variableName) ?? 0) + 1
+      generations.set(variableName, generation)
+      commit([])
+      if (files.length === 0) return
+      try {
+        const uploads = await convert(files, variableType)
+        if (mounted && generations.get(variableName) === generation) commit(uploads)
+      } catch (error) {
+        if (mounted && generations.get(variableName) === generation) {
+          onError(error instanceof Error && error.message === 'testUploadTotalTooLarge' ? error.message : 'testUploadInvalid')
+        }
+      }
+    },
+    dispose() { mounted = false },
+  }
 }
 
 interface Props { definitions: ComfyVariableDefinition[]; onChange(payload: WorkflowTestPayload | null): void; onError(key: string): void }
@@ -80,16 +113,23 @@ export default function WorkflowTestForm({ definitions, onChange, onError }: Pro
   const [rawValues, setRawValues] = useState<RawValues>(() => Object.fromEntries(definitions.flatMap((item) =>
     item.defaultValue !== undefined && ['string', 'number', 'boolean'].includes(item.type) ? [[item.name, String(item.defaultValue)]] : [])))
   const [uploadValues, setUploadValues] = useState<UploadValues>({})
+  const uploadController = useRef<ReturnType<typeof createWorkflowUploadSelectionController> | null>(null)
+  if (!uploadController.current) uploadController.current = createWorkflowUploadSelectionController()
+  useEffect(() => () => uploadController.current?.dispose(), [])
   const result = useMemo(() => buildWorkflowTestPayload(definitions, rawValues, uploadValues), [definitions, rawValues, uploadValues])
   useEffect(() => onChange(result.payload), [onChange, result.payload])
   if (definitions.length === 0) return null
   return <fieldset className="space-y-2 rounded-xl border border-[var(--glass-stroke-base)] p-3"><legend className="px-1 text-sm font-medium">{t('testInputs')}</legend>
     {definitions.map((variable) => <label key={variable.name} className="block text-xs">{variable.name}{variable.required ? ' *' : ''}
-      {['image_ref', 'video_ref', 'image_ref_list'].includes(variable.type) ? <input className={inputClass} type="file" multiple={variable.type === 'image_ref_list'} accept={variable.type === 'video_ref' ? 'video/mp4,video/webm,video/quicktime' : 'image/png,image/jpeg,image/webp'} onChange={async (event) => {
-        try {
-          const files = await filesToLiveTestUploads(Array.from(event.target.files ?? []), variable.type)
-          setUploadValues((current) => ({ ...current, [variable.name]: files }))
-        } catch { onError('testUploadInvalid') }
+      {['image_ref', 'video_ref', 'image_ref_list'].includes(variable.type) ? <input className={inputClass} type="file" multiple={variable.type === 'image_ref_list'} accept={variable.type === 'video_ref' ? 'video/mp4,video/webm,video/quicktime' : 'image/png,image/jpeg,image/webp'} onChange={(event) => {
+        void uploadController.current?.select(variable.name, Array.from(event.target.files ?? []), variable.type, (files) => {
+          setUploadValues((current) => {
+            const next = { ...current }
+            if (files.length === 0) delete next[variable.name]
+            else next[variable.name] = files
+            return next
+          })
+        }, onError)
       }} /> : variable.options?.length ? <select className={inputClass} required={variable.required} value={String(rawValues[variable.name] ?? '')} onChange={(event) => setRawValues((current) => ({ ...current, [variable.name]: event.target.value }))}>
         <option value="">{t('selectValue')}</option>{variable.options.map((option) => <option key={String(option)} value={String(option)}>{String(option)}</option>)}</select> : variable.type === 'boolean' ? <select className={inputClass} required={variable.required} value={String(rawValues[variable.name] ?? '')} onChange={(event) => setRawValues((current) => ({ ...current, [variable.name]: event.target.value }))}>
         <option value="">{t('selectValue')}</option><option value="true">true</option><option value="false">false</option></select> : <input className={inputClass} required={variable.required} type={variable.type === 'number' ? 'number' : 'text'} value={String(rawValues[variable.name] ?? '')} onChange={(event) => setRawValues((current) => ({ ...current, [variable.name]: event.target.value }))} />}

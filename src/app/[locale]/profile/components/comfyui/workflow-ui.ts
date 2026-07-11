@@ -6,7 +6,7 @@ import type {
   WorkflowValidationIssue,
 } from '@/lib/comfyui/types'
 
-export type WorkflowCompatibilityStatus = 'online' | 'offline' | 'auth_failed' | 'disabled'
+export type WorkflowCompatibilityStatus = 'online' | 'offline' | 'auth_failed' | 'disabled' | 'timeout'
 
 export interface WorkflowCompatibilityResponseItem {
   connectionId: string
@@ -23,6 +23,8 @@ export function mapWorkflowCompatibility(item: WorkflowCompatibilityResponseItem
     connectionName: item.connectionName,
     state: item.status === 'disabled'
       ? 'disabled' as const
+      : item.status === 'timeout'
+        ? 'timeout' as const
       : item.status === 'auth_failed'
         ? 'auth_failed' as const
         : item.status === 'offline'
@@ -110,6 +112,13 @@ export function setPrimaryOutput(outputs: ComfyOutputBinding[], index: number): 
   return outputs.map((output, outputIndex) => ({ ...output, primary: outputIndex === index }))
 }
 
+export function removeWorkflowOutput(outputs: ComfyOutputBinding[], index: number): ComfyOutputBinding[] {
+  if (outputs.length <= 1 || !outputs[index]) return outputs
+  const removedPrimary = outputs[index].primary
+  const remaining = outputs.filter((_, outputIndex) => outputIndex !== index)
+  return removedPrimary ? setPrimaryOutput(remaining, 0) : remaining
+}
+
 export function workflowPayload(draft: WorkflowAuthorDraft) {
   return {
     apiFormatJson: parseWorkflowImportText(draft.apiFormatJson),
@@ -119,9 +128,54 @@ export function workflowPayload(draft: WorkflowAuthorDraft) {
   }
 }
 
-export function safeWorkflowErrorKey(error: unknown): 'requestFailed' | 'workflowInvalidJson' | 'workflowTooLarge' {
+export type WorkflowErrorKey =
+  | 'requestFailed'
+  | 'workflowInvalidJson'
+  | 'workflowTooLarge'
+  | 'workflowRequestInvalid'
+  | 'workflowConflict'
+  | 'workflowNotFound'
+  | 'workflowAccessDenied'
+  | 'workflowMissingConfig'
+  | 'workflowTimedOut'
+  | 'workflowNetworkFailed'
+  | 'workflowExternalFailed'
+
+export class WorkflowRequestError extends Error {
+  constructor(readonly code: string) {
+    super('workflowRequestFailed')
+    this.name = 'WorkflowRequestError'
+  }
+}
+
+const SAFE_WORKFLOW_API_ERRORS: Readonly<Record<string, WorkflowErrorKey>> = {
+  INVALID_PARAMS: 'workflowRequestInvalid',
+  CONFLICT: 'workflowConflict',
+  NOT_FOUND: 'workflowNotFound',
+  UNAUTHORIZED: 'workflowAccessDenied',
+  FORBIDDEN: 'workflowAccessDenied',
+  MISSING_CONFIG: 'workflowMissingConfig',
+  GENERATION_TIMEOUT: 'workflowTimedOut',
+  NETWORK_ERROR: 'workflowNetworkFailed',
+  EXTERNAL_ERROR: 'workflowExternalFailed',
+}
+
+export function workflowRequestErrorFromPayload(payload: unknown): WorkflowRequestError {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return new WorkflowRequestError('UNKNOWN')
+  const record = payload as Record<string, unknown>
+  const nested = record.error && typeof record.error === 'object' && !Array.isArray(record.error)
+    ? record.error as Record<string, unknown>
+    : null
+  const code = typeof nested?.code === 'string'
+    ? nested.code
+    : typeof record.code === 'string' ? record.code : 'UNKNOWN'
+  return new WorkflowRequestError(code)
+}
+
+export function safeWorkflowErrorKey(error: unknown): WorkflowErrorKey {
   if (error instanceof Error && ['workflowInvalidJson', 'workflowTooLarge'].includes(error.message)) {
     return error.message as 'workflowInvalidJson' | 'workflowTooLarge'
   }
+  if (error instanceof WorkflowRequestError) return SAFE_WORKFLOW_API_ERRORS[error.code] ?? 'requestFailed'
   return 'requestFailed'
 }

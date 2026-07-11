@@ -6,7 +6,7 @@ import type { WorkflowValidationIssue } from '@/lib/comfyui/types'
 export interface WorkflowCompatibilityView {
   connectionId: string
   connectionName: string
-  state: 'compatible' | 'incompatible' | 'unknown' | 'offline' | 'auth_failed' | 'disabled'
+  state: 'compatible' | 'incompatible' | 'unknown' | 'offline' | 'auth_failed' | 'disabled' | 'timeout'
   missingNodes?: string[]
   missingModels?: Array<{ nodeId: string; field: string; value: string }>
 }
