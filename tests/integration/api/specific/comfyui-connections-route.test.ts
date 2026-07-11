@@ -291,14 +291,20 @@ describe('ComfyUI private connection routes', () => {
       where: {
         id: 'connection-1',
         userId: 'user-1',
-        updatedAt: new Date('2026-07-11T08:00:00.000Z'),
+        normalizedBaseUrl: 'http://example.com/comfy',
+        authType: 'bearer',
+        authSecretEncrypted: 'encrypted:{"token":"top-secret"}',
+        enabled: true,
       },
       data: expect.objectContaining({
         lastHealthCode: 'offline',
         lastHealthMessage: 'Connection unavailable',
       }),
     })
-    expect(JSON.stringify(prismaMock.comfyConnection.updateMany.mock.calls)).not.toContain('top-secret')
+    const healthWrite = prismaMock.comfyConnection.updateMany.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>
+    }
+    expect(JSON.stringify(healthWrite.data)).not.toContain('top-secret')
   })
 
   it('discards a stale probe after PATCH and re-probes the stable connection version', async () => {
@@ -326,7 +332,7 @@ describe('ComfyUI private connection routes', () => {
     expect(await responseJson(response)).toEqual({ health: expect.objectContaining({ version: 'stable' }) })
     expect(clientConstructedMock).toHaveBeenCalledTimes(2)
     expect(prismaMock.comfyConnection.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ updatedAt: changed.updatedAt }),
+      where: expect.objectContaining({ normalizedBaseUrl: 'http://changed.example.com' }),
     }))
   })
 
@@ -343,6 +349,40 @@ describe('ComfyUI private connection routes', () => {
     }), connectionContext('connection-1'))
 
     expect(response.status).toBe(404)
+  })
+
+  it('does not re-probe when concurrent health writes use the same connection config', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const initial = connection()
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(initial)
+    let healthWriteAdvancedUpdatedAt = false
+    prismaMock.comfyConnection.updateMany.mockImplementation(
+      async ({ where }: { where: Record<string, unknown> }) => {
+        if (!('updatedAt' in where)) return { count: 1 }
+        if (healthWriteAdvancedUpdatedAt) return { count: 0 }
+        healthWriteAdvancedUpdatedAt = true
+        return { count: 1 }
+      },
+    )
+    const route = await import('@/app/api/comfyui/connections/[connectionId]/probe/route')
+    const request = () => route.POST(buildMockRequest({
+      path: '/api/comfyui/connections/connection-1/probe', method: 'POST',
+    }), connectionContext('connection-1'))
+
+    const responses = await Promise.all([request(), request()])
+    expect(responses.map((response) => response.status)).toEqual([200, 200])
+    expect(clientConstructedMock).toHaveBeenCalledTimes(2)
+    expect(prismaMock.comfyConnection.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        id: 'connection-1',
+        userId: 'user-1',
+        normalizedBaseUrl: 'http://example.com/comfy',
+        authType: 'bearer',
+        authSecretEncrypted: 'encrypted:{"token":"top-secret"}',
+        enabled: true,
+      },
+    }))
   })
 
   it('returns exact idle, external-busy, owned-busy, offline, and auth status states', async () => {
@@ -406,6 +446,27 @@ describe('ComfyUI private connection routes', () => {
 
     expect(response.status).toBe(200)
     expect(peak).toBe(3)
+  })
+
+  it('drops a status probe disabled mid-flight without constructing a second client', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findMany.mockResolvedValue([connection()])
+    prismaMock.comfyConnection.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 })
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection({
+      enabled: false,
+      updatedAt: new Date('2026-07-11T08:01:00.000Z'),
+    }))
+    const route = await import('@/app/api/comfyui/connections/status/route')
+    const response = await route.GET(buildMockRequest({
+      path: '/api/comfyui/connections/status', method: 'GET',
+    }), collectionContext)
+
+    expect(response.status).toBe(200)
+    expect(await responseJson(response)).toEqual({ statuses: [] })
+    expect(clientConstructedMock).toHaveBeenCalledTimes(1)
   })
 
   it('retries P2034 serialization conflicts finitely before deleting', async () => {

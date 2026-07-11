@@ -142,7 +142,9 @@ export async function probeOwnedConnection(
   connectionId: string,
 ): Promise<ComfyHealthSummary> {
   const record = await findOwnedConnection(userId, connectionId)
-  return probeStableConnection(record, userId)
+  const summary = await probeStableConnection(record, userId, false)
+  if (!summary) throw new ApiError('CONFLICT')
+  return summary
 }
 
 export async function probeOwnedConnectionStatuses(userId: string) {
@@ -155,9 +157,11 @@ export async function probeOwnedConnectionStatuses(userId: string) {
     readStatusProbeConcurrency(),
     async (record) => {
       try {
+        const summary = await probeStableConnection(record, userId, true)
+        if (!summary) return null
         return {
           connectionId: record.id,
-          ...await probeStableConnection(record, userId),
+          ...summary,
         }
       } catch (error) {
         if (error instanceof ApiError
@@ -169,12 +173,23 @@ export async function probeOwnedConnectionStatuses(userId: string) {
   return statuses.filter((status) => status !== null)
 }
 
-async function probeStableConnection(initialRecord: ComfyConnection, userId: string) {
+async function probeStableConnection(
+  initialRecord: ComfyConnection,
+  userId: string,
+  discardWhenDisabled: boolean,
+): Promise<ComfyHealthSummary | null> {
   let record = initialRecord
   for (let attempt = 1; attempt <= MAX_STABLE_PROBE_ATTEMPTS; attempt += 1) {
     const summary = await collectProbe(record, userId)
     const persisted = await prisma.comfyConnection.updateMany({
-      where: { id: record.id, userId, updatedAt: record.updatedAt },
+      where: {
+        id: record.id,
+        userId,
+        normalizedBaseUrl: record.normalizedBaseUrl,
+        authType: record.authType,
+        authSecretEncrypted: record.authSecretEncrypted,
+        enabled: record.enabled,
+      },
       data: sanitizeComfyHealthDiagnostic(summary),
     })
     if (persisted.count === 1) return summary
@@ -182,6 +197,7 @@ async function probeStableConnection(initialRecord: ComfyConnection, userId: str
       where: { id: record.id, userId },
     })
     if (!current) throw new ApiError('NOT_FOUND')
+    if (discardWhenDisabled && !current.enabled) return null
     record = current
   }
   throw new ApiError('CONFLICT')
