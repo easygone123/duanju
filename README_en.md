@@ -154,7 +154,7 @@ COMFYUI_ALLOWED_CIDRS=127.0.0.1/32 \
 npm run check:comfyui-contract
 ```
 
-Optional auth variables are `COMFYUI_CONTRACT_AUTH_TYPE=none|bearer|basic` and the corresponding `COMFYUI_CONTRACT_AUTH_TOKEN` or `COMFYUI_CONTRACT_AUTH_USERNAME` / `COMFYUI_CONTRACT_AUTH_PASSWORD`. This command performs one real generation; use a dedicated safe test workflow. The contract check explicitly rejects bundles requiring uploaded `image_ref` / `video_ref` inputs; use a text-only or built-in-value workflow. On success or failure it best-effort deletes its exact queued prompt, rechecks before interrupting its exact running prompt, and clears its history without touching manual prompts. Cleanup errors expose only a sanitized stage and code.
+Optional auth variables are `COMFYUI_CONTRACT_AUTH_TYPE=none|bearer|basic` and the corresponding `COMFYUI_CONTRACT_AUTH_TOKEN` or `COMFYUI_CONTRACT_AUTH_USERNAME` / `COMFYUI_CONTRACT_AUTH_PASSWORD`. This command performs one real generation; use a dedicated safe test workflow. The contract check explicitly rejects bundles requiring uploaded `image_ref` / `video_ref` inputs; use a text-only or built-in-value workflow. On success or failure it only best-effort deletes its exact queued prompt and clears history. If that prompt is still running, it waits briefly and emits a sanitized operator-required notice; it never calls global `/interrupt`, so manual prompts remain untouched.
 
 This integration does not change the repository license. The project remains under **CC BY-NC-SA 4.0**, and deployment or redistribution must honor its attribution, non-commercial, and share-alike terms.
 

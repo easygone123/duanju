@@ -631,7 +631,7 @@ describe('system - ComfyUI executable acceptance evidence', () => {
     }
   })
 
-  it('contract cleanup rechecks and interrupts its running prompt after download failure only', async () => {
+  it('contract cleanup never globally interrupts a running prompt and preserves manual work', async () => {
     const workflowFile = await writeContractWorkflow()
     const server = new AcceptanceComfyServer()
     server.submitQueueMode = 'running'
@@ -640,13 +640,18 @@ describe('system - ComfyUI executable acceptance evidence', () => {
     server.installDynamicHistoryRoutes()
     await server.start()
     try {
+      const output: string[] = []
       await expect(runComfyContractCheck({
         baseUrl: server.baseUrl, workflowFile, auth: { type: 'none' }, timeoutMs: 100,
         networkPolicy: { mode: 'allowlist', allowedHosts: [], allowedCidrs: ['127.0.0.1/32'] },
-      })).rejects.toMatchObject({ code: COMFY_ERROR_CODE.OUTPUT_TRANSFER_FAILED })
-      expect(server.running).toEqual([[99, 'manual-prompt']])
-      expect(server.interruptCount).toBe(1)
+      }, { write: (line) => output.push(line) }))
+        .rejects.toMatchObject({ code: COMFY_ERROR_CODE.OUTPUT_TRANSFER_FAILED })
+      expect(server.running).toEqual([[99, 'manual-prompt'], [1, 'prompt-1']])
+      expect(server.interruptCount).toBe(0)
       expect(server.historyDeleteCount).toBe(1)
+      expect(output).toContain(JSON.stringify({
+        ok: false, event: 'cleanup_pending', stage: 'running_prompt', action: 'operator_required',
+      }))
     } finally {
       await server.close()
     }

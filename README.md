@@ -166,7 +166,7 @@ COMFYUI_ALLOWED_CIDRS=127.0.0.1/32 \
 npm run check:comfyui-contract
 ```
 
-可选认证变量为 `COMFYUI_CONTRACT_AUTH_TYPE=none|bearer|basic`，以及对应的 `COMFYUI_CONTRACT_AUTH_TOKEN` 或 `COMFYUI_CONTRACT_AUTH_USERNAME` / `COMFYUI_CONTRACT_AUTH_PASSWORD`。该命令会真实提交一次生成，请只使用专用的安全测试工作流。合约检查目前明确拒绝需要上传 `image_ref` / `video_ref` 的 bundle；请使用纯文本或内置值工作流。检查结束或失败时会按 prompt ID 尽力删除自己的排队项、再次确认后中断自己的运行项并清理历史，不会操作手工 prompt；清理失败只输出脱敏阶段和错误码。
+可选认证变量为 `COMFYUI_CONTRACT_AUTH_TYPE=none|bearer|basic`，以及对应的 `COMFYUI_CONTRACT_AUTH_TOKEN` 或 `COMFYUI_CONTRACT_AUTH_USERNAME` / `COMFYUI_CONTRACT_AUTH_PASSWORD`。该命令会真实提交一次生成，请只使用专用的安全测试工作流。合约检查目前明确拒绝需要上传 `image_ref` / `video_ref` 的 bundle；请使用纯文本或内置值工作流。检查结束或失败时只会按 prompt ID 尽力删除自己的排队项并清理历史；若该 prompt 仍在运行，会短暂等待后输出脱敏的人工处理提示，绝不会调用全局 `/interrupt`，因此不会误伤手工 prompt。
 
 本集成不改变仓库许可证：项目继续使用 **CC BY-NC-SA 4.0**，部署和再分发必须遵守非商业及署名、相同方式共享条款。
 

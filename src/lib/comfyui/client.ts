@@ -264,6 +264,8 @@ export class ComfyClient {
   }
 
   async interruptPrompt(promptId: string): Promise<void> {
+    // Standard ComfyUI /interrupt is global-current semantics; prompt_id is correlation only.
+    // Callers must not assume this is a prompt-scoped cancellation primitive.
     await this.requestJson(
       'interrupt',
       { method: 'POST', body: JSON.stringify({ prompt_id: promptId }), headers: jsonHeaders() },

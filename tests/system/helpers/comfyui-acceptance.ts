@@ -100,10 +100,9 @@ export class AcceptanceComfyServer {
         this.server.send({ type: 'executing', data: { prompt_id: promptId, node: null } })
       })
     })
-    this.server.override('/proxy/comfy/interrupt', (_request, response, body) => {
+    this.server.override('/proxy/comfy/interrupt', (_request, response) => {
       this.interruptCount += 1
-      const parsed = JSON.parse(body.toString('utf8')) as { prompt_id?: string }
-      this.running = this.running.filter((entry) => promptIdOf(entry) !== parsed.prompt_id)
+      this.running = []
       sendJson(response, {})
     })
     this.server.override('/proxy/comfy/history', (_request, response, body) => {

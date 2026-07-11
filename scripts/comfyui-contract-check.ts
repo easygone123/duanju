@@ -19,6 +19,7 @@ import type {
 } from '../src/lib/comfyui/types'
 
 const MAX_CONTRACT_BYTES = 4 * 1024 * 1024
+const RUNNING_CLEANUP_GRACE_MS = 50
 
 export interface ComfyContractCheckConfig {
   baseUrl: string
@@ -127,10 +128,16 @@ async function cleanupContractPrompt(
     }
   } else if (queue && queueContains(queue.running, promptId)) {
     try {
+      await new Promise((resolve) => setTimeout(resolve, RUNNING_CLEANUP_GRACE_MS))
       const confirmed = await client.getQueue()
-      if (queueContains(confirmed.running, promptId)) await client.interruptPrompt(promptId)
+      if (queueContains(confirmed.running, promptId)) {
+        output.write(JSON.stringify({
+          ok: false, event: 'cleanup_pending', stage: 'running_prompt',
+          action: 'operator_required',
+        }))
+      }
     } catch (error) {
-      writeCleanupFailure(output, 'interrupt_running', error)
+      writeCleanupFailure(output, 'confirm_running', error)
     }
   }
   try {
