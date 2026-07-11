@@ -160,7 +160,11 @@ export const REQUIREMENTS_MATRIX: ReadonlyArray<RequirementCoverageEntry> = [
     id: 'REQ-COMFYUI-AC-01', feature: 'ComfyUI connection status',
     userValue: '本地和远程连接显示准确的空闲、忙碌、离线、认证和兼容状态',
     risk: '错误健康状态导致任务误分配', priority: 'P0',
-    tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/provider/comfyui-health-monitor.contract.test.ts'],
+    tests: [
+      'tests/system/comfyui-generation.system.test.ts',
+      'tests/integration/provider/comfyui-health-monitor.contract.test.ts',
+      'tests/integration/api/specific/comfyui-connections-route.test.ts',
+    ],
   },
   {
     id: 'REQ-COMFYUI-AC-02', feature: 'ComfyUI arbitrary workflow import',

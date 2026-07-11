@@ -1,6 +1,6 @@
 export const COMFYUI_ACCEPTANCE_SCENARIOS: Readonly<Record<string, readonly string[]>> = {
   'REQ-COMFYUI-AC-01': [
-    'local-and-remote-url', 'online-idle', 'online-busy-owned', 'online-busy-external',
+    'local-and-remote-url-add', 'states', 'online-idle', 'online-busy-owned', 'online-busy-external',
     'offline', 'auth-failed', 'workflow-incompatible',
   ],
   'REQ-COMFYUI-AC-02': [

@@ -165,6 +165,92 @@ describe('ComfyUI private connection routes', () => {
     }))
   })
 
+  it('AC01 creates local and remote private connections with normalized owner-visible status', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    process.env.COMFYUI_ALLOWED_HOSTS = 'gpu.example.com'
+    process.env.COMFYUI_ALLOWED_CIDRS = '127.0.0.0/8'
+    const records: Array<ReturnType<typeof connection>> = []
+    prismaMock.comfyConnection.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => {
+        const record = connection({ ...data, id: `connection-${records.length + 1}` })
+        records.push(record)
+        return record
+      },
+    )
+    prismaMock.comfyConnection.findFirst.mockImplementation(
+      async ({ where }: { where: { id: string; userId: string } }) =>
+        records.find((record) => record.id === where.id && record.userId === where.userId) ?? null,
+    )
+    prismaMock.comfyConnection.findMany.mockImplementation(
+      async ({ where }: { where: { userId: string } }) =>
+        records.filter((record) => record.userId === where.userId),
+    )
+    const route = await import('@/app/api/comfyui/connections/route')
+
+    const cases = [
+      {
+        name: 'Local GPU',
+        inputUrl: '127.0.0.1:8188///',
+        normalizedUrl: 'http://127.0.0.1:8188',
+      },
+      {
+        name: 'Remote GPU',
+        inputUrl: 'HTTPS://GPU.Example.COM:443/comfy///',
+        normalizedUrl: 'https://gpu.example.com/comfy',
+      },
+    ]
+    for (const item of cases) {
+      const response = await route.POST(buildMockRequest({
+        path: '/api/comfyui/connections', method: 'POST',
+        body: { name: item.name, baseUrl: item.inputUrl, authType: 'none' },
+      }), collectionContext)
+      expect(response.status).toBe(201)
+      const body = await responseJson(response)
+      expect(body.connection).toEqual(expect.objectContaining({
+        name: item.name, normalizedBaseUrl: item.normalizedUrl, hasCredentials: false,
+      }))
+      expect(body.health).toEqual(expect.objectContaining({ state: 'online_idle' }))
+      expect(JSON.stringify(body)).not.toContain('userId')
+      expect(JSON.stringify(body)).not.toContain('authSecretEncrypted')
+    }
+
+    expect(records.map(({ userId, normalizedBaseUrl, authSecretEncrypted }) => ({
+      userId, normalizedBaseUrl, authSecretEncrypted,
+    }))).toEqual([
+      { userId: 'user-1', normalizedBaseUrl: 'http://127.0.0.1:8188', authSecretEncrypted: null },
+      { userId: 'user-1', normalizedBaseUrl: 'https://gpu.example.com/comfy', authSecretEncrypted: null },
+    ])
+    expect(authorizeComfyTargetMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8188', expect.objectContaining({ mode: 'allowlist' }),
+    )
+    expect(authorizeComfyTargetMock).toHaveBeenCalledWith(
+      'https://gpu.example.com/comfy', expect.objectContaining({ mode: 'allowlist' }),
+    )
+
+    const ownerStatusRoute = await import('@/app/api/comfyui/connections/status/route')
+    const ownerStatus = await ownerStatusRoute.GET(buildMockRequest({
+      path: '/api/comfyui/connections/status', method: 'GET',
+    }), collectionContext)
+    const ownerStatusBody = await responseJson(ownerStatus) as {
+      statuses: Array<{ connectionId: string; state: string }>
+    }
+    expect(ownerStatusBody.statuses).toEqual([
+      expect.objectContaining({ connectionId: 'connection-1', state: 'online_idle' }),
+      expect.objectContaining({ connectionId: 'connection-2', state: 'online_idle' }),
+    ])
+
+    mockAuthenticated('user-2')
+    const foreignList = await route.GET(buildMockRequest({
+      path: '/api/comfyui/connections', method: 'GET',
+    }), collectionContext)
+    expect(await responseJson(foreignList)).toEqual({ connections: [] })
+    const foreignStatus = await ownerStatusRoute.GET(buildMockRequest({
+      path: '/api/comfyui/connections/status', method: 'GET',
+    }), collectionContext)
+    expect(await responseJson(foreignStatus)).toEqual({ statuses: [] })
+  })
+
   it('normalizes the URL, encrypts credential JSON, and returns only hasCredentials', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')

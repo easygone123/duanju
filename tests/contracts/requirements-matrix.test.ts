@@ -48,6 +48,19 @@ describe('requirements matrix integrity', () => {
       'restart-after-acceptance', 'websocket-disconnect', 'queued-and-running-cancel',
       'transfer-failure-retry',
     ])
+    expect(COMFYUI_ACCEPTANCE_SCENARIOS['REQ-COMFYUI-AC-01']).toEqual(expect.arrayContaining([
+      'local-and-remote-url-add', 'states',
+    ]))
+
+    const ac01 = entries.find((entry) => entry.id === 'REQ-COMFYUI-AC-01')
+    const connectionsRouteEvidence = 'tests/integration/api/specific/comfyui-connections-route.test.ts'
+    expect(ac01?.tests).toContain(connectionsRouteEvidence)
+    const connectionsRouteSource = fs.readFileSync(
+      path.resolve(process.cwd(), connectionsRouteEvidence), 'utf8',
+    )
+    expect(connectionsRouteSource).toMatch(
+      /it\(['"]AC01 creates local and remote private connections[^'"]*['"]/,
+    )
   })
 
   it('keeps the real ComfyUI contract check opt-in', () => {
