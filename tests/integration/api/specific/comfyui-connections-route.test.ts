@@ -216,6 +216,43 @@ describe('ComfyUI private connection routes', () => {
     expect(encryptApiKeyMock).not.toHaveBeenCalled()
   })
 
+  it('returns 409 for URL/auth identity PATCH while a test lease is active', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    redisMock.set.mockResolvedValue(null)
+    const route = await import('@/app/api/comfyui/connections/[connectionId]/route')
+    const response = await route.PATCH(buildMockRequest({
+      path: '/api/comfyui/connections/connection-1', method: 'PATCH',
+      body: { baseUrl: 'http://gpu-b.example.com', authType: 'none' },
+    }), connectionContext('connection-1'))
+    expect(response.status).toBe(409)
+    expect(redisMock.set).toHaveBeenCalledWith(
+      'comfy:lease:connection-1', expect.stringContaining('connection-update'),
+      'PX', expect.any(Number), 'NX',
+    )
+    expect(prismaMock.comfyConnection.update).not.toHaveBeenCalled()
+  })
+
+  it('updates URL/auth identity under an acquired lease and releases it', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection({ authType: 'none', authSecretEncrypted: null }))
+    prismaMock.comfyConnection.update.mockResolvedValue(connection({
+      baseUrl: 'http://gpu-b.example.com', normalizedBaseUrl: 'http://gpu-b.example.com',
+      authType: 'none', authSecretEncrypted: null,
+    }))
+    const route = await import('@/app/api/comfyui/connections/[connectionId]/route')
+    const response = await route.PATCH(buildMockRequest({
+      path: '/api/comfyui/connections/connection-1', method: 'PATCH',
+      body: { baseUrl: 'http://gpu-b.example.com', authType: 'none' },
+    }), connectionContext('connection-1'))
+    expect(response.status).toBe(200)
+    expect(redisMock.set).toHaveBeenCalled()
+    expect(prismaMock.comfyConnection.update).toHaveBeenCalled()
+    expect(redisMock.eval).toHaveBeenCalled()
+  })
+
   it('rejects deletion while owned nonterminal work exists but permits it after completion', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')

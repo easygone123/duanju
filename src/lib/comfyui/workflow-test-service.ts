@@ -125,6 +125,12 @@ async function runOwnedWorkflowTestInternal(
   })
   try {
     await guard.assertOwned()
+    const claimedConnection = await prisma.comfyConnection.findFirst({
+      where: { id: connection.id, userId },
+    })
+    if (!claimedConnection || !sameConnectionExecutionIdentity(connection, claimedConnection)) {
+      throw new ApiError('CONFLICT')
+    }
     const claimedQueue = await client.getQueue()
     if (claimedQueue.running.length > 0 || claimedQueue.pending.length > 0) {
       throw new ApiError('CONFLICT')
@@ -169,6 +175,13 @@ async function runOwnedWorkflowTestInternal(
     await guard.stop()
     await releaseComfyLease(leaseKey, leaseValue).catch(() => undefined)
   }
+}
+
+function sameConnectionExecutionIdentity(left: ComfyConnection, right: ComfyConnection) {
+  return left.normalizedBaseUrl === right.normalizedBaseUrl
+    && left.authType === right.authType
+    && left.authSecretEncrypted === right.authSecretEncrypted
+    && left.enabled === right.enabled
 }
 
 async function restoreSuccessfulWorkflowTest(marker: {

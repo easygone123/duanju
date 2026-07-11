@@ -9,7 +9,7 @@ import { ComfyClient } from './client'
 import { deriveComfyHealth, sanitizeComfyHealthDiagnostic } from './health'
 import { authorizeComfyTarget, type ComfyNetworkPolicyConfig } from './network-policy'
 import type { ComfyAuthType, ComfyConnectionAuth, ComfyHealthSummary } from './types'
-import { acquireComfyLease, releaseComfyLease } from './test-lease'
+import { acquireComfyLease, releaseComfyLease, startComfyLeaseGuard } from './test-lease'
 
 const TERMINAL_REQUEST_STATUSES = ['completed', 'failed', 'canceled'] as const
 const MAX_DELETE_ATTEMPTS = 3
@@ -95,7 +95,32 @@ export async function updateOwnedConnection(
   connectionId: string,
   input: UpdateComfyConnectionInput,
 ) {
-  const existing = await findOwnedConnection(userId, connectionId)
+  const initial = await findOwnedConnection(userId, connectionId)
+  if (!isConnectionIdentityMutation(input)) {
+    return updateOwnedConnectionRecord(userId, initial, input)
+  }
+  const leaseValue = JSON.stringify({ type: 'connection-update', id: randomUUID(), userId })
+  const leaseKey = await acquireComfyLease(connectionId, leaseValue, DELETE_LEASE_TTL_MS)
+  const guard = startComfyLeaseGuard({
+    key: leaseKey, value: leaseValue, ttlMs: DELETE_LEASE_TTL_MS, timeoutMs: DELETE_LEASE_TTL_MS,
+  })
+  try {
+    await guard.assertOwned()
+    const existing = await findOwnedConnection(userId, connectionId)
+    const result = await updateOwnedConnectionRecord(userId, existing, input)
+    await guard.assertOwned()
+    return result
+  } finally {
+    await guard.stop()
+    await releaseComfyLease(leaseKey, leaseValue).catch(() => undefined)
+  }
+}
+
+async function updateOwnedConnectionRecord(
+  userId: string,
+  existing: ComfyConnection,
+  input: UpdateComfyConnectionInput,
+) {
   const nextAuthType = input.authType ?? (existing.authType as ComfyAuthType)
   const data: Record<string, unknown> = {}
   if (input.name !== undefined) data.name = input.name.trim()
@@ -123,6 +148,10 @@ export async function updateOwnedConnection(
     if (isUniqueViolation(error)) throw new ApiError('CONFLICT')
     throw error
   }
+}
+
+function isConnectionIdentityMutation(input: UpdateComfyConnectionInput) {
+  return input.baseUrl !== undefined || input.authType !== undefined || input.credentials !== undefined
 }
 
 export async function deleteOwnedConnection(userId: string, connectionId: string) {

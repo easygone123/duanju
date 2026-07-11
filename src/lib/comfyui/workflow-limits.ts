@@ -1,6 +1,7 @@
 import { ApiError } from '@/lib/api-errors'
 
 export const MAX_WORKFLOW_JSON_BYTES = 4 * 1024 * 1024
+export const MAX_WORKFLOW_CONTRACT_BYTES = 6 * 1024 * 1024
 export const MAX_WORKFLOW_DEPTH = 64
 export const MAX_WORKFLOW_NODES = 2_000
 export const MAX_WORKFLOW_VALUES = 100_000
@@ -46,6 +47,21 @@ export function assertBoundedWorkflowJson(value: unknown) {
     maxKeys: MAX_WORKFLOW_KEYS,
   })
   if (isObject(value) && Object.keys(value).length > MAX_WORKFLOW_NODES) invalid()
+}
+
+export function assertBoundedWorkflowContract(value: {
+  graph: unknown
+  variableDefinitions: unknown
+  bindings: unknown
+  outputs: unknown
+}) {
+  assertBoundedJson(value, {
+    maxBytes: MAX_WORKFLOW_CONTRACT_BYTES,
+    maxDepth: MAX_WORKFLOW_DEPTH,
+    maxValues: MAX_WORKFLOW_VALUES,
+    maxKeys: MAX_WORKFLOW_KEYS,
+  })
+  if (isObject(value.graph) && Object.keys(value.graph).length > MAX_WORKFLOW_NODES) invalid()
 }
 
 export function isBoundedLiveVariables(value: unknown) {

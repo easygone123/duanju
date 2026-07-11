@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma'
 
 import { deriveComfyRequirements } from './workflow-requirements'
 import { validateComfyApiWorkflow, validateWorkflowContract } from './workflow-schema'
-import { assertBoundedWorkflowJson } from './workflow-limits'
+import { assertBoundedWorkflowContract, assertBoundedWorkflowJson } from './workflow-limits'
 import type {
   ComfyInputBinding,
   ComfyMediaType,
@@ -51,8 +51,15 @@ export function parseWorkflowImport(value: unknown): unknown {
 }
 
 export function canonicalWorkflowHash(input: CreateVersionInput): string {
+  const graph = parseWorkflowImport(input.apiFormatJson)
+  assertBoundedWorkflowContract({
+    graph,
+    variableDefinitions: input.variableDefinitions,
+    bindings: input.bindings,
+    outputs: input.outputs,
+  })
   return createHash('sha256').update(stableJson({
-    graph: parseWorkflowImport(input.apiFormatJson),
+    graph,
     variableDefinitions: input.variableDefinitions,
     bindings: input.bindings,
     outputs: input.outputs,
@@ -220,6 +227,12 @@ export async function bindProjectDefaultWorkflow(
 
 function prepareVersion(input: CreateVersionInput) {
   const graph = parseWorkflowImport(input.apiFormatJson)
+  assertBoundedWorkflowContract({
+    graph,
+    variableDefinitions: input.variableDefinitions,
+    bindings: input.bindings,
+    outputs: input.outputs,
+  })
   const issues = validateWorkflowContract({
     graph, variableDefinitions: input.variableDefinitions, bindings: input.bindings, outputs: input.outputs,
   })

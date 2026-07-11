@@ -165,6 +165,29 @@ describe('ComfyUI workflow library', () => {
     )
   })
 
+  it.each(['variableDefinitions', 'bindings', 'outputs'] as const)(
+    'rejects a 10k-deep %s contract before canonical recursive sorting',
+    async (field) => {
+      const { canonicalWorkflowHash } = await import('@/lib/comfyui/workflow-service')
+      let deep: Record<string, unknown> = { leaf: true }
+      for (let index = 0; index < 10_000; index += 1) deep = { child: deep }
+      const hostile = { ...contract, [field]: [deep] } as unknown as CreateVersionInput
+      expect(() => canonicalWorkflowHash(hostile)).toThrowError(expect.objectContaining({
+        code: 'INVALID_PARAMS',
+      }))
+    },
+  )
+
+  it('rejects excessive total contract bytes outside the graph', async () => {
+    const { canonicalWorkflowHash } = await import('@/lib/comfyui/workflow-service')
+    expect(() => canonicalWorkflowHash({
+      ...contract,
+      variableDefinitions: [{
+        name: 'huge', type: 'string', required: false, defaultValue: 'x'.repeat(7 * 1024 * 1024),
+      }],
+    })).toThrowError(expect.objectContaining({ code: 'INVALID_PARAMS' }))
+  })
+
   it('returns validation issues for an invalid draft but does not make it executable', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')
