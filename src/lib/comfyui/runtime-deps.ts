@@ -16,20 +16,46 @@ type ScheduleResult =
   | { outcome: 'empty' | 'waiting_capacity' | 'blocked_no_compatible_instance' | 'lost_race' }
   | { outcome: 'leased'; requestId: string; connectionId: string; leaseId: string; mediaType: 'image' | 'video' }
 
+export interface ComfyCursorPageInput {
+  afterId: string | null
+  limit: number
+}
+
+export interface ComfyCursorPage<T> {
+  items: T[]
+  nextCursor: string | null
+}
+
+export interface ComfyOwnerCursorItem {
+  id: string
+  userId: string
+}
+
+export interface ComfyReconcileCursorInput extends ComfyCursorPageInput {
+  now: Date
+}
+
+export interface ComfyReconcileCursorItem {
+  requestId: string
+  mediaType: 'image' | 'video'
+}
+
 export interface ProductionComfyRuntimeServices {
-  listHealthOwners(): Promise<string[]>
+  listHealthOwners(input: ComfyCursorPageInput): Promise<ComfyCursorPage<ComfyOwnerCursorItem>>
   probeOwnerHealth(
     userId: string,
     config: ComfyRuntimeConfig,
   ): Promise<Array<{ state: ComfyHealthState }>>
-  listDispatchOwners(): Promise<string[]>
+  listDispatchOwners(input: ComfyCursorPageInput): Promise<ComfyCursorPage<ComfyOwnerCursorItem>>
   scheduleNext(userId: string, config: ComfyRuntimeConfig): Promise<ScheduleResult>
   dispatch(
     requestId: string,
     limits: ComfyRuntimeOperationLimits,
     signal: AbortSignal,
   ): Promise<unknown>
-  listReconcileRequests(): Promise<Array<{ requestId: string; mediaType: 'image' | 'video' }>>
+  listReconcileRequests(
+    input: ComfyReconcileCursorInput,
+  ): Promise<ComfyCursorPage<ComfyReconcileCursorItem>>
   reconcile(
     requestId: string,
     limits: ComfyRuntimeOperationLimits,
@@ -40,12 +66,12 @@ export interface ProductionComfyRuntimeServices {
 }
 
 const productionServices: ProductionComfyRuntimeServices = {
-  listHealthOwners: async () => (await import('./runtime-production')).listProductionComfyHealthOwners(),
+  listHealthOwners: async (input) => (await import('./runtime-production')).listProductionComfyHealthOwners(input),
   probeOwnerHealth: async (userId, config) => (await import('./runtime-production')).probeProductionComfyOwnerHealth(userId, config),
-  listDispatchOwners: async () => (await import('./runtime-production')).listProductionComfyDispatchOwners(),
+  listDispatchOwners: async (input) => (await import('./runtime-production')).listProductionComfyDispatchOwners(input),
   scheduleNext: async (userId, config) => (await import('./runtime-production')).scheduleProductionComfyRequest(userId, config),
   dispatch: async (requestId, limits, signal) => (await import('./runtime-production')).dispatchProductionComfyRequest(requestId, limits, signal),
-  listReconcileRequests: async () => (await import('./runtime-production')).listProductionComfyReconcileRequests(),
+  listReconcileRequests: async (input) => (await import('./runtime-production')).listProductionComfyReconcileRequests(input),
   reconcile: async (requestId, limits, signal) => (await import('./runtime-production')).reconcileProductionComfyRequest(requestId, limits, signal),
   scanExpiredPreSubmit: async () => (await import('./runtime-production')).scanProductionExpiredPreSubmit(),
   onError: (_error, loop) => {
@@ -57,7 +83,12 @@ export function createProductionComfyRuntimeDeps(
   overrides: Partial<ProductionComfyRuntimeServices> = {},
 ): ComfyRuntimeDeps {
   const services = { ...productionServices, ...overrides }
-  let ownerCursor = 0
+  let healthCursor: string | null = null
+  let dispatchCursor: string | null = null
+  let reconcileCursor: string | null = null
+  const healthOwnersSeen = new Set<string>()
+  const dispatchOwnersSeen = new Set<string>()
+  const dispatchOwnersPending: string[] = []
   const failures = new Map<string, { attempts: number; retryAt: number }>()
   const allowed = (key: string) => (failures.get(key)?.retryAt ?? 0) <= Date.now()
   const failed = (key: string, config: ComfyRuntimeConfig) => {
@@ -73,7 +104,9 @@ export function createProductionComfyRuntimeDeps(
     onError: services.onError,
     async healthTick(signal, config) {
       let idle = false
-      for (const userId of await services.listHealthOwners()) {
+      const page = await services.listHealthOwners({ afterId: healthCursor, limit: config.pageSize })
+      healthCursor = page.nextCursor
+      for (const userId of ownersForRound(page, healthOwnersSeen)) {
         if (signal.aborted) break
         const key = `health:${userId}`
         if (!allowed(key)) continue
@@ -88,13 +121,18 @@ export function createProductionComfyRuntimeDeps(
       return { idle }
     },
     async dispatchTick(signal, config) {
-      const owners = await services.listDispatchOwners()
-      const rotated = [...owners.slice(ownerCursor), ...owners.slice(0, ownerCursor)]
-        .slice(0, config.pageSize)
-      ownerCursor = owners.length === 0 ? 0 : (ownerCursor + rotated.length) % owners.length
+      if (dispatchOwnersPending.length === 0) {
+        const page = await services.listDispatchOwners({
+          afterId: dispatchCursor, limit: config.pageSize,
+        })
+        dispatchCursor = page.nextCursor
+        dispatchOwnersPending.push(...ownersForRound(page, dispatchOwnersSeen))
+      }
       const executions: Promise<unknown>[] = []
-      for (const userId of rotated) {
+      let visited = 0
+      for (const userId of dispatchOwnersPending) {
         if (executions.length >= config.dispatchConcurrency || signal.aborted) break
+        visited += 1
         const key = `dispatch:${userId}`
         if (!allowed(key)) continue
         try {
@@ -113,10 +151,15 @@ export function createProductionComfyRuntimeDeps(
           failed(key, config); services.onError(error, 'dispatch')
         }
       }
+      dispatchOwnersPending.splice(0, visited)
       await Promise.all(executions)
     },
     async reconcileTick(signal, config) {
-      for (const request of await services.listReconcileRequests()) {
+      const page = await services.listReconcileRequests({
+        afterId: reconcileCursor, limit: config.pageSize, now: new Date(),
+      })
+      reconcileCursor = page.nextCursor
+      for (const request of page.items) {
         if (signal.aborted) break
         const key = `reconcile:${request.requestId}`
         if (!allowed(key)) continue
@@ -132,6 +175,20 @@ export function createProductionComfyRuntimeDeps(
       if (!signal.aborted) await services.scanExpiredPreSubmit()
     },
   }
+}
+
+function ownersForRound(
+  page: ComfyCursorPage<ComfyOwnerCursorItem>,
+  seen: Set<string>,
+) {
+  const owners: string[] = []
+  for (const item of page.items) {
+    if (seen.has(item.userId)) continue
+    seen.add(item.userId)
+    owners.push(item.userId)
+  }
+  if (page.nextCursor === null) seen.clear()
+  return owners
 }
 
 function limitsFor(

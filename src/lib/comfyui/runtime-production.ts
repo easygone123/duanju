@@ -12,7 +12,12 @@ import {
   scheduleNextComfyRequest,
 } from './scheduler'
 import type { ComfyRuntimeConfig } from './runtime'
-import type { ComfyRuntimeOperationLimits } from './runtime-deps'
+import type {
+  ComfyCursorPageInput,
+  ComfyOwnerCursorItem,
+  ComfyReconcileCursorInput,
+  ComfyRuntimeOperationLimits,
+} from './runtime-deps'
 import {
   createProductionDispatcherDependencies,
   createProductionComfyClient,
@@ -25,11 +30,8 @@ import { reclaimComfyRecoveryLease } from './submission'
 const compatibilityCache: ComfyCompatibilityCache = new Map()
 const compatibilityExpiry = new Map<string, number>()
 
-export async function listProductionComfyHealthOwners() {
-  const records = await prisma.comfyConnection.findMany({
-    where: { enabled: true }, distinct: ['userId'], select: { userId: true },
-  })
-  return records.map((record) => record.userId)
+export async function listProductionComfyHealthOwners(input: ComfyCursorPageInput) {
+  return listProductionComfyOwnerPage(input)
 }
 
 export async function probeProductionComfyOwnerHealth(
@@ -56,12 +58,18 @@ export async function probeProductionComfyOwnerHealth(
   return statuses
 }
 
-export async function listProductionComfyDispatchOwners() {
-  const records = await prisma.comfyGenerationRequest.findMany({
-    where: { status: { in: ['waiting_capacity', 'blocked_no_compatible_instance'] } },
-    distinct: ['userId'], select: { userId: true }, orderBy: { userId: 'asc' },
+export async function listProductionComfyDispatchOwners(input: ComfyCursorPageInput) {
+  return listProductionComfyOwnerPage(input)
+}
+
+async function listProductionComfyOwnerPage(input: ComfyCursorPageInput) {
+  const records = await prisma.comfyConnection.findMany({
+    where: { enabled: true, ...(input.afterId ? { id: { gt: input.afterId } } : {}) },
+    orderBy: { id: 'asc' },
+    take: input.limit + 1,
+    select: { id: true, userId: true },
   })
-  return records.map((record) => record.userId)
+  return boundedPage<ComfyOwnerCursorItem>(records, input.limit, (record) => record.id)
 }
 
 export async function scheduleProductionComfyRequest(
@@ -137,29 +145,40 @@ export async function dispatchProductionComfyRequest(
   )
 }
 
-export async function listProductionComfyReconcileRequests() {
+export async function listProductionComfyReconcileRequests(input: ComfyReconcileCursorInput) {
   const records = await prisma.comfyGenerationRequest.findMany({
     where: {
       status: { in: ['submitting', 'submitted', 'running', 'transferring', 'reconciling'] },
+      leaseExpiresAt: { lte: input.now },
       connectionId: { not: null }, leaseId: { not: null },
+      ...(input.afterId ? { id: { gt: input.afterId } } : {}),
     },
-    orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
-    take: 100,
-    select: {
-      id: true, mediaType: true, status: true, connectionId: true,
-      leaseId: true, leaseExpiresAt: true,
-    },
+    orderBy: { id: 'asc' },
+    take: input.limit + 1,
+    select: { id: true, mediaType: true, connectionId: true },
   })
+  const pageRecords = records.slice(0, input.limit)
   const candidates = [] as Array<{ requestId: string; mediaType: 'image' | 'video' }>
-  for (const record of records) {
+  for (const record of pageRecords) {
     if ((record.mediaType !== 'image' && record.mediaType !== 'video') || !record.connectionId) continue
-    const redisOwner = await redis.get(comfyLeaseKey(record.connectionId))
+    const redisOwner = await redis.get(comfyLeaseKey(record.connectionId)).catch(() => undefined)
     // Redis is the live ownership authority. A conservative DB expiry alone must
     // never let reconciliation race an active dispatcher heartbeat.
-    const recoverable = redisOwner === null
-    if (recoverable) candidates.push({ requestId: record.id, mediaType: record.mediaType })
+    if (redisOwner === null) candidates.push({ requestId: record.id, mediaType: record.mediaType })
   }
-  return candidates
+  return {
+    items: candidates,
+    nextCursor: records.length > input.limit && pageRecords.length > 0
+      ? pageRecords[pageRecords.length - 1].id : null,
+  }
+}
+
+function boundedPage<T>(records: T[], limit: number, idOf: (record: T) => string) {
+  const items = records.slice(0, limit)
+  return {
+    items,
+    nextCursor: records.length > limit && items.length > 0 ? idOf(items[items.length - 1]) : null,
+  }
 }
 
 export async function reconcileProductionComfyRequest(
