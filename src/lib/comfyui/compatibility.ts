@@ -119,13 +119,17 @@ function buildCandidateEnumIndex(
   candidates: ComfyWorkflowRequirements['candidateLoaderInputs'],
   parser: typeof parseComfyInputEnum,
 ) {
-  const memo = new Map<string, InputEnum | null>()
+  const memo = new Map<string | undefined, Map<string, InputEnum | null>>()
   let totalValues = 0
   let totalBytes = 0
   return candidates.map((candidate) => {
     const classType = graph[candidate.nodeId]?.class_type
-    const key = `${classType ?? ''}\u0000${candidate.inputName}`
-    if (!memo.has(key)) {
+    let classMemo = memo.get(classType)
+    if (!classMemo) {
+      classMemo = new Map<string, InputEnum | null>()
+      memo.set(classType, classMemo)
+    }
+    if (!classMemo.has(candidate.inputName)) {
       const inputEnum = parser(readInputDefinition(objectInfo, classType, candidate.inputName))
       if (inputEnum) {
         totalValues += inputEnum.values.length
@@ -137,9 +141,9 @@ function buildCandidateEnumIndex(
           throw incompatible('ComfyUI input enums exceed compatibility budget')
         }
       }
-      memo.set(key, inputEnum)
+      classMemo.set(candidate.inputName, inputEnum)
     }
-    return { candidate, inputEnum: memo.get(key) ?? null }
+    return { candidate, inputEnum: classMemo.get(candidate.inputName) ?? null }
   })
 }
 

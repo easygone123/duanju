@@ -300,6 +300,37 @@ describe('checkComfyCompatibility', () => {
     expect(parser).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps class and input identity distinct when delimiter-based keys would collide', async () => {
+    const firstClass = 'a\u0000b'
+    const firstInput = 'c'
+    const secondClass = 'a'
+    const secondInput = 'b\u0000c'
+    const comfy = client({
+      [firstClass]: { input: { required: { [firstInput]: [['wanted'], {}] } } },
+      [secondClass]: { input: { required: { [secondInput]: [['other'], {}] } } },
+    })
+
+    const result = await checkComfyCompatibility({
+      connectionId: 'connection-1', workflowHash: 'collision',
+      graph: {
+        '1': { class_type: firstClass, inputs: { [firstInput]: 'wanted' } },
+        '2': { class_type: secondClass, inputs: { [secondInput]: 'wanted' } },
+      },
+      requirements: {
+        nodeClasses: [firstClass, secondClass],
+        candidateLoaderInputs: [
+          { nodeId: '1', inputName: firstInput, value: 'wanted' },
+          { nodeId: '2', inputName: secondInput, value: 'wanted' },
+        ],
+      },
+      client: comfy,
+    })
+
+    expect(result.missingModels).toEqual([
+      { nodeId: '2', field: secondInput, value: 'wanted' },
+    ])
+  })
+
   it.each([
     [
       'entry count',
