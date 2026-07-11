@@ -279,6 +279,20 @@ describe('ComfyUI dispatcher contract', () => {
     expect(new Set(outputKeys).size).toBe(2)
   })
 
+  it('applies runtime input and output byte limits inside dispatcher media transfer', async () => {
+    const inputLimited = dependencies({ maxInputBytes: 4 })
+    await expect(dispatchComfyRequest('request-1', inputLimited)).resolves.toMatchObject({
+      outcome: 'failed', code: 'COMFY_INPUT_UPLOAD_FAILED',
+    })
+    expect(inputLimited.client.uploadImage).not.toHaveBeenCalled()
+
+    const outputLimited = dependencies({ maxOutputBytes: 4 })
+    await expect(dispatchComfyRequest('request-1', outputLimited)).resolves.toMatchObject({
+      outcome: 'reconciling', promptId: 'prompt-1',
+    })
+    expect(outputLimited.persistCompletedOutputs).not.toHaveBeenCalled()
+  })
+
   it('records execution duration and lease contention without sensitive labels', async () => {
     const metrics = { increment: vi.fn(), observe: vi.fn(), gauge: vi.fn() }
     const observation = createComfyObservability({

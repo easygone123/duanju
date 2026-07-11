@@ -4,8 +4,11 @@ import { createImageWorker } from './image.worker'
 import { createVideoWorker } from './video.worker'
 import { createVoiceWorker } from './voice.worker'
 import { createTextWorker } from './text.worker'
+import { redis, queueRedis } from '@/lib/redis'
+import { closeWorkerProcesses, createWorkerComfyRuntimeManager } from './comfy-runtime'
 
 const workers = [createImageWorker(), createVideoWorker(), createVoiceWorker(), createTextWorker()]
+const comfyRuntime = createWorkerComfyRuntimeManager().start()
 
 _ulogInfo('[Workers] started:', workers.length)
 
@@ -28,9 +31,19 @@ for (const worker of workers) {
   })
 }
 
-async function shutdown(signal: string) {
+let shutdownPromise: Promise<void> | null = null
+
+function shutdown(signal: string) {
+  if (shutdownPromise) return shutdownPromise
+  shutdownPromise = performShutdown(signal)
+  return shutdownPromise
+}
+
+async function performShutdown(signal: string) {
   _ulogInfo(`[Workers] shutdown signal: ${signal}`)
-  await Promise.all(workers.map(async (worker) => await worker.close()))
+  await closeWorkerProcesses(comfyRuntime, workers, async () => {
+    await Promise.all([redis.quit(), queueRedis.quit()])
+  })
   process.exit(0)
 }
 

@@ -104,6 +104,8 @@ export interface ComfyDispatcherDependencies extends ComfyMediaDependencies {
   client: ComfyExecutionClient
   signal: AbortSignal
   leaseTtlMs: number
+  maxInputBytes?: number
+  maxOutputBytes?: number
   heartbeatTickMs?: number
   randomId?: () => string
   observation?: ComfyObservability
@@ -173,6 +175,8 @@ export async function dispatchComfyRequest(
       definitions: context.version.variableDefinitions ?? [],
       client: dependencies.client,
       dependencies,
+      ...(dependencies.maxInputBytes === undefined
+        ? {} : { maxInputBytes: dependencies.maxInputBytes }),
     })
     const graph = renderComfyWorkflow({
       graph: context.version.graph ?? {},
@@ -299,6 +303,8 @@ async function transferAndComplete(
     })),
     client: dependencies.client,
     dependencies,
+    ...(dependencies.maxOutputBytes === undefined
+      ? {} : { maxOutputBytes: dependencies.maxOutputBytes }),
   })
   const primary = stored.find((output) => output.primary)
   if (!primary) throw new ComfyError(COMFY_ERROR_CODE.OUTPUT_MISSING, 'Primary output is missing')
