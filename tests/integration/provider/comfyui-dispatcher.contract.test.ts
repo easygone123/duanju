@@ -183,6 +183,33 @@ describe('ComfyUI dispatcher contract', () => {
     expect(deps.release).toHaveBeenCalledOnce()
   })
 
+  it('returns safely to capacity without POST when the connection is disabled pre-submit', async () => {
+    const deps = dependencies({ preSubmitGate: vi.fn().mockResolvedValue('disabled') })
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({
+      outcome: 'waiting_capacity',
+    })
+    expect(deps.client.submitPrompt).not.toHaveBeenCalled()
+    expect(deps.claimSubmissionFence).not.toHaveBeenCalled()
+    expect(deps.returnToWaiting).toHaveBeenCalledOnce()
+    expect(deps.release).toHaveBeenCalledOnce()
+  })
+
+  it('lets already-fenced output transfer finish after future assignments are disabled', async () => {
+    const refs = [output('primary', true)]
+    const deps = dependencies({
+      loadContext: vi.fn().mockResolvedValue(context({
+        connection: { id: 'connection-1', userId: 'user-1', enabled: false },
+        request: {
+          ...context().request, status: 'transferring', promptId: 'prompt-1',
+          clientId: 'client-1', outputRefs: refs,
+        },
+      })),
+    })
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({ outcome: 'completed' })
+    expect(deps.client.submitPrompt).not.toHaveBeenCalled()
+    expect(deps.persistCompletedOutputs).toHaveBeenCalledOnce()
+  })
+
   it('does not submit when fresh capability state makes the pinned workflow incompatible', async () => {
     const deps = dependencies({
       preSubmitGate: vi.fn().mockResolvedValue('incompatible'),

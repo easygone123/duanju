@@ -247,6 +247,26 @@ describe('ComfyUI private connection routes', () => {
     expect(encryptApiKeyMock).not.toHaveBeenCalled()
   })
 
+  it('allows an owner to disable an active connection without canceling work or releasing its lease', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    prismaMock.comfyConnection.update.mockResolvedValue(connection({ enabled: false }))
+    prismaMock.comfyGenerationRequest.count.mockResolvedValue(1)
+    const route = await import('@/app/api/comfyui/connections/[connectionId]/route')
+    const response = await route.PATCH(buildMockRequest({
+      path: '/api/comfyui/connections/connection-1', method: 'PATCH', body: { enabled: false },
+    }), connectionContext('connection-1'))
+
+    expect(response.status).toBe(200)
+    expect(prismaMock.comfyConnection.update).toHaveBeenCalledWith({
+      where: { id_userId: { id: 'connection-1', userId: 'user-1' } }, data: { enabled: false },
+    })
+    expect(prismaMock.comfyGenerationRequest.updateMany).not.toHaveBeenCalled()
+    expect(redisMock.set).not.toHaveBeenCalled()
+    expect(redisMock.eval).not.toHaveBeenCalled()
+  })
+
   it('returns 409 for URL/auth identity PATCH while a test lease is active', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')
@@ -282,6 +302,22 @@ describe('ComfyUI private connection routes', () => {
     expect(redisMock.set).toHaveBeenCalled()
     expect(prismaMock.comfyConnection.update).toHaveBeenCalled()
     expect(redisMock.eval).toHaveBeenCalled()
+  })
+
+  it('keeps URL/auth identity mutations blocked while durable active work exists', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    prismaMock.comfyGenerationRequest.count.mockResolvedValue(1)
+    const route = await import('@/app/api/comfyui/connections/[connectionId]/route')
+    const response = await route.PATCH(buildMockRequest({
+      path: '/api/comfyui/connections/connection-1', method: 'PATCH',
+      body: { baseUrl: 'http://gpu-b.example.com' },
+    }), connectionContext('connection-1'))
+
+    expect(response.status).toBe(409)
+    expect(redisMock.set).toHaveBeenCalled()
+    expect(prismaMock.comfyConnection.update).not.toHaveBeenCalled()
   })
 
   it('rejects deletion while owned nonterminal work exists but permits it after completion', async () => {

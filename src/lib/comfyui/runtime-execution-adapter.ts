@@ -89,6 +89,7 @@ export async function createProductionDispatcherDependencies(
         nodeClasses: [], candidateLoaderInputs: [],
       },
       client,
+      connectionState: () => readFreshConnectionState(owner, bundle.connection!),
       verifyOwner: async () => await executionFence()
         && await verifyFreshConnectionOwner(owner, bundle.connection!),
     }),
@@ -252,9 +253,6 @@ async function loadRuntimeContext(requestId: string, limits: ComfyRuntimeOperati
     },
   }) as Bundle | null
   if (!bundle?.connection || !bundle.leaseId) throw new Error('Invalid ComfyUI runtime request')
-  if (!bundle.connection.enabled && bundle.status === 'leased') {
-    throw new Error('ComfyUI connection is disabled')
-  }
   const client = createProductionComfyClient(bundle.connection, limits)
   const version = bundle.workflowVersion
   const context = {
@@ -306,7 +304,11 @@ export async function runFreshComfyPreSubmitGate(input: {
     getQueue(): Promise<{ running: unknown[]; pending: unknown[] }>
   }
   verifyOwner(): Promise<boolean>
-}): Promise<'ready' | 'external_busy' | 'incompatible' | 'lost'> {
+  connectionState?(): Promise<'enabled' | 'disabled' | 'changed'>
+}): Promise<'ready' | 'external_busy' | 'incompatible' | 'disabled' | 'lost'> {
+  const initialState = await input.connectionState?.()
+  if (initialState === 'disabled') return 'disabled'
+  if (initialState === 'changed') return 'lost'
   await input.client.getSystemStats()
   const queue = await input.client.getQueue()
   if (queue.running.length > 0 || queue.pending.length > 0) {
@@ -323,6 +325,9 @@ export async function runFreshComfyPreSubmitGate(input: {
   if (finalQueue.running.length > 0 || finalQueue.pending.length > 0) {
     return await input.verifyOwner() ? 'external_busy' : 'lost'
   }
+  const finalState = await input.connectionState?.()
+  if (finalState === 'disabled') return 'disabled'
+  if (finalState === 'changed') return 'lost'
   if (!await input.verifyOwner()) return 'lost'
   return compatibility.compatible ? 'ready' : 'incompatible'
 }
@@ -360,6 +365,23 @@ async function verifyFreshConnectionOwner(
     && connection.normalizedBaseUrl === snapshot.normalizedBaseUrl
     && connection.authType === snapshot.authType
     && connection.authSecretEncrypted === snapshot.authSecretEncrypted
+}
+
+async function readFreshConnectionState(
+  input: { userId: string; connectionId: string },
+  snapshot: ComfyConnection,
+): Promise<'enabled' | 'disabled' | 'changed'> {
+  const connection = await prisma.comfyConnection.findFirst({
+    where: { id: input.connectionId, userId: input.userId },
+    select: {
+      enabled: true, normalizedBaseUrl: true, authType: true, authSecretEncrypted: true,
+    },
+  })
+  if (!connection
+    || connection.normalizedBaseUrl !== snapshot.normalizedBaseUrl
+    || connection.authType !== snapshot.authType
+    || connection.authSecretEncrypted !== snapshot.authSecretEncrypted) return 'changed'
+  return connection.enabled ? 'enabled' : 'disabled'
 }
 
 function ownerOf(bundle: Bundle) {

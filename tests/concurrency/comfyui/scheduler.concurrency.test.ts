@@ -180,6 +180,15 @@ function schedulerFixture(overrides: Partial<ComfySchedulerDependencies> = {}) {
 }
 
 describe('idle-first ComfyUI scheduler', () => {
+  it('immediately excludes a connection disabled by the owner from new assignments', async () => {
+    const { deps, connections } = schedulerFixture()
+    connections.forEach((connection) => { connection.enabled = false })
+    await expect(scheduleNextComfyRequest('user-1', deps)).resolves.toEqual({
+      outcome: 'blocked_no_compatible_instance', requestId: 'request-old',
+    })
+    expect(deps.acquireLease).not.toHaveBeenCalled()
+  })
+
   it('keeps FIFO per user and chooses the least recently assigned compatible idle node', async () => {
     const { deps } = schedulerFixture()
     const result = await scheduleNextComfyRequest('user-1', deps, { leaseTtlMs: 30_000 })

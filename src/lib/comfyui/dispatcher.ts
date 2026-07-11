@@ -88,7 +88,7 @@ export interface ComfyDispatcherDependencies extends ComfyMediaDependencies {
   preSubmitGate(
     context: ExecutionContext,
     owner: OwnerInput,
-  ): Promise<'ready' | 'external_busy' | 'incompatible' | 'lost'>
+  ): Promise<'ready' | 'external_busy' | 'incompatible' | 'disabled' | 'lost'>
   blockIncompatible(input: OwnerInput): Promise<boolean>
   claimSubmissionFence(input: OwnerInput & {
     attemptId: string; clientId: string
@@ -209,6 +209,11 @@ export async function dispatchComfyRequest(
       return { outcome: 'waiting_capacity' }
     }
     if (gate === 'external_busy') {
+      await mustOwn(dependencies.returnToWaiting(owner))
+      terminal = true
+      return { outcome: 'waiting_capacity' }
+    }
+    if (gate === 'disabled') {
       await mustOwn(dependencies.returnToWaiting(owner))
       terminal = true
       return { outcome: 'waiting_capacity' }
@@ -685,7 +690,7 @@ export async function cancelComfyRequest(
 
 function assertContext(context: ExecutionContext, owner: OwnerInput) {
   const request = context.request
-  if (!context.connection || !context.connection.enabled
+  if (!context.connection
     || context.connection.id !== owner.connectionId
     || context.connection.userId !== request.userId
     || context.version.id !== request.workflowVersionId

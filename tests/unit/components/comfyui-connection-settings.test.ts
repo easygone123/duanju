@@ -132,6 +132,7 @@ describe('ComfyUI connection settings', () => {
     expect(html).toContain('running')
     expect(html).toContain('0.3.50')
     expect(html).toMatch(/disabled=""[^>]*aria-label="Delete"/)
+    expect(html).toMatch(/aria-label="Disable"(?![^>]*disabled)/)
   })
 
   it('catches rejected card actions and reports only a localized safe error', async () => {

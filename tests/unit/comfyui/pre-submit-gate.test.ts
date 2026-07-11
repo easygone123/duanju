@@ -67,4 +67,17 @@ describe('fresh ComfyUI pre-submit gate', () => {
       client: live, verifyOwner: vi.fn().mockResolvedValue(false),
     })).resolves.toBe('lost')
   })
+
+  it('returns disabled before contacting ComfyUI when the fresh connection was disabled', async () => {
+    const live = client()
+    const verifyOwner = vi.fn().mockResolvedValue(true)
+    await expect(runFreshComfyPreSubmitGate({
+      connectionId: 'connection-1', workflowHash: 'hash-1', graph, requirements,
+      client: live, verifyOwner,
+      connectionState: vi.fn().mockResolvedValue('disabled'),
+    })).resolves.toBe('disabled')
+    expect(live.getSystemStats).not.toHaveBeenCalled()
+    expect(live.getQueue).not.toHaveBeenCalled()
+    expect(verifyOwner).not.toHaveBeenCalled()
+  })
 })

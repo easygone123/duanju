@@ -115,7 +115,7 @@ export async function updateOwnedConnection(
   try {
     await guard.assertOwned()
     const existing = await findOwnedConnection(userId, connectionId)
-    if (input.enabled === false && await countOwnedNonterminal(connectionId, userId) > 0) {
+    if (await countOwnedNonterminal(connectionId, userId) > 0) {
       throw new ApiError('CONFLICT')
     }
     const result = await updateOwnedConnectionRecord(userId, existing, input)
@@ -163,7 +163,6 @@ async function updateOwnedConnectionRecord(
 
 function isConnectionIdentityMutation(input: UpdateComfyConnectionInput) {
   return input.baseUrl !== undefined || input.authType !== undefined || input.credentials !== undefined
-    || input.enabled === false
 }
 
 export async function deleteOwnedConnection(userId: string, connectionId: string) {
