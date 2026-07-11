@@ -15,9 +15,9 @@ import {
 } from './scheduler'
 import type { ComfyRuntimeConfig } from './runtime'
 import type {
-  ComfyCursorPageInput,
   ComfyBackedOffLeaseInput,
   ComfyOwnerCursorItem,
+  ComfyOwnerCursorPageInput,
   ComfyReconcileCursorInput,
   ComfyRuntimeOperationLimits,
 } from './runtime-deps'
@@ -33,7 +33,7 @@ import { reclaimComfyRecoveryLease } from './submission'
 const compatibilityCache: ComfyCompatibilityCache = new Map()
 const compatibilityExpiry = new Map<string, number>()
 
-export async function listProductionComfyHealthOwners(input: ComfyCursorPageInput) {
+export async function listProductionComfyHealthOwners(input: ComfyOwnerCursorPageInput) {
   return listProductionComfyOwnerPage(input)
 }
 
@@ -61,27 +61,30 @@ export async function probeProductionComfyOwnerHealth(
   return statuses
 }
 
-export async function listProductionComfyDispatchOwners(input: ComfyCursorPageInput) {
-  const records = await prisma.comfyGenerationRequest.findMany({
+export async function listProductionComfyDispatchOwners(input: ComfyOwnerCursorPageInput) {
+  const records = await prisma.comfyGenerationRequest.groupBy({
+    by: ['userId'],
     where: {
       status: { in: ['waiting_capacity', 'blocked_no_compatible_instance'] },
-      ...(input.afterId ? { id: { gt: input.afterId } } : {}),
+      ...(input.afterUserId ? { userId: { gt: input.afterUserId } } : {}),
     },
-    orderBy: { id: 'asc' },
+    orderBy: { userId: 'asc' },
     take: input.limit + 1,
-    select: { id: true, userId: true },
   })
-  return boundedPage<ComfyOwnerCursorItem>(records, input.limit, (record) => record.id)
+  return boundedPage<ComfyOwnerCursorItem>(records, input.limit, (record) => record.userId)
 }
 
-async function listProductionComfyOwnerPage(input: ComfyCursorPageInput) {
-  const records = await prisma.comfyConnection.findMany({
-    where: { enabled: true, ...(input.afterId ? { id: { gt: input.afterId } } : {}) },
-    orderBy: { id: 'asc' },
+async function listProductionComfyOwnerPage(input: ComfyOwnerCursorPageInput) {
+  const records = await prisma.comfyConnection.groupBy({
+    by: ['userId'],
+    where: {
+      enabled: true,
+      ...(input.afterUserId ? { userId: { gt: input.afterUserId } } : {}),
+    },
+    orderBy: { userId: 'asc' },
     take: input.limit + 1,
-    select: { id: true, userId: true },
   })
-  return boundedPage<ComfyOwnerCursorItem>(records, input.limit, (record) => record.id)
+  return boundedPage<ComfyOwnerCursorItem>(records, input.limit, (record) => record.userId)
 }
 
 export async function scheduleProductionComfyRequest(

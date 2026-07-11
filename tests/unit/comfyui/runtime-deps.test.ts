@@ -17,7 +17,7 @@ describe('production ComfyUI runtime dependency composition', () => {
   it('probes every enabled owner and reports idle capacity', async () => {
     const services = fixture()
     services.listHealthOwners.mockResolvedValue({
-      items: [{ id: 'c1', userId: 'u1' }, { id: 'c2', userId: 'u2' }],
+      items: [{ userId: 'u1' }, { userId: 'u2' }],
       nextCursor: null,
     })
     services.probeOwnerHealth
@@ -34,7 +34,7 @@ describe('production ComfyUI runtime dependency composition', () => {
   it('schedules then dispatches each leased request with runtime limits', async () => {
     const services = fixture()
     services.listDispatchOwners.mockResolvedValue({
-      items: [{ id: 'c1', userId: 'u1' }, { id: 'c2', userId: 'u2' }],
+      items: [{ userId: 'u1' }, { userId: 'u2' }],
       nextCursor: null,
     })
     services.scheduleNext.mockResolvedValueOnce({
@@ -57,7 +57,7 @@ describe('production ComfyUI runtime dependency composition', () => {
   it('bounds one dispatch cycle per owner and stops on abort', async () => {
     const services = fixture()
     services.listDispatchOwners.mockResolvedValue({
-      items: [{ id: 'c1', userId: 'u1' }], nextCursor: null,
+      items: [{ userId: 'u1' }], nextCursor: null,
     })
     services.scheduleNext.mockResolvedValue({
       outcome: 'leased', requestId: 'r1', connectionId: 'c1', leaseId: 'l1', mediaType: 'image',
@@ -75,7 +75,7 @@ describe('production ComfyUI runtime dependency composition', () => {
     const services = fixture()
     const first = Promise.withResolvers<void>()
     services.listDispatchOwners.mockResolvedValue({
-      items: [{ id: 'c1', userId: 'u1' }, { id: 'c2', userId: 'u2' }],
+      items: [{ userId: 'u1' }, { userId: 'u2' }],
       nextCursor: null,
     })
     services.scheduleNext
@@ -122,47 +122,46 @@ describe('production ComfyUI runtime dependency composition', () => {
     expect(services.scanExpiredPreSubmit).toHaveBeenCalledOnce()
   })
 
-  it('advances stable connection pages across ticks, wraps at EOF, and de-duplicates owners', async () => {
+  it('advances stable owner pages across health ticks and wraps at EOF', async () => {
     const services = fixture()
     services.listHealthOwners
       .mockResolvedValueOnce({
         items: Array.from({ length: 100 }, (_, index) => ({
-          id: `c${String(index + 1).padStart(3, '0')}`,
-          userId: index < 2 ? 'duplicate-owner' : `u${index}`,
+          userId: `u${String(index).padStart(3, '0')}`,
         })),
-        nextCursor: 'c100',
+        nextCursor: 'u099',
       })
       .mockResolvedValueOnce({
-        items: [{ id: 'c100a', userId: 'u1' }, { id: 'c101', userId: 'u101' }],
+        items: [{ userId: 'u100' }],
         nextCursor: null,
       })
-      .mockResolvedValueOnce({ items: [{ id: 'c001', userId: 'duplicate-owner' }], nextCursor: 'c001' })
+      .mockResolvedValueOnce({ items: [{ userId: 'u000' }], nextCursor: 'u000' })
     const deps = createProductionComfyRuntimeDeps(services)
     const signal = new AbortController().signal
 
     await deps.healthTick(signal, config)
-    expect(services.probeOwnerHealth).toHaveBeenCalledTimes(99)
+    expect(services.probeOwnerHealth).toHaveBeenCalledTimes(100)
     await deps.healthTick(signal, config)
-    expect(services.probeOwnerHealth).toHaveBeenCalledWith('u101', config)
+    expect(services.probeOwnerHealth).toHaveBeenCalledWith('u100', config)
     await deps.healthTick(signal, config)
 
-    expect(services.listHealthOwners).toHaveBeenNthCalledWith(1, { afterId: null, limit: 100 })
-    expect(services.listHealthOwners).toHaveBeenNthCalledWith(2, { afterId: 'c100', limit: 100 })
-    expect(services.listHealthOwners).toHaveBeenNthCalledWith(3, { afterId: null, limit: 100 })
+    expect(services.listHealthOwners).toHaveBeenNthCalledWith(1, { afterUserId: null, limit: 100 })
+    expect(services.listHealthOwners).toHaveBeenNthCalledWith(2, { afterUserId: 'u099', limit: 100 })
+    expect(services.listHealthOwners).toHaveBeenNthCalledWith(3, { afterUserId: null, limit: 100 })
   })
 
-  it('round-robins dispatch owners by stable connection page and wraps after EOF', async () => {
+  it('round-robins dispatch owners by stable owner page and wraps after EOF', async () => {
     const services = fixture()
     services.listDispatchOwners
       .mockResolvedValueOnce({
-        items: [{ id: 'c1', userId: 'u1' }, { id: 'c2', userId: 'u1' }, { id: 'c3', userId: 'u2' }],
-        nextCursor: 'c3',
+        items: [{ userId: 'u1' }, { userId: 'u2' }],
+        nextCursor: 'u2',
       })
       .mockResolvedValueOnce({
-        items: [{ id: 'c100a', userId: 'u1' }, { id: 'c101', userId: 'u101' }],
+        items: [{ userId: 'u101' }],
         nextCursor: null,
       })
-      .mockResolvedValueOnce({ items: [{ id: 'c1', userId: 'u1' }], nextCursor: 'c1' })
+      .mockResolvedValueOnce({ items: [{ userId: 'u1' }], nextCursor: 'u1' })
     const deps = createProductionComfyRuntimeDeps(services)
     const signal = new AbortController().signal
 
@@ -173,8 +172,8 @@ describe('production ComfyUI runtime dependency composition', () => {
       .toEqual(['u1', 'u2', 'u101'])
     await deps.dispatchTick(signal, config)
 
-    expect(services.listDispatchOwners).toHaveBeenNthCalledWith(2, { afterId: 'c3', limit: 100 })
-    expect(services.listDispatchOwners).toHaveBeenNthCalledWith(3, { afterId: null, limit: 100 })
+    expect(services.listDispatchOwners).toHaveBeenNthCalledWith(2, { afterUserId: 'u2', limit: 100 })
+    expect(services.listDispatchOwners).toHaveBeenNthCalledWith(3, { afterUserId: null, limit: 100 })
   })
 
   it('advances reconciliation pages even when a page has no recoverable Redis candidates', async () => {
@@ -240,17 +239,15 @@ describe('production ComfyUI runtime dependency composition', () => {
     await createProductionComfyRuntimeDeps(firstServices).dispatchTick(signal, config)
     await createProductionComfyRuntimeDeps(secondServices).dispatchTick(signal, config)
 
-    expect(firstServices.listDispatchOwners).toHaveBeenCalledWith({ afterId: null, limit: 100 })
-    expect(secondServices.listDispatchOwners).toHaveBeenCalledWith({ afterId: null, limit: 100 })
+    expect(firstServices.listDispatchOwners).toHaveBeenCalledWith({ afterUserId: null, limit: 100 })
+    expect(secondServices.listDispatchOwners).toHaveBeenCalledWith({ afterUserId: null, limit: 100 })
   })
 
   it('retains unvisited owners from a page when dispatch concurrency fills', async () => {
     const services = fixture()
     services.listDispatchOwners.mockResolvedValue({
-      items: Array.from({ length: 10 }, (_, index) => ({
-        id: `c${index + 1}`, userId: `u${index + 1}`,
-      })),
-      nextCursor: 'c10',
+      items: Array.from({ length: 10 }, (_, index) => ({ userId: `u${index + 1}` })),
+      nextCursor: 'u10',
     })
     services.scheduleNext.mockImplementation(async (userId: string) => ({
       outcome: 'leased' as const,
@@ -275,7 +272,7 @@ describe('production ComfyUI runtime dependency composition', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     const services = fixture()
     services.listDispatchOwners.mockResolvedValue({
-      items: [{ id: 'request-1', userId: 'u1' }, { id: 'request-2', userId: 'u2' }],
+      items: [{ userId: 'u1' }, { userId: 'u2' }],
       nextCursor: null,
     })
     services.scheduleNext

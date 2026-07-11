@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   connectionFindMany: vi.fn(),
+  connectionGroupBy: vi.fn(),
   requestFindMany: vi.fn(),
+  requestGroupBy: vi.fn(),
   requestUpdateMany: vi.fn(),
   redisGet: vi.fn(),
   redisSet: vi.fn(),
@@ -11,9 +13,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    comfyConnection: { findMany: mocks.connectionFindMany },
+    comfyConnection: {
+      findMany: mocks.connectionFindMany,
+      groupBy: mocks.connectionGroupBy,
+    },
     comfyGenerationRequest: {
       findMany: mocks.requestFindMany,
+      groupBy: mocks.requestGroupBy,
       updateMany: mocks.requestUpdateMany,
     },
   },
@@ -38,55 +44,58 @@ describe('production ComfyUI runtime keyset pages', () => {
   })
   afterEach(() => vi.useRealTimers())
 
-  it('queries an enabled connection page for health owners without requiring the cursor row', async () => {
-    mocks.connectionFindMany.mockResolvedValue([
-      { id: 'connection-101', userId: 'user-1' },
-      { id: 'connection-102', userId: 'user-2' },
-      { id: 'connection-103', userId: 'user-3' },
-    ])
+  it('pages health by distinct owner key even when owner A has 10,000 enabled connections', async () => {
+    const rows = [
+      ...Array.from({ length: 10_000 }, () => ({ userId: 'owner-a' })),
+      { userId: 'owner-b' },
+    ]
+    mocks.connectionGroupBy.mockImplementation(async (input: {
+      where: { userId?: { gt: string } }; take: number
+    }) => groupedOwners(rows, input.where.userId?.gt, input.take))
 
-    await expect(listProductionComfyHealthOwners({
-      afterId: 'deleted-connection-100', limit: 2,
-    })).resolves.toEqual({
-      items: [
-        { id: 'connection-101', userId: 'user-1' },
-        { id: 'connection-102', userId: 'user-2' },
-      ],
-      nextCursor: 'connection-102',
+    await expect(listProductionComfyHealthOwners({ afterUserId: null, limit: 1 }))
+      .resolves.toEqual({ items: [{ userId: 'owner-a' }], nextCursor: 'owner-a' })
+    await expect(listProductionComfyHealthOwners({ afterUserId: 'owner-a', limit: 1 }))
+      .resolves.toEqual({ items: [{ userId: 'owner-b' }], nextCursor: null })
+
+    expect(mocks.connectionGroupBy).toHaveBeenNthCalledWith(1, {
+      by: ['userId'], where: { enabled: true }, orderBy: { userId: 'asc' }, take: 2,
     })
-    expect(mocks.connectionFindMany).toHaveBeenCalledWith({
-      where: { enabled: true, id: { gt: 'deleted-connection-100' } },
-      orderBy: { id: 'asc' },
-      take: 3,
-      select: { id: true, userId: true },
+    expect(mocks.connectionGroupBy).toHaveBeenNthCalledWith(2, {
+      by: ['userId'], where: { enabled: true, userId: { gt: 'owner-a' } },
+      orderBy: { userId: 'asc' }, take: 2,
     })
+    expect(mocks.connectionFindMany).not.toHaveBeenCalled()
   })
 
-  it('queries dispatch owners from waiting requests, including users without enabled connections', async () => {
-    mocks.requestFindMany.mockResolvedValue([
-      { id: 'request-101', userId: 'user-without-node' },
-      { id: 'request-102', userId: 'user-with-node' },
-      { id: 'request-103', userId: 'next-page' },
-    ])
+  it('pages dispatch by distinct owner key even when owner A has 10,000 waiting requests', async () => {
+    const rows = [
+      ...Array.from({ length: 10_000 }, () => ({ userId: 'owner-a' })),
+      { userId: 'owner-b' },
+    ]
+    mocks.requestGroupBy.mockImplementation(async (input: {
+      where: { userId?: { gt: string } }; take: number
+    }) => groupedOwners(rows, input.where.userId?.gt, input.take))
 
-    await expect(listProductionComfyDispatchOwners({
-      afterId: 'deleted-request-100', limit: 2,
-    })).resolves.toEqual({
-      items: [
-        { id: 'request-101', userId: 'user-without-node' },
-        { id: 'request-102', userId: 'user-with-node' },
-      ],
-      nextCursor: 'request-102',
+    await expect(listProductionComfyDispatchOwners({ afterUserId: null, limit: 1 }))
+      .resolves.toEqual({ items: [{ userId: 'owner-a' }], nextCursor: 'owner-a' })
+    await expect(listProductionComfyDispatchOwners({ afterUserId: 'owner-a', limit: 1 }))
+      .resolves.toEqual({ items: [{ userId: 'owner-b' }], nextCursor: null })
+
+    expect(mocks.requestGroupBy).toHaveBeenNthCalledWith(1, {
+      by: ['userId'],
+      where: { status: { in: ['waiting_capacity', 'blocked_no_compatible_instance'] } },
+      orderBy: { userId: 'asc' }, take: 2,
     })
-    expect(mocks.requestFindMany).toHaveBeenCalledWith({
+    expect(mocks.requestGroupBy).toHaveBeenNthCalledWith(2, {
+      by: ['userId'],
       where: {
-        id: { gt: 'deleted-request-100' },
         status: { in: ['waiting_capacity', 'blocked_no_compatible_instance'] },
+        userId: { gt: 'owner-a' },
       },
-      orderBy: { id: 'asc' },
-      take: 3,
-      select: { id: true, userId: true },
+      orderBy: { userId: 'asc' }, take: 2,
     })
+    expect(mocks.requestFindMany).not.toHaveBeenCalled()
     expect(mocks.connectionFindMany).not.toHaveBeenCalled()
   })
 
@@ -278,4 +287,12 @@ function operationLimits() {
     executionTimeoutMs: 300_000,
     networkPolicy: { mode: 'allowlist' as const, allowedHosts: [], allowedCidrs: [] },
   }
+}
+
+function groupedOwners(rows: Array<{ userId: string }>, after: string | undefined, take: number) {
+  return [...new Set(rows.map((row) => row.userId))]
+    .filter((userId) => after === undefined || userId > after)
+    .sort()
+    .slice(0, take)
+    .map((userId) => ({ userId }))
 }

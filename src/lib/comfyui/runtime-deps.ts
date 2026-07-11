@@ -21,13 +21,17 @@ export interface ComfyCursorPageInput {
   limit: number
 }
 
+export interface ComfyOwnerCursorPageInput {
+  afterUserId: string | null
+  limit: number
+}
+
 export interface ComfyCursorPage<T> {
   items: T[]
   nextCursor: string | null
 }
 
 export interface ComfyOwnerCursorItem {
-  id: string
   userId: string
 }
 
@@ -49,12 +53,12 @@ export interface ComfyBackedOffLeaseInput {
 }
 
 export interface ProductionComfyRuntimeServices {
-  listHealthOwners(input: ComfyCursorPageInput): Promise<ComfyCursorPage<ComfyOwnerCursorItem>>
+  listHealthOwners(input: ComfyOwnerCursorPageInput): Promise<ComfyCursorPage<ComfyOwnerCursorItem>>
   probeOwnerHealth(
     userId: string,
     config: ComfyRuntimeConfig,
   ): Promise<Array<{ state: ComfyHealthState }>>
-  listDispatchOwners(input: ComfyCursorPageInput): Promise<ComfyCursorPage<ComfyOwnerCursorItem>>
+  listDispatchOwners(input: ComfyOwnerCursorPageInput): Promise<ComfyCursorPage<ComfyOwnerCursorItem>>
   scheduleNext(userId: string, config: ComfyRuntimeConfig): Promise<ScheduleResult>
   dispatch(
     requestId: string,
@@ -98,8 +102,6 @@ export function createProductionComfyRuntimeDeps(
   let healthCursor: string | null = null
   let dispatchCursor: string | null = null
   let reconcileCursor: string | null = null
-  const healthOwnersSeen = new Set<string>()
-  const dispatchOwnersSeen = new Set<string>()
   const dispatchOwnersPending: string[] = []
   const failures = new Map<string, { attempts: number; retryAt: number }>()
   const allowed = (key: string) => (failures.get(key)?.retryAt ?? 0) <= Date.now()
@@ -116,9 +118,11 @@ export function createProductionComfyRuntimeDeps(
     onError: services.onError,
     async healthTick(signal, config) {
       let idle = false
-      const page = await services.listHealthOwners({ afterId: healthCursor, limit: config.pageSize })
+      const page = await services.listHealthOwners({
+        afterUserId: healthCursor, limit: config.pageSize,
+      })
       healthCursor = page.nextCursor
-      for (const userId of ownersForRound(page, healthOwnersSeen)) {
+      for (const { userId } of page.items) {
         if (signal.aborted) break
         const key = `health:${userId}`
         if (!allowed(key)) continue
@@ -135,10 +139,10 @@ export function createProductionComfyRuntimeDeps(
     async dispatchTick(signal, config) {
       if (dispatchOwnersPending.length === 0) {
         const page = await services.listDispatchOwners({
-          afterId: dispatchCursor, limit: config.pageSize,
+          afterUserId: dispatchCursor, limit: config.pageSize,
         })
         dispatchCursor = page.nextCursor
-        dispatchOwnersPending.push(...ownersForRound(page, dispatchOwnersSeen))
+        dispatchOwnersPending.push(...page.items.map((item) => item.userId))
       }
       const executions: Promise<unknown>[] = []
       let visited = 0
@@ -198,20 +202,6 @@ export function createProductionComfyRuntimeDeps(
       if (!signal.aborted) await services.scanExpiredPreSubmit()
     },
   }
-}
-
-function ownersForRound(
-  page: ComfyCursorPage<ComfyOwnerCursorItem>,
-  seen: Set<string>,
-) {
-  const owners: string[] = []
-  for (const item of page.items) {
-    if (seen.has(item.userId)) continue
-    seen.add(item.userId)
-    owners.push(item.userId)
-  }
-  if (page.nextCursor === null) seen.clear()
-  return owners
 }
 
 function limitsFor(
