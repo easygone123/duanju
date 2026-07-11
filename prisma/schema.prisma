@@ -1120,6 +1120,7 @@ model ComfyGenerationRequest {
   connectionId          String?
   leaseId               String?
   leaseExpiresAt        DateTime?
+  lastTransitionToken   String?
   promptId              String?
   clientId              String?
   outputRefs            Json?

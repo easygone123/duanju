@@ -188,19 +188,24 @@ export async function transitionComfyGenerationRequest(
   if (input.expectedLeaseId !== undefined && !validOwnerToken(input.expectedLeaseId)) {
     throw new ApiError('INVALID_PARAMS')
   }
-  validateTransitionPatch(input.to, input.patch)
   const now = input.now ?? new Date()
+  validateTransitionPatch(input, now)
   const result = await dependencies.updateMany({
     where: {
       id: input.requestId, userId: input.userId, status: input.from,
       ...(LEASE_OWNED_STATUSES.has(input.from) ? { leaseId: input.expectedLeaseId } : {}),
     },
-    data: { ...input.patch, status: input.to, ...phaseTimestamp(input.to, now) },
+    data: {
+      ...input.patch,
+      status: input.to,
+      ...(input.expectedLeaseId ? { lastTransitionToken: input.expectedLeaseId } : {}),
+      ...phaseTimestamp(input.to, now),
+    },
   })
   if (result.count === 1) return
   const current = await dependencies.findCurrent(input.requestId, input.userId)
   if (current?.status === input.to
-    && (input.expectedLeaseId === undefined || current.leaseId === input.expectedLeaseId)
+    && retryOwnerMatches(current, input)
     && patchMatches(current, input.patch)) return
   throw new ApiError('CONFLICT')
 }
@@ -210,15 +215,48 @@ const LEASE_OWNED_STATUSES = new Set<ComfyRequestStatus>([
 ])
 
 function validOwnerToken(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 200
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= 191
 }
 
-function validateTransitionPatch(status: ComfyRequestStatus, patch: ComfyTransitionPatch | undefined) {
-  if (!patch) return
+function validateTransitionPatch(input: TransitionComfyGenerationRequestInput, now: Date) {
+  const { to: status, patch } = input
+  if (!patch) {
+    if (status === 'leased'
+      || (status === 'waiting_capacity' && LEASE_OWNED_STATUSES.has(input.from))) {
+      throw new ApiError('INVALID_PARAMS')
+    }
+    return
+  }
   const allowed = new Set<string>(TRANSITION_PATCH_FIELDS[status])
   for (const [key, value] of Object.entries(patch)) {
     if (!allowed.has(key) || !validPatchValue(key, value)) throw new ApiError('INVALID_PARAMS')
   }
+  if (status === 'leased') {
+    if (!validOwnerToken(patch.connectionId) || !validOwnerToken(patch.leaseId)
+      || !(patch.leaseExpiresAt instanceof Date)
+      || !Number.isFinite(patch.leaseExpiresAt.getTime())
+      || patch.leaseExpiresAt.getTime() <= now.getTime()
+      || input.expectedLeaseId !== patch.leaseId) {
+      throw new ApiError('INVALID_PARAMS')
+    }
+  }
+  if (status === 'waiting_capacity' && LEASE_OWNED_STATUSES.has(input.from)
+    && (patch.connectionId !== null || patch.leaseId !== null || patch.leaseExpiresAt !== null)) {
+    throw new ApiError('INVALID_PARAMS')
+  }
+}
+
+function retryOwnerMatches(
+  current: Record<string, unknown>,
+  input: TransitionComfyGenerationRequestInput,
+) {
+  if (input.expectedLeaseId === undefined) return true
+  if (current.leaseId === input.expectedLeaseId) return true
+  const clearsLease = input.to === 'waiting_capacity'
+    && input.patch?.connectionId === null
+    && input.patch.leaseId === null
+    && input.patch.leaseExpiresAt === null
+  return clearsLease && current.lastTransitionToken === input.expectedLeaseId
 }
 
 function validPatchValue(key: string, value: unknown) {

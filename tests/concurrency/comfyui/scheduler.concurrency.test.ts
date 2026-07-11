@@ -99,6 +99,54 @@ describe('ComfyUI request leases', () => {
       ...owner, requestId: 'request-2', leaseId: 'lease-2',
     }, redis)).resolves.toBe(true)
   })
+
+  it('does not claim ownership when a slow DB heartbeat outlives Redis TTL and a new owner wins', async () => {
+    const redis = new MemoryLeaseRedis()
+    const oldOwner = {
+      connectionId: 'connection-1', requestId: 'request-1', leaseId: 'lease-old', ttlMs: 100,
+    }
+    const newOwner = { ...oldOwner, requestId: 'request-2', leaseId: 'lease-new' }
+    const deferred = Promise.withResolvers<{ count: number }>()
+    const updateMany = vi.fn()
+      .mockImplementationOnce(() => deferred.promise)
+      .mockResolvedValue({ count: 1 })
+    let clock = new Date(0)
+    await acquireComfyRequestLease(oldOwner, redis)
+
+    const heartbeat = heartbeatDurableComfyRequestLease(
+      oldOwner, { updateMany }, redis, () => clock,
+    )
+    await vi.waitFor(() => expect(updateMany).toHaveBeenCalledOnce())
+    redis.now = 101
+    clock = new Date(101)
+    await expect(acquireComfyRequestLease(newOwner, redis)).resolves.toBe(true)
+    deferred.resolve({ count: 1 })
+
+    await expect(heartbeat).resolves.toEqual({ owned: false, reason: 'redis_lost' })
+    expect(updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ leaseId: 'lease-old' }),
+      data: { leaseExpiresAt: new Date(101) },
+    }))
+  })
+
+  it('owner-releases Redis without hiding a final durable heartbeat error', async () => {
+    const redis = new MemoryLeaseRedis()
+    const owner = {
+      connectionId: 'connection-1', requestId: 'request-1', leaseId: 'lease-1', ttlMs: 100,
+    }
+    const databaseError = new Error('final heartbeat failed')
+    const updateMany = vi.fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockRejectedValueOnce(databaseError)
+    await acquireComfyRequestLease(owner, redis)
+
+    await expect(heartbeatDurableComfyRequestLease(
+      owner, { updateMany }, redis, new Date(10),
+    )).rejects.toBe(databaseError)
+    await expect(acquireComfyRequestLease({
+      ...owner, requestId: 'request-2', leaseId: 'lease-2',
+    }, redis)).resolves.toBe(true)
+  })
 })
 
 function schedulerFixture(overrides: Partial<ComfySchedulerDependencies> = {}) {

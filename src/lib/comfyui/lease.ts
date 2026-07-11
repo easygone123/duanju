@@ -67,12 +67,13 @@ export async function heartbeatDurableComfyRequestLease(
   owner: ComfyRequestLeaseOwner,
   durableStore: ComfyDurableLeaseStore = defaultDurableLeaseStore,
   redisStore?: ComfyLeaseRedis,
-  now = new Date(),
+  now: Date | (() => Date) = () => new Date(),
 ) {
   if (!await heartbeatComfyRequestLease(owner, redisStore)) {
     return { owned: false as const, reason: 'redis_lost' as const }
   }
-  const leaseExpiresAt = new Date(now.getTime() + owner.ttlMs)
+  const clock = typeof now === 'function' ? now : () => now
+  const conservativeExpiry = clock()
   try {
     const result = await durableStore.updateMany({
       where: {
@@ -81,15 +82,62 @@ export async function heartbeatDurableComfyRequestLease(
         leaseId: owner.leaseId,
         status: { in: [...COMFY_ACTIVE_REQUEST_STATUSES] },
       },
-      data: { leaseExpiresAt },
+      data: { leaseExpiresAt: conservativeExpiry },
     })
-    if (result.count === 1) return { owned: true as const, leaseExpiresAt }
+    if (result.count !== 1) {
+      await releaseComfyRequestLease(owner, redisStore).catch(() => false)
+      return { owned: false as const, reason: 'db_lost' as const }
+    }
   } catch (error) {
     await releaseComfyRequestLease(owner, redisStore).catch(() => false)
     throw error
   }
-  await releaseComfyRequestLease(owner, redisStore).catch(() => false)
-  return { owned: false as const, reason: 'db_lost' as const }
+  if (!await heartbeatComfyRequestLease(owner, redisStore)) {
+    await expireDurableLease(owner, durableStore, clock())
+    return { owned: false as const, reason: 'redis_lost' as const }
+  }
+  const completedAt = clock()
+  const leaseExpiresAt = new Date(completedAt.getTime() + owner.ttlMs)
+  let finalized: { count: number }
+  try {
+    finalized = await durableStore.updateMany({
+      where: {
+        id: owner.requestId,
+        connectionId: owner.connectionId,
+        leaseId: owner.leaseId,
+        status: { in: [...COMFY_ACTIVE_REQUEST_STATUSES] },
+      },
+      data: { leaseExpiresAt },
+    })
+  } catch (error) {
+    await releaseComfyRequestLease(owner, redisStore).catch(() => false)
+    throw error
+  }
+  if (finalized.count !== 1) {
+    await releaseComfyRequestLease(owner, redisStore).catch(() => false)
+    return { owned: false as const, reason: 'db_lost' as const }
+  }
+  if (!await heartbeatComfyRequestLease(owner, redisStore)) {
+    await expireDurableLease(owner, durableStore, clock())
+    return { owned: false as const, reason: 'redis_lost' as const }
+  }
+  return { owned: true as const, leaseExpiresAt }
+}
+
+async function expireDurableLease(
+  owner: ComfyRequestLeaseOwner,
+  durableStore: ComfyDurableLeaseStore,
+  expiredAt: Date,
+) {
+  await durableStore.updateMany({
+    where: {
+      id: owner.requestId,
+      connectionId: owner.connectionId,
+      leaseId: owner.leaseId,
+      status: { in: [...COMFY_ACTIVE_REQUEST_STATUSES] },
+    },
+    data: { leaseExpiresAt: expiredAt },
+  }).catch(() => ({ count: 0 }))
 }
 
 export async function releaseComfyRequestLease(

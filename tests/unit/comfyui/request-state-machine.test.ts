@@ -73,7 +73,11 @@ describe('ComfyUI request state machine', () => {
     await transitionComfyGenerationRequest({
       requestId: 'request-1', userId: 'user-1',
       from: COMFY_REQUEST_STATUS.WAITING_CAPACITY, to: COMFY_REQUEST_STATUS.LEASED,
-      patch: { connectionId: 'connection-1', leaseId: 'lease-1' },
+      expectedLeaseId: 'lease-1',
+      patch: {
+        connectionId: 'connection-1', leaseId: 'lease-1',
+        leaseExpiresAt: new Date('2026-07-11T01:01:00.000Z'),
+      },
       now: new Date('2026-07-11T01:00:00.000Z'),
     }, { updateMany, findCurrent: vi.fn() })
 
@@ -84,7 +88,7 @@ describe('ComfyUI request state machine', () => {
     updateMany.mockResolvedValueOnce({ count: 0 })
     await expect(transitionComfyGenerationRequest({
       requestId: 'request-1', userId: 'user-1', from: 'waiting_capacity', to: 'leased',
-    }, { updateMany, findCurrent: vi.fn().mockResolvedValue(null) })).rejects.toMatchObject({ code: 'CONFLICT' })
+    }, { updateMany, findCurrent: vi.fn().mockResolvedValue(null) })).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
     await expect(transitionComfyGenerationRequest({
       requestId: 'request-1', userId: 'user-1', from: 'completed', to: 'running',
     }, { updateMany, findCurrent: vi.fn() })).rejects.toMatchObject({ code: 'CONFLICT' })
@@ -106,6 +110,7 @@ describe('ComfyUI request state machine', () => {
         connectionId: 'connection-1', leaseId: 'lease-1',
         leaseExpiresAt: new Date('2026-07-11T01:01:00.000Z'),
       },
+      now: new Date('2026-07-11T01:00:00.000Z'),
     }
 
     await expect(transitionComfyGenerationRequest(base, {
@@ -113,9 +118,10 @@ describe('ComfyUI request state machine', () => {
     })).resolves.toBeUndefined()
     await expect(transitionComfyGenerationRequest({
       ...base, patch: { ...base.patch, leaseId: 'different-lease' },
-    }, { updateMany, findCurrent })).rejects.toMatchObject({ code: 'CONFLICT' })
+    }, { updateMany, findCurrent })).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
     await expect(transitionComfyGenerationRequest({
       ...base, expectedLeaseId: 'different-lease',
+      patch: { ...base.patch, leaseId: 'different-lease' },
     }, { updateMany, findCurrent })).rejects.toMatchObject({ code: 'CONFLICT' })
   })
 
@@ -125,6 +131,44 @@ describe('ComfyUI request state machine', () => {
     }, { updateMany: vi.fn(), findCurrent: vi.fn() })).rejects.toMatchObject({
       code: 'INVALID_PARAMS',
     })
+  })
+
+  it('requires a complete and internally consistent owner when entering leased', async () => {
+    const dependencies = { updateMany: vi.fn(), findCurrent: vi.fn() }
+    await expect(transitionComfyGenerationRequest({
+      requestId: 'request-1', userId: 'user-1', from: 'waiting_capacity', to: 'leased',
+      expectedLeaseId: 'lease-1', patch: { connectionId: 'connection-1', leaseId: 'lease-1' },
+    }, dependencies)).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
+    await expect(transitionComfyGenerationRequest({
+      requestId: 'request-1', userId: 'user-1', from: 'waiting_capacity', to: 'leased',
+      expectedLeaseId: 'other-lease', patch: {
+        connectionId: 'connection-1', leaseId: 'lease-1', leaseExpiresAt: new Date(),
+      },
+    }, dependencies)).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
+  })
+
+  it('treats an exact leased-to-waiting retry as idempotent after the lease was cleared', async () => {
+    const patch = { connectionId: null, leaseId: null, leaseExpiresAt: null }
+    await expect(transitionComfyGenerationRequest({
+      requestId: 'request-1', userId: 'user-1', from: 'leased', to: 'waiting_capacity',
+      expectedLeaseId: 'old-lease', patch,
+    }, {
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      findCurrent: vi.fn().mockResolvedValue({
+        id: 'request-1', userId: 'user-1', status: 'waiting_capacity',
+        lastTransitionToken: 'old-lease', ...patch,
+      }),
+    })).resolves.toBeUndefined()
+    await expect(transitionComfyGenerationRequest({
+      requestId: 'request-1', userId: 'user-1', from: 'leased', to: 'waiting_capacity',
+      expectedLeaseId: 'other-lease', patch,
+    }, {
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      findCurrent: vi.fn().mockResolvedValue({
+        id: 'request-1', userId: 'user-1', status: 'waiting_capacity',
+        lastTransitionToken: 'old-lease', ...patch,
+      }),
+    })).rejects.toMatchObject({ code: 'CONFLICT' })
   })
 
   it('rejects immutable and phase-inappropriate transition patch fields at runtime', async () => {
