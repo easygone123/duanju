@@ -6,6 +6,7 @@
     "frozen": "冻结",
     "totalSpent": "已消费",
     "apiConfig": "API 配置",
+    "comfyui": "ComfyUI 节点池",
     "rechargeRecords": "充值记录",
     "billingRecords": "扣费记录",
     "logout": "退出登录",
