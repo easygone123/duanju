@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { COMFYUI_ACCEPTANCE_SCENARIOS } from './comfyui-acceptance-scenarios'
 import { REQUIREMENTS_MATRIX } from './requirements-matrix'
 
 function fileExists(repoPath: string) {
@@ -30,6 +31,7 @@ describe('requirements matrix integrity', () => {
     const entries = REQUIREMENTS_MATRIX.filter((entry) => entry.id.startsWith('REQ-COMFYUI-AC-'))
 
     expect(entries.map((entry) => entry.id)).toEqual(expectedIds)
+    expect(Object.keys(COMFYUI_ACCEPTANCE_SCENARIOS)).toEqual(expectedIds)
     for (const entry of entries) {
       expect(entry.tests).toContain('tests/system/comfyui-generation.system.test.ts')
       const escapedId = entry.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -39,7 +41,13 @@ describe('requirements matrix integrity', () => {
         return count + [...source.matchAll(executableTitle)].length
       }, 0)
       expect(titleCount, `${entry.id} executable evidence`).toBe(1)
+      expect(COMFYUI_ACCEPTANCE_SCENARIOS[entry.id]?.length, `${entry.id} scenarios`)
+        .toBeGreaterThan(0)
     }
+    expect(COMFYUI_ACCEPTANCE_SCENARIOS['REQ-COMFYUI-AC-08']).toEqual([
+      'restart-after-acceptance', 'websocket-disconnect', 'queued-and-running-cancel',
+      'transfer-failure-retry',
+    ])
   })
 
   it('keeps the real ComfyUI contract check opt-in', () => {

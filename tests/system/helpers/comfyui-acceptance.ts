@@ -35,6 +35,8 @@ export class AcceptanceComfyServer {
   promptCount = 0
   uploadCount = 0
   interruptCount = 0
+  websocketMode: 'complete' | 'disconnect' = 'complete'
+  historyVisible = true
   requiredAuthorization?: string
   systemStatus = 200
   objectInfo: Record<string, unknown> = {
@@ -84,6 +86,10 @@ export class AcceptanceComfyServer {
       this.outputBytes.set(filename, mediaType === 'video' ? MP4 : PNG)
       sendJson(response, { prompt_id: promptId, number: this.promptCount, node_errors: {} })
       void this.server.waitForSocket().then(() => {
+        if (this.websocketMode === 'disconnect') {
+          this.server.closeSockets()
+          return
+        }
         this.server.send({ type: 'progress', data: { prompt_id: promptId, node: '3', value: 1, max: 1 } })
         this.server.send({ type: 'executing', data: { prompt_id: promptId, node: null } })
       })
@@ -110,7 +116,7 @@ export class AcceptanceComfyServer {
   installHistoryRoute(promptId: string) {
     this.server.override(`/proxy/comfy/history/${promptId}`, (request, response) => {
       if (!this.authorized(request.headers.authorization)) return sendJson(response, {}, 401)
-      sendJson(response, this.histories.get(promptId) ?? {})
+      sendJson(response, this.historyVisible ? this.histories.get(promptId) ?? {} : {})
     })
   }
 

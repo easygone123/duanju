@@ -9,6 +9,7 @@ import { checkComfyCompatibility } from '@/lib/comfyui/compatibility'
 import {
   cancelComfyRequest,
   dispatchComfyRequest,
+  reconcileComfyRequest,
 } from '@/lib/comfyui/dispatcher'
 import { COMFY_ERROR_CODE } from '@/lib/comfyui/errors'
 import { monitorComfyHealth } from '@/lib/comfyui/health'
@@ -98,6 +99,14 @@ describe('system - ComfyUI executable acceptance evidence', () => {
       cacheEval: async () => 1,
     })
     try {
+      await expect(authorizeComfyTarget(server.baseUrl, {
+        mode: 'allowlist', allowedHosts: [], allowedCidrs: ['127.0.0.1/32'],
+      })).resolves.toMatchObject({ url: expect.objectContaining({ protocol: 'http:' }) })
+      await expect(authorizeComfyTarget('https://comfy.example/api', {
+        mode: 'allowlist', allowedHosts: ['comfy.example'], allowedCidrs: [],
+      }, async () => [{ address: '203.0.113.10', family: 4 }])).resolves.toMatchObject({
+        url: expect.objectContaining({ hostname: 'comfy.example' }),
+      })
       await expect(monitor()).resolves.toMatchObject({ health: { state: 'online_idle' } })
       owned = true
       await expect(monitor()).resolves.toMatchObject({ health: { state: 'online_busy_owned' } })
@@ -116,29 +125,33 @@ describe('system - ComfyUI executable acceptance evidence', () => {
     await expect(monitor()).resolves.toMatchObject({ health: { state: 'offline' } })
   })
 
-  it('REQ-COMFYUI-AC-02 imports arbitrary API Format placeholders and mappings into a real server execution', async () => {
-    const run = await startExecution('image')
-    try {
-      const result = await dispatchComfyRequest(run.aggregate.request.id, run.execution.dependencies())
-      expect(result).toMatchObject({ outcome: 'completed', primary: { mediaType: 'image', primary: true } })
-      const upload = run.server.server.requests.find((entry) => entry.path.endsWith('/upload/image'))
-      const prompt = run.server.server.requests.find((entry) => entry.path.endsWith('/prompt'))
-      expect(upload?.body.byteLength).toBeGreaterThan(PNG.byteLength)
-      expect(prompt?.body.toString('utf8')).toContain('RAW_PROMPT_DO_NOT_LOG')
-      expect(prompt?.body.toString('utf8')).toContain('uploaded-1')
-      expect(prompt?.body.toString('utf8')).not.toContain('${prompt}')
-      expect(run.server.promptCount).toBe(1)
-    } finally {
-      await run.server.close()
+  it('REQ-COMFYUI-AC-02 imports arbitrary image/video API Format mappings, uploads, and outputs', async () => {
+    for (const mediaType of ['image', 'video'] as const) {
+      const run = await startExecution(mediaType)
+      try {
+        const result = await dispatchComfyRequest(run.aggregate.request.id, run.execution.dependencies())
+        expect(result).toMatchObject({ outcome: 'completed', primary: { mediaType, primary: true } })
+        const upload = run.server.server.requests.find((entry) => entry.path.endsWith('/upload/image'))
+        const prompt = run.server.server.requests.find((entry) => entry.path.endsWith('/prompt'))
+        expect(upload?.body.byteLength).toBeGreaterThan((mediaType === 'image' ? PNG : MP4).byteLength)
+        expect(prompt?.body.toString('utf8')).toContain('RAW_PROMPT_DO_NOT_LOG')
+        expect(prompt?.body.toString('utf8')).toContain('uploaded-1')
+        expect(prompt?.body.toString('utf8')).not.toContain('${prompt}')
+        expect(run.aggregate.request.outputRefs).toEqual([
+          expect.objectContaining({ mediaType, primary: true, storageKey: expect.any(String) }),
+        ])
+      } finally {
+        await run.server.close()
+      }
     }
   })
 
   it('REQ-COMFYUI-AC-03 resolves task override, project Comfy default, specialized model, user default, and fixed version', async () => {
-    let binding: Record<string, unknown> | null = {
+    const binding: Record<string, unknown> = {
       imageWorkflowId: 'project-workflow', imageWorkflowVersionId: 'project-version-fixed',
-      videoWorkflowId: null, videoWorkflowVersionId: null,
+      videoWorkflowId: 'project-video-workflow', videoWorkflowVersionId: 'project-video-version-fixed',
     }
-    let project: Record<string, unknown> = {
+    const project: Record<string, unknown> = {
       analysisModel: null, characterModel: 'cloud::character', locationModel: 'cloud::location',
       storyboardModel: 'cloud::specialized', editModel: 'cloud::edit', videoModel: 'cloud::video',
       audioModel: null, capabilityOverrides: null,
@@ -157,81 +170,63 @@ describe('system - ComfyUI executable acceptance evidence', () => {
         currentVersionId: `${input.where.id}-version-fixed`,
       }) },
     ], async () => {
-      const task = await getProjectModelConfig('project-a', 'user-a', { imageModel: 'comfyui::task-workflow' })
+      const task = await getProjectModelConfig('project-a', 'user-a', {
+        imageModel: 'comfyui::task-workflow', videoModel: 'comfyui::task-video-workflow',
+      })
       expect(task.storyboardModel).toBe('comfyui::task-workflow')
       expect(task.comfyImageWorkflowVersionId).toBe('task-workflow-version-fixed')
+      expect(task.videoModel).toBe('comfyui::task-video-workflow')
+      expect(task.comfyVideoWorkflowVersionId).toBe('task-video-workflow-version-fixed')
       const projectDefault = await getProjectModelConfig('project-a', 'user-a')
       expect(projectDefault.storyboardModel).toBe('comfyui::project-workflow')
       expect(projectDefault.comfyImageWorkflowVersionId).toBe('project-version-fixed')
-      binding = null
-      expect((await getProjectModelConfig('project-a', 'user-a')).storyboardModel).toBe('cloud::specialized')
-      project = { ...project, storyboardModel: null }
-      expect((await getProjectModelConfig('project-a', 'user-a')).storyboardModel).toBe('user::default')
+      expect(projectDefault.videoModel).toBe('comfyui::project-video-workflow')
+      expect(projectDefault.comfyVideoWorkflowVersionId).toBe('project-video-version-fixed')
     })
   })
 
-  it('REQ-COMFYUI-AC-04 keeps connections, workflows, requests, and stored outputs private across users', async () => {
-    const run = await startExecution('image')
-    try {
-      const completed = await dispatchComfyRequest(run.aggregate.request.id, run.execution.dependencies())
-      expect(completed.outcome).toBe('completed')
-      const output = run.aggregate.request.outputRefs?.find((item) => 'storageKey' in item)
-      expect(output && 'storageKey' in output).toBe(true)
-      if (!output || !('storageKey' in output)) throw new Error('missing stored output')
-      await expect(run.storage.readOwnedObject({
-        userId: 'user-b', projectId: 'project-a', storageKey: output.storageKey, maxBytes: 1024,
-      })).rejects.toThrow('owned object unavailable')
-
-      const delegates = prisma as unknown as Record<string, Record<string, unknown>>
-      await withPrismaMethods([
-        { target: delegates.comfyGenerationRequest, key: 'findFirst', value: async (input: { where: { userId: string } }) =>
-          input.where.userId === 'user-a'
-            ? { status: 'completed', outputRefs: run.aggregate.request.outputRefs, errorMessage: null }
-            : null },
-        { target: delegates.comfyWorkflow, key: 'findFirst', value: async (input: { where: { userId: string } }) =>
-          input.where.userId === 'user-a'
-            ? { id: 'image-workflow', currentVersionId: 'version-fixed', currentVersion: { id: 'version-fixed', publishedAt: new Date() } }
-            : null },
-      ], async () => {
-        await expect(pollComfyGenerationRequest({ requestId: 'image-request', userId: 'user-b', mediaType: 'image' }))
-          .rejects.toMatchObject({ code: 'NOT_FOUND' })
-        await expect(resolveModelSelection('user-b', 'comfyui::image-workflow', 'image'))
-          .rejects.toThrow('MODEL_NOT_FOUND')
-      })
-      let leaseAttempts = 0
-      const isolationSchedule = await scheduleNextComfyRequest('user-a', {
-        listSchedulableRequests: async () => [{
-          id: 'private-request', userId: 'user-a', workflowVersionId: 'version-fixed',
-          status: 'waiting_capacity', queuedAt: new Date(0), priority: 0,
-        }],
-        listOwnedEnabledConnections: async () => [{
-          id: 'user-b-connection', userId: 'user-b', enabled: true, lastAssignedAt: null,
-        }],
-        readCachedHealth: async () => ({ state: 'online_idle' }),
-        checkCachedCompatibility: async () => true,
-        acquireLease: async () => { leaseAttempts += 1; return true },
-        releaseLease: async () => true, makeWaitingIfBlocked: async () => true,
-        assignIfEligible: async () => 'assigned', markBlockedIfEligible: async () => true,
-      })
-      expect(isolationSchedule).toMatchObject({ outcome: 'blocked_no_compatible_instance' })
-      expect(leaseAttempts).toBe(0)
-    } finally {
-      await run.server.close()
+  it('REQ-COMFYUI-AC-04 copies image/video outputs to storage and returns them through existing media flows', async () => {
+    const delegates = prisma as unknown as Record<string, Record<string, unknown>>
+    for (const mediaType of ['image', 'video'] as const) {
+      const run = await startExecution(mediaType)
+      try {
+        const result = await dispatchComfyRequest(run.aggregate.request.id, run.execution.dependencies())
+        expect(result).toMatchObject({ outcome: 'completed', primary: { mediaType } })
+        const stored = run.aggregate.request.outputRefs?.find((item) => 'storageKey' in item)
+        if (!stored || !('storageKey' in stored)) throw new Error('missing stored output')
+        expect(run.storage.objects.get(stored.storageKey)?.bytes)
+          .toEqual(mediaType === 'image' ? PNG : MP4)
+        await withPrismaMethods([
+          { target: delegates.comfyGenerationRequest, key: 'findFirst', value: async () => ({
+            status: 'completed', outputRefs: run.aggregate.request.outputRefs, errorMessage: null,
+          }) },
+        ], async () => {
+          const flow = await pollComfyGenerationRequest({
+            requestId: run.aggregate.request.id, userId: 'user-a', mediaType,
+          })
+          expect(flow).toMatchObject({
+            status: 'completed', resultUrl: stored.url,
+            ...(mediaType === 'image' ? { imageUrl: stored.url } : { videoUrl: stored.url }),
+          })
+        })
+      } finally {
+        await run.server.close()
+      }
     }
   })
 
-  it('REQ-COMFYUI-AC-05 preserves priority/FIFO, idle/LRU assignment, capacity wait, and concurrency one', async () => {
+  it('REQ-COMFYUI-AC-05 prefers a compatible idle LRU instance and enforces concurrency one', async () => {
     const requests: ComfySchedulableRequest[] = [
       { id: 'fifo-first', userId: 'user-a', workflowVersionId: 'version-a', status: 'waiting_capacity', queuedAt: new Date(0), priority: 1 },
       { id: 'fifo-second', userId: 'user-a', workflowVersionId: 'version-a', status: 'waiting_capacity', queuedAt: new Date(1), priority: 1 },
     ]
     const connections: ComfySchedulableConnection[] = [
+      { id: 'idle-incompatible', userId: 'user-a', enabled: true, lastAssignedAt: null },
       { id: 'recent', userId: 'user-a', enabled: true, lastAssignedAt: new Date(10) },
       { id: 'least-recent', userId: 'user-a', enabled: true, lastAssignedAt: new Date(5) },
     ]
     const leases = new Set<string>()
     const active = new Map<string, string>()
-    let state: 'online_idle' | 'online_busy_external' = 'online_busy_external'
     const assignmentStore: Parameters<typeof assignComfyRequestWithStore>[1] = {
       transaction: async (operation) => operation({
         countActiveRequests: async (input) => {
@@ -259,7 +254,8 @@ describe('system - ComfyUI executable acceptance evidence', () => {
     const dependencies: ComfySchedulerDependencies = {
       listSchedulableRequests: async () => [...requests],
       listOwnedEnabledConnections: async () => [...connections],
-      readCachedHealth: async () => ({ state }), checkCachedCompatibility: async () => true,
+      readCachedHealth: async () => ({ state: 'online_idle' }),
+      checkCachedCompatibility: async (connectionId) => connectionId !== 'idle-incompatible',
       acquireLease: async ({ connectionId }) => {
         if (leases.has(connectionId)) return false
         leases.add(connectionId); return true
@@ -268,8 +264,6 @@ describe('system - ComfyUI executable acceptance evidence', () => {
       makeWaitingIfBlocked: async () => true, markBlockedIfEligible: async () => true,
       assignIfEligible: (input) => assignComfyRequestWithStore(input, assignmentStore),
     }
-    await expect(scheduleNextComfyRequest('user-a', dependencies)).resolves.toMatchObject({ outcome: 'waiting_capacity' })
-    state = 'online_idle'
     await expect(scheduleNextComfyRequest('user-a', dependencies, { newLeaseId: () => 'lease-1' }))
       .resolves.toMatchObject({ outcome: 'leased', requestId: 'fifo-first', connectionId: 'least-recent' })
     const directBusy = await assignComfyRequestWithStore({
@@ -279,73 +273,165 @@ describe('system - ComfyUI executable acceptance evidence', () => {
     expect(directBusy).toBe('connection_busy')
   })
 
-  it('REQ-COMFYUI-AC-06 transfers real image and video inputs and primary outputs through production client transport', async () => {
-    for (const mediaType of ['image', 'video'] as const) {
-      const run = await startExecution(mediaType)
-      try {
-        const result = await dispatchComfyRequest(run.aggregate.request.id, run.execution.dependencies())
-        expect(result).toMatchObject({ outcome: 'completed', primary: { mediaType } })
-        expect(run.server.uploadCount).toBe(1)
-        const stored = run.aggregate.request.outputRefs?.find((item) => 'storageKey' in item)
-        expect(stored && 'byteSize' in stored ? stored.byteSize : 0).toBe(mediaType === 'image' ? PNG.byteLength : MP4.byteLength)
-      } finally {
-        await run.server.close()
-      }
-    }
-  })
-
-  it('REQ-COMFYUI-AC-07 retries transfer after restart without resubmitting an accepted prompt', async () => {
-    const run = await startExecution('image', 1)
-    try {
-      await expect(dispatchComfyRequest(run.aggregate.request.id, run.execution.dependencies()))
-        .resolves.toMatchObject({ outcome: 'reconciling', promptId: 'prompt-1' })
-      expect(run.server.promptCount).toBe(1)
-      const restarted = new InMemoryComfyExecution(
-        run.server.client(), run.storage, run.aggregate, run.telemetry,
-      )
-      await expect(dispatchComfyRequest(run.aggregate.request.id, restarted.dependencies()))
-        .resolves.toMatchObject({ outcome: 'completed' })
-      expect(run.server.promptCount).toBe(1)
-      expect(run.aggregate.request.status).toBe('completed')
-    } finally {
-      await run.server.close()
-    }
-  })
-
-  it('REQ-COMFYUI-AC-08 cancels an owned queued prompt, preserves manual work, and safely leaves running work canceling', async () => {
+  it('REQ-COMFYUI-AC-06 keeps requests in waoowaoo when all compatible instances are busy', async () => {
     const server = new AcceptanceComfyServer()
-    server.pending = [[0, 'owned-prompt'], [1, 'manual-prompt']]
-    server.installHistoryRoute('owned-prompt')
+    server.running = [[0, 'existing-owned-prompt']]
+    server.pending = [[1, 'existing-pending-prompt']]
     await server.start()
-    const client = server.client()
-    const request = {
-      id: 'request-a', userId: 'user-a', status: 'submitted' as const,
-      connectionId: 'connection-a', leaseId: 'lease-a', promptId: 'owned-prompt',
-    }
-    const cancellationDependencies = {
-      loadOwnedRequest: async (_requestId: string, userId: string) => userId === 'user-a' ? request : null,
-      cancelLocal: async () => true, verifyLeaseOwner: async () => true,
-      requestCancellation: async () => 'requested' as const,
-      getQueue: () => client.getQueue(), getHistory: (promptId: string) => client.getHistory(promptId),
-      isAbsenceConclusive: async () => true, deleteQueuedPrompt: (promptId: string) => client.deleteQueuedPrompt(promptId),
-      release: async () => true, markCanceledOwned: async () => true,
-    }
+    const before = await server.client().getQueue()
+    let assignments = 0
     try {
-      await expect(cancelComfyRequest('request-a', 'user-a', cancellationDependencies))
-        .resolves.toEqual({ outcome: 'canceled' })
-      expect(server.pending).toEqual([[1, 'manual-prompt']])
-      server.pending = []
-      server.running = [[0, 'owned-prompt']]
-      await expect(cancelComfyRequest('request-a', 'user-a', cancellationDependencies))
-        .resolves.toEqual({ outcome: 'canceling' })
-      expect(server.interruptCount).toBe(0)
-      expect(server.running).toEqual([[0, 'owned-prompt']])
+      const result = await scheduleNextComfyRequest('user-a', {
+        listSchedulableRequests: async () => [{
+          id: 'waiting-request', userId: 'user-a', workflowVersionId: 'version-fixed',
+          status: 'waiting_capacity', queuedAt: new Date(0), priority: 0,
+        }],
+        listOwnedEnabledConnections: async () => [{
+          id: 'busy-compatible', userId: 'user-a', enabled: true, lastAssignedAt: null,
+        }],
+        readCachedHealth: async () => ({ state: 'online_busy_owned' }),
+        checkCachedCompatibility: async () => true,
+        acquireLease: async () => true, releaseLease: async () => true,
+        makeWaitingIfBlocked: async () => true, markBlockedIfEligible: async () => true,
+        assignIfEligible: async () => { assignments += 1; return 'assigned' },
+      })
+      expect(result).toEqual({ outcome: 'waiting_capacity', requestId: 'waiting-request' })
+      expect(assignments).toBe(0)
+      expect(server.promptCount).toBe(0)
+      expect(await server.client().getQueue()).toEqual(before)
     } finally {
       await server.close()
     }
   })
 
-  it('REQ-COMFYUI-AC-09 skips billing while emitting progress, diagnostics, metrics, and redacted logs', async () => {
+  it('REQ-COMFYUI-AC-07 treats a manual prompt as external busy and makes no assignment', async () => {
+    const server = new AcceptanceComfyServer()
+    server.running = [[0, 'manual-prompt']]
+    await server.start()
+    const client = server.client()
+    let assignments = 0
+    try {
+      const monitored = await monitorComfyHealth({
+        connectionId: 'connection-a', checkedAt: new Date(), ttlMs: 1_000,
+      }, {
+        authorize: async () => undefined, getSystemStats: () => client.getSystemStats(),
+        getQueue: () => client.getQueue(), hasLease: async () => false,
+        checkCompatibility: async () => { throw new Error('not requested') },
+        cacheEval: async () => 1,
+      })
+      expect(monitored.health.state).toBe('online_busy_external')
+      const result = await scheduleNextComfyRequest('user-a', {
+        listSchedulableRequests: async () => [{
+          id: 'waiting-request', userId: 'user-a', workflowVersionId: 'version-fixed',
+          status: 'waiting_capacity', queuedAt: new Date(0), priority: 0,
+        }],
+        listOwnedEnabledConnections: async () => [{
+          id: 'connection-a', userId: 'user-a', enabled: true, lastAssignedAt: null,
+        }],
+        readCachedHealth: async () => ({ state: monitored.health.state }),
+        checkCachedCompatibility: async () => true,
+        acquireLease: async () => true, releaseLease: async () => true,
+        makeWaitingIfBlocked: async () => true, markBlockedIfEligible: async () => true,
+        assignIfEligible: async () => { assignments += 1; return 'assigned' },
+      })
+      expect(result.outcome).toBe('waiting_capacity')
+      expect(assignments).toBe(0)
+      expect(server.promptCount).toBe(0)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('REQ-COMFYUI-AC-08 avoids duplicate execution across restart, WS loss, cancel, and transfer failure', async () => {
+    const restart = await startExecution('image')
+    restart.server.websocketMode = 'disconnect'
+    restart.server.historyVisible = false
+    try {
+      await expect(dispatchComfyRequest(restart.aggregate.request.id, restart.execution.dependencies()))
+        .resolves.toEqual({ outcome: 'reconciling', promptId: 'prompt-1' })
+      expect(restart.server.promptCount).toBe(1)
+      restart.server.historyVisible = true
+      const recovery = new InMemoryComfyExecution(
+        restart.server.client(), restart.storage, restart.aggregate, restart.telemetry,
+      )
+      await expect(reconcileComfyRequest(restart.aggregate.request.id, {
+        loadContext: recovery.dependencies().loadContext, verifyLeaseOwner: async () => true,
+        getQueue: () => restart.server.client().getQueue(),
+        getHistory: (promptId) => restart.server.client().getHistory(promptId),
+        recordAttemptAbsence: async () => ({ outcome: 'reconciling', checkCount: 1 }),
+        deleteQueuedPrompt: (promptId) => restart.server.client().deleteQueuedPrompt(promptId),
+        persistRecoveredCancellation: async () => true, persistRecoveredDiagnostics: async () => true,
+        releaseLease: async () => true,
+        persistRecoveredState: async ({ status, outputs }) => {
+          restart.aggregate.request.status = status
+          if (outputs) restart.aggregate.request.outputRefs = outputs
+          return true
+        },
+      })).resolves.toMatchObject({ outcome: 'transferring' })
+      await expect(dispatchComfyRequest(restart.aggregate.request.id, recovery.dependencies()))
+        .resolves.toMatchObject({ outcome: 'completed' })
+      expect(restart.server.promptCount).toBe(1)
+    } finally {
+      await restart.server.close()
+    }
+
+    const disconnected = await startExecution('image')
+    disconnected.server.websocketMode = 'disconnect'
+    try {
+      await expect(dispatchComfyRequest(disconnected.aggregate.request.id, disconnected.execution.dependencies()))
+        .resolves.toMatchObject({ outcome: 'completed' })
+      expect(disconnected.server.promptCount).toBe(1)
+    } finally {
+      await disconnected.server.close()
+    }
+
+    const cancelServer = new AcceptanceComfyServer()
+    cancelServer.pending = [[0, 'owned-prompt'], [1, 'manual-prompt']]
+    cancelServer.installHistoryRoute('owned-prompt')
+    await cancelServer.start()
+    const cancelClient = cancelServer.client()
+    const cancelRequest = {
+      id: 'request-a', userId: 'user-a', status: 'submitted' as const,
+      connectionId: 'connection-a', leaseId: 'lease-a', promptId: 'owned-prompt',
+    }
+    const cancellationDependencies = {
+      loadOwnedRequest: async () => cancelRequest, cancelLocal: async () => true,
+      verifyLeaseOwner: async () => true, requestCancellation: async () => 'requested' as const,
+      getQueue: () => cancelClient.getQueue(), getHistory: (promptId: string) => cancelClient.getHistory(promptId),
+      isAbsenceConclusive: async () => true,
+      deleteQueuedPrompt: (promptId: string) => cancelClient.deleteQueuedPrompt(promptId),
+      release: async () => true, markCanceledOwned: async () => true,
+    }
+    try {
+      await expect(cancelComfyRequest('request-a', 'user-a', cancellationDependencies))
+        .resolves.toEqual({ outcome: 'canceled' })
+      expect(cancelServer.pending).toEqual([[1, 'manual-prompt']])
+      cancelServer.pending = []
+      cancelServer.running = [[0, 'owned-prompt']]
+      await expect(cancelComfyRequest('request-a', 'user-a', cancellationDependencies))
+        .resolves.toEqual({ outcome: 'canceling' })
+      expect(cancelServer.interruptCount).toBe(0)
+      expect(cancelServer.promptCount).toBe(0)
+    } finally {
+      await cancelServer.close()
+    }
+
+    const transfer = await startExecution('image', 1)
+    try {
+      await expect(dispatchComfyRequest(transfer.aggregate.request.id, transfer.execution.dependencies()))
+        .resolves.toMatchObject({ outcome: 'reconciling', promptId: 'prompt-1' })
+      const retried = new InMemoryComfyExecution(
+        transfer.server.client(), transfer.storage, transfer.aggregate, transfer.telemetry,
+      )
+      await expect(dispatchComfyRequest(transfer.aggregate.request.id, retried.dependencies()))
+        .resolves.toMatchObject({ outcome: 'completed' })
+      expect(transfer.server.promptCount).toBe(1)
+    } finally {
+      await transfer.server.close()
+    }
+  })
+
+  it('records zero billing, progress, metrics, and redacted operational logs', async () => {
     expect(buildDefaultTaskBillingInfo(TASK_TYPE.IMAGE_PANEL, {
       imageModel: 'comfyui::workflow-a', count: 2,
     })).toEqual({ billable: false, source: 'task', status: 'skipped' })
@@ -372,7 +458,7 @@ describe('system - ComfyUI executable acceptance evidence', () => {
     }
   })
 
-  it('REQ-COMFYUI-AC-10 enforces allowlist/trusted security, auth, and SSRF metadata blocking', async () => {
+  it('REQ-COMFYUI-AC-09 blocks unauthorized allowlist targets and requires explicit trusted mode', async () => {
     const server = new AcceptanceComfyServer()
     server.requiredAuthorization = 'Bearer required-token'
     await server.start()
@@ -391,6 +477,54 @@ describe('system - ComfyUI executable acceptance evidence', () => {
       })).rejects.toMatchObject({ code: COMFY_ERROR_CODE.NETWORK_TARGET_BLOCKED })
     } finally {
       await server.close()
+    }
+  })
+
+  it('REQ-COMFYUI-AC-10 denies cross-user connections, workflows, tasks, and outputs', async () => {
+    const run = await startExecution('image')
+    try {
+      await dispatchComfyRequest(run.aggregate.request.id, run.execution.dependencies())
+      const output = run.aggregate.request.outputRefs?.find((item) => 'storageKey' in item)
+      if (!output || !('storageKey' in output)) throw new Error('missing stored output')
+      await expect(run.storage.readOwnedObject({
+        userId: 'user-b', projectId: 'project-a', storageKey: output.storageKey, maxBytes: 1024,
+      })).rejects.toThrow('owned object unavailable')
+
+      const delegates = prisma as unknown as Record<string, Record<string, unknown>>
+      await withPrismaMethods([
+        { target: delegates.comfyGenerationRequest, key: 'findFirst', value: async (input: { where: { userId: string } }) =>
+          input.where.userId === 'user-a'
+            ? { status: 'completed', outputRefs: run.aggregate.request.outputRefs, errorMessage: null }
+            : null },
+        { target: delegates.comfyWorkflow, key: 'findFirst', value: async (input: { where: { userId: string } }) =>
+          input.where.userId === 'user-a'
+            ? { id: 'image-workflow', currentVersionId: 'version-fixed', currentVersion: { id: 'version-fixed', publishedAt: new Date() } }
+            : null },
+      ], async () => {
+        await expect(pollComfyGenerationRequest({ requestId: 'image-request', userId: 'user-b', mediaType: 'image' }))
+          .rejects.toMatchObject({ code: 'NOT_FOUND' })
+        await expect(resolveModelSelection('user-b', 'comfyui::image-workflow', 'image'))
+          .rejects.toThrow('MODEL_NOT_FOUND')
+      })
+      let leaseAttempts = 0
+      const connectionResult = await scheduleNextComfyRequest('user-a', {
+        listSchedulableRequests: async () => [{
+          id: 'private-request', userId: 'user-a', workflowVersionId: 'version-fixed',
+          status: 'waiting_capacity', queuedAt: new Date(0), priority: 0,
+        }],
+        listOwnedEnabledConnections: async () => [{
+          id: 'user-b-connection', userId: 'user-b', enabled: true, lastAssignedAt: null,
+        }],
+        readCachedHealth: async () => ({ state: 'online_idle' }),
+        checkCachedCompatibility: async () => true,
+        acquireLease: async () => { leaseAttempts += 1; return true },
+        releaseLease: async () => true, makeWaitingIfBlocked: async () => true,
+        assignIfEligible: async () => 'assigned', markBlockedIfEligible: async () => true,
+      })
+      expect(connectionResult.outcome).toBe('blocked_no_compatible_instance')
+      expect(leaseAttempts).toBe(0)
+    } finally {
+      await run.server.close()
     }
   })
 

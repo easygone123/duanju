@@ -73,6 +73,10 @@ export class FakeComfyUiServer {
     for (const socket of this.sockets) socket.send(bytes)
   }
 
+  closeSockets(): void {
+    for (const socket of this.sockets) socket.close()
+  }
+
   async waitForSocket(): Promise<void> {
     const deadline = Date.now() + 1_000
     while (this.sockets.size === 0 && Date.now() < deadline) {
