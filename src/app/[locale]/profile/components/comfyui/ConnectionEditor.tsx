@@ -3,7 +3,12 @@
 import { useState, type FormEvent } from 'react'
 import { useTranslations } from 'next-intl'
 
-import type { ComfyConnectionView, ConnectionFormValues } from './hooks'
+import {
+  initialConnectionValues,
+  validateConnectionCredentials,
+  type ComfyConnectionView,
+  type ConnectionFormValues,
+} from './hooks'
 
 interface Props {
   connection?: ComfyConnectionView | null
@@ -13,19 +18,20 @@ interface Props {
 
 export default function ConnectionEditor({ connection, onSubmit, onCancel }: Props) {
   const t = useTranslations('comfyui')
-  const [values, setValues] = useState<ConnectionFormValues>({
-    name: connection?.name ?? '', baseUrl: connection?.baseUrl ?? '',
-    authType: connection?.authType ?? 'none', token: '', username: '', password: '',
-    enabled: connection?.enabled ?? true,
-  })
+  const [values, setValues] = useState<ConnectionFormValues>(() => initialConnectionValues(connection))
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const set = <K extends keyof ConnectionFormValues>(key: K, value: ConnectionFormValues[K]) =>
     setValues((current) => ({ ...current, [key]: value }))
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    setSubmitting(true)
     setError('')
+    const credentialError = validateConnectionCredentials(values, connection)
+    if (credentialError) {
+      setError(t(credentialError))
+      return
+    }
+    setSubmitting(true)
     try { await onSubmit(values) } catch {
       setError(t('requestFailed'))
     } finally { setSubmitting(false) }

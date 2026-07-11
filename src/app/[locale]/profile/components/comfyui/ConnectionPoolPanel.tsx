@@ -7,6 +7,8 @@ import ConnectionCard from './ConnectionCard'
 import ConnectionEditor from './ConnectionEditor'
 import {
   buildConnectionPayload,
+  buildConnectionUpdate,
+  connectionEditorKey,
   safelyRunConnectionAction,
   useComfyConnectionActions,
   useComfyConnections,
@@ -28,8 +30,11 @@ export default function ConnectionPoolPanel() {
     || actions.remove.isPending || actions.probe.isPending
 
   const submit = async (values: ConnectionFormValues) => {
-    if (editing === 'new') await actions.create.mutateAsync(buildConnectionPayload(values, false))
-    else if (editing) await actions.update.mutateAsync({ id: editing.id, payload: buildConnectionPayload(values, true) })
+    if (editing === 'new') await actions.create.mutateAsync(buildConnectionPayload(values, null))
+    else if (editing) {
+      const update = buildConnectionUpdate(editing, values)
+      if (Object.keys(update.payload).length > 0) await actions.update.mutateAsync(update)
+    }
     setEditing(null)
   }
   const remove = async (connection: ComfyConnectionView) => {
@@ -45,8 +50,9 @@ export default function ConnectionPoolPanel() {
         <button type="button" onClick={() => setEditing('new')} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('addConnection')}</button>
       </header>
       <div className="flex-1 space-y-4 overflow-y-auto p-5 sm:p-6">
-        {editing && <ConnectionEditor connection={editing === 'new' ? null : editing} onSubmit={submit} onCancel={() => setEditing(null)} />}
-        {connectionsQuery.isLoading && <p role="status" className="text-sm text-[var(--glass-text-secondary)]">{t('loading')}</p>}
+        {editing && <ConnectionEditor key={connectionEditorKey(editing === 'new' ? null : editing)}
+          connection={editing === 'new' ? null : editing} onSubmit={submit} onCancel={() => setEditing(null)} />}
+        {connectionsQuery.isLoading && <p role="status" aria-live="polite" className="text-sm text-[var(--glass-text-secondary)]">{t('loading')}</p>}
         {connectionsQuery.isError && <div role="alert" className="glass-surface-soft rounded-xl p-4 text-sm text-[var(--glass-danger)]">
           <p>{t('loadFailed')}</p><button type="button" onClick={() => void connectionsQuery.refetch()} className="mt-2 underline">{t('retry')}</button>
         </div>}

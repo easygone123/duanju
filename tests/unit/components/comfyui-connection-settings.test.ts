@@ -10,8 +10,12 @@ import ConnectionCard from '@/app/[locale]/profile/components/comfyui/Connection
 import ConnectionEditor from '@/app/[locale]/profile/components/comfyui/ConnectionEditor'
 import {
   buildConnectionPayload,
+  buildConnectionUpdate,
+  connectionEditorKey,
+  initialConnectionValues,
   safelyRunConnectionAction,
   statusPollingInterval,
+  validateConnectionCredentials,
   type ComfyConnectionView,
   type ComfyStatusView,
 } from '@/app/[locale]/profile/components/comfyui/hooks'
@@ -27,6 +31,10 @@ const messages = {
     version: 'Version', unknownVersion: '—',
     ownedTask: 'Current waoowaoo task', ownedTaskActive: 'Active owned generation',
     deleteBlockedOwned: 'Owned work is active',
+    editConnection: 'Edit Studio GPU', testConnection: 'Test Studio GPU',
+    enableConnection: 'Enable Studio GPU', disableConnection: 'Disable Studio GPU',
+    deleteConnection: 'Delete Studio GPU',
+    credentialsRequired: 'Enter credentials', basicCredentialsPair: 'Enter both username and password',
     preservedCredential: 'Leave blank to keep the saved credential',
     states: {
       online_idle: 'Idle', online_busy_owned: 'Busy · waoowaoo',
@@ -84,10 +92,51 @@ describe('ComfyUI connection settings', () => {
   it('omits an empty credential during edit so the server preserves the saved value', () => {
     expect(buildConnectionPayload({
       name: 'Studio GPU', baseUrl: 'http://10.0.0.8:8188', authType: 'bearer',
-      token: '', username: '', password: '', enabled: true,
-    }, true)).toEqual({
-      name: 'Studio GPU', baseUrl: 'http://10.0.0.8:8188', authType: 'bearer', enabled: true,
+      token: '', username: '', password: '',
+    }, connection)).toEqual({})
+  })
+
+  it('builds only actual edit deltas and never rolls back enabled state', () => {
+    expect(buildConnectionPayload({
+      name: 'Renamed GPU', baseUrl: connection.baseUrl, authType: connection.authType,
+      token: '', username: '', password: '',
+    }, connection)).toEqual({ name: 'Renamed GPU' })
+    expect(JSON.stringify(buildConnectionPayload({
+      name: connection.name, baseUrl: connection.baseUrl, authType: connection.authType,
+      token: 'replacement', username: '', password: '',
+    }, connection))).not.toContain('enabled')
+    expect(buildConnectionPayload({
+      name: 'New GPU', baseUrl: '10.0.0.9:8188', authType: 'none',
+      token: '', username: '', password: '',
+    }, null)).toEqual({
+      name: 'New GPU', baseUrl: '10.0.0.9:8188', authType: 'none', enabled: true,
     })
+  })
+
+  it('requires complete new credentials but preserves a completely blank same-auth edit', () => {
+    const base = { name: connection.name, baseUrl: connection.baseUrl, token: '', username: '', password: '' }
+    expect(validateConnectionCredentials({ ...base, authType: 'bearer' }, connection)).toBeNull()
+    expect(validateConnectionCredentials({ ...base, authType: 'basic', username: 'alice' }, connection))
+      .toBe('basicCredentialsPair')
+    expect(validateConnectionCredentials({ ...base, authType: 'basic' }, connection))
+      .toBe('credentialsRequired')
+    expect(validateConnectionCredentials({ ...base, authType: 'bearer' }, { ...connection, authType: 'none' }))
+      .toBe('credentialsRequired')
+    expect(validateConnectionCredentials({ ...base, authType: 'none' }, connection)).toBeNull()
+  })
+
+  it('uses a distinct remount key and initial values when switching editor targets', () => {
+    const second = { ...connection, id: 'connection-2', name: 'Second GPU', baseUrl: 'http://10.0.0.9:8188' }
+    expect(connectionEditorKey(connection)).toBe('mode:connection-1')
+    expect(connectionEditorKey(second)).toBe('mode:connection-2')
+    expect(connectionEditorKey(null)).toBe('mode:new')
+    expect(initialConnectionValues(second)).toMatchObject({
+      name: 'Second GPU', baseUrl: 'http://10.0.0.9:8188', token: '', username: '', password: '',
+    })
+    expect(initialConnectionValues(null)).toMatchObject({ name: '', baseUrl: '', authType: 'none' })
+    expect(buildConnectionUpdate(second, {
+      ...initialConnectionValues(second), name: 'Second GPU renamed',
+    })).toEqual({ id: 'connection-2', payload: { name: 'Second GPU renamed' } })
   })
 
   it.each([
@@ -111,6 +160,13 @@ describe('ComfyUI connection settings', () => {
     expect(html).toContain('RTX 4090')
     expect(html).toContain('16.0 GB / 24.0 GB')
     expect(html).toContain(`${state.includes('busy') ? 1 : 0} running · 2 pending`)
+    expect(html).toContain('role="status"')
+    expect(html).toContain('aria-live="polite"')
+    expect(html).toContain('aria-atomic="true"')
+    expect(html).toContain('aria-label="Edit Studio GPU"')
+    expect(html).toContain('aria-label="Test Studio GPU"')
+    expect(html).toContain('aria-label="Disable Studio GPU"')
+    expect(html).toContain('aria-label="Delete Studio GPU"')
   })
 
   it('polls every five seconds only while the document is visible', () => {
@@ -132,8 +188,8 @@ describe('ComfyUI connection settings', () => {
     expect(html).toContain('task-42')
     expect(html).toContain('running')
     expect(html).toContain('0.3.50')
-    expect(html).toMatch(/disabled=""[^>]*aria-label="Delete"/)
-    expect(html).toMatch(/aria-label="Disable"(?![^>]*disabled)/)
+    expect(html).toMatch(/disabled=""[^>]*aria-label="Delete Studio GPU"/)
+    expect(html).toMatch(/aria-label="Disable Studio GPU"(?![^>]*disabled)/)
   })
 
   it('uses only fresh ownedTask data for disabled-node deletion eligibility', () => {
@@ -143,7 +199,7 @@ describe('ComfyUI connection settings', () => {
       onToggle: async () => undefined, onDelete: async () => undefined,
     }))
     expect(missing).toContain('Disabled')
-    expect(missing).toMatch(/disabled=""[^>]*aria-label="Delete"/)
+    expect(missing).toMatch(/disabled=""[^>]*aria-label="Delete Studio GPU"/)
 
     const activeStatus: ComfyStatusView = {
       connectionId: disabled.id, state: 'disabled', checkedAt: null,
@@ -155,13 +211,13 @@ describe('ComfyUI connection settings', () => {
       onProbe: async () => undefined, onToggle: async () => undefined, onDelete: async () => undefined,
     }))
     expect(active).toContain('task-42 · running')
-    expect(active).toMatch(/disabled=""[^>]*aria-label="Delete"/)
+    expect(active).toMatch(/disabled=""[^>]*aria-label="Delete Studio GPU"/)
 
     const completed = render(createElement(ConnectionCard, {
       connection: disabled, status: { ...activeStatus, ownedTask: null }, onEdit: () => undefined,
       onProbe: async () => undefined, onToggle: async () => undefined, onDelete: async () => undefined,
     }))
-    expect(completed).toMatch(/aria-label="Delete"(?![^>]*disabled)/)
+    expect(completed).toMatch(/aria-label="Delete Studio GPU"(?![^>]*disabled)/)
     expect(completed).not.toContain('Active owned generation')
   })
 

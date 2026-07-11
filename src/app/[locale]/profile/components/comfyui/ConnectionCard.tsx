@@ -32,7 +32,8 @@ export default function ConnectionCard({ connection, status, busy, onEdit, onPro
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0"><h3 className="font-semibold text-[var(--glass-text-primary)]">{connection.name}</h3>
           <p className="mt-1 break-all text-xs text-[var(--glass-text-tertiary)]">{connection.baseUrl}</p></div>
-        <span className="glass-badge rounded-full px-3 py-1 text-xs font-medium">{t(`states.${state}`)}</span>
+        <span role="status" aria-live="polite" aria-atomic="true"
+          className="glass-badge rounded-full px-3 py-1 text-xs font-medium">{t(`states.${state}`)}</span>
       </div>
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
         <div><dt className="text-[var(--glass-text-tertiary)]">{t('version')}</dt>
@@ -52,11 +53,13 @@ export default function ConnectionCard({ connection, status, busy, onEdit, onPro
       </dl>
       {status?.message && <p className="mt-3 text-xs text-[var(--glass-text-tertiary)]">{status.message}</p>}
       <div className="mt-5 flex flex-wrap gap-2">
-        <button type="button" onClick={onEdit} disabled={busy} aria-label={t('edit')} className="glass-btn-base px-3 py-2 text-sm">{t('edit')}</button>
-        <button type="button" onClick={() => void onProbe()} disabled={busy} aria-label={t('test')} className="glass-btn-base px-3 py-2 text-sm">{t('test')}</button>
-        <button type="button" onClick={() => void onToggle()} disabled={busy} aria-label={connection.enabled ? t('disable') : t('enable')}
+        <button type="button" onClick={onEdit} disabled={busy} aria-label={t('editConnection', { name: connection.name })} className="glass-btn-base px-3 py-2 text-sm">{t('edit')}</button>
+        <button type="button" onClick={() => void onProbe()} disabled={busy} aria-label={t('testConnection', { name: connection.name })} className="glass-btn-base px-3 py-2 text-sm">{t('test')}</button>
+        <button type="button" onClick={() => void onToggle()} disabled={busy}
+          aria-label={connection.enabled ? t('disableConnection', { name: connection.name }) : t('enableConnection', { name: connection.name })}
           className="glass-btn-base px-3 py-2 text-sm">{connection.enabled ? t('disable') : t('enable')}</button>
-        <button type="button" onClick={() => void onDelete()} disabled={busy || owned || statusPending} aria-label={t('delete')}
+        <button type="button" onClick={() => void onDelete()} disabled={busy || owned || statusPending}
+          aria-label={t('deleteConnection', { name: connection.name })}
           title={owned ? t('deleteBlockedOwned') : undefined} className="glass-btn-base glass-btn-tone-danger px-3 py-2 text-sm">{t('delete')}</button>
       </div>
     </article>

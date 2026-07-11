@@ -41,23 +41,61 @@ export interface ConnectionFormValues {
   token: string
   username: string
   password: string
-  enabled: boolean
 }
 
-type ConnectionPayload = {
+type ConnectionPayload = Partial<{
   name: string
   baseUrl: string
   authType: ComfyAuthType
   enabled: boolean
   credentials?: { token: string } | { username: string; password: string }
+}>
+
+export type ConnectionCredentialError = 'credentialsRequired' | 'basicCredentialsPair'
+
+export function initialConnectionValues(connection?: ComfyConnectionView | null): ConnectionFormValues {
+  return {
+    name: connection?.name ?? '', baseUrl: connection?.baseUrl ?? '',
+    authType: connection?.authType ?? 'none', token: '', username: '', password: '',
+  }
 }
 
-export function buildConnectionPayload(values: ConnectionFormValues, editing: boolean): ConnectionPayload {
-  const payload: ConnectionPayload = {
-    name: values.name.trim(),
-    baseUrl: values.baseUrl.trim(),
-    authType: values.authType,
-    enabled: values.enabled,
+export function connectionEditorKey(connection?: ComfyConnectionView | null) {
+  return `mode:${connection?.id ?? 'new'}`
+}
+
+export function validateConnectionCredentials(
+  values: ConnectionFormValues,
+  original?: ComfyConnectionView | null,
+): ConnectionCredentialError | null {
+  if (values.authType === 'none') return null
+  const authChanged = values.authType !== original?.authType
+  if (values.authType === 'bearer') {
+    if (values.token.trim()) return null
+    return original && !authChanged ? null : 'credentialsRequired'
+  }
+  const hasUsername = values.username.trim().length > 0
+  const hasPassword = values.password.length > 0
+  if (hasUsername !== hasPassword) return 'basicCredentialsPair'
+  if (hasUsername && hasPassword) return null
+  return original && !authChanged ? null : 'credentialsRequired'
+}
+
+export function buildConnectionPayload(
+  values: ConnectionFormValues,
+  original?: ComfyConnectionView | null,
+): ConnectionPayload {
+  const validationError = validateConnectionCredentials(values, original)
+  if (validationError) throw new Error(validationError)
+  const name = values.name.trim()
+  const baseUrl = values.baseUrl.trim()
+  const payload: ConnectionPayload = original ? {} : {
+    name, baseUrl, authType: values.authType, enabled: true,
+  }
+  if (original) {
+    if (name !== original.name) payload.name = name
+    if (baseUrl !== original.baseUrl) payload.baseUrl = baseUrl
+    if (values.authType !== original.authType) payload.authType = values.authType
   }
   if (values.authType === 'bearer' && values.token.trim()) {
     payload.credentials = { token: values.token.trim() }
@@ -65,10 +103,14 @@ export function buildConnectionPayload(values: ConnectionFormValues, editing: bo
   if (values.authType === 'basic' && values.username.trim() && values.password) {
     payload.credentials = { username: values.username.trim(), password: values.password }
   }
-  if (!editing && values.authType !== 'none' && !payload.credentials) {
-    throw new Error('Credentials are required')
-  }
   return payload
+}
+
+export function buildConnectionUpdate(
+  connection: ComfyConnectionView,
+  values: ConnectionFormValues,
+) {
+  return { id: connection.id, payload: buildConnectionPayload(values, connection) }
 }
 
 export function statusPollingInterval(visibility: DocumentVisibilityState | undefined) {

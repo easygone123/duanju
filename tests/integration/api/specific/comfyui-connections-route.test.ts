@@ -267,6 +267,25 @@ describe('ComfyUI private connection routes', () => {
     expect(redisMock.eval).not.toHaveBeenCalled()
   })
 
+  it('updates only a display name while active without taking the identity lease', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    prismaMock.comfyConnection.update.mockResolvedValue(connection({ name: 'Renamed GPU' }))
+    prismaMock.comfyGenerationRequest.count.mockResolvedValue(1)
+    const route = await import('@/app/api/comfyui/connections/[connectionId]/route')
+    const response = await route.PATCH(buildMockRequest({
+      path: '/api/comfyui/connections/connection-1', method: 'PATCH', body: { name: 'Renamed GPU' },
+    }), connectionContext('connection-1'))
+
+    expect(response.status).toBe(200)
+    expect(prismaMock.comfyConnection.update).toHaveBeenCalledWith({
+      where: { id_userId: { id: 'connection-1', userId: 'user-1' } },
+      data: { name: 'Renamed GPU' },
+    })
+    expect(redisMock.set).not.toHaveBeenCalled()
+  })
+
   it('returns 409 for URL/auth identity PATCH while a test lease is active', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')
