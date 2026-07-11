@@ -4,18 +4,17 @@ import WebSocket, { type RawData } from 'ws'
 
 import { COMFY_ERROR_CODE, ComfyError } from './errors'
 import {
-  sanitizeComfyDiagnosticMessage,
-  sanitizeComfyNodeErrors,
-  type ComfyHttpErrorContext,
+  sanitizeComfyExecutionNodeErrors,
+  sanitizeComfyExecutionNodeId,
 } from './http-response'
-import type { ComfyExecutionEvent } from './types'
+import type { ComfyConnectionAuth, ComfyExecutionEvent } from './types'
 
 export async function* iterateComfyWebSocket(
   websocket: WebSocket,
   promptId: string,
   signal: AbortSignal,
   idleTimeoutMs: number,
-  diagnosticContext: ComfyHttpErrorContext,
+  auth: ComfyConnectionAuth,
 ): AsyncIterable<ComfyExecutionEvent> {
   const values: ComfyExecutionEvent[] = []
   let wake: (() => void) | undefined
@@ -46,7 +45,7 @@ export async function* iterateComfyWebSocket(
   const onOpen = () => resetIdleTimer()
   const onMessage = (raw: RawData, isBinary: boolean) => {
     if (isBinary || signal.aborted) return
-    const event = mapExecutionEvent(raw, promptId, diagnosticContext)
+    const event = mapExecutionEvent(raw, promptId, auth)
     if (!event) return
     values.push(event)
     resetIdleTimer()
@@ -135,7 +134,7 @@ function ignoreCleanupError(): void {
 function mapExecutionEvent(
   raw: RawData,
   promptId: string,
-  diagnosticContext: ComfyHttpErrorContext,
+  auth: ComfyConnectionAuth,
 ): ComfyExecutionEvent | undefined {
   let message: { type?: string; data?: Record<string, unknown> }
   try {
@@ -165,15 +164,12 @@ function mapExecutionEvent(
     return { type: 'executed', promptId, nodeId: data.node, output: data.output }
   }
   if (message.type === 'execution_error') {
+    const nodeId = sanitizeComfyExecutionNodeId(data.node_id, auth)
     return {
       type: 'execution_error', promptId,
-      nodeId: typeof data.node_id === 'string'
-        ? sanitizeComfyDiagnosticMessage(data.node_id, diagnosticContext, 128)
-        : undefined,
-      message: typeof data.exception_message === 'string'
-        ? sanitizeComfyDiagnosticMessage(data.exception_message, diagnosticContext)
-        : 'Execution failed',
-      nodeErrors: sanitizeComfyNodeErrors(data.node_errors, diagnosticContext),
+      ...(nodeId ? { nodeId } : {}),
+      message: 'Execution failed',
+      nodeErrors: sanitizeComfyExecutionNodeErrors(data.node_errors, auth),
     }
   }
   return undefined

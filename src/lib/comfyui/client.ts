@@ -8,7 +8,6 @@ import { buildComfyAuthorization } from './auth'
 import { COMFY_ERROR_CODE, ComfyError, type ComfyErrorCode } from './errors'
 import {
   buildComfyHttpError,
-  collectComfySensitiveValues,
   readComfySuccessBody,
   sanitizeComfyNodeErrors,
   type ComfyHttpErrorContext,
@@ -61,7 +60,6 @@ const DEFAULT_MAX_INPUT_BYTES = 256 * 1024 * 1024
 const DEFAULT_MAX_REDIRECTS = 3
 
 export class ComfyClient {
-  private readonly promptSensitiveValues = new Map<string, string[]>()
   private readonly baseUrl: URL
   private readonly timeoutMs: number
   private readonly maxJsonBytes: number
@@ -160,7 +158,6 @@ export class ComfyClient {
         },
       })
     }
-    this.rememberPromptSensitiveValues(result.prompt_id, graph)
     return { promptId: result.prompt_id }
   }
 
@@ -169,12 +166,7 @@ export class ComfyClient {
     clientId: string,
     signal: AbortSignal,
   ): AsyncIterable<ComfyExecutionEvent> {
-    const clearPromptSensitiveValues = () => this.promptSensitiveValues.delete(promptId)
-    if (signal.aborted) {
-      clearPromptSensitiveValues()
-      return
-    }
-    signal.addEventListener('abort', clearPromptSensitiveValues, { once: true })
+    if (signal.aborted) return
     let websocket: WebSocket | undefined
     let websocketAgent: HttpAgent | HttpsAgent | undefined
     try {
@@ -198,20 +190,14 @@ export class ComfyClient {
         promptId,
         signal,
         this.wsIdleTimeoutMs,
-        {
-          auth: this.options.auth,
-          sensitiveValues: this.promptSensitiveValues.get(promptId),
-        },
+        this.options.auth,
       )) {
-        if (isTerminalExecutionEvent(event)) clearPromptSensitiveValues()
         yield event
       }
     } catch (error) {
       if (signal.aborted) return
       throw error
     } finally {
-      signal.removeEventListener('abort', clearPromptSensitiveValues)
-      clearPromptSensitiveValues()
       if (websocket?.readyState === WebSocket.OPEN) websocket.close()
       else if (websocket?.readyState === WebSocket.CONNECTING) {
         websocket.once('error', ignoreWebSocketCleanupError)
@@ -397,13 +383,6 @@ export class ComfyClient {
     return new ComfyError(COMFY_ERROR_CODE.NETWORK_TARGET_BLOCKED, 'Redirect target is not permitted')
   }
 
-  private rememberPromptSensitiveValues(promptId: string, graph: ComfyApiWorkflow): void {
-    this.promptSensitiveValues.set(promptId, collectComfySensitiveValues(graph))
-    if (this.promptSensitiveValues.size > 1_000) {
-      const oldestPromptId = this.promptSensitiveValues.keys().next().value
-      if (oldestPromptId) this.promptSensitiveValues.delete(oldestPromptId)
-    }
-  }
 }
 
 function normalizeBaseUrl(rawUrl: string): URL {
@@ -430,10 +409,6 @@ function pinnedLookup(address: string, family: 4 | 6): LookupFunction {
 
 function isRedirect(status: number): boolean {
   return status >= 300 && status < 400
-}
-
-function isTerminalExecutionEvent(event: ComfyExecutionEvent): boolean {
-  return event.type === 'execution_error' || (event.type === 'executing' && event.nodeId === null)
 }
 
 function ignoreWebSocketCleanupError(): void {

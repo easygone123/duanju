@@ -104,6 +104,26 @@ describe('ComfyClient contract', () => {
     expect(server.requests).toHaveLength(requestsAfterAcceptedPrompt)
   })
 
+  it('does not retain prompt-sensitive context after many near-limit submissions', async () => {
+    let promptNumber = 0
+    server.override('/proxy/comfy/prompt', (_request, response) => {
+      promptNumber += 1
+      response.end(JSON.stringify({ prompt_id: `retention-${promptNumber}`, node_errors: {} }))
+    })
+    const comfy = client({ type: 'none' }, { maxWorkflowBytes: 16 * 1024 })
+
+    for (let index = 0; index < 12; index += 1) {
+      await comfy.submitPrompt({
+        '1': {
+          class_type: 'TextNode',
+          inputs: { prompt: `sensitive-${index}-${'x'.repeat(15 * 1024)}` },
+        },
+      }, 'client-1')
+    }
+
+    expect(Object.keys(comfy).filter((key) => /prompt|sensitive/i.test(key))).toEqual([])
+  })
+
   it('rejects missing prompt ids and exposes bounded sanitized node errors', async () => {
     server.override('/proxy/comfy/prompt', (_request, response) => {
       response.statusCode = 400
@@ -176,7 +196,7 @@ describe('ComfyClient contract', () => {
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
   })
 
-  it('bounds and structurally sanitizes WebSocket execution errors with submitted prompt context', async () => {
+  it('omits delayed-watch free text and preserves only canonical structural diagnostics', async () => {
     const comfy = client({ type: 'bearer', token: 'ws-auth-secret' })
     await comfy.submitPrompt({
       '1': { class_type: 'TextNode', inputs: { prompt: 'ws-prompt-secret' } },
@@ -202,6 +222,9 @@ describe('ComfyClient contract', () => {
             }],
             extra_info: { arbitrary: 'must-not-survive' },
           },
+          'unsafe/node': {
+            errors: [{ type: 'value_error', code: 'UNSAFE_NODE', message: 'must-not-survive' }],
+          },
         },
         extra_info: { raw: 'must-not-survive' },
       },
@@ -213,18 +236,17 @@ describe('ComfyClient contract', () => {
       value: {
         type: 'execution_error',
         promptId: 'prompt-1',
-        nodeId: '[REDACTED]',
-        message: '[REDACTED]',
+        message: 'Execution failed',
         nodeErrors: {
           '4': {
             nodeId: '4',
-            classType: 'KSampler',
-            errors: [{ type: 'value_error', code: 'BAD_PROMPT', message: '[REDACTED]' }],
+            errors: [{ type: 'value_error', code: 'BAD_PROMPT' }],
           },
         },
       },
     })
     const serialized = JSON.stringify(result)
+    expect(result.value).not.toHaveProperty('nodeId')
     expect(serialized.length).toBeLessThan(2_000)
     expect(serialized).not.toMatch(/ws-prompt-secret|ws-auth-secret|must-not-survive|x{100}/)
 
@@ -232,7 +254,7 @@ describe('ComfyClient contract', () => {
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
   })
 
-  it('bounds direct-watch diagnostics and auth-redacts them without stored prompt context', async () => {
+  it('omits direct-watch free text and unsafe identifiers without prompt context', async () => {
     const controller = new AbortController()
     const iterator = client({ type: 'bearer', token: 'direct-auth-secret' })
       .watchPrompt('direct-prompt', 'client-1', controller.signal)[Symbol.asyncIterator]()
@@ -242,6 +264,7 @@ describe('ComfyClient contract', () => {
       type: 'execution_error',
       data: {
         prompt_id: 'direct-prompt',
+        node_id: 'unsafe/node',
         exception_message: 'x'.repeat(5_000),
         node_errors: {
           '8': {
@@ -255,9 +278,10 @@ describe('ComfyClient contract', () => {
     const result = await next
     expect(result.value?.type).toBe('execution_error')
     if (result.value?.type !== 'execution_error') throw new Error('expected execution_error')
-    expect(result.value.message.length).toBeLessThanOrEqual(512)
+    expect(result.value.message).toBe('Execution failed')
+    expect(result.value).not.toHaveProperty('nodeId')
     expect(result.value.nodeErrors).toEqual({
-      '8': { nodeId: '8', errors: [{ message: '[REDACTED]' }] },
+      '8': { nodeId: '8', errors: [] },
     })
     expect(JSON.stringify(result.value)).not.toMatch(/direct-auth-secret|extra_info/)
     controller.abort()

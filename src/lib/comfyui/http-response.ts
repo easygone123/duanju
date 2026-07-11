@@ -5,7 +5,6 @@ import type { ComfyApiWorkflow, ComfyConnectionAuth } from './types'
 export interface ComfyHttpErrorContext {
   auth: ComfyConnectionAuth
   workflow?: ComfyApiWorkflow
-  sensitiveValues?: string[]
 }
 
 export async function readComfySuccessBody(
@@ -62,16 +61,31 @@ export function sanitizeComfyNodeErrors(
   return sanitizeNodeErrors(value, context)
 }
 
-export function sanitizeComfyDiagnosticMessage(
-  value: string,
-  context: ComfyHttpErrorContext,
-  limit = 512,
-): string {
-  return redactDiagnostic(value, diagnosticRedactions(context), limit)
+export function sanitizeComfyExecutionNodeId(
+  value: unknown,
+  auth: ComfyConnectionAuth,
+): string | undefined {
+  return typeof value === 'string' && isSafeNodeId(value, auth) ? value : undefined
 }
 
-export function collectComfySensitiveValues(value: unknown): string[] {
-  return collectStringLeaves(value)
+export function sanitizeComfyExecutionNodeErrors(
+  value: unknown,
+  auth: ComfyConnectionAuth,
+): Record<string, unknown> {
+  if (!isRecord(value)) return {}
+  const entries: Array<[string, unknown]> = []
+  for (const [nodeId, rawNode] of Object.entries(value).slice(0, 100)) {
+    if (!isSafeNodeId(nodeId, auth)) continue
+    const node = isRecord(rawNode) ? rawNode : {}
+    const errors = Array.isArray(node.errors)
+      ? node.errors
+        .slice(0, 20)
+        .map((error) => sanitizeExecutionError(error, auth))
+        .filter((error) => Object.keys(error).length > 0)
+      : []
+    entries.push([nodeId, { nodeId, errors }])
+  }
+  return Object.fromEntries(entries)
 }
 
 function sanitizeNodeErrors(
@@ -103,9 +117,31 @@ function sanitizeNodeErrors(
 function diagnosticRedactions(context: ComfyHttpErrorContext): string[] {
   return [
     ...comfyAuthSecrets(context.auth),
-    ...(context.sensitiveValues ?? []),
     ...collectStringLeaves(context.workflow),
   ].filter(Boolean)
+}
+
+function sanitizeExecutionError(
+  value: unknown,
+  auth: ComfyConnectionAuth,
+): Record<string, string> {
+  const error = isRecord(value) ? value : {}
+  const type = safeStructuralValue(error.type, auth)
+  const code = safeStructuralValue(error.code, auth)
+  return { ...(type ? { type } : {}), ...(code ? { code } : {}) }
+}
+
+function safeStructuralValue(value: unknown, auth: ComfyConnectionAuth): string | undefined {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(value)) return undefined
+  return containsCredential(value, auth) ? undefined : value
+}
+
+function isSafeNodeId(value: string, auth: ComfyConnectionAuth): boolean {
+  return /^(0|[1-9][0-9]{0,19})$/.test(value) && !containsCredential(value, auth)
+}
+
+function containsCredential(value: string, auth: ComfyConnectionAuth): boolean {
+  return comfyAuthSecrets(auth).filter(Boolean).some((secret) => value.includes(secret))
 }
 
 function sanitizeNodeError(value: unknown, redactions: string[]): Record<string, string> {
