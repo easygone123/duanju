@@ -211,7 +211,8 @@ async function submitGlobalAssetGenerateTask(input: AssetGenerateInput) {
 
   let billingPayload: Record<string, unknown>
   try {
-    billingPayload = buildImageBillingPayloadFromUserConfig({
+    billingPayload = await buildImageBillingPayloadFromUserConfig({
+      userId: input.access.userId,
       userModelConfig,
       imageModel,
       basePayload: payloadBase,
@@ -420,7 +421,8 @@ async function submitGlobalAssetModifyTask(input: AssetModifyInput) {
   const imageModel = userModelConfig.editModel
   let billingPayload: Record<string, unknown>
   try {
-    billingPayload = buildImageBillingPayloadFromUserConfig({
+    billingPayload = await buildImageBillingPayloadFromUserConfig({
+      userId: input.access.userId,
       userModelConfig,
       imageModel,
       basePayload: payload,

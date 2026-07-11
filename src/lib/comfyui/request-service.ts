@@ -132,13 +132,13 @@ export async function createComfyGenerationRequest(
         ? await client.findPublishedVersion?.({
           id: input.workflowVersionId,
           workflowId: workflow.id,
-          requireSuccessfulTest: true,
+          requireSuccessfulTest: false,
         })
         : currentVersion
       if (!isRecord(selectedVersion)
         || selectedVersion.workflowId !== workflow.id || !selectedVersion.publishedAt
         || (input.workflowVersionId
-          ? selectedVersion.id !== input.workflowVersionId || !selectedVersion.lastSuccessfulTestAt
+          ? selectedVersion.id !== input.workflowVersionId
           : workflow.currentVersionId === null || selectedVersion.id !== workflow.currentVersionId)) {
         throw new ApiError('NOT_FOUND')
       }

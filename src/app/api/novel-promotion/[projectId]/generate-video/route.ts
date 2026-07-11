@@ -207,10 +207,10 @@ export const POST = apiHandler(async (
   if (!isRecord(body) || !projectModels.videoModel) {
     throw new ApiError('INVALID_PARAMS', { code: 'VIDEO_MODEL_REQUIRED', field: 'videoModel' })
   }
-  if (!requestedVideoModel) body.videoModel = projectModels.videoModel
+  body.videoModel = projectModels.videoModel
   applyTrustedComfyVersionSnapshot(
     body,
-    requestedVideoModel ? null : projectModels.comfyVideoWorkflowVersionId,
+    projectModels.comfyVideoWorkflowVersionId,
   )
   requireVideoModelKeyFromPayload(body)
   const locale = resolveRequiredTaskLocale(request, body)

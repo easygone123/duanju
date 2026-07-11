@@ -34,7 +34,15 @@ vi.mock('@/lib/storage', () => ({
 vi.mock('@/lib/fonts', () => ({ initializeFonts: vi.fn(), createLabelSVG: vi.fn() }))
 vi.mock('@/lib/media-process', () => ({ processMediaResult: vi.fn() }))
 vi.mock('@/lib/config-service', () => ({
-  getProjectModelConfig: vi.fn(),
+  getProjectModelConfig: vi.fn(async () => ({
+    characterModel: 'comfyui::wf-image',
+    locationModel: 'comfyui::wf-image',
+    storyboardModel: 'comfyui::wf-image',
+    editModel: 'comfyui::wf-image',
+    videoModel: 'comfyui::wf-video',
+    comfyImageWorkflowVersionId: 'wf-image-version-1',
+    comfyVideoWorkflowVersionId: 'wf-video-version-1',
+  })),
   getUserModelConfig: vi.fn(),
   resolveProjectModelCapabilityGenerationOptions: vi.fn(),
 }))

@@ -189,6 +189,10 @@ export async function getProjectModelConfig(
 
   const taskImageModel = strictTaskOverride(taskOverrides.imageModel, 'imageModel')
   const taskVideoModel = strictTaskOverride(taskOverrides.videoModel, 'videoModel')
+  const [taskImageVersionId, taskVideoVersionId] = await Promise.all([
+    resolveTrustedComfyWorkflowVersion(userId, taskImageModel, 'image'),
+    resolveTrustedComfyWorkflowVersion(userId, taskVideoModel, 'video'),
+  ])
   const comfyImageModel = workflowModelKey(
     comfyBinding?.imageWorkflowId, comfyBinding?.imageWorkflowVersionId,
   )
@@ -204,13 +208,38 @@ export async function getProjectModelConfig(
     editModel: taskImageModel || comfyImageModel || extractModelKey(projectData?.editModel) || extractModelKey(userPref?.editModel) || null,
     videoModel: taskVideoModel || comfyVideoModel || extractModelKey(projectData?.videoModel) || extractModelKey(userPref?.videoModel) || null,
     audioModel: extractModelKey(projectData?.audioModel) || extractModelKey(userPref?.audioModel) || null,
-    comfyImageWorkflowVersionId: taskImageModel ? null : comfyBinding?.imageWorkflowVersionId ?? null,
-    comfyVideoWorkflowVersionId: taskVideoModel ? null : comfyBinding?.videoWorkflowVersionId ?? null,
+    comfyImageWorkflowVersionId: taskImageModel ? taskImageVersionId : comfyBinding?.imageWorkflowVersionId ?? null,
+    comfyVideoWorkflowVersionId: taskVideoModel ? taskVideoVersionId : comfyBinding?.videoWorkflowVersionId ?? null,
     videoRatio: projectData?.videoRatio || '16:9',
     artStyle: projectData?.artStyle || null,
     capabilityDefaults: parseCapabilitySelections(userPref?.capabilityDefaults),
     capabilityOverrides: parseCapabilitySelections(projectData?.capabilityOverrides),
   }
+}
+
+export async function resolveTrustedComfyWorkflowVersion(
+  userId: string,
+  modelKey: string | null,
+  mediaType: 'image' | 'video',
+): Promise<string | null> {
+  if (!modelKey) return null
+  const parsed = parseModelKeyStrict(modelKey)
+  if (!parsed || parsed.provider !== 'comfyui') return null
+  const workflow = await prisma.comfyWorkflow.findFirst({
+    where: {
+      id: parsed.modelId,
+      userId,
+      mediaType,
+      status: 'published',
+      currentVersionId: { not: null },
+      currentVersion: { publishedAt: { not: null } },
+    },
+    select: { currentVersionId: true },
+  })
+  if (!workflow?.currentVersionId) {
+    throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: ${modelKey}`)
+  }
+  return workflow.currentVersionId
 }
 
 function strictTaskOverride(value: string | null | undefined, field: keyof TaskModelOverrides): string | null {
@@ -385,12 +414,13 @@ export async function buildImageBillingPayload(input: {
  *
  * 适用于 asset-hub 等无 projectId 场景，使用已取出的 userModelConfig。
  */
-export function buildImageBillingPayloadFromUserConfig(input: {
+export async function buildImageBillingPayloadFromUserConfig(input: {
+  userId: string
   userModelConfig: UserModelConfig
   imageModel: string | null
   basePayload: Record<string, unknown>
-}): Record<string, unknown> {
-  const { userModelConfig, imageModel, basePayload } = input
+}): Promise<Record<string, unknown>> {
+  const { userId, userModelConfig, imageModel, basePayload } = input
   if (!imageModel) return basePayload
 
   let capabilityOptions: Record<string, CapabilityValue> = {}
@@ -405,8 +435,13 @@ export function buildImageBillingPayloadFromUserConfig(input: {
     throw Object.assign(new Error(message), { code: 'IMAGE_MODEL_CAPABILITY_NOT_CONFIGURED', message })
   }
 
+  const comfyWorkflowVersionId = await resolveTrustedComfyWorkflowVersion(
+    userId,
+    imageModel,
+    'image',
+  )
   return {
-    ...basePayload,
+    ...applyTrustedComfyVersionSnapshot({ ...basePayload }, comfyWorkflowVersionId),
     imageModel,
     ...(Object.keys(capabilityOptions).length > 0 ? { generationOptions: capabilityOptions } : {}),
   }

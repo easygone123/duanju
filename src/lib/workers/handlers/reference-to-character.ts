@@ -1,10 +1,7 @@
 import sharp from 'sharp'
 import { DelayedError, type Job } from 'bullmq'
 import { prisma } from '@/lib/prisma'
-import { generateImage } from '@/lib/generator-api'
-import { queryFalStatus } from '@/lib/async-submit'
 import { fetchWithTimeoutAndRetry } from '@/lib/ark-api'
-import { getProviderConfig } from '@/lib/api-config'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { executeAiVisionStep } from '@/lib/ai-runtime'
 import { getUserModelConfig } from '@/lib/config-service'
@@ -21,13 +18,12 @@ import { assertTaskActive, resolveImageSourceFromGeneration } from '@/lib/worker
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
 import { normalizeImageGenerationCount } from '@/lib/image-generation/count'
+import { normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-image'
 import {
   parseReferenceImages,
   readBoolean,
   readString,
 } from './reference-to-character-helpers'
-const POLL_MAX_ATTEMPTS = 60
-const POLL_INTERVAL_MS = 2000
 async function generateReferenceImage(params: {
   job: Job<TaskJobData>
   imageIndex: number
@@ -35,7 +31,7 @@ async function generateReferenceImage(params: {
   imageModel: string
   prompt: string
   referenceImages?: string[]
-  falApiKey?: string | null
+  comfyReferenceImages?: string[]
   keyPrefix: string
   labelText?: string
 }): Promise<string | null> {
@@ -46,60 +42,22 @@ async function generateReferenceImage(params: {
     imageModel,
     prompt,
     referenceImages,
-    falApiKey,
+    comfyReferenceImages,
     keyPrefix,
     labelText,
   } = params
 
   try {
     await assertTaskActive(job, `reference_to_character_generate_${imageIndex + 1}`)
-    let finalImageUrl: string | undefined
-    if (parseModelKeyStrict(imageModel)?.provider === 'comfyui') {
-      finalImageUrl = await resolveImageSourceFromGeneration(job, {
-        userId,
-        modelId: imageModel,
-        comfyWorkflowVersionId: readString(job.data.payload?.comfyWorkflowVersionId) || undefined,
-        invocationKey: `${job.data.taskId}:reference-character:${keyPrefix}:image:${imageIndex}`,
-        prompt,
-        comfyReferenceImages: referenceImages,
-        options: { referenceImages, aspectRatio: CHARACTER_IMAGE_BANANA_RATIO },
-      })
-    } else {
-      const result = await generateImage(
-        userId,
-        imageModel,
-        prompt,
-        {
-          referenceImages,
-          aspectRatio: CHARACTER_IMAGE_BANANA_RATIO,
-        },
-      )
-
-      finalImageUrl = result.imageUrl
-      const requestId = typeof result.requestId === 'string' ? result.requestId : ''
-      const endpoint = typeof result.endpoint === 'string' ? result.endpoint : ''
-      if (result.async && requestId && endpoint) {
-        if (!falApiKey) {
-          throw new Error('reference_to_character async result requires falApiKey')
-        }
-        for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt += 1) {
-          await assertTaskActive(job, `reference_to_character_poll_${imageIndex + 1}_${attempt + 1}`)
-          await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
-          const status = await queryFalStatus(endpoint, requestId, falApiKey)
-          if (status.completed && status.resultUrl) {
-            finalImageUrl = status.resultUrl
-            break
-          }
-          if (status.failed) {
-            return null
-          }
-        }
-      }
-
-      if (!result.success || !finalImageUrl) {
-        return null
-      }
-    }
+    const finalImageUrl = await resolveImageSourceFromGeneration(job, {
+      userId,
+      modelId: imageModel,
+      comfyWorkflowVersionId: readString(job.data.payload?.comfyWorkflowVersionId) || undefined,
+      invocationKey: `${job.data.taskId}:reference-character:${keyPrefix}:image:${imageIndex}`,
+      prompt,
+      comfyReferenceImages,
+      options: { referenceImages, aspectRatio: CHARACTER_IMAGE_BANANA_RATIO },
+    })
 
     const imgRes = await fetchWithTimeoutAndRetry(finalImageUrl, {
       logPrefix: `[reference-to-character:${imageIndex + 1}]`,
@@ -226,10 +184,10 @@ export async function handleReferenceToCharacterTask(job: Job<TaskJobData>) {
   }
 
   const useReferenceImages = !customDescription
+  const normalizedReferenceImages = useReferenceImages
+    ? await normalizeReferenceImagesForGeneration(allReferenceImages)
+    : undefined
   const isComfyImageModel = parseModelKeyStrict(imageModel)?.provider === 'comfyui'
-  const falApiKey = isComfyImageModel
-    ? null
-    : (await getProviderConfig(job.data.userId, 'fal')).apiKey
   const keyPrefix = isAssetHub ? 'ref-char' : `proj-ref-char-${job.data.projectId}`
   const count = normalizeImageGenerationCount('reference-to-character', payload.count)
 
@@ -245,8 +203,8 @@ export async function handleReferenceToCharacterTask(job: Job<TaskJobData>) {
     userId: job.data.userId,
     imageModel,
     prompt,
-    referenceImages: useReferenceImages ? allReferenceImages : undefined,
-    falApiKey,
+    referenceImages: normalizedReferenceImages,
+    comfyReferenceImages: useReferenceImages ? allReferenceImages : undefined,
     keyPrefix,
     ...(isProject ? { labelText: characterName } : {}),
   })

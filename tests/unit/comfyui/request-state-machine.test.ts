@@ -69,8 +69,8 @@ describe('ComfyUI request state machine', () => {
     }))
   })
 
-  it('uses an explicitly pinned tested project version after workflow current changes', async () => {
-    const pinned = { ...version, id: 'version-1', lastSuccessfulTestAt: new Date() }
+  it('uses an explicitly pinned published version without requiring a successful test', async () => {
+    const pinned = { ...version, id: 'version-1', lastSuccessfulTestAt: null }
     const create = vi.fn().mockResolvedValue({ id: 'request-pinned' })
     const dependencies = {
       findInvocation: vi.fn().mockResolvedValue(null),
@@ -90,7 +90,7 @@ describe('ComfyUI request state machine', () => {
     }, dependencies)
 
     expect(dependencies.findPublishedVersion).toHaveBeenCalledWith({
-      id: 'version-1', workflowId: 'workflow-1', requireSuccessfulTest: true,
+      id: 'version-1', workflowId: 'workflow-1', requireSuccessfulTest: false,
     })
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ workflowVersionId: 'version-1' }))
   })

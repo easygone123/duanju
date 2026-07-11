@@ -22,7 +22,7 @@ vi.mock('@/lib/config-service', () => ({
   }),
   getProjectModelConfig: vi.fn(async (_projectId: string, _userId: string, overrides: { videoModel?: string }) => ({
     videoModel: overrides.videoModel ?? null,
-    comfyVideoWorkflowVersionId: null,
+    comfyVideoWorkflowVersionId: overrides.videoModel?.startsWith('comfyui::') ? 'video-version-1' : null,
   })),
   resolveProjectModelCapabilityGenerationOptions: vi.fn(async () => ({})),
 }))
@@ -62,6 +62,12 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     expect(response.status).toBe(200)
     expect(capabilityMock).not.toHaveBeenCalledWith('video', 'comfyui::wf-video')
     expect(submitTaskMock).toHaveBeenCalledTimes(1)
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        videoModel: 'comfyui::wf-video',
+        comfyWorkflowVersionId: 'video-version-1',
+      }),
+    }))
   })
 
   it('continues rejecting unsupported cloud first-last-frame models', async () => {

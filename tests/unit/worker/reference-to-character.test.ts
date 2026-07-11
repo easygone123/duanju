@@ -112,6 +112,9 @@ vi.mock('@/lib/async-submit', () => asyncSubmitMock)
 vi.mock('@/lib/ark-api', () => arkApiMock)
 vi.mock('@/lib/api-config', () => apiConfigMock)
 vi.mock('@/lib/config-service', () => configServiceMock)
+vi.mock('@/lib/media/outbound-image', () => ({
+  normalizeReferenceImagesForGeneration: vi.fn(async (values: string[]) => values),
+}))
 vi.mock('@/lib/llm-client', () => llmClientMock)
 vi.mock('@/lib/storage', () => cosMock)
 vi.mock('@/lib/fonts', () => fontsMock)
@@ -137,15 +140,18 @@ function buildJob(payload: Record<string, unknown>, type: TaskType): Job<TaskJob
 }
 
 function readGenerateCall(index: number) {
-  const call = generatorApiMock.generateImage.mock.calls[index]
+  const call = workersUtilsMock.resolveImageSourceFromGeneration.mock.calls[index]
   if (!call) {
     return {
       prompt: '',
       options: {} as Record<string, unknown>,
     }
   }
-  const prompt = typeof call[2] === 'string' ? call[2] : ''
-  const options = (typeof call[3] === 'object' && call[3]) ? call[3] as Record<string, unknown> : {}
+  const params = call[1] as { prompt?: unknown; options?: unknown } | undefined
+  const prompt = typeof params?.prompt === 'string' ? params.prompt : ''
+  const options = (typeof params?.options === 'object' && params.options)
+    ? params.options as Record<string, unknown>
+    : {}
   return { prompt, options }
 }
 
@@ -180,7 +186,7 @@ describe('worker reference-to-character', () => {
     const result = await handleReferenceToCharacterTask(job)
 
     expect(result).toEqual(expect.objectContaining({ success: true }))
-    expect(generatorApiMock.generateImage).toHaveBeenCalledTimes(3)
+    expect(workersUtilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledTimes(3)
     expect(fontsMock.initializeFonts).not.toHaveBeenCalled()
     expect(fontsMock.createLabelSVG).not.toHaveBeenCalled()
 
@@ -206,7 +212,7 @@ describe('worker reference-to-character', () => {
     const result = await handleReferenceToCharacterTask(job)
 
     expect(result).toEqual(expect.objectContaining({ success: true }))
-    expect(generatorApiMock.generateImage).toHaveBeenCalledTimes(3)
+    expect(workersUtilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledTimes(3)
     expect(fontsMock.initializeFonts).not.toHaveBeenCalled()
     expect(fontsMock.createLabelSVG).not.toHaveBeenCalled()
 
@@ -240,7 +246,7 @@ describe('worker reference-to-character', () => {
     const result = await handleReferenceToCharacterTask(job)
 
     expect(result).toEqual(expect.objectContaining({ success: true }))
-    expect(generatorApiMock.generateImage).toHaveBeenCalledTimes(5)
+    expect(workersUtilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledTimes(5)
     const cosKeys = (result as { cosKeys?: string[] }).cosKeys
     expect(cosKeys).toHaveLength(5)
     expect(cosKeys?.every((item) => item.startsWith('cos/reference-key-'))).toBe(true)
@@ -294,12 +300,12 @@ describe('worker reference-to-character', () => {
   it('keeps cloud multi-image generation parallel', async () => {
     let active = 0
     let maxActive = 0
-    generatorApiMock.generateImage.mockImplementation(async () => {
+    workersUtilsMock.resolveImageSourceFromGeneration.mockImplementation(async () => {
       active += 1
       maxActive = Math.max(maxActive, active)
       await new Promise((resolve) => setTimeout(resolve, 0))
       active -= 1
-      return { success: true, imageUrl: 'https://example.com/generated.jpg', async: false }
+      return 'https://example.com/generated.jpg'
     })
 
     await handleReferenceToCharacterTask(buildJob({

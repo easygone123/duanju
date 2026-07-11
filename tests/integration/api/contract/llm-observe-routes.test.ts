@@ -36,11 +36,18 @@ const maybeSubmitLLMTaskMock = vi.hoisted(() =>
 )
 
 const configServiceMock = vi.hoisted(() => ({
+  applyTrustedComfyVersionSnapshot: vi.fn((payload: Record<string, unknown>, versionId?: string | null) => {
+    delete payload.comfyWorkflowVersionId
+    if (versionId) payload.comfyWorkflowVersionId = versionId
+    return payload
+  }),
   getUserModelConfig: vi.fn(async () => ({
     analysisModel: 'llm::analysis',
   })),
   getProjectModelConfig: vi.fn(async () => ({
     analysisModel: 'llm::analysis',
+    characterModel: 'img::character',
+    comfyImageWorkflowVersionId: null,
   })),
 }))
 

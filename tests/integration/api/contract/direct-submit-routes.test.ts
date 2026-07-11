@@ -32,6 +32,11 @@ const authState = vi.hoisted<AuthState>(() => ({
 const submitTaskMock = vi.hoisted(() => vi.fn<(...args: unknown[]) => Promise<SubmitResult>>())
 
 const configServiceMock = vi.hoisted(() => ({
+  applyTrustedComfyVersionSnapshot: vi.fn((payload: Record<string, unknown>, versionId?: string | null) => {
+    delete payload.comfyWorkflowVersionId
+    if (versionId) payload.comfyWorkflowVersionId = versionId
+    return payload
+  }),
   getUserModelConfig: vi.fn(async () => ({
     characterModel: 'img::character',
     locationModel: 'img::location',

@@ -38,6 +38,15 @@ const prismaMock = vi.hoisted(() => ({
       videoWorkflowId: 'video-workflow', videoWorkflowVersionId: 'video-version-1',
     })),
   },
+  comfyWorkflow: {
+    findFirst: vi.fn(async ({ where }: { where: { id: string; mediaType: string } }): Promise<{
+      id: string
+      currentVersionId: string
+    } | null> => ({
+      id: where.id,
+      currentVersionId: where.mediaType === 'image' ? 'task-image-version-1' : 'task-video-version-1',
+    })),
+  },
 }))
 
 const bindingMock = vi.hoisted(() => ({
@@ -153,6 +162,36 @@ describe('api specific - project ComfyUI defaults', () => {
       .rejects.toThrow('MODEL_KEY_INVALID')
   })
 
+  it('snapshots the current published version for explicit owned Comfy image and video overrides', async () => {
+    const { getProjectModelConfig } = await import('@/lib/config-service')
+    const config = await getProjectModelConfig('project-1', 'user-1', {
+      imageModel: 'comfyui::task-image-workflow',
+      videoModel: 'comfyui::task-video-workflow',
+    })
+
+    expect(config.storyboardModel).toBe('comfyui::task-image-workflow')
+    expect(config.comfyImageWorkflowVersionId).toBe('task-image-version-1')
+    expect(config.videoModel).toBe('comfyui::task-video-workflow')
+    expect(config.comfyVideoWorkflowVersionId).toBe('task-video-version-1')
+    expect(prismaMock.comfyWorkflow.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'task-image-workflow', userId: 'user-1', mediaType: 'image', status: 'published',
+        currentVersionId: { not: null },
+        currentVersion: { publishedAt: { not: null } },
+      },
+      select: { currentVersionId: true },
+    })
+  })
+
+  it('fails closed when an explicit Comfy override is not an owned published workflow', async () => {
+    const { getProjectModelConfig } = await import('@/lib/config-service')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValueOnce(null)
+
+    await expect(getProjectModelConfig('project-1', 'user-1', {
+      imageModel: 'comfyui::other-users-workflow',
+    })).rejects.toThrow('COMFY_WORKFLOW_NOT_AVAILABLE')
+  })
+
   it('central image payload builder snapshots the pinned Comfy version', async () => {
     const { buildImageBillingPayload, getProjectModelConfig } = await import('@/lib/config-service')
     const projectModelConfig = await getProjectModelConfig('project-1', 'user-1')
@@ -169,7 +208,24 @@ describe('api specific - project ComfyUI defaults', () => {
     })
   })
 
-  it('strips user-supplied Comfy version aliases when a task override has no trusted project pin', async () => {
+  it('snapshots an owned published Comfy version for user-level asset image tasks', async () => {
+    const { buildImageBillingPayloadFromUserConfig, getUserModelConfig } = await import('@/lib/config-service')
+    const userModelConfig = await getUserModelConfig('user-1')
+    const payload = await buildImageBillingPayloadFromUserConfig({
+      userId: 'user-1',
+      userModelConfig,
+      imageModel: 'comfyui::asset-workflow',
+      basePayload: { assetId: 'asset-1' },
+    })
+
+    expect(payload).toMatchObject({
+      imageModel: 'comfyui::asset-workflow',
+      comfyWorkflowVersionId: 'task-image-version-1',
+      assetId: 'asset-1',
+    })
+  })
+
+  it('strips user-supplied Comfy version aliases and replaces them with the trusted override pin', async () => {
     const { buildImageBillingPayload, getProjectModelConfig } = await import('@/lib/config-service')
     const taskConfig = await getProjectModelConfig('project-1', 'user-1', {
       imageModel: 'comfyui::task-workflow',
@@ -186,9 +242,10 @@ describe('api specific - project ComfyUI defaults', () => {
       },
     })
     expect(payload).toMatchObject({
-      imageModel: 'comfyui::task-workflow', cloudRequestTag: 'preserved',
+      imageModel: 'comfyui::task-workflow',
+      comfyWorkflowVersionId: 'task-image-version-1',
+      cloudRequestTag: 'preserved',
     })
-    expect(payload).not.toHaveProperty('comfyWorkflowVersionId')
     expect(payload).not.toHaveProperty('comfyImageWorkflowVersionId')
     expect(payload).not.toHaveProperty('workflowVersionId')
     expect(payload).not.toHaveProperty('workflow_version_id')

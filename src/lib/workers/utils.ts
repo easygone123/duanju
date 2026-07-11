@@ -30,6 +30,12 @@ import {
 } from '@/lib/comfyui/media-ownership'
 import type { ComfyMediaRef } from '@/lib/comfyui/types'
 import type { ComfyProviderInvocation } from '@/lib/comfyui/provider'
+import {
+  hasTaskModelSnapshotFields,
+  resolveImageTaskSnapshot,
+  resolveVideoTaskSnapshot,
+  type TaskModelSnapshot,
+} from '@/lib/workers/task-model-snapshot'
 
 const DEFAULT_POLL_TIMEOUT_MS = Number.parseInt(process.env.WORKER_EXTERNAL_TIMEOUT_MS || String(20 * 60 * 1000), 10)
 const DEFAULT_POLL_INTERVAL_MS = Number.parseInt(process.env.WORKER_EXTERNAL_POLL_MS || '3000', 10)
@@ -291,6 +297,54 @@ async function clearComfyCapacityResumeMarker(job: Job<TaskJobData>) {
   await job.updateData(nextData)
 }
 
+async function resolveImageGenerationSnapshot(
+  job: Job<TaskJobData>,
+  params: { modelId: string; comfyWorkflowVersionId?: string },
+): Promise<TaskModelSnapshot> {
+  const payload = job.data.payload
+  if (hasTaskModelSnapshotFields(payload, 'image')) {
+    return resolveImageTaskSnapshot(payload, { model: params.modelId })
+  }
+  let legacyVersionId = params.comfyWorkflowVersionId
+  if (!legacyVersionId && parseModelKeyStrict(params.modelId)?.provider === 'comfyui') {
+    const config = await getProjectModelConfig(job.data.projectId, job.data.userId)
+    const matchesCurrentImageModel = [
+      config.characterModel,
+      config.locationModel,
+      config.storyboardModel,
+      config.editModel,
+    ].includes(params.modelId)
+    legacyVersionId = matchesCurrentImageModel
+      ? config.comfyImageWorkflowVersionId ?? undefined
+      : undefined
+  }
+  return resolveImageTaskSnapshot(payload, {
+    model: params.modelId,
+    comfyWorkflowVersionId: legacyVersionId,
+  })
+}
+
+async function resolveVideoGenerationSnapshot(
+  job: Job<TaskJobData>,
+  params: { modelId: string; comfyWorkflowVersionId?: string },
+): Promise<TaskModelSnapshot> {
+  const payload = job.data.payload
+  if (hasTaskModelSnapshotFields(payload, 'video')) {
+    return resolveVideoTaskSnapshot(payload, { model: params.modelId })
+  }
+  let legacyVersionId = params.comfyWorkflowVersionId
+  if (!legacyVersionId && parseModelKeyStrict(params.modelId)?.provider === 'comfyui') {
+    const config = await getProjectModelConfig(job.data.projectId, job.data.userId)
+    legacyVersionId = config.videoModel === params.modelId
+      ? config.comfyVideoWorkflowVersionId ?? undefined
+      : undefined
+  }
+  return resolveVideoTaskSnapshot(payload, {
+    model: params.modelId,
+    comfyWorkflowVersionId: legacyVersionId,
+  })
+}
+
 export async function resolveImageSourceFromGeneration(
   job: Job<TaskJobData>,
   params: {
@@ -311,10 +365,11 @@ export async function resolveImageSourceFromGeneration(
     pollProgress?: { start?: number; end?: number }
   },
 ): Promise<string> {
+  const snapshot = await resolveImageGenerationSnapshot(job, params)
   const logger = scopedWorkerUtilLogger(job, 'worker.image.generate_source')
   const startedAt = Date.now()
   const allowTaskExternalIdResume = params.allowTaskExternalIdResume !== false
-  const isComfyInvocation = parseModelKeyStrict(params.modelId)?.provider === 'comfyui'
+  const isComfyInvocation = parseModelKeyStrict(snapshot.model)?.provider === 'comfyui'
 
   // 服务重启续接：若 DB 中已有 externalId，直接恢复轮询，不重新提交外部 API
   if (allowTaskExternalIdResume && !isComfyInvocation) {
@@ -336,7 +391,7 @@ export async function resolveImageSourceFromGeneration(
     message: 'image source generation started',
     provider: params.options?.provider || undefined,
     details: {
-      model: params.modelId,
+      model: snapshot.model,
     },
   })
 
@@ -349,14 +404,14 @@ export async function resolveImageSourceFromGeneration(
     projectId: job.data.projectId,
     userId: params.userId,
     modelType: 'image',
-    modelKey: params.modelId,
+    modelKey: snapshot.model,
     runtimeSelections,
   })
 
   logger.info({
     message: 'image source generation calling generateImage',
     details: {
-      model: params.modelId,
+      model: snapshot.model,
       referenceImageCount: params.options?.referenceImages?.length ?? 0,
       capabilityOptions,
       optionKeys: Object.keys(params.options || {}),
@@ -367,15 +422,15 @@ export async function resolveImageSourceFromGeneration(
     userId: params.userId,
     projectId: job.data.projectId,
     taskId: job.data.taskId,
-    modelKey: params.modelId,
+    modelKey: snapshot.model,
     invocationKey: params.invocationKey,
-    workflowVersionId: params.comfyWorkflowVersionId,
+    workflowVersionId: snapshot.comfyWorkflowVersionId,
     inputImages: params.comfyReferenceImages ?? params.options?.referenceImages,
   })
 
   const result = await withLogContext(
     { projectId: job.data.projectId, taskId: job.data.taskId, userId: params.userId },
-    () => generateImage(params.userId, params.modelId, params.prompt, {
+    () => generateImage(params.userId, snapshot.model, params.prompt, {
       ...params.options,
       ...capabilityOptions,
       ...(comfy ? { comfy } : {}),
@@ -437,6 +492,7 @@ export async function resolveImageSourcesFromGeneration(
   params: {
     userId: string
     modelId: string
+    comfyWorkflowVersionId?: string
     invocationKey: string
     prompt: string
     options?: {
@@ -451,10 +507,11 @@ export async function resolveImageSourcesFromGeneration(
     pollProgress?: { start?: number; end?: number }
   },
 ): Promise<string[]> {
+  const snapshot = await resolveImageGenerationSnapshot(job, params)
   const logger = scopedWorkerUtilLogger(job, 'worker.image.generate_sources')
   const startedAt = Date.now()
   const allowTaskExternalIdResume = params.allowTaskExternalIdResume !== false
-  const isComfyInvocation = parseModelKeyStrict(params.modelId)?.provider === 'comfyui'
+  const isComfyInvocation = parseModelKeyStrict(snapshot.model)?.provider === 'comfyui'
 
   // 服务重启续接：若 DB 中已有 externalId，直接恢复轮询（异步只有一张）
   if (allowTaskExternalIdResume && !isComfyInvocation) {
@@ -475,7 +532,7 @@ export async function resolveImageSourcesFromGeneration(
   logger.info({
     message: 'image sources generation started',
     provider: params.options?.provider || undefined,
-    details: { model: params.modelId },
+    details: { model: snapshot.model },
   })
 
   const runtimeSelections: Record<string, string | number | boolean> = {}
@@ -487,7 +544,7 @@ export async function resolveImageSourcesFromGeneration(
     projectId: job.data.projectId,
     userId: params.userId,
     modelType: 'image',
-    modelKey: params.modelId,
+    modelKey: snapshot.model,
     runtimeSelections,
   })
 
@@ -495,14 +552,15 @@ export async function resolveImageSourcesFromGeneration(
     userId: params.userId,
     projectId: job.data.projectId,
     taskId: job.data.taskId,
-    modelKey: params.modelId,
+    modelKey: snapshot.model,
     invocationKey: params.invocationKey,
+    workflowVersionId: snapshot.comfyWorkflowVersionId,
     inputImages: params.comfyReferenceImages ?? params.options?.referenceImages,
   })
 
   const result = await withLogContext(
     { projectId: job.data.projectId, taskId: job.data.taskId, userId: params.userId },
-    () => generateImage(params.userId, params.modelId, params.prompt, {
+    () => generateImage(params.userId, snapshot.model, params.prompt, {
       ...params.options,
       ...capabilityOptions,
       ...(comfy ? { comfy } : {}),
@@ -583,16 +641,17 @@ export async function resolveVideoSourceFromGeneration(
     pollProgress?: { start?: number; end?: number }
   },
 ): Promise<{ url: string; actualVideoTokens?: number; downloadHeaders?: Record<string, string> }> {
+  const snapshot = await resolveVideoGenerationSnapshot(job, params)
   const logger = scopedWorkerUtilLogger(job, 'worker.video.generate_source')
   const startedAt = Date.now()
-  const isComfyInvocation = parseModelKeyStrict(params.modelId)?.provider === 'comfyui'
+  const isComfyInvocation = parseModelKeyStrict(snapshot.model)?.provider === 'comfyui'
 
   // 服务重启续接：若 DB 中已有 externalId，直接恢复轮询，不重新提交外部 API（避免重复扣费）
   const resumeExternalId = isComfyInvocation ? null : await getTaskExistingExternalId(job.data.taskId)
   if (resumeExternalId) {
     logger.info({
       message: 'video source generation resumed from existing external id',
-      details: { externalId: resumeExternalId, model: params.modelId },
+      details: { externalId: resumeExternalId, model: snapshot.model },
     })
     const polled = await waitExternalResult(job, resumeExternalId, params.userId, {
       progressStart: params.pollProgress?.start ?? 45,
@@ -613,7 +672,7 @@ export async function resolveVideoSourceFromGeneration(
   logger.info({
     message: 'video source generation started',
     details: {
-      model: params.modelId,
+      model: snapshot.model,
     },
   })
 
@@ -638,7 +697,7 @@ export async function resolveVideoSourceFromGeneration(
     projectId: job.data.projectId,
     userId: params.userId,
     modelType: 'video',
-    modelKey: params.modelId,
+    modelKey: snapshot.model,
     runtimeSelections,
   })
 
@@ -654,16 +713,16 @@ export async function resolveVideoSourceFromGeneration(
     userId: params.userId,
     projectId: job.data.projectId,
     taskId: job.data.taskId,
-    modelKey: params.modelId,
+    modelKey: snapshot.model,
     invocationKey: params.invocationKey,
-    workflowVersionId: params.comfyWorkflowVersionId,
+    workflowVersionId: snapshot.comfyWorkflowVersionId,
     firstFrame: params.comfyFirstFrameSource ?? params.imageUrl,
     lastFrame: params.comfyLastFrameSource ?? params.options?.lastFrameImageUrl,
   })
 
   const result = await withLogContext(
     { projectId: job.data.projectId, taskId: job.data.taskId, userId: params.userId },
-    () => generateVideo(params.userId, params.modelId, params.imageUrl, {
+    () => generateVideo(params.userId, snapshot.model, params.imageUrl, {
       ...providerRequestOptions,
       ...providerCapabilityOptions,
       ...(comfy ? { comfy } : {}),
