@@ -9,6 +9,7 @@ import type {
   ComfyVariableDefinition,
   ComfyVariableValue,
 } from './types'
+import type { OwnedComfyMediaInput } from './media-ownership'
 
 const DEFAULT_MAX_INPUT_BYTES = 256 * 1024 * 1024
 const DEFAULT_MAX_TOTAL_INPUT_BYTES = 512 * 1024 * 1024
@@ -28,6 +29,7 @@ export interface ComfyMediaClient {
 }
 
 export interface ComfyMediaDependencies {
+  resolveOwnedMedia(input: OwnedComfyMediaInput): Promise<boolean>
   readOwnedObject(input: {
     userId: string
     projectId: string
@@ -63,6 +65,11 @@ export async function prepareComfyMediaUploads(input: {
       if (!isMediaRef(candidate)) throw inputUploadError()
       const maxBytes = input.maxInputBytes ?? DEFAULT_MAX_INPUT_BYTES
       if (!isOpaqueStorageKey(candidate.storageKey)) throw inputUploadError()
+      const mediaType = definition.type === 'video_ref' ? 'video' : 'image'
+      if (!await input.dependencies.resolveOwnedMedia({
+        userId: input.userId, projectId: input.projectId,
+        storageKey: candidate.storageKey, mediaType,
+      })) throw inputUploadError()
       const bytes = await input.dependencies.readOwnedObject({
         userId: input.userId,
         projectId: input.projectId,

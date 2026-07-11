@@ -205,6 +205,33 @@ describe('ComfyUI request state machine', () => {
     }, dependencies)).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
     expect(dependencies.create).not.toHaveBeenCalled()
   })
+
+  it('authorizes registered legacy media asynchronously instead of guessing ownership from its key', async () => {
+    const owned = requestDependenciesWithDefinitions([
+      { name: 'input', type: 'image_ref', required: true },
+    ])
+    owned.resolveOwnedMedia.mockResolvedValue(true)
+    await expect(createComfyGenerationRequest({
+      invocationKey: 'invoke-owned', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'image', workflowId: 'workflow-1',
+      variables: { input: { storageKey: 'images/owned.png' } },
+    }, owned)).resolves.toBeUndefined()
+    expect(owned.resolveOwnedMedia).toHaveBeenCalledWith({
+      userId: 'user-1', projectId: 'project-1', storageKey: 'images/owned.png',
+      mediaType: 'image',
+    })
+
+    const rejected = requestDependenciesWithDefinitions([
+      { name: 'input', type: 'image_ref', required: true },
+    ])
+    rejected.resolveOwnedMedia.mockResolvedValue(false)
+    await expect(createComfyGenerationRequest({
+      invocationKey: 'invoke-cross-owner', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'image', workflowId: 'workflow-1',
+      variables: { input: { storageKey: 'users/user-1/guessed.png' } },
+    }, rejected)).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
+    expect(rejected.create).not.toHaveBeenCalled()
+  })
 })
 
 function requestDependenciesWithDefinitions(variableDefinitions: unknown[]) {
@@ -216,6 +243,7 @@ function requestDependenciesWithDefinitions(variableDefinitions: unknown[]) {
       currentVersion: { ...version, variableDefinitions },
     }),
     create: vi.fn(),
+    resolveOwnedMedia: vi.fn().mockResolvedValue(false),
     transaction: async <T>(operation: (value: never) => Promise<T>) => operation(dependencies as never),
   }
   return dependencies

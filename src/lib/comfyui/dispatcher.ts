@@ -468,9 +468,15 @@ export async function reconcileComfyRequest(
         return { outcome: 'reconciling' as const }
       }
       await dependencies.deleteQueuedPrompt(promptId)
+      queue = await dependencies.getQueue()
+      if (queueContainsPrompt(queue.pending, promptId)
+        || queueContainsPrompt(queue.running, promptId)) {
+        return { outcome: 'reconciling' as const }
+      }
     } else if (running) {
       return { outcome: 'reconciling' as const }
-    } else {
+    }
+    {
       const cancellationHistory = await dependencies.getHistory(promptId)
       if (historyShowsExecutionFailure(cancellationHistory, promptId)) {
         if (!await dependencies.verifyLeaseOwner(owner)) throw lostLease()
@@ -563,6 +569,8 @@ export interface ComfyCancellationDependencies {
     observedStatus: ComfyRequestStatus; promptId?: string
   }): Promise<'canceled' | 'requested' | 'lost'>
   getQueue(): Promise<{ running: unknown[]; pending: unknown[] }>
+  getHistory(promptId: string): Promise<Record<string, unknown>>
+  isAbsenceConclusive?(input: OwnerInput & { promptId: string }): Promise<boolean>
   deleteQueuedPrompt(promptId: string): Promise<void>
   release(input: OwnerInput): Promise<boolean>
   markCanceledOwned(input: OwnerInput & { promptId?: string }): Promise<boolean>
@@ -592,21 +600,29 @@ export async function cancelComfyRequest(
     return { outcome: 'canceled' as const }
   }
   if (!promptId) return { outcome: 'canceling' as const }
-  if (promptId) {
-    const queue = await dependencies.getQueue()
-    if (queueContainsPrompt(queue.pending, promptId)) {
-      if (!await dependencies.verifyLeaseOwner(owner)) throw new ApiError('CONFLICT')
-      const confirmed = await dependencies.getQueue()
-      if (!await dependencies.verifyLeaseOwner(owner)
-        || !queueContainsPrompt(confirmed.pending, promptId)
-        || queueContainsPrompt(confirmed.running, promptId)) {
-        return { outcome: 'canceling' as const }
-      }
-      await dependencies.deleteQueuedPrompt(promptId)
-    } else if (queueContainsPrompt(queue.running, promptId)) {
+  let queue = await dependencies.getQueue()
+  if (queueContainsPrompt(queue.pending, promptId)) {
+    if (!await dependencies.verifyLeaseOwner(owner)) throw new ApiError('CONFLICT')
+    const confirmed = await dependencies.getQueue()
+    if (!await dependencies.verifyLeaseOwner(owner)
+      || !queueContainsPrompt(confirmed.pending, promptId)
+      || queueContainsPrompt(confirmed.running, promptId)) {
       return { outcome: 'canceling' as const }
     }
+    await dependencies.deleteQueuedPrompt(promptId)
+    queue = await dependencies.getQueue()
   }
+  if (queueContainsPrompt(queue.pending, promptId)
+    || queueContainsPrompt(queue.running, promptId)) {
+    return { outcome: 'canceling' as const }
+  }
+  const history = await dependencies.getHistory(promptId)
+  if (!historyShowsExecutionFailure(history, promptId)
+    && !hasHistoryEntry(history, promptId) && !Object.hasOwn(history, 'outputs')
+    && !await dependencies.isAbsenceConclusive?.({ ...owner, promptId })) {
+    return { outcome: 'canceling' as const }
+  }
+  if (!await dependencies.verifyLeaseOwner(owner)) throw new ApiError('CONFLICT')
   await mustOwn(dependencies.markCanceledOwned({ ...owner, ...(promptId ? { promptId } : {}) }))
   await dependencies.release(owner).catch(() => false)
   return { outcome: 'canceled' as const }

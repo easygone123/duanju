@@ -525,6 +525,8 @@ describe('ComfyUI recovery and cancellation contract', () => {
         status === 'leased' || status === 'uploading' ? 'canceled' : 'requested',
       ),
       getQueue: vi.fn().mockResolvedValue(queue), deleteQueuedPrompt: vi.fn().mockResolvedValue(undefined),
+      getHistory: vi.fn().mockResolvedValue({ 'prompt-1': { status: { status_str: 'success' } } }),
+      isAbsenceConclusive: vi.fn().mockResolvedValue(false),
       release: vi.fn().mockResolvedValue(true),
       markCanceledOwned: vi.fn().mockResolvedValue(true),
     } satisfies ComfyCancellationDependencies
@@ -552,13 +554,56 @@ describe('ComfyUI recovery and cancellation contract', () => {
     const queued = cancellation('submitted', { running: [['x', 'manual']], pending: [[0, 'prompt-1']] })
     await cancelComfyRequest('request-1', 'user-1', queued)
     expect(queued.deleteQueuedPrompt).toHaveBeenCalledWith('prompt-1')
-    expect(queued.getQueue).toHaveBeenCalledTimes(2)
+    expect(queued.getQueue).toHaveBeenCalledTimes(3)
 
     const running = cancellation('running', { running: [[0, 'prompt-1']], pending: [[0, 'manual']] })
     await expect(cancelComfyRequest('request-1', 'user-1', running)).resolves.toMatchObject({ outcome: 'canceling' })
     expect(running.deleteQueuedPrompt).not.toHaveBeenCalled()
     expect(running.markCanceledOwned).not.toHaveBeenCalled()
     expect(running.release).not.toHaveBeenCalled()
+  })
+
+  it('never finalizes cancellation from a queue miss or an unverified delete', async () => {
+    const pending = { running: [], pending: [[0, 'prompt-1']] }
+    const cases = [
+      [pending, pending, { running: [[0, 'prompt-1']], pending: [] }],
+      [pending, pending, pending],
+      [{ running: [], pending: [] }],
+    ] as const
+    for (const snapshots of cases) {
+      const deps = cancellation('submitted')
+      for (const snapshot of snapshots) deps.getQueue.mockResolvedValueOnce(snapshot)
+      deps.getHistory.mockResolvedValue({})
+      deps.isAbsenceConclusive.mockResolvedValue(false)
+
+      await expect(cancelComfyRequest('request-1', 'user-1', deps))
+        .resolves.toMatchObject({ outcome: 'canceling' })
+      expect(deps.markCanceledOwned).not.toHaveBeenCalled()
+      expect(deps.release).not.toHaveBeenCalled()
+    }
+  })
+
+  it('rechecks queue and history after deleting a queued prompt during reconciliation', async () => {
+    const deps = {
+      ...reconciliationSafetyDefaults(),
+      loadContext: vi.fn().mockResolvedValue({ request: {
+        id: 'request-1', userId: 'user-1', status: 'reconciling', connectionId: 'connection-1',
+        leaseId: 'lease-1', promptId: 'prompt-1', cancelRequestedAt: new Date(1),
+      }, version: { outputs: [] } }),
+      verifyLeaseOwner: vi.fn().mockResolvedValue(true),
+      getQueue: vi.fn()
+        .mockResolvedValueOnce({ running: [], pending: [[0, 'prompt-1']] })
+        .mockResolvedValueOnce({ running: [], pending: [[0, 'prompt-1']] })
+        .mockResolvedValueOnce({ running: [[0, 'prompt-1']], pending: [] }),
+      getHistory: vi.fn().mockResolvedValue({}),
+      isAbsenceConclusive: vi.fn().mockResolvedValue(false),
+      persistRecoveredState: vi.fn(),
+    } satisfies ComfyReconciliationDependencies
+
+    await expect(reconcileComfyRequest('request-1', deps))
+      .resolves.toEqual({ outcome: 'reconciling' })
+    expect(deps.persistRecoveredCancellation).not.toHaveBeenCalled()
+    expect(deps.releaseLease).not.toHaveBeenCalled()
   })
 
   it('never interrupts or deletes external work when prompt or lease ownership differs', async () => {

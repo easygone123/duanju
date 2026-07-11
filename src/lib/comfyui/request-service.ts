@@ -14,6 +14,10 @@ import { isBoundedLiveVariables } from './workflow-limits'
 import { matchesComfyVariableType } from './workflow-schema'
 import type { ComfyVariableDefinition } from './types'
 import { isOpaqueStorageKey } from './media'
+import {
+  resolveOwnedComfyMedia,
+  type OwnedComfyMediaInput,
+} from './media-ownership'
 
 export const ALLOWED_COMFY_REQUEST_TRANSITIONS: Record<
   ComfyRequestStatus,
@@ -51,6 +55,7 @@ interface RequestCreateOperations {
     mediaType: ComfyMediaType
   }): Promise<Record<string, unknown> | null>
   create(data: Record<string, unknown>): Promise<Record<string, unknown>>
+  resolveOwnedMedia?(input: OwnedComfyMediaInput): Promise<boolean>
 }
 
 interface RequestCreateDependencies extends RequestCreateOperations {
@@ -68,6 +73,7 @@ const defaultCreateOperations: RequestCreateOperations = {
   create: (data) => prisma.comfyGenerationRequest.create({
     data: data as Prisma.ComfyGenerationRequestUncheckedCreateInput,
   }),
+  resolveOwnedMedia: (input) => resolveOwnedComfyMedia(input),
 }
 
 const defaultCreateDependencies: RequestCreateDependencies = {
@@ -82,6 +88,9 @@ const defaultCreateDependencies: RequestCreateDependencies = {
     }),
     create: (data) => tx.comfyGenerationRequest.create({
       data: data as Prisma.ComfyGenerationRequestUncheckedCreateInput,
+    }),
+    resolveOwnedMedia: (input) => resolveOwnedComfyMedia(input, {
+      findFirst: (args) => tx.mediaObject.findFirst(args as Prisma.MediaObjectFindFirstArgs),
     }),
   }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }),
 }
@@ -103,8 +112,9 @@ export async function createComfyGenerationRequest(
         || currentVersion.workflowId !== workflow.id || !currentVersion.publishedAt) {
         throw new ApiError('NOT_FOUND')
       }
-      const variableSnapshot = sanitizeVariableSnapshot(
+      const variableSnapshot = await sanitizeVariableSnapshot(
         input.variables, currentVersion.variableDefinitions, input.userId, input.projectId,
+        client.resolveOwnedMedia,
       )
       return client.create({
         invocationKey: input.invocationKey,
@@ -279,11 +289,12 @@ function equalValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
-function sanitizeVariableSnapshot(
+async function sanitizeVariableSnapshot(
   variables: Record<string, ComfyVariableValue>,
   rawDefinitions: unknown,
   userId: string,
   projectId: string,
+  resolveOwnedMedia: RequestCreateOperations['resolveOwnedMedia'],
 ) {
   if (!isBoundedLiveVariables(variables) || !Array.isArray(rawDefinitions)) {
     throw new ApiError('INVALID_PARAMS')
@@ -305,7 +316,9 @@ function sanitizeVariableSnapshot(
     if (!supplied && definition.required) throw new ApiError('INVALID_PARAMS')
     if (value === undefined) continue
     if (!matchesComfyVariableType(value, definition.type)) throw new ApiError('INVALID_PARAMS')
-    snapshot[definition.name] = sanitizeVariableValue(value, definition.type, userId, projectId)
+    snapshot[definition.name] = await sanitizeVariableValue(
+      value, definition.type, userId, projectId, resolveOwnedMedia,
+    )
   }
   if (!isBoundedLiveVariables(snapshot)) throw new ApiError('INVALID_PARAMS')
   return snapshot
@@ -318,25 +331,36 @@ function isVariableDefinition(value: unknown): value is ComfyVariableDefinition 
     && typeof value.required === 'boolean'
 }
 
-function sanitizeVariableValue(
+async function sanitizeVariableValue(
   value: ComfyVariableValue,
   type: ComfyVariableDefinition['type'],
   userId: string,
   projectId: string,
-): ComfyVariableValue {
+  resolveOwnedMedia: RequestCreateOperations['resolveOwnedMedia'],
+): Promise<ComfyVariableValue> {
   if (type === 'image_ref_list') {
-    return (value as ComfyMediaRef[]).map((ref) => sanitizeMediaRef(ref, userId, projectId))
+    return Promise.all((value as ComfyMediaRef[]).map((ref) => sanitizeMediaRef(
+      ref, userId, projectId, 'image', resolveOwnedMedia,
+    )))
   }
   if (type === 'image_ref' || type === 'video_ref') {
-    return sanitizeMediaRef(value as ComfyMediaRef, userId, projectId)
+    return sanitizeMediaRef(
+      value as ComfyMediaRef, userId, projectId,
+      type === 'video_ref' ? 'video' : 'image', resolveOwnedMedia,
+    )
   }
   return value
 }
 
-function sanitizeMediaRef(value: ComfyMediaRef, userId: string, projectId: string) {
-  if (!isOpaqueStorageKey(value.storageKey)
-    || (!value.storageKey.startsWith(`users/${userId}/`)
-      && !value.storageKey.startsWith(`projects/${projectId}/`))) {
+async function sanitizeMediaRef(
+  value: ComfyMediaRef,
+  userId: string,
+  projectId: string,
+  mediaType: ComfyMediaType,
+  resolveOwnedMedia: RequestCreateOperations['resolveOwnedMedia'],
+) {
+  if (!isOpaqueStorageKey(value.storageKey) || !resolveOwnedMedia
+    || !await resolveOwnedMedia({ userId, projectId, storageKey: value.storageKey, mediaType })) {
     throw new ApiError('INVALID_PARAMS')
   }
   return {

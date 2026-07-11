@@ -72,6 +72,7 @@ function dependencies(overrides: Partial<ComfyDispatcherDependencies> = {}): Com
       deleteQueuedPrompt: vi.fn(),
     },
     readOwnedObject: vi.fn().mockResolvedValue(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+    resolveOwnedMedia: vi.fn().mockResolvedValue(true),
     uploadObject: vi.fn(async (_bytes, key) => key),
     objectExists: vi.fn().mockResolvedValue(false),
     resolveStoredUrl: vi.fn((key) => `/api/files/${key}`),
@@ -327,8 +328,35 @@ describe('ComfyUI dispatcher contract', () => {
         definitions: [{ name: 'input', type: 'image_ref', required: true }],
         client: deps.client, dependencies: deps,
       })).rejects.toMatchObject({ code: 'COMFY_INPUT_UPLOAD_FAILED' })
+      expect(deps.resolveOwnedMedia).not.toHaveBeenCalled()
       expect(deps.readOwnedObject).not.toHaveBeenCalled()
       expect(deps.client.uploadImage).not.toHaveBeenCalled()
+    }
+  })
+
+  it('resolves opaque legacy media ownership and type before storage reads', async () => {
+    const owned = dependencies()
+    await expect(prepareComfyMediaUploads({
+      userId: 'user-1', projectId: 'project-1', requestId: 'request-1',
+      variables: { input: { storageKey: 'images/owned.png' } },
+      definitions: [{ name: 'input', type: 'image_ref', required: true }],
+      client: owned.client, dependencies: owned,
+    })).resolves.toMatchObject({ input: { name: 'uploaded.png' } })
+    expect(owned.resolveOwnedMedia).toHaveBeenCalledWith({
+      userId: 'user-1', projectId: 'project-1', storageKey: 'images/owned.png',
+      mediaType: 'image',
+    })
+
+    for (const storageKey of ['images/cross-user.png', 'images/cross-project.png', 'images/unregistered.png']) {
+      const rejected = dependencies({ resolveOwnedMedia: vi.fn().mockResolvedValue(false) })
+      await expect(prepareComfyMediaUploads({
+        userId: 'user-1', projectId: 'project-1', requestId: 'request-1',
+        variables: { input: { storageKey } },
+        definitions: [{ name: 'input', type: 'image_ref', required: true }],
+        client: rejected.client, dependencies: rejected,
+      })).rejects.toMatchObject({ code: 'COMFY_INPUT_UPLOAD_FAILED' })
+      expect(rejected.readOwnedObject).not.toHaveBeenCalled()
+      expect(rejected.client.uploadImage).not.toHaveBeenCalled()
     }
   })
 
