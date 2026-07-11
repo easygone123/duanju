@@ -271,6 +271,14 @@ export class ComfyClient {
     )
   }
 
+  async deletePromptHistory(promptId: string): Promise<void> {
+    await this.requestJson(
+      'history',
+      { method: 'POST', body: JSON.stringify({ delete: [promptId] }), headers: jsonHeaders() },
+      COMFY_ERROR_CODE.CONNECTION_OFFLINE,
+    )
+  }
+
   private async requestJson<T>(
     endpoint: string,
     init: FetchInit,

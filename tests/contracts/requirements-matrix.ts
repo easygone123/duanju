@@ -7,6 +7,7 @@ export type RequirementCoverageEntry = {
   risk: string
   priority: RequirementPriority
   tests: ReadonlyArray<string>
+  scenarioIds?: ReadonlyArray<string>
 }
 
 export const REQUIREMENTS_MATRIX: ReadonlyArray<RequirementCoverageEntry> = [
@@ -165,65 +166,83 @@ export const REQUIREMENTS_MATRIX: ReadonlyArray<RequirementCoverageEntry> = [
       'tests/integration/provider/comfyui-health-monitor.contract.test.ts',
       'tests/integration/api/specific/comfyui-connections-route.test.ts',
     ],
+    scenarioIds: ['local-and-remote-url-add', 'states'],
   },
   {
     id: 'REQ-COMFYUI-AC-02', feature: 'ComfyUI arbitrary workflow import',
     userValue: '图片和视频 API Format 工作流可声明变量、上传、节点映射和输出',
     risk: '图结构或映射漂移导致错误生成', priority: 'P0',
     tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/api/contract/comfyui-workflows-route.test.ts'],
+    scenarioIds: ['arbitrary-image-video-workflows'],
   },
   {
     id: 'REQ-COMFYUI-AC-03', feature: 'ComfyUI workflow selection',
     userValue: '项目图片/视频默认工作流可被任务级选择覆盖',
     risk: '选择层级错误导致使用错误工作流', priority: 'P0',
     tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/api/specific/project-comfyui-defaults.test.ts'],
+    scenarioIds: ['task-override-fixed-version', 'project-comfy-default-fixed-version', 'specialized-project-default', 'user-default'],
   },
   {
     id: 'REQ-COMFYUI-AC-04', feature: 'ComfyUI media persistence',
     userValue: '图片和视频输出进入 waoowaoo 存储和现有业务流',
     risk: '远端临时输出丢失或媒体类型错配', priority: 'P0',
-    tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/provider/comfyui-dispatcher.contract.test.ts'],
+    tests: [
+      'tests/system/comfyui-generation.system.test.ts',
+      'tests/integration/provider/comfyui-dispatcher.contract.test.ts',
+    ],
+    scenarioIds: ['image-video-storage-existing-flows'],
   },
   {
     id: 'REQ-COMFYUI-AC-05', feature: 'ComfyUI idle scheduling',
     userValue: '优先空闲兼容实例且单实例并发严格为一',
     risk: '同一实例并发执行导致显存争用', priority: 'P0',
-    tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/provider/comfyui-dispatcher.contract.test.ts'],
+    tests: [
+      'tests/system/comfyui-generation.system.test.ts',
+      'tests/integration/provider/comfyui-dispatcher.contract.test.ts',
+      'tests/concurrency/comfyui/scheduler.concurrency.test.ts',
+    ],
+    scenarioIds: ['compatible-idle-preference', 'least-recently-assigned', 'per-instance-concurrency-one'],
   },
   {
     id: 'REQ-COMFYUI-AC-06', feature: 'ComfyUI capacity wait',
     userValue: '实例全忙时任务留在 waoowaoo 队列等待',
     risk: '提前进入 ComfyUI 队列绕过容量控制', priority: 'P0',
     tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/provider/comfyui-dispatcher.contract.test.ts'],
+    scenarioIds: ['all-busy-waoowaoo-wait'],
   },
   {
     id: 'REQ-COMFYUI-AC-07', feature: 'ComfyUI external busy detection',
     userValue: '手工提示运行时实例显示外部忙且不接收任务',
     risk: '抢占用户手工工作负载', priority: 'P0',
     tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/provider/comfyui-health-monitor.contract.test.ts'],
+    scenarioIds: ['manual-prompt-external-busy'],
   },
   {
     id: 'REQ-COMFYUI-AC-08', feature: 'ComfyUI recovery and cancellation',
     userValue: '重启、断线、取消和传输重试不会重复执行工作流',
     risk: '恢复路径重复提交并产生重复费用或资产', priority: 'P0',
     tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/provider/comfyui-recovery.contract.test.ts'],
+    scenarioIds: ['restart-ws-cancel-transfer-recovery'],
   },
   {
     id: 'REQ-COMFYUI-AC-09', feature: 'ComfyUI network security modes',
     userValue: '默认 allowlist 阻止未授权目标且 trusted 必须显式启用',
     risk: 'SSRF 访问内网或云凭证端点', priority: 'P0',
     tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/provider/comfyui-client.contract.test.ts'],
+    scenarioIds: ['allowlist-trusted-ssrf'],
   },
   {
     id: 'REQ-COMFYUI-AC-10', feature: 'ComfyUI private ownership',
     userValue: '连接、工作流、任务和输出按用户隔离',
     risk: '跨用户读取或执行私有资源', priority: 'P0',
     tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/api/specific/comfyui-connections-route.test.ts'],
+    scenarioIds: ['cross-user-resource-isolation'],
   },
   {
     id: 'REQ-COMFYUI-AC-11', feature: 'ComfyUI provider coexistence',
     userValue: 'ComfyUI 与现有图片和视频 provider 共存',
     risk: '新路由破坏原有 provider 或模型键契约', priority: 'P0',
     tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/provider/fal-provider.contract.test.ts'],
+    scenarioIds: ['comfy-cloud-provider-coexistence'],
   },
 ]

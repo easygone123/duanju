@@ -463,6 +463,13 @@ describe('ComfyClient contract', () => {
     await expect(next).rejects.toMatchObject({ code: 'COMFY_EXECUTION_TIMEOUT' })
   })
 
+  it('cancels waiting for a fake WebSocket during cleanup', async () => {
+    const controller = new AbortController()
+    const waiting = server.waitForSocket(controller.signal)
+    controller.abort()
+    await expect(waiting).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
   it('resets the WebSocket idle timeout on each correlated event', async () => {
     const controller = new AbortController()
     const iterator = client({ type: 'none' }, { wsIdleTimeoutMs: 100 })

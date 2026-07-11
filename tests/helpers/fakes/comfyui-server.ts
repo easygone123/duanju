@@ -73,21 +73,29 @@ export class FakeComfyUiServer {
     for (const socket of this.sockets) socket.send(bytes)
   }
 
-  closeSockets(): void {
-    for (const socket of this.sockets) socket.close()
+  async closeSockets(): Promise<void> {
+    await Promise.all([...this.sockets].map(async (socket) => {
+      if (socket.readyState === socket.CLOSED) return
+      await new Promise<void>((resolve) => {
+        socket.once('close', resolve)
+        socket.close()
+      })
+    }))
   }
 
-  async waitForSocket(): Promise<void> {
+  async waitForSocket(signal?: AbortSignal): Promise<void> {
     const deadline = Date.now() + 1_000
     while (this.sockets.size === 0 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 5))
+      if (signal?.aborted) throw abortError()
+      await abortableDelay(5, signal)
     }
+    if (signal?.aborted) throw abortError()
     if (this.sockets.size === 0) throw new Error('WebSocket did not connect')
   }
 
   async close(): Promise<void> {
-    for (const socket of this.sockets) socket.close()
-    this.websocketServer.close()
+    await this.closeSockets()
+    await new Promise<void>((resolve) => this.websocketServer.close(() => resolve()))
     await new Promise<void>((resolve, reject) =>
       this.server.close((error) => (error ? reject(error) : resolve())),
     )
@@ -125,6 +133,27 @@ export class FakeComfyUiServer {
     response.statusCode = 404
     json(response, { error: 'not found' })
   }
+}
+
+function abortError() {
+  return new DOMException('Operation aborted', 'AbortError')
+}
+
+async function abortableDelay(ms: number, signal?: AbortSignal) {
+  if (!signal) return await new Promise((resolve) => setTimeout(resolve, ms))
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(done, ms)
+    const onAbort = () => {
+      clearTimeout(timeout)
+      signal.removeEventListener('abort', onAbort)
+      reject(abortError())
+    }
+    function done() {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function json(response: ServerResponse, value: unknown): void {

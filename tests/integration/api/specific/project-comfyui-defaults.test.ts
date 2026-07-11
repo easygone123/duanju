@@ -118,17 +118,19 @@ describe('api specific - project ComfyUI defaults', () => {
     expect(prismaMock.novelPromotionProject.update).not.toHaveBeenCalled()
   })
 
-  it('resolves strict precedence task override then Comfy binding then project model then user default', async () => {
+  it('AC03 task override wins and snapshots its fixed workflow version', async () => {
     const { getProjectModelConfig } = await import('@/lib/config-service')
-
     const taskConfig = await getProjectModelConfig('project-1', 'user-1', {
-      imageModel: 'task::image', videoModel: 'task::video',
+      imageModel: 'comfyui::task-image-workflow', videoModel: 'comfyui::task-video-workflow',
     })
-    expect(taskConfig.storyboardModel).toBe('task::image')
-    expect(taskConfig.videoModel).toBe('task::video')
-    expect(taskConfig.comfyImageWorkflowVersionId).toBeNull()
-    expect(taskConfig.comfyVideoWorkflowVersionId).toBeNull()
+    expect(taskConfig.storyboardModel).toBe('comfyui::task-image-workflow')
+    expect(taskConfig.videoModel).toBe('comfyui::task-video-workflow')
+    expect(taskConfig.comfyImageWorkflowVersionId).toBe('task-image-version-1')
+    expect(taskConfig.comfyVideoWorkflowVersionId).toBe('task-video-version-1')
+  })
 
+  it('AC03 project Comfy default wins and keeps its pinned workflow version', async () => {
+    const { getProjectModelConfig } = await import('@/lib/config-service')
     const bindingConfig = await getProjectModelConfig('project-1', 'user-1')
     expect(bindingConfig.characterModel).toBe('comfyui::image-workflow')
     expect(bindingConfig.locationModel).toBe('comfyui::image-workflow')
@@ -137,14 +139,20 @@ describe('api specific - project ComfyUI defaults', () => {
     expect(bindingConfig.videoModel).toBe('comfyui::video-workflow')
     expect(bindingConfig.comfyImageWorkflowVersionId).toBe('image-version-1')
     expect(bindingConfig.comfyVideoWorkflowVersionId).toBe('video-version-1')
+  })
 
+  it('AC03 specialized project provider model wins when no Comfy default exists', async () => {
+    const { getProjectModelConfig } = await import('@/lib/config-service')
     prismaMock.projectComfyBinding.findUnique.mockResolvedValueOnce({
       imageWorkflowId: null, videoWorkflowId: null,
     })
     const projectConfig = await getProjectModelConfig('project-1', 'user-1')
     expect(projectConfig.storyboardModel).toBe('cloud::storyboard')
     expect(projectConfig.videoModel).toBe('cloud::video')
+  })
 
+  it('AC03 user default is used only when project and Comfy defaults are absent', async () => {
+    const { getProjectModelConfig } = await import('@/lib/config-service')
     prismaMock.projectComfyBinding.findUnique.mockResolvedValueOnce(null)
     prismaMock.novelPromotionProject.findUnique.mockResolvedValueOnce({
       analysisModel: null, characterModel: null, locationModel: null,

@@ -58,6 +58,10 @@ export async function runComfyContractCheck(
   const timings: Record<string, number> = {}
   const startedAt = Date.now()
   const bundle = await timed(timings, 'validateMs', () => readContractBundle(config.workflowFile))
+  if (bundle.variableDefinitions.some(({ type }) =>
+    type === 'image_ref' || type === 'image_ref_list' || type === 'video_ref')) {
+    throw new Error('ComfyUI contract check does not support uploaded inputs')
+  }
   const client = new ComfyClient({
     baseUrl: config.baseUrl,
     auth: config.auth,
@@ -77,23 +81,78 @@ export async function runComfyContractCheck(
     graph: bundle.graph, variables: bundle.variables,
     variableDefinitions: bundle.variableDefinitions, bindings: bundle.bindings, uploads: {},
   })
-  const submitted = await timed(timings, 'submitMs', () => client.submitPrompt(
-    renderedGraph,
-    `waoowaoo-contract-${createHash('sha256').update(`${Date.now()}:${workflowHash}`).digest('hex').slice(0, 16)}`,
-  ))
-  const history = await timed(timings, 'executeMs', () => waitForHistory(
-    client, submitted.promptId, config.timeoutMs,
-  ))
-  const outputs = extractComfyOutputs(history, bundle.outputs)
-  const primaryRef = outputs.find((candidate) => candidate.primary)
-  if (!primaryRef) throw new Error('ComfyUI contract workflow has no primary output')
-  const bytes = await timed(timings, 'fetchMs', () => client.downloadOutput(primaryRef))
-  const primary = { mediaType: primaryRef.mediaType, byteSize: bytes.byteLength }
-  output.write(JSON.stringify({
-    ok: true, compatibility: 'compatible', primary,
-    timings: { ...timings, totalMs: Date.now() - startedAt },
-  }))
-  return { primary, timings }
+  const clientId = `waoowaoo-contract-${createHash('sha256')
+    .update(`${Date.now()}:${workflowHash}`).digest('hex').slice(0, 16)}`
+  let promptId: string | undefined
+  try {
+    const submitted = await timed(timings, 'submitMs', () => client.submitPrompt(renderedGraph, clientId))
+    promptId = submitted.promptId
+    const history = await timed(timings, 'executeMs', () => waitForHistory(
+      client, promptId!, config.timeoutMs,
+    ))
+    const outputs = extractComfyOutputs(history, bundle.outputs)
+    const primaryRef = outputs.find((candidate) => candidate.primary)
+    if (!primaryRef) throw new Error('ComfyUI contract workflow has no primary output')
+    const bytes = await timed(timings, 'fetchMs', () => client.downloadOutput(primaryRef))
+    const primary = { mediaType: primaryRef.mediaType, byteSize: bytes.byteLength }
+    output.write(JSON.stringify({
+      ok: true, compatibility: 'compatible', primary,
+      timings: { ...timings, totalMs: Date.now() - startedAt },
+    }))
+    return { primary, timings }
+  } finally {
+    if (promptId) await cleanupContractPrompt(client, promptId, clientId, output)
+  }
+}
+
+async function cleanupContractPrompt(
+  client: ComfyClient,
+  promptId: string,
+  clientId: string,
+  output: { write(line: string): void },
+) {
+  // clientId is retained with promptId as the ownership correlation created by this process.
+  void clientId
+  let queue: Awaited<ReturnType<ComfyClient['getQueue']>> | undefined
+  try {
+    queue = await client.getQueue()
+  } catch (error) {
+    writeCleanupFailure(output, 'queue', error)
+  }
+  if (queue && queueContains(queue.pending, promptId)) {
+    try {
+      await client.deleteQueuedPrompt(promptId)
+    } catch (error) {
+      writeCleanupFailure(output, 'delete_pending', error)
+    }
+  } else if (queue && queueContains(queue.running, promptId)) {
+    try {
+      const confirmed = await client.getQueue()
+      if (queueContains(confirmed.running, promptId)) await client.interruptPrompt(promptId)
+    } catch (error) {
+      writeCleanupFailure(output, 'interrupt_running', error)
+    }
+  }
+  try {
+    await client.deletePromptHistory(promptId)
+  } catch (error) {
+    writeCleanupFailure(output, 'delete_history', error)
+  }
+}
+
+function queueContains(entries: unknown[], promptId: string) {
+  return entries.some((entry) => Array.isArray(entry) && entry[1] === promptId)
+}
+
+function writeCleanupFailure(
+  output: { write(line: string): void },
+  stage: string,
+  error: unknown,
+) {
+  const rawCode = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+  const code = typeof rawCode === 'string' && /^[A-Z0-9_]{1,80}$/.test(rawCode)
+    ? rawCode : 'CLEANUP_FAILED'
+  output.write(JSON.stringify({ ok: false, event: 'cleanup_failed', stage, code }))
 }
 
 async function readContractBundle(filename: string): Promise<ContractBundle> {

@@ -135,6 +135,9 @@ COMFYUI_ENABLED=true
 COMFYUI_NETWORK_MODE=allowlist
 COMFYUI_ALLOWED_HOSTS=comfy.example.com
 COMFYUI_ALLOWED_CIDRS=192.168.1.0/24
+# docker-compose.yml 也接受同名变量；未提供时使用安全默认值
+COMFYUI_LEASE_TTL_MS=30000
+COMFYUI_OUTPUT_MAX_BYTES=536870912
 
 # 仅适用于你完全信任的自托管网络；必须显式选择
 # COMFYUI_NETWORK_MODE=trusted
@@ -163,7 +166,7 @@ COMFYUI_ALLOWED_CIDRS=127.0.0.1/32 \
 npm run check:comfyui-contract
 ```
 
-可选认证变量为 `COMFYUI_CONTRACT_AUTH_TYPE=none|bearer|basic`，以及对应的 `COMFYUI_CONTRACT_AUTH_TOKEN` 或 `COMFYUI_CONTRACT_AUTH_USERNAME` / `COMFYUI_CONTRACT_AUTH_PASSWORD`。该命令会真实提交一次生成，请只使用专用的安全测试工作流。
+可选认证变量为 `COMFYUI_CONTRACT_AUTH_TYPE=none|bearer|basic`，以及对应的 `COMFYUI_CONTRACT_AUTH_TOKEN` 或 `COMFYUI_CONTRACT_AUTH_USERNAME` / `COMFYUI_CONTRACT_AUTH_PASSWORD`。该命令会真实提交一次生成，请只使用专用的安全测试工作流。合约检查目前明确拒绝需要上传 `image_ref` / `video_ref` 的 bundle；请使用纯文本或内置值工作流。检查结束或失败时会按 prompt ID 尽力删除自己的排队项、再次确认后中断自己的运行项并清理历史，不会操作手工 prompt；清理失败只输出脱敏阶段和错误码。
 
 本集成不改变仓库许可证：项目继续使用 **CC BY-NC-SA 4.0**，部署和再分发必须遵守非商业及署名、相同方式共享条款。
 

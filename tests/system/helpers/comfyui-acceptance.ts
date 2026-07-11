@@ -35,6 +35,10 @@ export class AcceptanceComfyServer {
   promptCount = 0
   uploadCount = 0
   interruptCount = 0
+  historyDeleteCount = 0
+  submitQueueMode: 'none' | 'pending' | 'running' = 'none'
+  historyStatus = 200
+  downloadStatus = 200
   websocketMode: 'complete' | 'disconnect' = 'complete'
   historyVisible = true
   requiredAuthorization?: string
@@ -76,6 +80,8 @@ export class AcceptanceComfyServer {
       const submitted = JSON.parse(body.toString('utf8')) as { prompt: ComfyApiWorkflow; client_id: string }
       this.promptCount += 1
       const promptId = `prompt-${this.promptCount}`
+      if (this.submitQueueMode === 'pending') this.pending.push([this.promptCount, promptId])
+      if (this.submitQueueMode === 'running') this.running.push([this.promptCount, promptId])
       const mediaType = Object.values(submitted.prompt).some((node) => node.class_type === 'VHS_VideoCombine')
         ? 'video' : 'image'
       const filename = mediaType === 'video' ? `${promptId}.mp4` : `${promptId}.png`
@@ -87,18 +93,27 @@ export class AcceptanceComfyServer {
       sendJson(response, { prompt_id: promptId, number: this.promptCount, node_errors: {} })
       void this.server.waitForSocket().then(() => {
         if (this.websocketMode === 'disconnect') {
-          this.server.closeSockets()
+          void this.server.closeSockets()
           return
         }
         this.server.send({ type: 'progress', data: { prompt_id: promptId, node: '3', value: 1, max: 1 } })
         this.server.send({ type: 'executing', data: { prompt_id: promptId, node: null } })
       })
     })
-    this.server.override('/proxy/comfy/interrupt', (_request, response) => {
+    this.server.override('/proxy/comfy/interrupt', (_request, response, body) => {
       this.interruptCount += 1
+      const parsed = JSON.parse(body.toString('utf8')) as { prompt_id?: string }
+      this.running = this.running.filter((entry) => promptIdOf(entry) !== parsed.prompt_id)
+      sendJson(response, {})
+    })
+    this.server.override('/proxy/comfy/history', (_request, response, body) => {
+      const parsed = JSON.parse(body.toString('utf8')) as { delete?: string[] }
+      for (const promptId of parsed.delete ?? []) this.histories.delete(promptId)
+      this.historyDeleteCount += 1
       sendJson(response, {})
     })
     this.server.override('/proxy/comfy/view', (request, response) => {
+      if (this.downloadStatus !== 200) return sendJson(response, {}, this.downloadStatus)
       const filename = new URL(request.url ?? '/', 'http://localhost').searchParams.get('filename') ?? ''
       response.setHeader('content-type', 'application/octet-stream')
       response.end(this.outputBytes.get(filename) ?? Buffer.alloc(0))
@@ -116,7 +131,11 @@ export class AcceptanceComfyServer {
   installHistoryRoute(promptId: string) {
     this.server.override(`/proxy/comfy/history/${promptId}`, (request, response) => {
       if (!this.authorized(request.headers.authorization)) return sendJson(response, {}, 401)
-      sendJson(response, this.historyVisible ? this.histories.get(promptId) ?? {} : {})
+      sendJson(
+        response,
+        this.historyVisible ? this.histories.get(promptId) ?? {} : {},
+        this.historyStatus,
+      )
     })
   }
 

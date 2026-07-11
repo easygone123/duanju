@@ -66,6 +66,24 @@ async function startExecution(mediaType: 'image' | 'video', transferFailures = 0
   return { server, aggregate, storage, telemetry, execution }
 }
 
+async function writeContractWorkflow() {
+  const directory = await mkdtemp(join(tmpdir(), 'comfy-contract-'))
+  temporaryPaths.push(directory)
+  const workflowFile = join(directory, 'workflow.json')
+  await writeFile(workflowFile, JSON.stringify({
+    graph: {
+      '1': { class_type: 'SaveImage', inputs: { text: '${prompt}' } },
+      '3': { class_type: 'SaveImage', inputs: { source: ['1', 0] } },
+    },
+    variableDefinitions: [{ name: 'prompt', type: 'string', required: true }],
+    variables: { prompt: 'CONTRACT_RAW_PROMPT' },
+    outputs: [{
+      name: 'primary', nodeId: '3', fieldPath: 'images', mediaType: 'image', primary: true,
+    }],
+  }))
+  return workflowFile
+}
+
 type PrismaMethodPatch = { target: Record<string, unknown>; key: string; value: unknown }
 
 async function withPrismaMethods<T>(patches: PrismaMethodPatch[], operation: () => Promise<T>): Promise<T> {
@@ -551,18 +569,7 @@ describe('system - ComfyUI executable acceptance evidence', () => {
 
   it('keeps the opt-in real contract checker on production network/auth/client paths', async () => {
     expect(() => readComfyContractCheckConfig({})).toThrow(/COMFYUI_CONTRACT_URL/)
-    const directory = await mkdtemp(join(tmpdir(), 'comfy-contract-'))
-    temporaryPaths.push(directory)
-    const workflowFile = join(directory, 'workflow.json')
-    await writeFile(workflowFile, JSON.stringify({
-      graph: {
-        '1': { class_type: 'SaveImage', inputs: { text: '${prompt}' } },
-        '3': { class_type: 'SaveImage', inputs: { source: ['1', 0] } },
-      },
-      variableDefinitions: [{ name: 'prompt', type: 'string', required: true }],
-      variables: { prompt: 'CONTRACT_RAW_PROMPT' },
-      outputs: [{ name: 'primary', nodeId: '3', fieldPath: 'images', mediaType: 'image', primary: true }],
-    }))
+    const workflowFile = await writeContractWorkflow()
     const server = new AcceptanceComfyServer()
     server.objectInfo = { SaveImage: { input: {} } }
     server.installDynamicHistoryRoutes()
@@ -576,6 +583,128 @@ describe('system - ComfyUI executable acceptance evidence', () => {
       }), { write: (line) => output.push(line) })
       expect(result.primary).toMatchObject({ mediaType: 'image', byteSize: PNG.byteLength })
       expect(JSON.stringify(output)).not.toContain('CONTRACT_RAW_PROMPT')
+      expect(server.historyDeleteCount).toBe(1)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('contract cleanup deletes its timed-out pending prompt and preserves manual queue work', async () => {
+    const workflowFile = await writeContractWorkflow()
+    const server = new AcceptanceComfyServer()
+    server.submitQueueMode = 'pending'
+    server.historyVisible = false
+    server.pending.push([99, 'manual-prompt'])
+    server.installDynamicHistoryRoutes()
+    await server.start()
+    try {
+      await expect(runComfyContractCheck({
+        baseUrl: server.baseUrl, workflowFile, auth: { type: 'none' }, timeoutMs: 25,
+        networkPolicy: { mode: 'allowlist', allowedHosts: [], allowedCidrs: ['127.0.0.1/32'] },
+      })).rejects.toThrow('ComfyUI contract workflow timed out')
+      expect(server.pending).toEqual([[99, 'manual-prompt']])
+      expect(server.interruptCount).toBe(0)
+      expect(server.historyDeleteCount).toBe(1)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('contract cleanup deletes its prompt after history failure without touching manual work', async () => {
+    const workflowFile = await writeContractWorkflow()
+    const server = new AcceptanceComfyServer()
+    server.submitQueueMode = 'pending'
+    server.historyStatus = 500
+    server.pending.push([99, 'manual-prompt'])
+    server.installDynamicHistoryRoutes()
+    await server.start()
+    try {
+      await expect(runComfyContractCheck({
+        baseUrl: server.baseUrl, workflowFile, auth: { type: 'none' }, timeoutMs: 100,
+        networkPolicy: { mode: 'allowlist', allowedHosts: [], allowedCidrs: ['127.0.0.1/32'] },
+      })).rejects.toMatchObject({ code: COMFY_ERROR_CODE.CONNECTION_OFFLINE })
+      expect(server.pending).toEqual([[99, 'manual-prompt']])
+      expect(server.interruptCount).toBe(0)
+      expect(server.historyDeleteCount).toBe(1)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('contract cleanup rechecks and interrupts its running prompt after download failure only', async () => {
+    const workflowFile = await writeContractWorkflow()
+    const server = new AcceptanceComfyServer()
+    server.submitQueueMode = 'running'
+    server.downloadStatus = 500
+    server.running.push([99, 'manual-prompt'])
+    server.installDynamicHistoryRoutes()
+    await server.start()
+    try {
+      await expect(runComfyContractCheck({
+        baseUrl: server.baseUrl, workflowFile, auth: { type: 'none' }, timeoutMs: 100,
+        networkPolicy: { mode: 'allowlist', allowedHosts: [], allowedCidrs: ['127.0.0.1/32'] },
+      })).rejects.toMatchObject({ code: COMFY_ERROR_CODE.OUTPUT_TRANSFER_FAILED })
+      expect(server.running).toEqual([[99, 'manual-prompt']])
+      expect(server.interruptCount).toBe(1)
+      expect(server.historyDeleteCount).toBe(1)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('contract checker rejects upload-dependent bundles before submitting a prompt', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'comfy-contract-upload-'))
+    temporaryPaths.push(directory)
+    const workflowFile = join(directory, 'workflow.json')
+    await writeFile(workflowFile, JSON.stringify({
+      graph: { '1': { class_type: 'LoadImage', inputs: { image: '${input}' } } },
+      variableDefinitions: [{ name: 'input', type: 'image_ref', required: true }],
+      bindings: [{
+        nodeId: '1', inputPath: 'image', variable: 'input', valueType: 'image_ref', transform: 'filename',
+      }],
+      variables: { input: { storageKey: 'users/user-a/input.png' } },
+      outputs: [{ name: 'primary', nodeId: '1', fieldPath: 'images', mediaType: 'image', primary: true }],
+    }))
+    const server = new AcceptanceComfyServer()
+    await server.start()
+    try {
+      await expect(runComfyContractCheck({
+        baseUrl: server.baseUrl, workflowFile, auth: { type: 'none' }, timeoutMs: 100,
+        networkPolicy: { mode: 'allowlist', allowedHosts: [], allowedCidrs: ['127.0.0.1/32'] },
+      })).rejects.toThrow('does not support uploaded inputs')
+      expect(server.promptCount).toBe(0)
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('contract cleanup failure stays sanitized and never replaces the original execution error', async () => {
+    const workflowFile = await writeContractWorkflow()
+    const server = new AcceptanceComfyServer()
+    server.submitQueueMode = 'pending'
+    server.historyVisible = false
+    server.installDynamicHistoryRoutes()
+    server.server.override('/proxy/comfy/queue', (request, response) => {
+      response.setHeader('content-type', 'application/json')
+      if (request.method === 'POST') {
+        response.statusCode = 500
+        response.end(JSON.stringify({ secret: 'MUST_NOT_LEAK' }))
+      } else {
+        response.end(JSON.stringify({ queue_running: server.running, queue_pending: server.pending }))
+      }
+    })
+    await server.start()
+    try {
+      const output: string[] = []
+      await expect(runComfyContractCheck({
+        baseUrl: server.baseUrl, workflowFile, auth: { type: 'none' }, timeoutMs: 25,
+        networkPolicy: { mode: 'allowlist', allowedHosts: [], allowedCidrs: ['127.0.0.1/32'] },
+      }, { write: (line) => output.push(line) })).rejects.toThrow('ComfyUI contract workflow timed out')
+      expect(output.map((line) => JSON.parse(line))).toContainEqual({
+        ok: false, event: 'cleanup_failed', stage: 'delete_pending',
+        code: COMFY_ERROR_CODE.CONNECTION_OFFLINE,
+      })
+      expect(JSON.stringify(output)).not.toContain('MUST_NOT_LEAK')
     } finally {
       await server.close()
     }
