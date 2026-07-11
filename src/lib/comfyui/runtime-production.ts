@@ -50,7 +50,9 @@ export async function probeProductionComfyOwnerHealth(
       maxOutputBytes: config.outputMaxBytes,
     },
   })
-  await Promise.all(statuses.map(({ connectionId, ...health }) => {
+  const enabledStatuses = statuses.filter((status) => status.state !== 'disabled')
+  await Promise.all(enabledStatuses.map(({ connectionId, ownedTask: _ownedTask, ...health }) => {
+    void _ownedTask
     const capabilityFingerprint = [...compatibilityCache.entries()]
       .find(([key]) => key.startsWith(`${connectionId}:`))?.[1].capabilityFingerprint
     return cacheComfyHealthIfNewer(
@@ -58,7 +60,7 @@ export async function probeProductionComfyOwnerHealth(
       Math.min(config.healthIntervalMs * 3, 3_600_000),
     )
   }))
-  return statuses
+  return enabledStatuses
 }
 
 export async function listProductionComfyDispatchOwners(input: ComfyOwnerCursorPageInput) {

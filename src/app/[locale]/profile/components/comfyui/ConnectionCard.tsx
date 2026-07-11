@@ -21,9 +21,10 @@ function formatBytes(value: number | undefined) {
 
 export default function ConnectionCard({ connection, status, busy, onEdit, onProbe, onToggle, onDelete }: Props) {
   const t = useTranslations('comfyui')
-  const state = status?.state ?? (connection.lastHealthCode || 'offline')
+  const state = status?.state ?? (connection.enabled ? 'checking' : 'disabled')
   const devices = status?.devices?.length ? status.devices : connection.deviceSummary
-  const owned = state === 'online_busy_owned'
+  const owned = status?.ownedTask != null
+  const statusPending = status === undefined
   const checkedAt = status?.checkedAt ?? connection.lastHealthAt
 
   return (
@@ -55,7 +56,7 @@ export default function ConnectionCard({ connection, status, busy, onEdit, onPro
         <button type="button" onClick={() => void onProbe()} disabled={busy} aria-label={t('test')} className="glass-btn-base px-3 py-2 text-sm">{t('test')}</button>
         <button type="button" onClick={() => void onToggle()} disabled={busy} aria-label={connection.enabled ? t('disable') : t('enable')}
           className="glass-btn-base px-3 py-2 text-sm">{connection.enabled ? t('disable') : t('enable')}</button>
-        <button type="button" onClick={() => void onDelete()} disabled={busy || owned} aria-label={t('delete')}
+        <button type="button" onClick={() => void onDelete()} disabled={busy || owned || statusPending} aria-label={t('delete')}
           title={owned ? t('deleteBlockedOwned') : undefined} className="glass-btn-base glass-btn-tone-danger px-3 py-2 text-sm">{t('delete')}</button>
       </div>
     </article>

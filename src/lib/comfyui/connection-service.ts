@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { ComfyClient, type ComfyClientOptions } from './client'
 import { deriveComfyHealth, sanitizeComfyHealthDiagnostic } from './health'
 import { authorizeComfyTarget, type ComfyNetworkPolicyConfig } from './network-policy'
-import type { ComfyAuthType, ComfyConnectionAuth, ComfyHealthSummary } from './types'
+import type { ComfyAuthType, ComfyConnectionAuth, ComfyDeviceSummary, ComfyHealthSummary } from './types'
 import { acquireComfyLease, releaseComfyLease, startComfyLeaseGuard } from './test-lease'
 
 const TERMINAL_REQUEST_STATUSES = ['completed', 'failed', 'canceled'] as const
@@ -203,7 +203,7 @@ export async function probeOwnedConnectionStatuses(
   options?: ComfyProbeOptions,
 ) {
   const records = await prisma.comfyConnection.findMany({
-    where: { userId, enabled: true },
+    where: { userId },
     orderBy: { createdAt: 'asc' },
   })
   const statuses = await mapWithConcurrency(
@@ -211,12 +211,14 @@ export async function probeOwnedConnectionStatuses(
     readStatusProbeConcurrency(),
     async (record) => {
       try {
+        const ownedTask = await findOwnedActiveRequest(record.id, userId)
+        if (!record.enabled) return disabledConnectionStatus(record, ownedTask)
         const summary = await probeStableConnection(record, userId, true, options)
         if (!summary) return null
         return {
           connectionId: record.id,
           ...summary,
-          ownedTask: await findOwnedActiveRequest(record.id, userId),
+          ownedTask,
         }
       } catch (error) {
         if (error instanceof ApiError
@@ -226,6 +228,44 @@ export async function probeOwnedConnectionStatuses(
     },
   )
   return statuses.filter((status) => status !== null)
+}
+
+function disabledConnectionStatus(
+  record: ComfyConnection,
+  ownedTask: { requestId: string; taskId: string; status: string } | null,
+) {
+  const devices = readStoredDevices(record.deviceSummary)
+  return {
+    connectionId: record.id,
+    state: 'disabled' as const,
+    checkedAt: record.lastHealthAt?.toISOString() ?? null,
+    ...(record.lastSeenVersion ? { version: record.lastSeenVersion.slice(0, 100) } : {}),
+    ...(devices.length > 0 ? { devices } : {}),
+    ...(record.lastHealthMessage ? { message: record.lastHealthMessage.slice(0, 200) } : {}),
+    runningCount: 0,
+    pendingCount: 0,
+    ownedTask,
+  }
+}
+
+function readStoredDevices(value: Prisma.JsonValue): ComfyDeviceSummary[] {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, 16).flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const name = typeof entry.name === 'string' ? entry.name.slice(0, 160) : undefined
+    const type = typeof entry.type === 'string' ? entry.type.slice(0, 80) : undefined
+    const vramTotalBytes = storedNonnegativeNumber(entry.vramTotalBytes)
+    const vramFreeBytes = storedNonnegativeNumber(entry.vramFreeBytes)
+    return [{
+      ...(name ? { name } : {}), ...(type ? { type } : {}),
+      ...(vramTotalBytes !== undefined ? { vramTotalBytes } : {}),
+      ...(vramFreeBytes !== undefined ? { vramFreeBytes } : {}),
+    }]
+  })
+}
+
+function storedNonnegativeNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
 }
 
 async function probeStableConnection(

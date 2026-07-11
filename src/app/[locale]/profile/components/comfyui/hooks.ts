@@ -24,8 +24,8 @@ export interface ComfyConnectionView {
 
 export interface ComfyStatusView {
   connectionId: string
-  state: ComfyHealthState
-  checkedAt: string
+  state: ComfyHealthState | 'disabled'
+  checkedAt: string | null
   runningCount: number
   pendingCount: number
   version?: string

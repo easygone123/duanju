@@ -45,6 +45,8 @@
     "online_busy_external": "忙碌 · 外部任务",
     "offline": "离线",
     "auth_failed": "认证失败",
-    "workflow_incompatible": "工作流不兼容"
+    "workflow_incompatible": "工作流不兼容",
+    "disabled": "已停用",
+    "checking": "正在检查状态"
   }
 }

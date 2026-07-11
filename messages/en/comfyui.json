@@ -45,6 +45,8 @@
     "online_busy_external": "Busy · external",
     "offline": "Offline",
     "auth_failed": "Authentication failed",
-    "workflow_incompatible": "Workflow incompatible"
+    "workflow_incompatible": "Workflow incompatible",
+    "disabled": "Disabled",
+    "checking": "Checking status"
   }
 }

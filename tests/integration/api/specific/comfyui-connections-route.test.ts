@@ -580,6 +580,45 @@ describe('ComfyUI private connection routes', () => {
     expect(JSON.stringify(body)).not.toContain('must-not-leak')
   })
 
+  it('returns disabled connections with fresh owned-task state without DNS or ComfyUI traffic', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findMany.mockResolvedValue([connection({
+      id: 'disabled', enabled: false, lastHealthCode: 'online_busy_owned',
+      lastHealthAt: new Date('2026-07-11T07:00:00.000Z'), lastSeenVersion: '0.3.49',
+      deviceSummary: [{ name: 'RTX 4090', type: 'cuda', vramTotalBytes: 24 }],
+    })])
+    prismaMock.comfyGenerationRequest.findFirst
+      .mockResolvedValueOnce({ id: 'request-1', taskId: 'task-42', status: 'running' })
+      .mockResolvedValueOnce(null)
+    const route = await import('@/app/api/comfyui/connections/status/route')
+
+    const active = await route.GET(buildMockRequest({
+      path: '/api/comfyui/connections/status', method: 'GET',
+    }), collectionContext)
+    expect(await responseJson(active)).toEqual({ statuses: [{
+      connectionId: 'disabled', state: 'disabled', checkedAt: '2026-07-11T07:00:00.000Z',
+      version: '0.3.49', devices: [{ name: 'RTX 4090', type: 'cuda', vramTotalBytes: 24 }],
+      runningCount: 0, pendingCount: 0,
+      ownedTask: { requestId: 'request-1', taskId: 'task-42', status: 'running' },
+    }] })
+
+    const completed = await route.GET(buildMockRequest({
+      path: '/api/comfyui/connections/status', method: 'GET',
+    }), collectionContext)
+    expect(await responseJson(completed)).toEqual({ statuses: [expect.objectContaining({
+      connectionId: 'disabled', state: 'disabled', ownedTask: null,
+    })] })
+    expect(prismaMock.comfyConnection.findMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1' }, orderBy: { createdAt: 'asc' },
+    })
+    expect(prismaMock.comfyGenerationRequest.count).not.toHaveBeenCalled()
+    expect(authorizeComfyTargetMock).not.toHaveBeenCalled()
+    expect(clientConstructedMock).not.toHaveBeenCalled()
+    expect(getSystemStatsMock).not.toHaveBeenCalled()
+    expect(getQueueMock).not.toHaveBeenCalled()
+  })
+
   it('bounds status fan-out to the configured safe probe concurrency', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')

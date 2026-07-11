@@ -32,6 +32,7 @@ const messages = {
       online_idle: 'Idle', online_busy_owned: 'Busy · waoowaoo',
       online_busy_external: 'Busy · external', offline: 'Offline',
       auth_failed: 'Authentication failed', workflow_incompatible: 'Workflow incompatible',
+      disabled: 'Disabled', checking: 'Checking status',
     },
   },
 }
@@ -133,6 +134,35 @@ describe('ComfyUI connection settings', () => {
     expect(html).toContain('0.3.50')
     expect(html).toMatch(/disabled=""[^>]*aria-label="Delete"/)
     expect(html).toMatch(/aria-label="Disable"(?![^>]*disabled)/)
+  })
+
+  it('uses only fresh ownedTask data for disabled-node deletion eligibility', () => {
+    const disabled = { ...connection, enabled: false, lastHealthCode: 'online_busy_owned' }
+    const missing = render(createElement(ConnectionCard, {
+      connection: disabled, onEdit: () => undefined, onProbe: async () => undefined,
+      onToggle: async () => undefined, onDelete: async () => undefined,
+    }))
+    expect(missing).toContain('Disabled')
+    expect(missing).toMatch(/disabled=""[^>]*aria-label="Delete"/)
+
+    const activeStatus: ComfyStatusView = {
+      connectionId: disabled.id, state: 'disabled', checkedAt: null,
+      runningCount: 0, pendingCount: 0,
+      ownedTask: { requestId: 'request-1', taskId: 'task-42', status: 'running' },
+    }
+    const active = render(createElement(ConnectionCard, {
+      connection: disabled, status: activeStatus, onEdit: () => undefined,
+      onProbe: async () => undefined, onToggle: async () => undefined, onDelete: async () => undefined,
+    }))
+    expect(active).toContain('task-42 · running')
+    expect(active).toMatch(/disabled=""[^>]*aria-label="Delete"/)
+
+    const completed = render(createElement(ConnectionCard, {
+      connection: disabled, status: { ...activeStatus, ownedTask: null }, onEdit: () => undefined,
+      onProbe: async () => undefined, onToggle: async () => undefined, onDelete: async () => undefined,
+    }))
+    expect(completed).toMatch(/aria-label="Delete"(?![^>]*disabled)/)
+    expect(completed).not.toContain('Active owned generation')
   })
 
   it('catches rejected card actions and reports only a localized safe error', async () => {
