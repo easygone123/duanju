@@ -1,0 +1,241 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { ComfyClient } from '@/lib/comfyui/client'
+import { ComfyError } from '@/lib/comfyui/errors'
+import type { ComfyConnectionAuth } from '@/lib/comfyui/types'
+import { FakeComfyUiServer } from '../../helpers/fakes/comfyui-server'
+
+describe('ComfyClient contract', () => {
+  let server: FakeComfyUiServer
+
+  beforeEach(async () => {
+    server = new FakeComfyUiServer()
+    await server.start()
+  })
+
+  afterEach(async () => {
+    await server.close()
+  })
+
+  function client(auth: ComfyConnectionAuth = { type: 'none' }, overrides = {}) {
+    return new ComfyClient({
+      baseUrl: server.baseUrl,
+      auth,
+      networkPolicy: { mode: 'trusted', allowedHosts: [], allowedCidrs: [] },
+      timeoutMs: 500,
+      ...overrides,
+    })
+  }
+
+  it.each([
+    [{ type: 'none' } as const, undefined],
+    [{ type: 'bearer', token: 'top-secret-token' } as const, 'Bearer top-secret-token'],
+    [
+      { type: 'basic', username: '测试', password: 'päss' } as const,
+      `Basic ${Buffer.from('测试:päss', 'utf8').toString('base64')}`,
+    ],
+  ])('applies in-memory %s auth without changing the path prefix', async (auth, expected) => {
+    await client(auth).getSystemStats()
+
+    expect(server.requests[0].path).toBe('/proxy/comfy/system_stats')
+    expect(server.requests[0].headers.authorization).toBe(expected)
+  })
+
+  it('reads stats, queue, object info, and safely encoded model folders', async () => {
+    const comfy = client()
+
+    await expect(comfy.getSystemStats()).resolves.toMatchObject({ system: { os: 'fake' } })
+    await expect(comfy.getQueue()).resolves.toEqual({ running: [['run']], pending: [['wait']] })
+    await expect(comfy.getObjectInfo()).resolves.toHaveProperty('CheckpointLoaderSimple')
+    await expect(comfy.getModels('checkpoints/custom')).resolves.toEqual(['model one.safetensors'])
+    expect(server.requests.at(-1)?.path).toBe('/proxy/comfy/models/checkpoints%2Fcustom')
+  })
+
+  it('uploads bytes as multipart with caller-controlled collision-safe metadata', async () => {
+    await client().uploadImage({
+      filename: 'request-123-input.png',
+      contentType: 'image/png',
+      bytes: Uint8Array.from([137, 80, 78, 71]),
+      subfolder: 'requests/request-123',
+      overwrite: false,
+    })
+
+    const request = server.requests.at(-1)!
+    expect(request.headers['content-type']).toContain('multipart/form-data; boundary=')
+    expect(request.body.toString('latin1')).toContain('filename="request-123-input.png"')
+    expect(request.body.toString()).toContain('requests/request-123')
+    expect(request.body.toString()).toContain('overwrite')
+  })
+
+  it('submits the graph with client id and returns a validated prompt id', async () => {
+    await expect(client().submitPrompt({ '1': { class_type: 'KSampler', inputs: {} } }, 'client-1'))
+      .resolves.toEqual({ promptId: 'prompt-1' })
+
+    expect(JSON.parse(server.requests.at(-1)!.body.toString())).toEqual({
+      prompt: { '1': { class_type: 'KSampler', inputs: {} } },
+      client_id: 'client-1',
+    })
+  })
+
+  it('rejects missing prompt ids and exposes bounded sanitized node errors', async () => {
+    server.override('/proxy/comfy/prompt', (_request, response) => {
+      response.statusCode = 400
+      response.end(JSON.stringify({
+        error: { message: 'bad Bearer top-secret-token' },
+        node_errors: {
+          '3': { errors: [{ message: 'token=top-secret-token' }] },
+          'top-secret-token': { errors: [] },
+        },
+      }))
+    })
+
+    await expect(client({ type: 'bearer', token: 'top-secret-token' }).submitPrompt({}, 'client-1'))
+      .rejects.toMatchObject({
+        code: 'COMFY_PROMPT_REJECTED',
+        details: {
+          nodeErrors: {
+            '3': { errors: [{ message: '[REDACTED]' }] },
+            '[REDACTED]': { errors: [] },
+          },
+        },
+      })
+  })
+
+  it('maps correlated execution events and ignores previews and other prompts', async () => {
+    const controller = new AbortController()
+    const iterator = client().watchPrompt('prompt-1', 'client-1', controller.signal)[Symbol.asyncIterator]()
+    const first = iterator.next()
+    await server.waitForSocket()
+    server.sendBinary()
+    server.send({ type: 'executing', data: { prompt_id: 'other', node: '1' } })
+    server.send({ type: 'status', data: { status: { exec_info: { queue_remaining: 1 } } } })
+    server.send({ type: 'execution_start', data: { prompt_id: 'prompt-1' } })
+
+    await expect(first).resolves.toEqual({
+      done: false,
+      value: { type: 'status', queueRemaining: 1 },
+    })
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: { type: 'execution_start', promptId: 'prompt-1' },
+    })
+
+    const eventPromises = [iterator.next(), iterator.next(), iterator.next(), iterator.next()]
+    server.send({ type: 'executing', data: { prompt_id: 'prompt-1', node: '4' } })
+    server.send({ type: 'progress', data: { prompt_id: 'prompt-1', node: '4', value: 2, max: 5 } })
+    server.send({ type: 'executed', data: { prompt_id: 'prompt-1', node: '4', output: { images: [] } } })
+    server.send({ type: 'execution_error', data: { prompt_id: 'prompt-1', node_id: '4', exception_message: 'boom' } })
+    const events = await Promise.all(eventPromises)
+    expect(events.map((result) => result.value?.type)).toEqual([
+      'executing', 'progress', 'executed', 'execution_error',
+    ])
+
+    controller.abort()
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+  })
+
+  it('reads history and output bytes with safe explicit view query fields', async () => {
+    const comfy = client()
+    await expect(comfy.getHistory('prompt-1')).resolves.toHaveProperty('prompt-1')
+    await expect(comfy.downloadOutput({
+      name: 'primary', nodeId: '9', mediaType: 'image', primary: true,
+      filename: 'output #1.png', subfolder: 'job/a b', type: 'output',
+    })).resolves.toEqual(Buffer.from('output-bytes'))
+    expect(server.requests.at(-1)?.path).toBe(
+      '/proxy/comfy/view?filename=output+%231.png&subfolder=job%2Fa+b&type=output',
+    )
+  })
+
+  it('deletes only the requested queued prompt and interrupts with the prompt id', async () => {
+    const comfy = client()
+    await comfy.deleteQueuedPrompt('prompt-1')
+    await comfy.interruptPrompt('prompt-1')
+
+    expect(JSON.parse(server.requests.at(-2)!.body.toString())).toEqual({ delete: ['prompt-1'] })
+    expect(JSON.parse(server.requests.at(-1)!.body.toString())).toEqual({ prompt_id: 'prompt-1' })
+  })
+
+  it('times out stalled phases with a stable error', async () => {
+    server.override('/proxy/comfy/system_stats', () => undefined)
+
+    await expect(client({ type: 'none' }, { timeoutMs: 25 }).getSystemStats()).rejects.toMatchObject({
+      code: 'COMFY_EXECUTION_TIMEOUT',
+    })
+  })
+
+  it('bounds a stalled DNS authorization phase', async () => {
+    const resolveHost = () => new Promise<never>(() => undefined)
+
+    await expect(client({ type: 'none' }, { timeoutMs: 25, resolveHost }).getSystemStats())
+      .rejects.toMatchObject({ code: 'COMFY_EXECUTION_TIMEOUT' })
+  }, 250)
+
+  it('enforces JSON and output body limits', async () => {
+    server.override('/proxy/comfy/system_stats', (_request, response) => response.end('x'.repeat(80)))
+    server.override('/proxy/comfy/view', (_request, response) => response.end(Buffer.alloc(80)))
+    const comfy = client({ type: 'none' }, { maxJsonBytes: 32, maxOutputBytes: 32 })
+
+    await expect(comfy.getSystemStats()).rejects.toBeInstanceOf(ComfyError)
+    await expect(comfy.downloadOutput({
+      name: 'x', nodeId: '1', mediaType: 'image', primary: true,
+      filename: 'x.png', subfolder: '', type: 'output',
+    })).rejects.toBeInstanceOf(ComfyError)
+  })
+
+  it('rejects cross-origin redirects without forwarding credentials', async () => {
+    server.override('/proxy/comfy/system_stats', (_request, response) => {
+      response.statusCode = 302
+      response.setHeader('location', 'http://127.0.0.1:1/stolen')
+      response.end()
+    })
+
+    await expect(client({ type: 'bearer', token: 'redirect-secret' }).getSystemStats())
+      .rejects.toMatchObject({ code: 'COMFY_NETWORK_TARGET_BLOCKED' })
+  })
+
+  it('reauthorizes a bounded same-origin redirect before following it', async () => {
+    const resolveHost = vi.fn(async () => [{ address: '127.0.0.1', family: 4 as const }])
+    server.override('/proxy/comfy/system_stats', (_request, response) => {
+      response.statusCode = 302
+      response.setHeader('location', '/proxy/comfy/object_info')
+      response.end()
+    })
+
+    await expect(client({ type: 'none' }, { resolveHost }).getSystemStats())
+      .resolves.toHaveProperty('CheckpointLoaderSimple')
+    expect(resolveHost).toHaveBeenCalledTimes(2)
+  })
+
+  it('pins the authorized address for both HTTP and WebSocket connections', async () => {
+    const resolveHost = vi.fn(async () => [{ address: '127.0.0.1', family: 4 as const }])
+    const comfy = new ComfyClient({
+      baseUrl: server.baseUrl.replace('127.0.0.1', 'localhost'),
+      auth: { type: 'none' },
+      networkPolicy: { mode: 'trusted', allowedHosts: [], allowedCidrs: [] },
+      resolveHost,
+      timeoutMs: 500,
+    })
+
+    await expect(comfy.getSystemStats()).resolves.toHaveProperty('system')
+    expect(server.requests.at(-1)?.headers.host).toMatch(/^localhost:/)
+    const controller = new AbortController()
+    const next = comfy.watchPrompt('prompt-1', 'client-1', controller.signal)
+      [Symbol.asyncIterator]().next()
+    await server.waitForSocket()
+    controller.abort()
+    await expect(next).resolves.toEqual({ done: true, value: undefined })
+    expect(resolveHost).toHaveBeenCalledTimes(2)
+  })
+
+  it('sanitizes and bounds non-OK response bodies', async () => {
+    server.override('/proxy/comfy/system_stats', (_request, response) => {
+      response.statusCode = 500
+      response.end(`Bearer response-secret ${'x'.repeat(1_000)}`)
+    })
+
+    const promise = client({ type: 'bearer', token: 'response-secret' }, { maxErrorBytes: 48 })
+      .getSystemStats()
+    await expect(promise).rejects.toBeInstanceOf(ComfyError)
+    await expect(promise).rejects.not.toThrow(/response-secret/)
+  })
+})
