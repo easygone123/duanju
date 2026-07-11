@@ -5,6 +5,11 @@ import {
   MAX_COMFY_COMPATIBILITY_CANDIDATES,
   MAX_COMFY_MODEL_FOLDERS,
   MAX_COMFY_MODEL_PROBE_CONCURRENCY,
+  MAX_COMFY_ENUM_ENTRIES,
+  MAX_COMFY_ENUM_VALUE_BYTES,
+  MAX_COMFY_TOTAL_ENUM_BYTES,
+  MAX_COMFY_TOTAL_ENUM_VALUES,
+  parseComfyInputEnum,
   type ComfyCompatibilityClient,
 } from '@/lib/comfyui/compatibility'
 import type { ComfyWorkflowRequirements } from '@/lib/comfyui/types'
@@ -269,5 +274,76 @@ describe('checkComfyCompatibility', () => {
       requirements: { nodeClasses: Object.keys(info), candidateLoaderInputs: folderCandidates },
       client: comfy,
     })).rejects.toMatchObject({ code: 'COMFY_WORKFLOW_INCOMPATIBLE' })
+  })
+
+  it('parses and normalizes one shared class/input enum once for 256 candidates', async () => {
+    const values = Array.from({ length: 2_000 }, (_, index) => `model-${index}`)
+    const comfy = client({
+      Loader: { input: { required: { model: [values, { model_folder: 'models' }] } } },
+    })
+    const parser = vi.fn(parseComfyInputEnum)
+    const candidates = Array.from(
+      { length: MAX_COMFY_COMPATIBILITY_CANDIDATES },
+      (_, index) => ({ nodeId: String(index), inputName: 'model', value: `model-${index}` }),
+    )
+    const sharedGraph = Object.fromEntries(candidates.map(({ nodeId, value }) => [
+      nodeId, { class_type: 'Loader', inputs: { model: value } },
+    ]))
+
+    const result = await checkComfyCompatibility({
+      connectionId: 'connection-1', workflowHash: 'shared-enum', graph: sharedGraph,
+      requirements: { nodeClasses: ['Loader'], candidateLoaderInputs: candidates },
+      client: comfy, parseInputEnum: parser,
+    })
+
+    expect(result.compatible).toBe(true)
+    expect(parser).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    [
+      'entry count',
+      Array.from({ length: MAX_COMFY_ENUM_ENTRIES + 1 }, (_, index) => `m${index}`),
+    ],
+    ['single value bytes', ['x'.repeat(MAX_COMFY_ENUM_VALUE_BYTES + 1)]],
+    ['mixed invalid values', ['valid', 42]],
+  ])('fails closed on oversized or malformed %s enums', async (_label, values) => {
+    const comfy = client({
+      Loader: { input: { required: { model: [values, { model_folder: 'models' }] } } },
+    })
+    await expect(checkComfyCompatibility({
+      connectionId: 'connection-1', workflowHash: 'bad-enum',
+      graph: { '1': { class_type: 'Loader', inputs: { model: 'wanted' } } },
+      requirements: {
+        nodeClasses: ['Loader'],
+        candidateLoaderInputs: [{ nodeId: '1', inputName: 'model', value: 'wanted' }],
+      },
+      client: comfy,
+    })).rejects.toMatchObject({ code: 'COMFY_WORKFLOW_INCOMPATIBLE' })
+    expect(comfy.getModels).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when unique enum aggregate value or byte budgets are exceeded', async () => {
+    const valueOverflow = Array.from(
+      { length: MAX_COMFY_TOTAL_ENUM_VALUES + 1 },
+      (_, index) => `m${index}`,
+    )
+    const byteValue = 'x'.repeat(MAX_COMFY_ENUM_VALUE_BYTES)
+    const byteOverflow = Array.from(
+      { length: Math.floor(MAX_COMFY_TOTAL_ENUM_BYTES / Buffer.byteLength(byteValue)) + 1 },
+      (_, index) => `${String(index).padStart(6, '0')}${byteValue.slice(6)}`,
+    )
+    for (const values of [valueOverflow, byteOverflow]) {
+      const comfy = client({ Loader: { input: { required: { model: [values, {}] } } } })
+      await expect(checkComfyCompatibility({
+        connectionId: 'connection-1', workflowHash: 'aggregate-overflow',
+        graph: { '1': { class_type: 'Loader', inputs: { model: 'wanted' } } },
+        requirements: {
+          nodeClasses: ['Loader'],
+          candidateLoaderInputs: [{ nodeId: '1', inputName: 'model', value: 'wanted' }],
+        },
+        client: comfy,
+      })).rejects.toMatchObject({ code: 'COMFY_WORKFLOW_INCOMPATIBLE' })
+    }
   })
 })

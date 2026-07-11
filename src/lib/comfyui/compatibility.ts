@@ -25,6 +25,7 @@ export interface CheckComfyCompatibilityInput {
   requirements: ComfyWorkflowRequirements
   client: ComfyCompatibilityClient
   cache?: ComfyCompatibilityCache
+  parseInputEnum?: typeof parseComfyInputEnum
 }
 
 interface InputEnum {
@@ -36,6 +37,10 @@ const MODEL_FOLDER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 export const MAX_COMFY_COMPATIBILITY_CANDIDATES = 256
 export const MAX_COMFY_MODEL_FOLDERS = 32
 export const MAX_COMFY_MODEL_PROBE_CONCURRENCY = 4
+export const MAX_COMFY_ENUM_ENTRIES = 10_000
+export const MAX_COMFY_ENUM_VALUE_BYTES = 1_024
+export const MAX_COMFY_TOTAL_ENUM_VALUES = 8_192
+export const MAX_COMFY_TOTAL_ENUM_BYTES = 1024 * 1024
 const MAX_COMFY_MODEL_CATALOG_ENTRIES = 10_000
 const MAX_COMFY_MODEL_NAME_LENGTH = 1_024
 
@@ -46,10 +51,12 @@ export async function checkComfyCompatibility(
     throw incompatible('Too many workflow model candidates')
   }
   const objectInfo = await input.client.getObjectInfo()
-  const candidateEnums = input.requirements.candidateLoaderInputs.map((candidate) => ({
-    candidate,
-    inputEnum: readCandidateInputEnum(objectInfo, input.graph, candidate.nodeId, candidate.inputName),
-  }))
+  const candidateEnums = buildCandidateEnumIndex(
+    objectInfo,
+    input.graph,
+    input.requirements.candidateLoaderInputs,
+    input.parseInputEnum ?? parseComfyInputEnum,
+  )
   const modelFolders = [...new Set(candidateEnums.flatMap(({ inputEnum }) =>
     inputEnum?.modelFolder ? [inputEnum.modelFolder] : []))].sort()
   if (modelFolders.length > MAX_COMFY_MODEL_FOLDERS) {
@@ -73,17 +80,10 @@ export async function checkComfyCompatibility(
   const missingNodes = input.requirements.nodeClasses
     .filter((classType) => !isRecord(objectInfo[classType]))
     .sort()
-  const missingModels = input.requirements.candidateLoaderInputs
-    .filter((candidate) => {
-      const inputEnum = readCandidateInputEnum(
-        objectInfo,
-        input.graph,
-        candidate.nodeId,
-        candidate.inputName,
-      )
-      return inputEnum !== null && !inputEnum.values.includes(candidate.value)
-    })
-    .map((candidate) => ({
+  const missingModels = candidateEnums
+    .filter(({ candidate, inputEnum }) =>
+      inputEnum !== null && !inputEnum.values.includes(candidate.value))
+    .map(({ candidate }) => ({
       nodeId: candidate.nodeId,
       field: candidate.inputName,
       value: candidate.value,
@@ -113,28 +113,61 @@ export function compatibilityCacheKey(
   return `${connectionId}:${workflowHash}:${capabilityFingerprint}`
 }
 
-function readCandidateInputEnum(
+function buildCandidateEnumIndex(
   objectInfo: Record<string, unknown>,
   graph: ComfyApiWorkflow,
-  nodeId: string,
-  inputName: string,
-): InputEnum | null {
-  const node = graph[nodeId]
-  if (!node) return null
-  const schema = objectInfo[node.class_type]
-  if (!isRecord(schema) || !isRecord(schema.input)) return null
-  for (const groupName of ['required', 'optional']) {
-    const group = schema.input[groupName]
-    if (!isRecord(group) || !(inputName in group)) continue
-    return parseInputEnum(group[inputName])
-  }
-  return null
+  candidates: ComfyWorkflowRequirements['candidateLoaderInputs'],
+  parser: typeof parseComfyInputEnum,
+) {
+  const memo = new Map<string, InputEnum | null>()
+  let totalValues = 0
+  let totalBytes = 0
+  return candidates.map((candidate) => {
+    const classType = graph[candidate.nodeId]?.class_type
+    const key = `${classType ?? ''}\u0000${candidate.inputName}`
+    if (!memo.has(key)) {
+      const inputEnum = parser(readInputDefinition(objectInfo, classType, candidate.inputName))
+      if (inputEnum) {
+        totalValues += inputEnum.values.length
+        totalBytes += inputEnum.values.reduce(
+          (sum, value) => sum + Buffer.byteLength(value, 'utf8'), 0,
+        )
+        if (totalValues > MAX_COMFY_TOTAL_ENUM_VALUES
+          || totalBytes > MAX_COMFY_TOTAL_ENUM_BYTES) {
+          throw incompatible('ComfyUI input enums exceed compatibility budget')
+        }
+      }
+      memo.set(key, inputEnum)
+    }
+    return { candidate, inputEnum: memo.get(key) ?? null }
+  })
 }
 
-function parseInputEnum(value: unknown): InputEnum | null {
+function readInputDefinition(
+  objectInfo: Record<string, unknown>,
+  classType: string | undefined,
+  inputName: string,
+): unknown {
+  if (!classType) return undefined
+  const schema = objectInfo[classType]
+  if (!isRecord(schema) || !isRecord(schema.input)) return undefined
+  for (const groupName of ['required', 'optional']) {
+    const group = schema.input[groupName]
+    if (isRecord(group) && inputName in group) return group[inputName]
+  }
+  return undefined
+}
+
+export function parseComfyInputEnum(value: unknown): InputEnum | null {
   if (!Array.isArray(value) || !Array.isArray(value[0])) return null
+  if (value[0].length === 0) return null
+  if (value[0].length > MAX_COMFY_ENUM_ENTRIES
+    || value[0].some((entry) => typeof entry !== 'string'
+      || entry.length === 0
+      || Buffer.byteLength(entry, 'utf8') > MAX_COMFY_ENUM_VALUE_BYTES)) {
+    throw incompatible('Invalid ComfyUI input enum')
+  }
   const values = normalizeStringArray(value[0])
-  if (values.length === 0) return null
   const options = value[1]
   const rawFolder = isRecord(options)
     ? options.model_folder ?? options.modelFolder
