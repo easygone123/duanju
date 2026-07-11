@@ -130,6 +130,7 @@ interface BuildWorkspaceControllerViewModelParams {
   stageRuntime: WorkspaceStageRuntimeValue
   actionsState: {
     handleUpdateConfig: (key: string, value: unknown) => Promise<void>
+    handleUpdateConfigStrict: (key: string, value: unknown) => Promise<void>
     handleUpdateEpisode: (key: string, value: unknown) => Promise<void>
   }
 }

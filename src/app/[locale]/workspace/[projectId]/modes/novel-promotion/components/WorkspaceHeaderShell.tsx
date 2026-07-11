@@ -55,6 +55,7 @@ interface WorkspaceHeaderShellProps {
   videoRatio: string | null | undefined
   ttsRate: string | null | undefined
   onUpdateConfig: (key: string, value: unknown) => Promise<void>
+  onUpdateConfigStrict: (key: string, value: unknown) => Promise<void>
   globalAssetText: string
   projectName: string
   episodes: EpisodeSummary[]
@@ -91,7 +92,7 @@ interface DefaultWorkflowOption {
   currentVersion?: { lastSuccessfulTestAt?: string | null } | null
 }
 
-function ProjectComfyDefaults({ projectId, onUpdateConfig }: Pick<WorkspaceHeaderShellProps, 'projectId' | 'onUpdateConfig'>) {
+function ProjectComfyDefaults({ projectId, onUpdateConfigStrict }: Pick<WorkspaceHeaderShellProps, 'projectId' | 'onUpdateConfigStrict'>) {
   const t = useTranslations('comfyui.workflows')
   const [workflows, setWorkflows] = useState<DefaultWorkflowOption[]>([])
   const [comfyImageWorkflowId, setComfyImageWorkflowId] = useState('')
@@ -123,10 +124,10 @@ function ProjectComfyDefaults({ projectId, onUpdateConfig }: Pick<WorkspaceHeade
     inFlight.current.add(field); setPendingFields((current) => new Set(current).add(field)); setError(null)
     try {
       if (field === 'image') {
-        await onUpdateConfig('comfyImageWorkflowId', value || null)
+        await onUpdateConfigStrict('comfyImageWorkflowId', value || null)
         setComfyImageWorkflowId(value)
       } else {
-        await onUpdateConfig('comfyVideoWorkflowId', value || null)
+        await onUpdateConfigStrict('comfyVideoWorkflowId', value || null)
         setComfyVideoWorkflowId(value)
       }
     } catch {
@@ -175,6 +176,7 @@ export default function WorkspaceHeaderShell({
   videoRatio,
   ttsRate,
   onUpdateConfig,
+  onUpdateConfigStrict,
   globalAssetText,
   projectName,
   episodes,
@@ -224,7 +226,7 @@ export default function WorkspaceHeaderShell({
         onVideoRatioChange={(value) => { onUpdateConfig('videoRatio', value) }}
         onCapabilityOverridesChange={(value) => { onUpdateConfig('capabilityOverrides', value) }}
         onTTSRateChange={(value) => { onUpdateConfig('ttsRate', value) }}
-        additionalSettings={<ProjectComfyDefaults projectId={projectId} onUpdateConfig={onUpdateConfig} />}
+        additionalSettings={<ProjectComfyDefaults projectId={projectId} onUpdateConfigStrict={onUpdateConfigStrict} />}
       />
 
       <WorldContextModal

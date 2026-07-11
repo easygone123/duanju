@@ -233,6 +233,7 @@ export function useNovelPromotionWorkspaceController({
 
   const actionsState = {
     handleUpdateConfig: configActions.handleUpdateConfig,
+    handleUpdateConfigStrict: configActions.handleUpdateConfigStrict,
     handleUpdateEpisode: configActions.handleUpdateEpisode,
   }
 

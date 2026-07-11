@@ -18,8 +18,10 @@ describe('ComfyUI project and task workflow selection', () => {
     expect(source).toContain('comfyImageWorkflowId')
     expect(source).toContain('comfyVideoWorkflowId')
     expect(source).toContain("lastSuccessfulTestAt")
-    expect(source).toContain("onUpdateConfig('comfyImageWorkflowId'")
-    expect(source).toContain("onUpdateConfig('comfyVideoWorkflowId'")
+    expect(source).toContain("onUpdateConfigStrict('comfyImageWorkflowId'")
+    expect(source).toContain("onUpdateConfigStrict('comfyVideoWorkflowId'")
+    const container = read(`${workspace}/NovelPromotionWorkspace.tsx`)
+    expect(container).toContain('onUpdateConfigStrict={vm.actions.handleUpdateConfigStrict}')
   })
 
   it('keeps cloud models while allowing a per-task ComfyUI override from user models', () => {

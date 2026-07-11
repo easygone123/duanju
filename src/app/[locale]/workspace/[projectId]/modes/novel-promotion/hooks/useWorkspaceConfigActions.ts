@@ -14,6 +14,26 @@ interface UseWorkspaceConfigActionsParams {
   onStageChange?: (stage: string) => void
 }
 
+type ConfigMutation = (input: { key: string; value: unknown }) => Promise<unknown>
+type ConfigErrorLogger = (message: string, error: unknown) => void
+
+export function createWorkspaceConfigHandlers(
+  mutateAsync: ConfigMutation,
+  logError: ConfigErrorLogger,
+) {
+  const handleUpdateConfigStrict = async (key: string, value: unknown): Promise<void> => {
+    await mutateAsync({ key, value })
+  }
+  const handleUpdateConfig = async (key: string, value: unknown): Promise<void> => {
+    try {
+      await handleUpdateConfigStrict(key, value)
+    } catch (error: unknown) {
+      logError('Update config error:', error)
+    }
+  }
+  return { handleUpdateConfig, handleUpdateConfigStrict }
+}
+
 export function useWorkspaceConfigActions({
   projectId,
   episodeId,
@@ -27,12 +47,20 @@ export function useWorkspaceConfigActions({
     onStageChange?.(stage)
   }, [onStageChange])
 
+  const handleUpdateConfigStrict = useCallback(async (key: string, value: unknown) => {
+    const handlers = createWorkspaceConfigHandlers(
+      updateProjectConfigMutation.mutateAsync,
+      _ulogError,
+    )
+    await handlers.handleUpdateConfigStrict(key, value)
+  }, [updateProjectConfigMutation])
+
   const handleUpdateConfig = useCallback(async (key: string, value: unknown) => {
-    try {
-      await updateProjectConfigMutation.mutateAsync({ key, value })
-    } catch (error: unknown) {
-      _ulogError('Update config error:', error)
-    }
+    const handlers = createWorkspaceConfigHandlers(
+      updateProjectConfigMutation.mutateAsync,
+      _ulogError,
+    )
+    await handlers.handleUpdateConfig(key, value)
   }, [updateProjectConfigMutation])
 
   const handleUpdateEpisode = useCallback(async (key: string, value: unknown) => {
@@ -55,6 +83,7 @@ export function useWorkspaceConfigActions({
   return {
     handleStageChange,
     handleUpdateConfig,
+    handleUpdateConfigStrict,
     handleUpdateEpisode,
     getProjectStoryboardStats,
   }

@@ -95,6 +95,7 @@ function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
         videoRatio={vm.project.videoRatio}
         ttsRate={vm.project.ttsRate !== undefined && vm.project.ttsRate !== null ? String(vm.project.ttsRate) : undefined}
         onUpdateConfig={vm.actions.handleUpdateConfig}
+        onUpdateConfigStrict={vm.actions.handleUpdateConfigStrict}
         globalAssetText={vm.project.globalAssetText}
         projectName={project.name}
         episodes={episodes}
