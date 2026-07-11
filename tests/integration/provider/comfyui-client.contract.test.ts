@@ -67,6 +67,19 @@ describe('ComfyClient contract', () => {
     expect(request.body.toString()).toContain('overwrite')
   })
 
+  it('accepts an input at the source-byte limit and rejects one byte over before upload', async () => {
+    const atLimit = client({ type: 'none' }, { maxInputBytes: 4 })
+    await expect(atLimit.uploadImage({
+      filename: 'at-limit.png', contentType: 'image/png', bytes: Uint8Array.from([1, 2, 3, 4]),
+    })).resolves.toMatchObject({ name: 'upload.png' })
+    const requestsAfterAcceptedUpload = server.requests.length
+
+    await expect(atLimit.uploadImage({
+      filename: 'over-limit.png', contentType: 'image/png', bytes: Uint8Array.from([1, 2, 3, 4, 5]),
+    })).rejects.toMatchObject({ code: 'COMFY_INPUT_UPLOAD_FAILED' })
+    expect(server.requests).toHaveLength(requestsAfterAcceptedUpload)
+  })
+
   it('submits the graph with client id and returns a validated prompt id', async () => {
     await expect(client().submitPrompt({ '1': { class_type: 'KSampler', inputs: {} } }, 'client-1'))
       .resolves.toEqual({ promptId: 'prompt-1' })
@@ -75,6 +88,20 @@ describe('ComfyClient contract', () => {
       prompt: { '1': { class_type: 'KSampler', inputs: {} } },
       client_id: 'client-1',
     })
+  })
+
+  it('accepts a serialized prompt request at its UTF-8 limit and rejects one byte over', async () => {
+    const graph = { '1': { class_type: '测试Sampler', inputs: { prompt: '画面' } } }
+    const serialized = JSON.stringify({ prompt: graph, client_id: 'client-1' })
+    const requestBytes = Buffer.byteLength(serialized, 'utf8')
+
+    await expect(client({ type: 'none' }, { maxWorkflowBytes: requestBytes })
+      .submitPrompt(graph, 'client-1')).resolves.toEqual({ promptId: 'prompt-1' })
+    const requestsAfterAcceptedPrompt = server.requests.length
+
+    await expect(client({ type: 'none' }, { maxWorkflowBytes: requestBytes - 1 })
+      .submitPrompt(graph, 'client-1')).rejects.toMatchObject({ code: 'COMFY_PROMPT_REJECTED' })
+    expect(server.requests).toHaveLength(requestsAfterAcceptedPrompt)
   })
 
   it('rejects missing prompt ids and exposes bounded sanitized node errors', async () => {
@@ -206,6 +233,19 @@ describe('ComfyClient contract', () => {
     expect(resolveHost).toHaveBeenCalledTimes(2)
   })
 
+  it('rejects a same-origin redirect outside the configured base prefix before forwarding auth', async () => {
+    server.override('/proxy/comfy/system_stats', (_request, response) => {
+      response.statusCode = 302
+      response.setHeader('location', '/outside-prefix')
+      response.end()
+    })
+
+    await expect(client({ type: 'bearer', token: 'prefix-secret' }).getSystemStats())
+      .rejects.toMatchObject({ code: 'COMFY_NETWORK_TARGET_BLOCKED' })
+    expect(server.requests).toHaveLength(1)
+    expect(server.requests[0].headers.authorization).toBe('Bearer prefix-secret')
+  })
+
   it('pins the authorized address for both HTTP and WebSocket connections', async () => {
     const resolveHost = vi.fn(async () => [{ address: '127.0.0.1', family: 4 as const }])
     const comfy = new ComfyClient({
@@ -237,5 +277,22 @@ describe('ComfyClient contract', () => {
       .getSystemStats()
     await expect(promise).rejects.toBeInstanceOf(ComfyError)
     await expect(promise).rejects.not.toThrow(/response-secret/)
+  })
+
+  it('preserves operation code and HTTP status when a non-OK body exceeds the error limit', async () => {
+    server.override('/proxy/comfy/system_stats', (_request, response) => {
+      response.statusCode = 500
+      response.end(`Bearer oversized-secret leak-marker ${'x'.repeat(1_000)}`)
+    })
+
+    const promise = client(
+      { type: 'bearer', token: 'oversized-secret' },
+      { maxErrorBytes: 32 },
+    ).getSystemStats()
+    await expect(promise).rejects.toMatchObject({
+      code: 'COMFY_CONNECTION_OFFLINE',
+      details: { httpStatus: 500, bodyTruncated: true },
+    })
+    await expect(promise).rejects.not.toThrow(/oversized-secret|leak-marker/)
   })
 })

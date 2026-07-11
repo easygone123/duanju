@@ -35,6 +35,8 @@ export interface ComfyClientOptions {
   maxJsonBytes?: number
   maxOutputBytes?: number
   maxErrorBytes?: number
+  maxWorkflowBytes?: number
+  maxInputBytes?: number
   maxRedirects?: number
   resolveHost?: ComfyResolver
   fetchImpl?: ComfyFetch
@@ -45,6 +47,8 @@ const DEFAULT_TIMEOUT_MS = 30_000
 const DEFAULT_MAX_JSON_BYTES = 4 * 1024 * 1024
 const DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024 * 1024
 const DEFAULT_MAX_ERROR_BYTES = 8 * 1024
+const DEFAULT_MAX_WORKFLOW_BYTES = 4 * 1024 * 1024
+const DEFAULT_MAX_INPUT_BYTES = 256 * 1024 * 1024
 const DEFAULT_MAX_REDIRECTS = 3
 
 export class ComfyClient {
@@ -53,6 +57,8 @@ export class ComfyClient {
   private readonly maxJsonBytes: number
   private readonly maxOutputBytes: number
   private readonly maxErrorBytes: number
+  private readonly maxWorkflowBytes: number
+  private readonly maxInputBytes: number
   private readonly maxRedirects: number
   private readonly resolveHost: ComfyResolver
   private readonly fetchImpl: ComfyFetch
@@ -64,6 +70,8 @@ export class ComfyClient {
     this.maxJsonBytes = options.maxJsonBytes ?? DEFAULT_MAX_JSON_BYTES
     this.maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
     this.maxErrorBytes = options.maxErrorBytes ?? DEFAULT_MAX_ERROR_BYTES
+    this.maxWorkflowBytes = options.maxWorkflowBytes ?? DEFAULT_MAX_WORKFLOW_BYTES
+    this.maxInputBytes = options.maxInputBytes ?? DEFAULT_MAX_INPUT_BYTES
     this.maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS
     this.resolveHost = options.resolveHost ?? resolveComfyHost
     this.fetchImpl = options.fetchImpl ?? (undiciFetch as unknown as ComfyFetch)
@@ -96,7 +104,13 @@ export class ComfyClient {
     )
   }
 
-  uploadImage(input: ComfyUploadInput): Promise<ComfyUploadedFile> {
+  async uploadImage(input: ComfyUploadInput): Promise<ComfyUploadedFile> {
+    // The input limit applies to caller-provided source bytes; multipart framing is transport overhead.
+    if (input.bytes.byteLength > this.maxInputBytes) {
+      throw new ComfyError(COMFY_ERROR_CODE.INPUT_UPLOAD_FAILED, 'ComfyUI input exceeds size limit', {
+        details: { actualBytes: input.bytes.byteLength, limitBytes: this.maxInputBytes },
+      })
+    }
     const form = new FormData()
     const bytes = input.bytes.buffer.slice(
       input.bytes.byteOffset,
@@ -111,9 +125,16 @@ export class ComfyClient {
   }
 
   async submitPrompt(graph: ComfyApiWorkflow, clientId: string): Promise<{ promptId: string }> {
+    const body = JSON.stringify({ prompt: graph, client_id: clientId })
+    const bodyBytes = Buffer.byteLength(body, 'utf8')
+    if (bodyBytes > this.maxWorkflowBytes) {
+      throw new ComfyError(COMFY_ERROR_CODE.PROMPT_REJECTED, 'ComfyUI workflow exceeds size limit', {
+        details: { actualBytes: bodyBytes, limitBytes: this.maxWorkflowBytes },
+      })
+    }
     const result = await this.requestJson<Record<string, unknown>>(
       'prompt',
-      { method: 'POST', body: JSON.stringify({ prompt: graph, client_id: clientId }), headers: jsonHeaders() },
+      { method: 'POST', body, headers: jsonHeaders() },
       COMFY_ERROR_CODE.PROMPT_REJECTED,
     )
     if (typeof result.prompt_id !== 'string' || result.prompt_id.length === 0) {
@@ -246,22 +267,33 @@ export class ComfyClient {
           const location = response.headers.get('location')
           if (!location || redirects >= this.maxRedirects) throw this.networkBlocked()
           const redirected = new URL(location, authorized.url)
-          if (redirected.origin !== authorized.url.origin) throw this.networkBlocked()
+          if (
+            redirected.origin !== authorized.url.origin ||
+            !redirected.pathname.startsWith(this.baseUrl.pathname)
+          ) {
+            throw this.networkBlocked()
+          }
           await response.body?.cancel()
           url = redirected
           continue
         }
         if (!response.ok) {
-          const body = await readBounded(response, this.maxErrorBytes)
-          const responseText = body.toString('utf8')
+          const errorBody = await readErrorBody(response, this.maxErrorBytes)
+          const responseText = errorBody.bytes.toString('utf8')
           const responseJson = parseJsonObject(responseText)
           throw new ComfyError(
             code,
-            `ComfyUI request failed (${response.status}): ${this.sanitizeText(responseText)}`,
+            `ComfyUI request failed (${response.status}): ${
+              errorBody.truncated ? 'response body omitted' : this.sanitizeText(responseText)
+            }`,
             {
-              details: code === COMFY_ERROR_CODE.PROMPT_REJECTED
-                ? { nodeErrors: this.sanitize(responseJson?.node_errors) }
-                : undefined,
+              details: {
+                httpStatus: response.status,
+                bodyTruncated: errorBody.truncated,
+                ...(code === COMFY_ERROR_CODE.PROMPT_REJECTED
+                  ? { nodeErrors: this.sanitize(responseJson?.node_errors) }
+                  : {}),
+              },
             },
           )
         }
@@ -374,6 +406,38 @@ async function readBounded(response: Response, limit: number): Promise<Buffer> {
     chunks.push(chunk)
   }
   return Buffer.concat(chunks)
+}
+
+async function readErrorBody(
+  response: Response,
+  limit: number,
+): Promise<{ bytes: Buffer; truncated: boolean }> {
+  const declaredHeader = response.headers.get('content-length')
+  const declaredLength = declaredHeader === null ? undefined : Number(declaredHeader)
+  if (declaredLength !== undefined && Number.isFinite(declaredLength) && declaredLength > limit) {
+    await response.body?.cancel()
+    return { bytes: Buffer.alloc(0), truncated: true }
+  }
+  if (!response.body) return { bytes: Buffer.alloc(0), truncated: false }
+
+  const reader = response.body.getReader()
+  const chunks: Buffer[] = []
+  let size = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) return { bytes: Buffer.concat(chunks), truncated: false }
+      const chunk = Buffer.from(value)
+      size += chunk.length
+      if (size > limit) {
+        await reader.cancel()
+        return { bytes: Buffer.alloc(0), truncated: true }
+      }
+      chunks.push(chunk)
+    }
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 function bodyTooLarge(): ComfyError {
