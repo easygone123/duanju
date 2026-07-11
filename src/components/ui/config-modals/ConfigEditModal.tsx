@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslations } from 'next-intl'
 import {
     ART_STYLES,
@@ -66,6 +67,7 @@ interface SettingsModalProps {
     onVideoRatioChange?: (value: string) => void
     onCapabilityOverridesChange?: (value: CapabilitySelections) => void
     onTTSRateChange?: (value: string) => void
+    additionalSettings?: ReactNode
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -149,6 +151,7 @@ export function SettingsModal({
     onVideoRatioChange,
     onCapabilityOverridesChange,
     onTTSRateChange,
+    additionalSettings,
 }: SettingsModalProps) {
     const t = useTranslations('configModal')
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
@@ -501,6 +504,7 @@ export function SettingsModal({
                             </div>
                         </div>
                     </div>
+                    {additionalSettings}
 
 
                 </div>

@@ -50,6 +50,10 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
   const showsOutgoingLinkBadge = layout.isLinked && !!layout.nextPanel
   const showsPromptEditor = !layout.isLastFrame || layout.isLinked
   const showsFirstLastFrameActions = layout.isLinked && !!layout.nextPanel
+  const comfyWorkflowOptions = videoModel.videoModelOptions.filter((option) => option.provider === 'comfyui')
+  const cloudModelOptions = videoModel.videoModelOptions.filter((option) => option.provider !== 'comfyui')
+  const taskModelOptions = [...cloudModelOptions, ...comfyWorkflowOptions]
+  const isComfyTaskOverride = videoModel.selectedModel.startsWith('comfyui::')
 
   return (
     <div className="p-4 space-y-2">
@@ -185,7 +189,7 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                   <div className="flex-1 min-w-0">
                     <ModelCapabilityDropdown
                       compact
-                      models={videoModel.videoModelOptions}
+                      models={taskModelOptions}
                       value={videoModel.selectedModel || undefined}
                       onModelChange={(modelKey) => {
                         videoModel.setSelectedModel(modelKey)
@@ -200,6 +204,7 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                       onCapabilityChange={(field, rawValue) => videoModel.setCapabilityValue(field, rawValue)}
                       placeholder={t('panelCard.selectModel')}
                     />
+                    {isComfyTaskOverride && <span className="sr-only">ComfyUI task workflow override</span>}
                   </div>
                 </div>
 

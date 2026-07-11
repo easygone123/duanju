@@ -1,5 +1,8 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import { useTranslations } from 'next-intl'
+import { apiFetch } from '@/lib/api-fetch'
 import { CapsuleNav, EpisodeSelector } from '@/components/ui/CapsuleNav'
 import { SettingsModal, WorldContextModal } from '@/components/ui/ConfigModals'
 import WorkspaceTopActions from './WorkspaceTopActions'
@@ -80,6 +83,49 @@ interface WorkspaceHeaderShellProps {
   refreshTitle: string
 }
 
+interface DefaultWorkflowOption {
+  id: string
+  name: string
+  mediaType: 'image' | 'video'
+  status: string
+  currentVersion?: { lastSuccessfulTestAt?: string | null } | null
+}
+
+function ProjectComfyDefaults({ projectId, onUpdateConfig }: Pick<WorkspaceHeaderShellProps, 'projectId' | 'onUpdateConfig'>) {
+  const t = useTranslations('comfyui.workflows')
+  const [workflows, setWorkflows] = useState<DefaultWorkflowOption[]>([])
+  const [comfyImageWorkflowId, setComfyImageWorkflowId] = useState('')
+  const [comfyVideoWorkflowId, setComfyVideoWorkflowId] = useState('')
+  useEffect(() => {
+    const controller = new AbortController()
+    Promise.all([
+      apiFetch('/api/comfyui/workflows', { signal: controller.signal }),
+      apiFetch(`/api/novel-promotion/${encodeURIComponent(projectId)}`, { signal: controller.signal }),
+    ]).then(async ([workflowResponse, projectResponse]) => {
+      if (!workflowResponse.ok || !projectResponse.ok) return
+      const workflowPayload = await workflowResponse.json() as { workflows?: DefaultWorkflowOption[] }
+      const projectPayload = await projectResponse.json() as { comfyImageWorkflowId?: string | null; comfyVideoWorkflowId?: string | null }
+      setWorkflows((workflowPayload.workflows ?? []).filter((workflow) => workflow.status === 'published' && !!workflow.currentVersion?.lastSuccessfulTestAt))
+      setComfyImageWorkflowId(projectPayload.comfyImageWorkflowId ?? '')
+      setComfyVideoWorkflowId(projectPayload.comfyVideoWorkflowId ?? '')
+    }).catch(() => undefined)
+    return () => controller.abort()
+  }, [projectId])
+  const selectClass = 'mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm'
+  return <section aria-labelledby="project-comfy-defaults" className="mt-6 border-t border-[var(--glass-stroke-base)] pt-5">
+    <h3 id="project-comfy-defaults" className="mb-3 text-sm font-semibold">{t('projectDefaults')}</h3>
+    <div className="grid gap-4 sm:grid-cols-2">
+      <label className="text-sm">{t('defaultImageWorkflow')}<select className={selectClass} value={comfyImageWorkflowId} onChange={(event) => {
+        const value = event.target.value; setComfyImageWorkflowId(value); void onUpdateConfig('comfyImageWorkflowId', value || null)
+      }}><option value="">{t('noDefault')}</option>{workflows.filter((workflow) => workflow.mediaType === 'image').map((workflow) => <option key={workflow.id} value={workflow.id}>ComfyUI / {workflow.name}</option>)}</select></label>
+      <label className="text-sm">{t('defaultVideoWorkflow')}<select className={selectClass} value={comfyVideoWorkflowId} onChange={(event) => {
+        const value = event.target.value; setComfyVideoWorkflowId(value); void onUpdateConfig('comfyVideoWorkflowId', value || null)
+      }}><option value="">{t('noDefault')}</option>{workflows.filter((workflow) => workflow.mediaType === 'video').map((workflow) => <option key={workflow.id} value={workflow.id}>ComfyUI / {workflow.name}</option>)}</select></label>
+    </div>
+    <p className="mt-2 text-xs text-[var(--glass-text-tertiary)]">{t('projectDefaultTestHint')}</p>
+  </section>
+}
+
 export default function WorkspaceHeaderShell({
   isSettingsModalOpen,
   isWorldContextModalOpen,
@@ -148,6 +194,7 @@ export default function WorkspaceHeaderShell({
         onVideoRatioChange={(value) => { onUpdateConfig('videoRatio', value) }}
         onCapabilityOverridesChange={(value) => { onUpdateConfig('capabilityOverrides', value) }}
         onTTSRateChange={(value) => { onUpdateConfig('ttsRate', value) }}
+        additionalSettings={<ProjectComfyDefaults projectId={projectId} onUpdateConfig={onUpdateConfig} />}
       />
 
       <WorldContextModal
