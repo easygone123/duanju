@@ -142,13 +142,13 @@ export async function listProductionComfyReconcileRequests() {
       leaseId: true, leaseExpiresAt: true,
     },
   })
-  const now = Date.now()
   const candidates = [] as Array<{ requestId: string; mediaType: 'image' | 'video' }>
   for (const record of records) {
     if ((record.mediaType !== 'image' && record.mediaType !== 'video') || !record.connectionId) continue
     const redisOwner = await redis.get(comfyLeaseKey(record.connectionId))
-    const recoverable = record.status === 'reconciling' || redisOwner === null
-      || !record.leaseExpiresAt || record.leaseExpiresAt.getTime() <= now
+    // Redis is the live ownership authority. A conservative DB expiry alone must
+    // never let reconciliation race an active dispatcher heartbeat.
+    const recoverable = redisOwner === null
     if (recoverable) candidates.push({ requestId: record.id, mediaType: record.mediaType })
   }
   return candidates
@@ -171,7 +171,7 @@ export async function reconcileProductionComfyRequest(
   }, Math.max(100, Math.floor(limits.leaseTtlMs / 3)))
   heartbeat.unref?.()
   try {
-    await reclaimProductionRequestIfNeeded(requestId, limits.leaseTtlMs)
+    if (!await reclaimProductionRequestIfNeeded(requestId, limits.leaseTtlMs)) return
     if (lockLost || signal.aborted) return
     const result = await reconcileComfyRequest(
       requestId,
@@ -200,20 +200,21 @@ async function reclaimProductionRequestIfNeeded(requestId: string, ttlMs: number
       submissionAttempts: { select: { id: true }, take: 1 },
     },
   })
-  if (!record?.connectionId || !record.leaseId || !record.leaseExpiresAt) return
+  if (!record?.connectionId || !record.leaseId || !record.leaseExpiresAt) return false
   const redisOwner = await redis.get(comfyLeaseKey(record.connectionId))
-  if (redisOwner !== null && record.leaseExpiresAt.getTime() > Date.now()) return
+  if (redisOwner !== null) return false
   const now = new Date()
   if (record.leaseExpiresAt.getTime() > now.getTime()) {
     await prisma.comfyGenerationRequest.updateMany({
       where: { id: record.id, leaseId: record.leaseId }, data: { leaseExpiresAt: now },
     })
   }
-  await reclaimComfyRecoveryLease({
+  const result = await reclaimComfyRecoveryLease({
     requestId: record.id, userId: record.userId, connectionId: record.connectionId,
     previousLeaseId: record.leaseId, newLeaseId: randomUUID(), ttlMs,
     leaseExpiredAt: now, now, hasSubmissionAttempt: record.submissionAttempts.length > 0,
   })
+  return result.outcome === 'reclaimed'
 }
 
 export async function scanProductionExpiredPreSubmit() {

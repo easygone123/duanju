@@ -316,6 +316,25 @@ describe('ComfyUI dispatcher contract', () => {
     expect(deps.release).toHaveBeenCalled()
   })
 
+  it('persists a stable terminal timeout and releases without interrupting ComfyUI', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const dispose = vi.fn()
+    const deps = dependencies({
+      startExecutionTimeout: vi.fn(() => ({ signal: controller.signal, dispose })),
+    })
+
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({
+      outcome: 'failed', code: 'COMFY_EXECUTION_TIMEOUT',
+    })
+    expect(deps.markFailed).toHaveBeenCalledWith(expect.objectContaining({
+      errorCode: 'COMFY_EXECUTION_TIMEOUT', promptId: 'prompt-1',
+    }))
+    expect(deps.release).toHaveBeenCalledOnce()
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(deps.client).not.toHaveProperty('interruptPrompt')
+  })
+
   it('reconciles when WebSocket completes before history becomes visible', async () => {
     const deps = dependencies({
       client: { ...dependencies().client, getHistory: vi.fn().mockResolvedValue({}) },

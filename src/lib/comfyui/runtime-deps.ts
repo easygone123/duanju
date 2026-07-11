@@ -100,9 +100,15 @@ export function createProductionComfyRuntimeDeps(
         try {
           const result = await services.scheduleNext(userId, config)
           succeeded(key)
-          if (result.outcome === 'leased') executions.push(services.dispatch(
-            result.requestId, limitsFor(result.mediaType, config), signal,
-          ).catch((error) => { failed(key, config); services.onError(error, 'dispatch') }))
+          if (result.outcome === 'leased') {
+            const requestKey = `dispatch-request:${result.requestId}`
+            if (!allowed(requestKey)) continue
+            executions.push(services.dispatch(
+              result.requestId, limitsFor(result.mediaType, config), signal,
+            ).then(() => succeeded(requestKey)).catch((error) => {
+              failed(requestKey, config); services.onError(error, 'dispatch')
+            }))
+          }
         } catch (error) {
           failed(key, config); services.onError(error, 'dispatch')
         }

@@ -253,6 +253,13 @@ export async function dispatchComfyRequest(
         dependencies.client, promptId, clientId, owner, dependencies,
         executionDeadline?.signal ?? dependencies.signal,
       )
+      if (executionDeadline?.signal.aborted && !dependencies.signal.aborted) {
+        throw new ComfyError(
+          COMFY_ERROR_CODE.EXECUTION_TIMEOUT,
+          'ComfyUI execution timed out',
+          { retryable: false },
+        )
+      }
     } catch (error) {
       if (error instanceof ComfyError && !error.retryable) throw error
       dependencies.observation?.increment('reconciliation', { outcome: 'websocket_fallback' })

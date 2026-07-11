@@ -191,15 +191,19 @@ export async function createProductionReconciliationDependencies(
       await client.getQueue(), await client.getHistoryAll(), clientId,
     ),
     persistDiscoveredPrompt: async ({ attemptId, clientId, promptId }) => {
+      if (!await reconciliationFence()) return false
       const receipt = await recordComfyAcceptedPromptWithStore({
         ...owner, attemptId, clientId, promptId,
       })
       return receipt.outcome === 'request_recorded' || receipt.outcome === 'attempt_recorded'
     },
-    recordAttemptAbsence: (input) => recordComfyAttemptAbsenceWithStore({
-      ...input, now: new Date(),
-      policy: { minChecks: 3, minAgeMs: 5_000, deadlineMs: limits.executionTimeoutMs },
-    }),
+    recordAttemptAbsence: async (input) => {
+      if (!await reconciliationFence()) throw new Error('Reconciliation ownership lost')
+      return recordComfyAttemptAbsenceWithStore({
+        ...input, now: new Date(),
+        policy: { minChecks: 3, minAgeMs: 5_000, deadlineMs: limits.executionTimeoutMs },
+      })
+    },
     deleteQueuedPrompt: (promptId) => client.deleteQueuedPrompt(promptId),
     persistRecoveredCancellation: ({ promptId }) => updateOwned(
       { status: 'canceled', canceledAt: new Date() },
@@ -208,7 +212,8 @@ export async function createProductionReconciliationDependencies(
     persistRecoveredDiagnostics: ({ promptId, outputs, errorCode }) => updateOwned({
       ...(outputs ? { outputRefs: outputs } : {}), ...(errorCode ? { errorCode } : {}),
     }, { promptId, status: { notIn: ['completed', 'failed', 'canceled'] } }),
-    releaseLease: (input) => releaseComfyRequestLease({ ...input, ttlMs: 1 }),
+    releaseLease: async (input) => await reconciliationFence()
+      && await releaseComfyRequestLease({ ...input, ttlMs: 1 }),
     isAbsenceConclusive: async () => Date.now() - bundle.updatedAt.getTime() >= limits.executionTimeoutMs,
     persistRecoveredState: ({ promptId, status, outputs, errorCode }) => updateOwned({
       status, ...timestampFor(status), ...(outputs ? { outputRefs: outputs } : {}),
