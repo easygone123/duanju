@@ -25,7 +25,10 @@ import {
   submitComfyVideoGeneration,
   pollComfyGenerationRequest,
 } from '@/lib/comfyui/provider'
-import { resolveOwnedComfyMediaRefFromValue } from '@/lib/comfyui/media-ownership'
+import {
+  resolveComfyStorageKeyFromMediaValue,
+  resolveOwnedComfyMediaRefFromValue,
+} from '@/lib/comfyui/media-ownership'
 
 describe('ComfyUI native provider routing', () => {
   beforeEach(() => {
@@ -164,6 +167,43 @@ describe('ComfyUI native provider routing', () => {
         mimeType: { startsWith: 'image/' },
       }),
     }))
+  })
+
+  it.each([
+    ['/api/storage/sign?key=projects%2Fp1%2Finput.png&expires=3600', 'projects/p1/input.png'],
+  ])('extracts an opaque key from the real signed-storage route %s', async (value, expected) => {
+    await expect(resolveComfyStorageKeyFromMediaValue(value)).resolves.toBe(expected)
+  })
+
+  it('uses the real signed-route parser before the owner/project/mime database gate', async () => {
+    await expect(resolveOwnedComfyMediaRefFromValue({
+      userId: 'user-1', projectId: 'project-1', mediaType: 'image',
+      value: '/api/storage/sign?key=images%2Fowned.png&expires=3600',
+    }, {
+      findFirst: vi.fn(async () => ({ storageKey: 'images/owned.png', mimeType: 'image/png' })),
+    })).resolves.toEqual({ storageKey: 'images/owned.png', mimeType: 'image/png' })
+  })
+
+  it('rejects a real signed-route key when the owner/project database gate does not match', async () => {
+    await expect(resolveOwnedComfyMediaRefFromValue({
+      userId: 'other-user', projectId: 'project-1', mediaType: 'image',
+      value: '/api/storage/sign?key=images%2Fowned.png&expires=3600',
+    }, {
+      findFirst: vi.fn(async () => null),
+    })).resolves.toBeNull()
+  })
+
+  it.each([
+    '/api/storage/sign',
+    '/api/storage/sign?key=one.png&key=two.png',
+    '/api/storage/sign?key=images%2Fowned.png#fragment',
+    '/api/storage/sign?key=images%2Fowned.png&token=secret',
+    'https://evil.example/api/storage/sign?key=images%2Fowned.png',
+    '//evil.example/api/storage/sign?key=images%2Fowned.png',
+    '/api/storage/sign?key=..%2Fsecret.png',
+    '/api/storage/sign?key=https%3A%2F%2Fevil.example%2Finput.png',
+  ])('rejects malformed or spoofed signed-storage media value %s', async (value) => {
+    await expect(resolveComfyStorageKeyFromMediaValue(value)).resolves.toBeNull()
   })
 
   it.each([

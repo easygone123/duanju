@@ -41,14 +41,31 @@ export interface ResolveOwnedComfyMediaRefDependencies {
 }
 
 const defaultRefDependencies: ResolveOwnedComfyMediaRefDependencies = {
-  resolveStorageKey: resolveStorageKeyFromMediaValue,
+  resolveStorageKey: resolveComfyStorageKeyFromMediaValue,
   findFirst: defaultStore.findFirst,
+}
+
+export async function resolveComfyStorageKeyFromMediaValue(value: unknown): Promise<string | null> {
+  if (typeof value !== 'string' || !value.trim()) return null
+  const raw = value.trim()
+  if (raw.startsWith('//')) return null
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(raw)) {
+    try {
+      if (new URL(raw).pathname === '/api/storage/sign') return null
+    } catch {
+      return null
+    }
+    return resolveStorageKeyFromMediaValue(raw)
+  }
+  if (raw.startsWith('/api/storage/sign')) return parseInternalSignedStorageRoute(raw)
+  return resolveStorageKeyFromMediaValue(raw)
 }
 
 export async function resolveOwnedComfyMediaRefFromValue(
   input: Omit<OwnedComfyMediaInput, 'storageKey'> & { value: unknown },
-  dependencies: ResolveOwnedComfyMediaRefDependencies = defaultRefDependencies,
+  overrides: Partial<ResolveOwnedComfyMediaRefDependencies> = {},
 ) {
+  const dependencies = { ...defaultRefDependencies, ...overrides }
   const storageKey = await dependencies.resolveStorageKey(input.value)
   if (!storageKey || !isOpaqueStorageKey(storageKey)) return null
   const record = await dependencies.findFirst({
@@ -60,6 +77,29 @@ export async function resolveOwnedComfyMediaRefFromValue(
     storageKey: record.storageKey,
     ...(record.mimeType ? { mimeType: record.mimeType } : {}),
   }
+}
+
+function parseInternalSignedStorageRoute(value: string): string | null {
+  let parsed: URL
+  try {
+    parsed = new URL(value, 'http://waoowaoo.internal')
+  } catch {
+    return null
+  }
+  if (parsed.origin !== 'http://waoowaoo.internal'
+    || parsed.pathname !== '/api/storage/sign'
+    || parsed.hash) return null
+  const keys = parsed.searchParams.getAll('key')
+  const expires = parsed.searchParams.getAll('expires')
+  const parameterNames = [...new Set(parsed.searchParams.keys())]
+  if (keys.length !== 1 || !keys[0]
+    || expires.length > 1
+    || (expires.length === 1 && !/^\d+$/.test(expires[0]))
+    || parameterNames.some((name) => name !== 'key' && name !== 'expires')) return null
+  const storageKey = keys[0]
+  if (!isOpaqueStorageKey(storageKey)
+    || storageKey.split('/').some((segment) => segment === '.' || segment === '..')) return null
+  return storageKey
 }
 
 function ownedMediaWhere(input: OwnedComfyMediaInput): Prisma.MediaObjectWhereInput {
