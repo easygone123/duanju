@@ -1,7 +1,7 @@
 # ComfyUI Provider Integration Design
 
 - Date: 2026-07-11
-- Status: Implementation complete; Docker-backed acceptance verification pending
+- Status: Implemented and verified, including Docker-backed acceptance tests
 - Target branch: `feat/comfyui-integration`
 
 ## 1. Summary
