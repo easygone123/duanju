@@ -148,6 +148,22 @@ describe('idle-first ComfyUI scheduler', () => {
     expect(deps.releaseLease).toHaveBeenCalledOnce()
   })
 
+  it('best-effort releases Redis ownership when database assignment throws', async () => {
+    const databaseError = new Error('transaction failed')
+    const { deps } = schedulerFixture({
+      assignIfEligible: vi.fn().mockRejectedValue(databaseError),
+      releaseLease: vi.fn().mockRejectedValue(new Error('release transport failed')),
+    })
+
+    await expect(scheduleNextComfyRequest('user-1', deps, {
+      newLeaseId: () => 'lease-crash',
+    })).rejects.toBe(databaseError)
+    expect(deps.releaseLease).toHaveBeenCalledWith({
+      connectionId: 'connection-never', requestId: 'request-old',
+      leaseId: 'lease-crash', ttlMs: 30_000,
+    })
+  })
+
   it('gives two schedulers racing for one request and node exactly one winner', async () => {
     const { deps } = schedulerFixture()
     const [first, second] = await Promise.all([

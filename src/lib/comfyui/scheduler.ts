@@ -142,14 +142,24 @@ export async function scheduleNextComfyRequest(
       ttlMs,
     }
     if (!await dependencies.acquireLease(owner)) continue
-    const assigned = await dependencies.assignIfEligible({
-      requestId: request.id,
-      userId,
-      connectionId: connection.id,
-      leaseId: owner.leaseId,
-      leaseExpiresAt: new Date(now.getTime() + ttlMs),
-      assignedAt: now,
-    })
+    let assigned: boolean
+    try {
+      assigned = await dependencies.assignIfEligible({
+        requestId: request.id,
+        userId,
+        connectionId: connection.id,
+        leaseId: owner.leaseId,
+        leaseExpiresAt: new Date(now.getTime() + ttlMs),
+        assignedAt: now,
+      })
+    } catch (error) {
+      try {
+        await dependencies.releaseLease(owner)
+      } catch {
+        // Preserve the assignment error; the lease still has a bounded TTL.
+      }
+      throw error
+    }
     if (assigned) {
       return {
         outcome: 'leased', requestId: request.id,
