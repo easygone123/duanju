@@ -181,6 +181,7 @@ export interface ComfyOutputRef {
 export interface ComfyStoredOutputRef extends ComfyOutputRef {
   storageKey: string
   url: string
+  byteSize: number
   mediaId?: string
 }
 

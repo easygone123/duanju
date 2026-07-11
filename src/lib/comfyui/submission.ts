@@ -353,6 +353,7 @@ export async function persistComfyOutputReceiptWithStore(
   input: ComfyOwnerInput & { promptId: string; output: ComfyStoredOutputRef },
   store: OutputReceiptStore = defaultOutputReceiptStore,
 ) {
+  if (!isOutputRef(input.output) || !isStoredOutput(input.output)) throw new ApiError('CONFLICT')
   return store.transaction(async (client) => {
     const request = await client.findRequest({
       where: {
@@ -393,6 +394,8 @@ function isOutputRef(value: unknown): value is ComfyOutputRef | ComfyStoredOutpu
 
 function isStoredOutput(value: ComfyOutputRef | ComfyStoredOutputRef): value is ComfyStoredOutputRef {
   return 'storageKey' in value && typeof value.storageKey === 'string'
+    && 'url' in value && typeof value.url === 'string'
+    && 'byteSize' in value && Number.isSafeInteger(value.byteSize) && value.byteSize > 0
 }
 
 function sameOutputIdentity(left: ComfyOutputRef, right: ComfyOutputRef) {

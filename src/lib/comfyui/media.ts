@@ -104,17 +104,23 @@ export async function transferComfyOutputs(input: {
 }): Promise<ComfyStoredOutputRef[]> {
   if (input.outputs.length === 0 || input.outputs.length > MAX_OUTPUT_REFS) throw transferError()
   const stored: ComfyStoredOutputRef[] = []
-  let totalBytes = 0
-  for (const output of input.outputs) {
-    const existing = input.existingStored?.find((candidate) => sameOutputRef(candidate, output))
+  const maxOutputBytes = input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
+  const maxTotalOutputBytes = input.maxTotalOutputBytes ?? DEFAULT_MAX_TOTAL_OUTPUT_BYTES
+  const existingByOutput = input.outputs.map((output) => input.existingStored?.find(
+    (candidate) => sameOutputRef(candidate, output) && hasTrustedByteSize(candidate),
+  ))
+  let totalBytes = existingByOutput.reduce((sum, output) => sum + (output?.byteSize ?? 0), 0)
+  if (existingByOutput.some((output) => output && output.byteSize > maxOutputBytes)
+    || totalBytes > maxTotalOutputBytes) throw transferError()
+  for (const [index, output] of input.outputs.entries()) {
+    const existing = existingByOutput[index]
     if (existing) {
       stored.push(existing)
       continue
     }
     const bytes = await input.client.downloadOutput(output)
     totalBytes += bytes.byteLength
-    if (bytes.byteLength > (input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES)
-      || totalBytes > (input.maxTotalOutputBytes ?? DEFAULT_MAX_TOTAL_OUTPUT_BYTES)) throw transferError()
+    if (bytes.byteLength > maxOutputBytes || totalBytes > maxTotalOutputBytes) throw transferError()
     const detected = detectMedia(bytes)
     if (!detected || !detected.mimeType.startsWith(`${output.mediaType}/`)) throw transferError()
     const id = createHash('sha256')
@@ -126,11 +132,18 @@ export async function transferComfyOutputs(input: {
     const storageKey = await input.dependencies.objectExists(key)
       ? key
       : await input.dependencies.uploadObject(bytes, key, 1, detected.mimeType)
-    const receipt = { ...output, storageKey, url: input.dependencies.resolveStoredUrl(storageKey) }
+    const receipt = {
+      ...output, storageKey, url: input.dependencies.resolveStoredUrl(storageKey),
+      byteSize: bytes.byteLength,
+    }
     await input.onStored?.(receipt)
     stored.push(receipt)
   }
   return stored
+}
+
+function hasTrustedByteSize(value: ComfyStoredOutputRef) {
+  return Number.isSafeInteger(value.byteSize) && value.byteSize > 0
 }
 
 function sameOutputRef(left: ComfyStoredOutputRef, right: ComfyOutputRef) {

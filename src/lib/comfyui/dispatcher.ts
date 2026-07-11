@@ -313,6 +313,8 @@ async function transferAndComplete(
 
 function isStoredOutput(value: ComfyOutputRef | ComfyStoredOutputRef): value is ComfyStoredOutputRef {
   return 'storageKey' in value && typeof value.storageKey === 'string'
+    && 'url' in value && typeof value.url === 'string'
+    && 'byteSize' in value && Number.isSafeInteger(value.byteSize) && value.byteSize > 0
 }
 
 async function consumePromptEvents(
@@ -529,6 +531,7 @@ export async function reconcileComfyRequest(
     ...owner, promptId, status: status ?? 'failed',
     ...(status === null ? { errorCode: COMFY_ERROR_CODE.RECONCILIATION_REQUIRED } : {}),
   }))
+  if (status === null) await dependencies.releaseLease(owner).catch(() => false)
   return { outcome: status ?? 'failed' }
 }
 

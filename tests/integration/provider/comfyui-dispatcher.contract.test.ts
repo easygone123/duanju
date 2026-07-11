@@ -4,7 +4,7 @@ import { dispatchComfyRequest, type ComfyDispatcherDependencies } from '@/lib/co
 import { ComfyError } from '@/lib/comfyui/errors'
 import { createComfyObservability } from '@/lib/comfyui/observability'
 import { prepareComfyMediaUploads, transferComfyOutputs } from '@/lib/comfyui/media'
-import type { ComfyOutputRef } from '@/lib/comfyui/types'
+import type { ComfyOutputRef, ComfyStoredOutputRef } from '@/lib/comfyui/types'
 
 function context(overrides: Record<string, unknown> = {}) {
   return {
@@ -374,6 +374,7 @@ describe('ComfyUI dispatcher contract', () => {
     })
     const key = first[0].storageKey
     expect(key).toMatch(/comfyui\/user-1\/project-1\/request-1\/[a-f0-9]{64}-primary\.png$/)
+    expect(first[0].byteSize).toBe(8)
 
     const retry = dependencies()
     const repeated = await transferComfyOutputs({
@@ -384,5 +385,48 @@ describe('ComfyUI dispatcher contract', () => {
     expect(repeated).toEqual(first)
     expect(retry.client.downloadOutput).not.toHaveBeenCalled()
     expect(retry.uploadObject).not.toHaveBeenCalled()
+  })
+
+  it('counts durable receipt bytes before uploading new outputs', async () => {
+    const downloaded = Buffer.alloc(200 * 1024 * 1024)
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(downloaded)
+    const deps = dependencies({
+      client: {
+        ...dependencies().client,
+        downloadOutput: vi.fn().mockResolvedValue(downloaded),
+      },
+    })
+    const existingStored = [{
+      ...output('primary', true),
+      storageKey: 'comfyui/user-1/project-1/request-1/primary.png',
+      url: '/api/files/primary.png',
+      byteSize: 400 * 1024 * 1024,
+    }]
+
+    await expect(transferComfyOutputs({
+      userId: 'user-1', projectId: 'project-1', requestId: 'request-1',
+      outputs: [output('primary', true), output('second', false)], existingStored,
+      client: deps.client, dependencies: deps, maxOutputBytes: 500 * 1024 * 1024,
+    })).rejects.toMatchObject({ code: 'COMFY_OUTPUT_TRANSFER_FAILED' })
+    expect(deps.uploadObject).not.toHaveBeenCalled()
+    expect(deps.objectExists).not.toHaveBeenCalled()
+  })
+
+  it('redownloads legacy stored outputs whose receipt has no trustworthy byte size', async () => {
+    const deps = dependencies()
+    const legacyStored = [{
+      ...output('primary', true),
+      storageKey: 'comfyui/user-1/project-1/request-1/primary.png',
+      url: '/api/files/primary.png',
+    }]
+
+    const result = await transferComfyOutputs({
+      userId: 'user-1', projectId: 'project-1', requestId: 'request-1',
+      outputs: [output('primary', true)],
+      existingStored: legacyStored as unknown as ComfyStoredOutputRef[],
+      client: deps.client, dependencies: deps,
+    })
+    expect(deps.client.downloadOutput).toHaveBeenCalledOnce()
+    expect(result[0].byteSize).toBe(8)
   })
 })

@@ -13,6 +13,7 @@ import {
   type ComfyCancellationDependencies,
   type ComfyReconciliationDependencies,
 } from '@/lib/comfyui/dispatcher'
+import type { ComfyStoredOutputRef } from '@/lib/comfyui/types'
 
 function reconciliationSafetyDefaults() {
   return {
@@ -63,12 +64,32 @@ describe('ComfyUI recovery and cancellation contract', () => {
       promptId: 'prompt-1', output: {
         name: 'result', nodeId: '2', mediaType: 'image' as const, primary: true,
         filename: 'out.png', subfolder: '', type: 'output',
-        storageKey: 'comfyui/result.png', url: '/api/files/result.png',
+        storageKey: 'comfyui/result.png', url: '/api/files/result.png', byteSize: 8,
       },
     }
     await expect(persistComfyOutputReceiptWithStore(input, store)).resolves.toBe(true)
     await expect(persistComfyOutputReceiptWithStore(input, store)).resolves.toBe(true)
     expect(updateRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects output receipts without a trustworthy byte size', async () => {
+    const updateRequest = vi.fn().mockResolvedValue({ count: 1 })
+    const store: NonNullable<Parameters<typeof persistComfyOutputReceiptWithStore>[1]> = {
+      transaction: async (operation) => operation({
+        findRequest: vi.fn().mockResolvedValue({ outputRefs: [] }), updateRequest,
+      }),
+    }
+    const legacyOutput = {
+      name: 'result', nodeId: '2', mediaType: 'image' as const, primary: true,
+      filename: 'out.png', subfolder: '', type: 'output',
+      storageKey: 'comfyui/result.png', url: '/api/files/result.png',
+    }
+
+    await expect(persistComfyOutputReceiptWithStore({
+      requestId: 'request-1', userId: 'user-1', connectionId: 'connection-1', leaseId: 'lease-1',
+      promptId: 'prompt-1', output: legacyOutput as unknown as ComfyStoredOutputRef,
+    }, store)).rejects.toMatchObject({ code: 'CONFLICT' })
+    expect(updateRequest).not.toHaveBeenCalled()
   })
 
   it('durably records accepted prompt on the attempt even if request owner CAS is lost', async () => {
@@ -466,6 +487,31 @@ describe('ComfyUI recovery and cancellation contract', () => {
     await expect(reconcileComfyRequest('request-1', {
       ...base, isAbsenceConclusive: vi.fn().mockResolvedValue(true),
     })).resolves.toMatchObject({ outcome: 'failed' })
+    expect(base.releaseLease).toHaveBeenCalledOnce()
+  })
+
+  it('releases a conclusively absent prompt only after the failed state is durable', async () => {
+    const base = {
+      ...reconciliationSafetyDefaults(),
+      loadContext: vi.fn().mockResolvedValue({ request: { id: 'request-1', userId: 'user-1', status: 'reconciling', connectionId: 'connection-1', leaseId: 'lease-1', promptId: 'prompt-1' }, version: { outputs: [] } }),
+      verifyLeaseOwner: vi.fn().mockResolvedValue(true),
+      getQueue: vi.fn().mockResolvedValue({ running: [], pending: [] }),
+      getHistory: vi.fn().mockResolvedValue({}),
+      isAbsenceConclusive: vi.fn().mockResolvedValue(true),
+    }
+    const lost = { ...base, persistRecoveredState: vi.fn().mockResolvedValue(false) }
+    await expect(reconcileComfyRequest('request-1', lost)).rejects.toMatchObject({
+      code: 'CONFLICT',
+    })
+    expect(lost.releaseLease).not.toHaveBeenCalled()
+
+    const releaseFailed = {
+      ...base,
+      persistRecoveredState: vi.fn().mockResolvedValue(true),
+      releaseLease: vi.fn().mockRejectedValue(new Error('lease backend unavailable')),
+    }
+    await expect(reconcileComfyRequest('request-1', releaseFailed)).resolves.toMatchObject({ outcome: 'failed' })
+    expect(releaseFailed.releaseLease).toHaveBeenCalledOnce()
   })
 
   function cancellation(
