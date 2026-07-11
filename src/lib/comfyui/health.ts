@@ -5,6 +5,80 @@ import type {
   ComfyQueueSnapshot,
   ComfySystemStats,
 } from './types'
+import type {
+  ComfyCompatibilityResult,
+} from './compatibility'
+import type { ComfyWorkflowRequirements } from './types'
+
+export interface ComfyHealthMonitorDependencies {
+  authorize(): Promise<void>
+  getSystemStats(): Promise<ComfySystemStats>
+  getQueue(): Promise<ComfyQueueSnapshot>
+  hasLease(connectionId: string): Promise<boolean>
+  checkCompatibility(input: {
+    connectionId: string
+    workflowHash: string
+    requirements: ComfyWorkflowRequirements
+  }): Promise<ComfyCompatibilityResult>
+  cacheSet(key: string, value: string, mode: 'PX', ttlMs: number): Promise<unknown>
+}
+
+export interface MonitorComfyHealthInput {
+  connectionId: string
+  workflowHash?: string
+  requirements?: ComfyWorkflowRequirements
+  checkedAt?: Date
+  ttlMs: number
+}
+
+export interface MonitoredComfyHealth {
+  health: ComfyHealthSummary
+  compatibility?: ComfyCompatibilityResult
+}
+
+export async function monitorComfyHealth(
+  input: MonitorComfyHealthInput,
+  dependencies: ComfyHealthMonitorDependencies,
+): Promise<MonitoredComfyHealth> {
+  const checkedAt = input.checkedAt ?? new Date()
+  let health: ComfyHealthSummary
+  let compatibility: ComfyCompatibilityResult | undefined
+  try {
+    await dependencies.authorize()
+    const systemStats = await dependencies.getSystemStats()
+    const queue = await dependencies.getQueue()
+    const hasLease = await dependencies.hasLease(input.connectionId)
+    if (input.workflowHash && input.requirements) {
+      compatibility = await dependencies.checkCompatibility({
+        connectionId: input.connectionId,
+        workflowHash: input.workflowHash,
+        requirements: input.requirements,
+      })
+    }
+    health = deriveComfyHealth({
+      checkedAt,
+      systemStats,
+      queue,
+      ownedNonterminalCount: hasLease ? 1 : 0,
+    })
+    if (compatibility && !compatibility.compatible) {
+      health = { ...health, state: 'workflow_incompatible' }
+    }
+  } catch (error) {
+    health = deriveComfyHealth({ checkedAt, error, ownedNonterminalCount: 0 })
+  }
+  await dependencies.cacheSet(
+    comfyHealthKey(input.connectionId),
+    JSON.stringify(health),
+    'PX',
+    input.ttlMs,
+  )
+  return { health, ...(compatibility ? { compatibility } : {}) }
+}
+
+export function comfyHealthKey(connectionId: string) {
+  return `comfy:health:${connectionId}`
+}
 
 interface DeriveComfyHealthInput {
   checkedAt: Date
