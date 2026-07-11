@@ -1,36 +1,26 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { Prisma, type ComfyConnection, type ComfyWorkflowVersion } from '@prisma/client'
+import { createHash } from 'node:crypto'
+import { Prisma, type ComfyWorkflowVersion } from '@prisma/client'
 
 import { ApiError } from '@/lib/api-errors'
-import { decryptApiKey } from '@/lib/crypto-utils'
 import { prisma } from '@/lib/prisma'
-import { redis } from '@/lib/redis'
 
-import { ComfyClient } from './client'
 import { deriveComfyRequirements } from './workflow-requirements'
-import { renderComfyWorkflow } from './workflow-renderer'
 import { validateComfyApiWorkflow, validateWorkflowContract } from './workflow-schema'
-import { authorizeComfyTarget, type ComfyNetworkPolicyConfig } from './network-policy'
+import { assertBoundedWorkflowJson } from './workflow-limits'
 import type {
-  ComfyApiWorkflow,
-  ComfyConnectionAuth,
   ComfyInputBinding,
   ComfyMediaType,
   ComfyOutputBinding,
   ComfyVariableDefinition,
-  ComfyVariableValue,
   ComfyWorkflowRequirements,
   WorkflowValidationIssue,
 } from './types'
 
-const TEST_LEASE_TTL_MS = 5 * 60 * 1000
-const TEST_RUN_TIMEOUT_MS = 5 * 60 * 1000
-const RELEASE_LEASE_SCRIPT = `
-if redis.call('get', KEYS[1]) == ARGV[1] then
-  return redis.call('del', KEYS[1])
-end
-return 0
-`
+export {
+  recordSuccessfulWorkflowTest,
+  runOwnedWorkflowTest,
+} from './workflow-test-service'
+export type { LiveTestInput, LiveTestUploadPayload } from './workflow-test-service'
 
 export interface CreateVersionInput {
   apiFormatJson: unknown
@@ -44,16 +34,17 @@ export interface CreateWorkflowInput extends CreateVersionInput {
   mediaType: ComfyMediaType
 }
 
-export interface LiveTestInput {
-  versionId: string
-  connectionId: string
-  variables: Record<string, ComfyVariableValue | undefined>
-}
 
 export function parseWorkflowImport(value: unknown): unknown {
-  if (typeof value !== 'string') return cloneJson(value)
+  if (typeof value !== 'string') {
+    assertBoundedWorkflowJson(value)
+    return cloneJson(value)
+  }
+  if (Buffer.byteLength(value, 'utf8') > 4 * 1024 * 1024) throw new ApiError('INVALID_PARAMS')
   try {
-    return JSON.parse(value) as unknown
+    const parsed = JSON.parse(value) as unknown
+    assertBoundedWorkflowJson(parsed)
+    return parsed
   } catch {
     throw new ApiError('INVALID_PARAMS', { message: 'Workflow import must contain valid JSON.' })
   }
@@ -157,27 +148,6 @@ export async function publishWorkflowVersion(
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 }
 
-export async function recordSuccessfulWorkflowTest(
-  userId: string,
-  versionId: string,
-  connectionId: string,
-) {
-  const version = await prisma.comfyWorkflowVersion.findFirst({
-    where: { id: versionId, workflow: { userId } },
-    select: { id: true, workflowId: true },
-  })
-  if (!version) throw new ApiError('NOT_FOUND')
-  const connection = await prisma.comfyConnection.findFirst({
-    where: { id: connectionId, userId }, select: { id: true },
-  })
-  if (!connection) throw new ApiError('NOT_FOUND')
-  const result = await prisma.comfyWorkflowVersion.updateMany({
-    where: { id: versionId, workflowId: version.workflowId },
-    data: { lastSuccessfulTestAt: new Date(), lastTestConnectionId: connectionId },
-  })
-  if (result.count !== 1) throw new ApiError('CONFLICT')
-}
-
 export async function archiveWorkflow(userId: string, workflowId: string) {
   await prisma.$transaction(async (tx) => {
     const workflow = await tx.comfyWorkflow.findFirst({ where: { id: workflowId, userId } })
@@ -199,7 +169,18 @@ export async function assertWorkflowCanBeProjectDefault(
   workflowId: string,
   mediaType: ComfyMediaType,
 ) {
-  const workflow = await prisma.comfyWorkflow.findFirst({
+  return prisma.$transaction(async (tx) => assertWorkflowCanBeProjectDefaultInTransaction(
+    tx, userId, workflowId, mediaType,
+  ), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+}
+
+async function assertWorkflowCanBeProjectDefaultInTransaction(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  workflowId: string,
+  mediaType: ComfyMediaType,
+) {
+  const workflow = await tx.comfyWorkflow.findFirst({
     where: { id: workflowId, userId, status: 'published', mediaType },
     include: {
       currentVersion: {
@@ -216,82 +197,25 @@ export async function assertWorkflowCanBeProjectDefault(
   return workflow.currentVersion
 }
 
-export async function runOwnedWorkflowTest(
+export async function bindProjectDefaultWorkflow(
   userId: string,
-  workflowId: string,
-  input: LiveTestInput,
+  projectId: string,
+  mediaType: ComfyMediaType,
+  workflowId: string | null,
 ) {
-  const workflow = await prisma.comfyWorkflow.findFirst({
-    where: { id: workflowId, userId, status: { not: 'archived' } },
-  })
-  if (!workflow) throw new ApiError('NOT_FOUND')
-  const version = await prisma.comfyWorkflowVersion.findFirst({
-    where: { id: input.versionId, workflowId },
-  })
-  if (!version) throw new ApiError('NOT_FOUND')
-  const issues = validationForVersion(version)
-  if (issues.length > 0) throw new ApiError('INVALID_PARAMS', { validationIssues: issues })
-  const connection = await prisma.comfyConnection.findFirst({
-    where: { id: input.connectionId, userId, enabled: true },
-  })
-  if (!connection) throw new ApiError('NOT_FOUND')
-
-  await authorizeComfyTarget(connection.normalizedBaseUrl, readNetworkPolicy())
-  const client = new ComfyClient({
-    baseUrl: connection.normalizedBaseUrl,
-    auth: connectionAuth(connection),
-    networkPolicy: readNetworkPolicy(),
-  })
-  const queue = await client.getQueue()
-  if (queue.running.length > 0 || queue.pending.length > 0) throw new ApiError('CONFLICT')
-  const leaseKey = `comfy:lease:${connection.id}`
-  if (await redis.get(leaseKey)) throw new ApiError('CONFLICT')
-  await assertCompatible(client, version)
-
-  const leaseValue = JSON.stringify({ type: 'test-run', id: randomUUID(), userId, workflowId })
-  const acquired = await redis.set(leaseKey, leaseValue, 'PX', TEST_LEASE_TTL_MS, 'NX')
-  if (acquired !== 'OK') throw new ApiError('CONFLICT')
-  try {
-    // Re-check the external queue after the atomic claim to close the probe/claim race.
-    const claimedQueue = await client.getQueue()
-    if (claimedQueue.running.length > 0 || claimedQueue.pending.length > 0) {
-      throw new ApiError('CONFLICT')
+  return prisma.$transaction(async (tx) => {
+    const project = await tx.project.findFirst({ where: { id: projectId, userId } })
+    if (!project) throw new ApiError('NOT_FOUND')
+    if (workflowId) {
+      await assertWorkflowCanBeProjectDefaultInTransaction(tx, userId, workflowId, mediaType)
     }
-    const rendered = renderComfyWorkflow({
-      graph: version.apiFormatJson as unknown as ComfyApiWorkflow,
-      variables: input.variables,
-      variableDefinitions: version.variableDefinitions as unknown as ComfyVariableDefinition[],
-      bindings: (
-        version.bindingSpec ?? (version as unknown as { bindings?: unknown }).bindings
-      ) as unknown as ComfyInputBinding[],
-      uploads: {},
+    const field = mediaType === 'image' ? 'imageWorkflowId' : 'videoWorkflowId'
+    return tx.projectComfyBinding.upsert({
+      where: { projectId_userId: { projectId, userId } },
+      create: { projectId, userId, [field]: workflowId },
+      update: { [field]: workflowId },
     })
-    const clientId = randomUUID()
-    const { promptId } = await client.submitPrompt(rendered, clientId)
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), TEST_RUN_TIMEOUT_MS)
-    try {
-      let completed = false
-      for await (const event of client.watchPrompt(promptId, clientId, controller.signal)) {
-        if (event.type === 'execution_error') throw new ApiError('EXTERNAL_ERROR')
-        if (event.type === 'executing' && event.nodeId === null) {
-          completed = true
-          break
-        }
-      }
-      if (!completed) throw new ApiError('EXTERNAL_ERROR')
-    } finally {
-      clearTimeout(timer)
-      controller.abort()
-    }
-    await recordSuccessfulWorkflowTest(userId, version.id, connection.id)
-    return { versionId: version.id, connectionId: connection.id, promptId, success: true }
-  } catch (error) {
-    if (error instanceof ApiError) throw error
-    throw new ApiError('INTERNAL_ERROR')
-  } finally {
-    await redis.eval(RELEASE_LEASE_SCRIPT, 1, leaseKey, leaseValue)
-  }
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 }
 
 function prepareVersion(input: CreateVersionInput) {
@@ -329,60 +253,6 @@ function validationForVersion(version: ComfyWorkflowVersion): WorkflowValidation
       version.outputSpec ?? (version as unknown as { outputs?: unknown }).outputs
     ) as unknown as ComfyOutputBinding[],
   })
-}
-
-async function assertCompatible(client: ComfyClient, version: ComfyWorkflowVersion) {
-  const objectInfo = await client.getObjectInfo()
-  const requirements = version.requirements as unknown as ComfyWorkflowRequirements
-  const missingNodes = requirements.nodeClasses.filter((nodeClass) => !Object.hasOwn(objectInfo, nodeClass))
-  if (missingNodes.length > 0) throw new ApiError('CONFLICT', { missingNodes })
-  for (const candidate of requirements.candidateLoaderInputs) {
-    const node = version.apiFormatJson as unknown as ComfyApiWorkflow
-    const classType = node[candidate.nodeId]?.class_type
-    const schema = classType ? objectInfo[classType] : undefined
-    if (!schemaAcceptsValue(schema, candidate.inputName, candidate.value)) {
-      throw new ApiError('CONFLICT', { missingModels: [candidate] })
-    }
-  }
-}
-
-function schemaAcceptsValue(schema: unknown, inputName: string, value: string): boolean {
-  if (!isObject(schema) || !isObject(schema.input)) return false
-  for (const sectionName of ['required', 'optional']) {
-    const section = schema.input[sectionName]
-    if (!isObject(section) || !Object.hasOwn(section, inputName)) continue
-    const spec = section[inputName]
-    if (!Array.isArray(spec) || !Array.isArray(spec[0])) return true
-    return spec[0].includes(value)
-  }
-  return false
-}
-
-function connectionAuth(connection: ComfyConnection): ComfyConnectionAuth {
-  if (connection.authType === 'none') return { type: 'none' }
-  if (!connection.authSecretEncrypted) throw new ApiError('MISSING_CONFIG')
-  let value: unknown
-  try {
-    value = JSON.parse(decryptApiKey(connection.authSecretEncrypted))
-  } catch {
-    throw new ApiError('MISSING_CONFIG')
-  }
-  if (connection.authType === 'bearer' && isObject(value) && typeof value.token === 'string') {
-    return { type: 'bearer', token: value.token }
-  }
-  if (connection.authType === 'basic' && isObject(value)
-    && typeof value.username === 'string' && typeof value.password === 'string') {
-    return { type: 'basic', username: value.username, password: value.password }
-  }
-  throw new ApiError('MISSING_CONFIG')
-}
-
-function readNetworkPolicy(): ComfyNetworkPolicyConfig {
-  return {
-    mode: process.env.COMFYUI_NETWORK_MODE === 'trusted' ? 'trusted' : 'allowlist',
-    allowedHosts: commaList(process.env.COMFYUI_ALLOWED_HOSTS),
-    allowedCidrs: commaList(process.env.COMFYUI_ALLOWED_CIDRS),
-  }
 }
 
 function toWorkflowDetail(record: Record<string, unknown>) {
@@ -435,10 +305,6 @@ function cloneJson<T>(value: T): T {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
-}
-
-function commaList(value: string | undefined) {
-  return (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
 }
 
 function asIso(value: unknown) {

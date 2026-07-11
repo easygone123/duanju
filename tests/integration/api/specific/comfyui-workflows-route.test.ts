@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildMockRequest } from '../../../helpers/request'
 import { installAuthMocks, mockAuthenticated, mockUnauthenticated, resetAuthMockState } from '../../../helpers/auth'
 import type { CreateVersionInput } from '@/lib/comfyui/workflow-service'
+import { COMFY_ERROR_CODE, ComfyError } from '@/lib/comfyui/errors'
 
 const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
@@ -13,7 +14,8 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn(),
   },
   comfyConnection: { findFirst: vi.fn() },
-  projectComfyBinding: { count: vi.fn() },
+  project: { findFirst: vi.fn() },
+  projectComfyBinding: { count: vi.fn(), upsert: vi.fn() },
 }))
 
 const redisMock = vi.hoisted(() => ({
@@ -24,6 +26,8 @@ const getQueueMock = vi.hoisted(() => vi.fn())
 const getObjectInfoMock = vi.hoisted(() => vi.fn())
 const getModelsMock = vi.hoisted(() => vi.fn())
 const watchPromptMock = vi.hoisted(() => vi.fn())
+const getHistoryMock = vi.hoisted(() => vi.fn())
+const uploadImageMock = vi.hoisted(() => vi.fn())
 const authorizeComfyTargetMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
@@ -43,6 +47,8 @@ vi.mock('@/lib/comfyui/client', () => ({
     getModels = getModelsMock
     submitPrompt = submitPromptMock
     watchPrompt = watchPromptMock
+    getHistory = getHistoryMock
+    uploadImage = uploadImageMock
   },
 }))
 
@@ -108,6 +114,10 @@ describe('ComfyUI workflow library', () => {
       SaveImage: { input: { required: {} } },
     })
     getModelsMock.mockResolvedValue(['model.safetensors'])
+    getHistoryMock.mockResolvedValue({ outputs: {
+      '2': { images: [{ filename: 'result.png', subfolder: '', type: 'output' }] },
+    } })
+    uploadImageMock.mockResolvedValue({ name: 'input.png', subfolder: 'waoowaoo', type: 'input' })
     submitPromptMock.mockResolvedValue({ promptId: 'prompt-1' })
     watchPromptMock.mockImplementation(async function* () {
       yield { type: 'executing', promptId: 'prompt-1', nodeId: null }
@@ -222,6 +232,27 @@ describe('ComfyUI workflow library', () => {
     }))
   })
 
+  it('atomically binds only a tested owned current version as a project default', async () => {
+    prismaMock.project.findFirst.mockResolvedValue({ id: 'project-1', userId: 'user-1' })
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow({
+      status: 'published', currentVersionId: 'version-1',
+      currentVersion: version({
+        publishedAt: new Date('2026-07-11T01:00:00Z'),
+        lastSuccessfulTestAt: new Date('2026-07-11T02:00:00Z'),
+        lastTestConnection: { userId: 'user-1' },
+      }),
+    }))
+    prismaMock.projectComfyBinding.upsert.mockResolvedValue({ projectId: 'project-1' })
+    const { bindProjectDefaultWorkflow } = await import('@/lib/comfyui/workflow-service')
+    await bindProjectDefaultWorkflow('user-1', 'project-1', 'image', 'workflow-1')
+    expect(prismaMock.$transaction).toHaveBeenCalled()
+    expect(prismaMock.projectComfyBinding.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { projectId_userId: { projectId: 'project-1', userId: 'user-1' } },
+      create: expect.objectContaining({ imageWorkflowId: 'workflow-1' }),
+      update: { imageWorkflowId: 'workflow-1' },
+    }))
+  })
+
   it('rejects publication of an invalid version with validation details', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')
@@ -283,7 +314,174 @@ describe('ComfyUI workflow library', () => {
       where: { id: 'version-1', workflowId: 'workflow-1' },
       data: { lastSuccessfulTestAt: expect.any(Date), lastTestConnectionId: 'connection-1' },
     }))
+    expect(getHistoryMock).toHaveBeenCalledWith('prompt-1')
     expect(redisMock.eval).toHaveBeenCalled()
+  })
+
+  it('renews the owner-matched test lease and refuses success after lease loss', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    redisMock.eval.mockResolvedValueOnce(0).mockResolvedValue(0)
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/test-run/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/test-run', method: 'POST',
+      body: { versionId: 'version-1', connectionId: 'connection-1', variables: { seed: 11 } },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+    expect(response.status).toBe(409)
+    expect(redisMock.eval.mock.calls.some((call) => String(call[0]).includes('pexpire'))).toBe(true)
+    expect(prismaMock.comfyWorkflowVersion.updateMany).not.toHaveBeenCalled()
+  })
+
+  it('rolls back newly recorded success metadata when the lease is lost during the DB write', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    redisMock.eval
+      .mockResolvedValueOnce(1).mockResolvedValueOnce(1).mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(1).mockResolvedValueOnce(1).mockResolvedValueOnce(0)
+      .mockResolvedValue(0)
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/test-run/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/test-run', method: 'POST',
+      body: { versionId: 'version-1', connectionId: 'connection-1', variables: { seed: 11 } },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+    expect(response.status).toBe(409)
+    expect(prismaMock.comfyWorkflowVersion.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      data: { lastSuccessfulTestAt: null, lastTestConnectionId: null },
+    }))
+  })
+
+  it('does not record a successful test when a declared history output is missing', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    getHistoryMock.mockResolvedValue({ outputs: {} })
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/test-run/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/test-run', method: 'POST',
+      body: { versionId: 'version-1', connectionId: 'connection-1', variables: { seed: 11 } },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+    expect(response.status).toBe(502)
+    expect(prismaMock.comfyWorkflowVersion.updateMany).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [COMFY_ERROR_CODE.AUTH_FAILED, 400, 'MISSING_CONFIG'],
+    [COMFY_ERROR_CODE.EXECUTION_TIMEOUT, 504, 'GENERATION_TIMEOUT'],
+    [COMFY_ERROR_CODE.PROMPT_REJECTED, 502, 'EXTERNAL_ERROR'],
+  ])('maps %s to stable safe API semantics', async (code, status, apiCode) => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    submitPromptMock.mockRejectedValue(new ComfyError(code, 'remote secret prompt body'))
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/test-run/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/test-run', method: 'POST',
+      body: { versionId: 'version-1', connectionId: 'connection-1', variables: { seed: 11 } },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+    expect(response.status).toBe(status)
+    const result = await body(response)
+    expect(result.error).toEqual(expect.objectContaining({ code: apiCode }))
+    expect(JSON.stringify(result)).not.toContain('remote secret prompt body')
+  })
+
+  it('uploads bounded image and video inputs before rendering I2V/V2V live tests', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const mediaContract: CreateVersionInput = {
+      apiFormatJson: {
+        '1': { class_type: 'LoadImage', inputs: { image: 'placeholder.png' } },
+        '2': { class_type: 'SaveVideo', inputs: { images: ['1', 0], video: ['3', 0] } },
+        '3': { class_type: 'LoadVideo', inputs: { video: 'placeholder.mp4' } },
+      },
+      variableDefinitions: [
+        { name: 'first_frame', type: 'image_ref', required: true },
+        { name: 'source_video', type: 'video_ref', required: true },
+      ],
+      bindings: [
+        { nodeId: '1', inputPath: 'image', variable: 'first_frame', valueType: 'image_ref', transform: 'filename' },
+        { nodeId: '3', inputPath: 'video', variable: 'source_video', valueType: 'video_ref', transform: 'filename' },
+      ],
+      outputs: [{ name: 'video', nodeId: '2', fieldPath: 'gifs', mediaType: 'video', primary: true }],
+    }
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow({ mediaType: 'video' }))
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version({
+      ...mediaContract,
+      bindingSpec: mediaContract.bindings,
+      outputSpec: mediaContract.outputs,
+      requirements: { nodeClasses: ['LoadImage', 'LoadVideo', 'SaveVideo'], candidateLoaderInputs: [] },
+    }))
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    getObjectInfoMock.mockResolvedValue({
+      LoadImage: { input: { required: {} } }, LoadVideo: { input: { required: {} } },
+      SaveVideo: { input: { required: {} } },
+    })
+    getHistoryMock.mockResolvedValue({ outputs: {
+      '2': { gifs: [{ filename: 'result.mp4', subfolder: '', type: 'output' }] },
+    } })
+    uploadImageMock
+      .mockResolvedValueOnce({ name: 'input.png', subfolder: 'waoowaoo', type: 'input' })
+      .mockResolvedValueOnce({ name: 'input.mp4', subfolder: 'waoowaoo', type: 'input' })
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/test-run/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/test-run', method: 'POST', body: {
+        versionId: 'version-1', connectionId: 'connection-1', variables: {
+          first_frame: { storageKey: 'inline:first_frame', mimeType: 'image/png', filename: 'input.png' },
+          source_video: { storageKey: 'inline:source_video', mimeType: 'video/mp4', filename: 'input.mp4' },
+        },
+        uploads: {
+          first_frame: { filename: 'input.png', contentType: 'image/png', base64: 'AQID' },
+          source_video: { filename: 'input.mp4', contentType: 'video/mp4', base64: 'BAUG' },
+        },
+      },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+    expect(response.status).toBe(200)
+    expect(uploadImageMock).toHaveBeenCalledWith(expect.objectContaining({
+      filename: expect.stringMatching(/-input\.png$/), contentType: 'image/png', bytes: new Uint8Array([1, 2, 3]),
+    }))
+    expect(submitPromptMock).toHaveBeenCalledWith(expect.objectContaining({
+      '1': expect.objectContaining({ inputs: { image: 'input.png' } }),
+      '3': expect.objectContaining({ inputs: { video: 'input.mp4' } }),
+    }), expect.any(String))
+  })
+
+  it('rejects oversized, deeply nested, and variable-exploding payloads before DB access', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const route = await import('@/app/api/comfyui/workflows/route')
+    const oversized = { '1': { class_type: 'Node', inputs: { value: 'x'.repeat(4 * 1024 * 1024) } } }
+    const oversizedResponse = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows', method: 'POST',
+      body: { name: 'Huge', mediaType: 'image', ...contract, apiFormatJson: oversized },
+    }), { params: Promise.resolve({}) })
+    expect(oversizedResponse.status).toBe(400)
+
+    let deep: Record<string, unknown> = { value: 'leaf' }
+    for (let index = 0; index < 80; index += 1) deep = { child: deep }
+    const deepResponse = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows', method: 'POST',
+      body: { name: 'Deep', mediaType: 'image', ...contract, apiFormatJson: deep },
+    }), { params: Promise.resolve({}) })
+    expect(deepResponse.status).toBe(400)
+    expect(prismaMock.comfyWorkflow.create).not.toHaveBeenCalled()
+
+    const testRoute = await import('@/app/api/comfyui/workflows/[workflowId]/test-run/route')
+    const variables = Object.fromEntries(Array.from({ length: 1100 }, (_, index) => [`v${index}`, index]))
+    const variableResponse = await testRoute.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/test-run', method: 'POST',
+      body: { versionId: 'version-1', connectionId: 'connection-1', variables },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+    expect(variableResponse.status).toBe(400)
+    expect(prismaMock.comfyWorkflow.findFirst).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -302,7 +500,7 @@ describe('ComfyUI workflow library', () => {
     prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
     prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
     if (setup.queue) getQueueMock.mockResolvedValue(setup.queue)
-    if (setup.lease) redisMock.get.mockResolvedValue(setup.lease)
+    if (setup.lease) redisMock.set.mockResolvedValue(null)
     if (setup.objectInfo) getObjectInfoMock.mockResolvedValue(setup.objectInfo)
     const route = await import('@/app/api/comfyui/workflows/[workflowId]/test-run/route')
     const response = await route.POST(buildMockRequest({

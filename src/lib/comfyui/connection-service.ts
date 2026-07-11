@@ -3,17 +3,20 @@ import { Prisma, type ComfyConnection } from '@prisma/client'
 import { ApiError } from '@/lib/api-errors'
 import { decryptApiKey, encryptApiKey } from '@/lib/crypto-utils'
 import { prisma } from '@/lib/prisma'
+import { randomUUID } from 'node:crypto'
 
 import { ComfyClient } from './client'
 import { deriveComfyHealth, sanitizeComfyHealthDiagnostic } from './health'
 import { authorizeComfyTarget, type ComfyNetworkPolicyConfig } from './network-policy'
 import type { ComfyAuthType, ComfyConnectionAuth, ComfyHealthSummary } from './types'
+import { acquireComfyLease, releaseComfyLease } from './test-lease'
 
 const TERMINAL_REQUEST_STATUSES = ['completed', 'failed', 'canceled'] as const
 const MAX_DELETE_ATTEMPTS = 3
 const MAX_STABLE_PROBE_ATTEMPTS = 3
 const DEFAULT_STATUS_PROBE_CONCURRENCY = 4
 const MAX_STATUS_PROBE_CONCURRENCY = 8
+const DELETE_LEASE_TTL_MS = 30_000
 
 export type ComfyCredentialInput =
   | { token: string }
@@ -123,17 +126,25 @@ export async function updateOwnedConnection(
 }
 
 export async function deleteOwnedConnection(userId: string, connectionId: string) {
-  for (let attempt = 1; attempt <= MAX_DELETE_ATTEMPTS; attempt += 1) {
-    try {
-      await deleteOwnedConnectionOnce(userId, connectionId)
-      return
-    } catch (error) {
-      if (isPrismaCode(error, 'P2034') && attempt < MAX_DELETE_ATTEMPTS) continue
-      if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2003')) {
-        throw new ApiError('CONFLICT')
+  await findOwnedConnection(userId, connectionId)
+  // The shared Redis lease serializes delete with live tests and generation claims.
+  const leaseValue = JSON.stringify({ type: 'delete', id: randomUUID(), userId })
+  const leaseKey = await acquireComfyLease(connectionId, leaseValue, DELETE_LEASE_TTL_MS)
+  try {
+    for (let attempt = 1; attempt <= MAX_DELETE_ATTEMPTS; attempt += 1) {
+      try {
+        await deleteOwnedConnectionOnce(userId, connectionId)
+        return
+      } catch (error) {
+        if (isPrismaCode(error, 'P2034') && attempt < MAX_DELETE_ATTEMPTS) continue
+        if (isPrismaCode(error, 'P2034') || isPrismaCode(error, 'P2003')) {
+          throw new ApiError('CONFLICT')
+        }
+        throw error
       }
-      throw error
     }
+  } finally {
+    await releaseComfyLease(leaseKey, leaseValue).catch(() => undefined)
   }
 }
 

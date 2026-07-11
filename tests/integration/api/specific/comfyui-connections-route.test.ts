@@ -27,8 +27,10 @@ const authorizeComfyTargetMock = vi.hoisted(() => vi.fn(async (url: string) => (
 const clientConstructedMock = vi.hoisted(() => vi.fn())
 const getSystemStatsMock = vi.hoisted(() => vi.fn())
 const getQueueMock = vi.hoisted(() => vi.fn())
+const redisMock = vi.hoisted(() => ({ set: vi.fn(), eval: vi.fn() }))
 
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
+vi.mock('@/lib/redis', () => ({ redis: redisMock }))
 vi.mock('@/lib/crypto-utils', () => ({
   encryptApiKey: encryptApiKeyMock,
   decryptApiKey: decryptApiKeyMock,
@@ -87,6 +89,8 @@ describe('ComfyUI private connection routes', () => {
     process.env.COMFYUI_ALLOWED_CIDRS = ''
     delete process.env.COMFYUI_STATUS_PROBE_CONCURRENCY
     prismaMock.comfyConnection.findMany.mockResolvedValue([])
+    redisMock.set.mockResolvedValue('OK')
+    redisMock.eval.mockResolvedValue(1)
     prismaMock.comfyConnection.updateMany.mockResolvedValue({ count: 1 })
     prismaMock.comfyGenerationRequest.count.mockResolvedValue(0)
     prismaMock.comfyGenerationRequest.updateMany.mockResolvedValue({ count: 0 })
@@ -243,6 +247,22 @@ describe('ComfyUI private connection routes', () => {
       },
       data: { connectionId: null, leaseId: null, leaseExpiresAt: null },
     })
+  })
+
+  it('returns 409 when a live-test lease owns the connection and never deletes it', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    redisMock.set.mockResolvedValue(null)
+    const route = await import('@/app/api/comfyui/connections/[connectionId]/route')
+    const response = await route.DELETE(buildMockRequest({
+      path: '/api/comfyui/connections/connection-1', method: 'DELETE',
+    }), connectionContext('connection-1'))
+    expect(response.status).toBe(409)
+    expect(redisMock.set).toHaveBeenCalledWith(
+      'comfy:lease:connection-1', expect.stringContaining('delete'), 'PX', expect.any(Number), 'NX',
+    )
+    expect(prismaMock.comfyConnection.delete).not.toHaveBeenCalled()
   })
 
   it('authorizes ownership and the network target before constructing a probe client', async () => {

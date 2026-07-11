@@ -1,4 +1,13 @@
 import { z } from 'zod'
+import { isBoundedLiveVariables } from './workflow-limits'
+
+const uploadPayloadSchema = z.object({
+  filename: z.string().min(1).max(255).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  contentType: z.enum([
+    'image/png', 'image/jpeg', 'image/webp', 'video/mp4', 'video/webm', 'video/quicktime',
+  ]),
+  base64: z.string().min(1).max(48 * 1024 * 1024).regex(/^[A-Za-z0-9+/]+={0,2}$/),
+}).strict()
 
 export const workflowContractSchema = z.object({
   apiFormatJson: z.union([z.string().max(4 * 1024 * 1024), z.record(z.string(), z.unknown())]),
@@ -19,5 +28,8 @@ export const publishWorkflowSchema = z.object({
 export const testWorkflowSchema = z.object({
   versionId: z.string().trim().min(1).max(128),
   connectionId: z.string().trim().min(1).max(128),
-  variables: z.record(z.string(), z.unknown()).default({}),
+  variables: z.record(z.string(), z.unknown()).refine(isBoundedLiveVariables).default({}),
+  uploads: z.record(
+    z.string(), z.union([uploadPayloadSchema, z.array(uploadPayloadSchema).min(1).max(8)]),
+  ).refine((value) => Object.keys(value).length <= 16).default({}),
 }).strict()

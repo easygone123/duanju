@@ -4,6 +4,7 @@ import { isErrorResponse, requireUserAuth } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { createWorkflowSchema } from '@/lib/comfyui/workflow-route-schema'
 import { createWorkflowDraft, listOwnedWorkflows } from '@/lib/comfyui/workflow-service'
+import { readBoundedJson } from '@/lib/comfyui/workflow-limits'
 
 export const GET = apiHandler(async () => {
   const auth = await requireUserAuth()
@@ -14,7 +15,7 @@ export const GET = apiHandler(async () => {
 export const POST = apiHandler(async (request: NextRequest) => {
   const auth = await requireUserAuth()
   if (isErrorResponse(auth)) return auth
-  const parsed = createWorkflowSchema.safeParse(await request.json().catch(() => null))
+  const parsed = createWorkflowSchema.safeParse(await readBoundedJson(request, 12 * 1024 * 1024))
   if (!parsed.success) throw new ApiError('INVALID_PARAMS')
   const workflow = await createWorkflowDraft(auth.session.user.id, parsed.data as Parameters<typeof createWorkflowDraft>[1])
   return NextResponse.json({ workflow }, { status: 201 })
