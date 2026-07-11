@@ -55,6 +55,7 @@ export async function createProductionDispatcherDependencies(
   limits: ComfyRuntimeOperationLimits,
   signal: AbortSignal,
   executionFence: () => Promise<boolean> = async () => true,
+  sharedRequestHeartbeat?: () => Promise<boolean>,
 ): Promise<ComfyDispatcherDependencies> {
   const { bundle, client, context } = await loadRuntimeContext(requestId, limits)
   const owner = ownerOf(bundle)
@@ -73,7 +74,9 @@ export async function createProductionDispatcherDependencies(
     loadContext: async () => context,
     recheckClaim: executionOwned,
     heartbeat: async (input) => await executionFence()
-      && (await heartbeatDurableComfyRequestLease(input)).owned,
+      && (sharedRequestHeartbeat
+        ? await sharedRequestHeartbeat()
+        : (await heartbeatDurableComfyRequestLease(input)).owned),
     release: async (input) => await executionFence() && await releaseComfyRequestLease(input),
     transition: ({ from, to }) => updateOwned(
       { status: from }, { status: to, ...timestampFor(to) },

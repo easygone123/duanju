@@ -7,7 +7,7 @@ import { cacheComfyHealthIfNewer } from './health'
 import { checkComfyCompatibility, type ComfyCompatibilityCache } from './compatibility'
 import { dispatchComfyRequest, reconcileComfyRequest } from './dispatcher'
 import { COMFY_ERROR_CODE } from './errors'
-import { releaseComfyRequestLease } from './lease'
+import { heartbeatDurableComfyRequestLease, releaseComfyRequestLease } from './lease'
 import { scanExpiredPreSubmitComfyRequests } from './recovery-scan'
 import {
   createDefaultComfySchedulerDependencies,
@@ -243,36 +243,44 @@ export async function reconcileProductionComfyRequest(
   const lockKey = `comfy:reconcile:${requestId}`
   const lockValue = randomUUID()
   if (await redis.set(lockKey, lockValue, 'PX', limits.leaseTtlMs, 'NX') !== 'OK') return
-  let lockLost = false
-  const heartbeat = setInterval(() => {
-    void redis.eval(COMFY_LEASE_RENEW_SCRIPT, 1, lockKey, lockValue, limits.leaseTtlMs)
-      .then((value) => { if (value !== 1) lockLost = true })
-      .catch(() => { lockLost = true })
-  }, Math.max(100, Math.floor(limits.leaseTtlMs / 3)))
-  heartbeat.unref?.()
-  const ownsClaim = async () => !lockLost && await redis.get(lockKey) === lockValue
+  const intervalMs = Math.max(1, Math.floor(limits.leaseTtlMs / 3))
+  const claimHeartbeat = startNonOverlappingHeartbeat(intervalMs, async () =>
+    await redis.eval(
+      COMFY_LEASE_RENEW_SCRIPT, 1, lockKey, lockValue, limits.leaseTtlMs,
+    ) === 1)
+  let requestHeartbeat: ManagedHeartbeat | undefined
+  const ownsClaim = async () => claimHeartbeat.owned()
+    && await redis.get(lockKey) === lockValue
   try {
-    if (!await services.reclaimRequest(requestId, limits.leaseTtlMs)) return
-    if (signal.aborted || !await ownsClaim()) return
+    const owner = await services.reclaimRequest(requestId, limits.leaseTtlMs)
+    if (!owner) return
+    requestHeartbeat = startNonOverlappingHeartbeat(intervalMs, async () =>
+      (await services.heartbeatRequest(owner)).owned)
+    const ownsRecovery = async () => await ownsClaim() && requestHeartbeat!.owned()
+    if (signal.aborted || !await ownsRecovery()) return
     const result = await services.reconcile(
       requestId,
-      await services.createReconciliationDependencies(requestId, limits, ownsClaim),
+      await services.createReconciliationDependencies(requestId, limits, ownsRecovery),
     )
-    if (result.outcome === 'transferring' && !signal.aborted && await ownsClaim()) {
+    if (result.outcome === 'transferring' && !signal.aborted && await ownsRecovery()) {
       return await services.dispatch(
         requestId,
-        await services.createDispatcherDependencies(requestId, limits, signal, ownsClaim),
+        await services.createDispatcherDependencies(
+          requestId, limits, signal, ownsRecovery,
+          async () => requestHeartbeat!.owned(),
+        ),
       )
     }
     return result
   } finally {
-    clearInterval(heartbeat)
+    await Promise.all([claimHeartbeat.stop(), requestHeartbeat?.stop()])
     await redis.eval(COMFY_LEASE_RELEASE_SCRIPT, 1, lockKey, lockValue).catch(() => 0)
   }
 }
 
 interface ProductionComfyReconcileServices {
   reclaimRequest: typeof reclaimProductionRequestIfNeeded
+  heartbeatRequest: typeof heartbeatDurableComfyRequestLease
   createReconciliationDependencies: typeof createProductionReconciliationDependencies
   reconcile: typeof reconcileComfyRequest
   createDispatcherDependencies: typeof createProductionDispatcherDependencies
@@ -281,6 +289,7 @@ interface ProductionComfyReconcileServices {
 
 const productionReconcileServices: ProductionComfyReconcileServices = {
   reclaimRequest: reclaimProductionRequestIfNeeded,
+  heartbeatRequest: heartbeatDurableComfyRequestLease,
   createReconciliationDependencies: createProductionReconciliationDependencies,
   reconcile: reconcileComfyRequest,
   createDispatcherDependencies: createProductionDispatcherDependencies,
@@ -296,21 +305,64 @@ async function reclaimProductionRequestIfNeeded(requestId: string, ttlMs: number
       submissionAttempts: { select: { id: true }, take: 1 },
     },
   })
-  if (!record?.connectionId || !record.leaseId || !record.leaseExpiresAt) return false
+  if (!record?.connectionId || !record.leaseId || !record.leaseExpiresAt) return null
   const redisOwner = await redis.get(comfyLeaseKey(record.connectionId))
-  if (redisOwner !== null) return false
+  if (redisOwner !== null) return null
   const now = new Date()
   if (record.leaseExpiresAt.getTime() > now.getTime()) {
     await prisma.comfyGenerationRequest.updateMany({
       where: { id: record.id, leaseId: record.leaseId }, data: { leaseExpiresAt: now },
     })
   }
+  const newLeaseId = randomUUID()
   const result = await reclaimComfyRecoveryLease({
     requestId: record.id, userId: record.userId, connectionId: record.connectionId,
-    previousLeaseId: record.leaseId, newLeaseId: randomUUID(), ttlMs,
+    previousLeaseId: record.leaseId, newLeaseId, ttlMs,
     leaseExpiredAt: now, now, hasSubmissionAttempt: record.submissionAttempts.length > 0,
   })
-  return result.outcome === 'reclaimed'
+  return result.outcome === 'reclaimed' ? {
+    requestId: record.id, userId: record.userId, connectionId: record.connectionId,
+    leaseId: newLeaseId, ttlMs,
+  } : null
+}
+
+interface ManagedHeartbeat {
+  owned(): boolean
+  stop(): Promise<void>
+}
+
+function startNonOverlappingHeartbeat(
+  intervalMs: number,
+  beat: () => Promise<boolean>,
+): ManagedHeartbeat {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let active: Promise<void> | undefined
+  let stopped = false
+  let lost = false
+  const schedule = () => {
+    if (stopped || lost) return
+    timer = setTimeout(() => {
+      timer = undefined
+      active = beat().then((owned) => {
+        if (!owned) lost = true
+      }).catch(() => {
+        lost = true
+      }).finally(() => {
+        active = undefined
+        schedule()
+      })
+    }, intervalMs)
+    timer.unref?.()
+  }
+  schedule()
+  return {
+    owned: () => !lost,
+    async stop() {
+      stopped = true
+      if (timer) clearTimeout(timer)
+      await active
+    },
+  }
 }
 
 export async function scanProductionExpiredPreSubmit() {

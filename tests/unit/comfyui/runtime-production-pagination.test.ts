@@ -210,7 +210,7 @@ describe('production ComfyUI runtime keyset pages', () => {
     await reconcileProductionComfyRequest(
       'request-1', operationLimits(), new AbortController().signal,
       {
-        reclaimRequest: vi.fn().mockResolvedValue(true),
+        reclaimRequest: vi.fn().mockResolvedValue(recoveryOwner()),
         createReconciliationDependencies: vi.fn(async (_requestId, _limits, fence) => {
           reconciliationFence = fence
           return {} as never
@@ -230,7 +230,7 @@ describe('production ComfyUI runtime keyset pages', () => {
     expect(claim).toBe('runtime-2-claim')
   })
 
-  it('keeps the reconcile claim heartbeat through transfer and passes its live fence to dispatch', async () => {
+  it('keeps both non-overlapping heartbeats alive for a transfer longer than two TTLs', async () => {
     vi.useFakeTimers()
     let claim: string | null = null
     mocks.redisSet.mockImplementation(async (_key: string, value: string) => {
@@ -238,45 +238,165 @@ describe('production ComfyUI runtime keyset pages', () => {
       return 'OK'
     })
     mocks.redisGet.mockImplementation(async () => claim)
+    let claimActive = 0
+    let claimMaxActive = 0
     mocks.redisEval.mockImplementation(async (...args: unknown[]) => {
       const value = args[3]
       if (claim !== value) return 0
-      if (args.length === 5) return 1
+      if (args.length === 5) {
+        claimActive += 1
+        claimMaxActive = Math.max(claimMaxActive, claimActive)
+        await Promise.resolve()
+        claimActive -= 1
+        return 1
+      }
       claim = null
       return 1
     })
-    const transfer = Promise.withResolvers<{ outcome: 'reconciling'; promptId: string }>()
+    const transfer = Promise.withResolvers<void>()
+    const receipt = vi.fn()
+    let durableExpiry = 0
+    let requestActive = 0
+    let requestMaxActive = 0
+    const heartbeatRequest = vi.fn(async (owner: { ttlMs: number }) => {
+      requestActive += 1
+      requestMaxActive = Math.max(requestMaxActive, requestActive)
+      await Promise.resolve()
+      durableExpiry = Date.now() + owner.ttlMs
+      requestActive -= 1
+      return { owned: true as const, leaseExpiresAt: new Date(durableExpiry) }
+    })
     let dispatchFence: (() => Promise<boolean>) | undefined
+    let requestHeartbeatFence: (() => Promise<boolean>) | undefined
     const running = reconcileProductionComfyRequest(
       'request-1', { ...operationLimits(), leaseTtlMs: 3_000 },
       new AbortController().signal,
       {
-        reclaimRequest: vi.fn().mockResolvedValue(true),
+        reclaimRequest: vi.fn().mockResolvedValue(recoveryOwner()),
+        heartbeatRequest,
         createReconciliationDependencies: vi.fn().mockResolvedValue({} as never),
         reconcile: vi.fn().mockResolvedValue({ outcome: 'transferring', outputs: [] }),
-        createDispatcherDependencies: vi.fn(async (_requestId, _limits, _signal, fence) => {
+        createDispatcherDependencies: vi.fn(async (
+          _requestId, _limits, _signal, fence, heartbeatFence,
+        ) => {
           dispatchFence = fence
+          requestHeartbeatFence = heartbeatFence
           return {} as never
         }),
-        dispatch: vi.fn(() => transfer.promise),
+        dispatch: vi.fn(async () => {
+          await transfer.promise
+          const requestOwned = requestHeartbeatFence
+            ? await requestHeartbeatFence() : true
+          if (await dispatchFence?.() && requestOwned) receipt()
+          return { outcome: 'reconciling' as const, promptId: 'prompt-1' }
+        }),
       },
     )
     for (let index = 0; index < 10 && !dispatchFence; index += 1) await Promise.resolve()
     expect(claim).not.toBeNull()
     expect(await dispatchFence?.()).toBe(true)
 
-    await vi.advanceTimersByTimeAsync(1_000)
-    expect(mocks.redisEval).toHaveBeenCalledWith(
-      expect.any(String), 1, 'comfy:reconcile:request-1', expect.any(String), 3_000,
-    )
-    claim = 'runtime-2-claim'
-    expect(await dispatchFence?.()).toBe(false)
+    await vi.advanceTimersByTimeAsync(7_000)
+    const claimRenewals = mocks.redisEval.mock.calls
+      .filter((call) => call.length === 5)
+    expect(claimRenewals.length).toBeGreaterThanOrEqual(6)
+    expect(heartbeatRequest.mock.calls.length).toBeGreaterThanOrEqual(6)
+    expect(claimMaxActive).toBe(1)
+    expect(requestMaxActive).toBe(1)
+    expect(durableExpiry).toBeGreaterThanOrEqual(9_000)
+    expect(await dispatchFence?.()).toBe(true)
+    expect(await requestHeartbeatFence?.()).toBe(true)
 
-    transfer.resolve({ outcome: 'reconciling', promptId: 'prompt-1' })
+    transfer.resolve()
     await running
-    expect(claim).toBe('runtime-2-claim')
+    expect(receipt).toHaveBeenCalledOnce()
+    expect(claim).toBeNull()
   })
+
+  it.each(['request', 'claim'] as const)(
+    'fails closed when the %s lease heartbeat is lost during transfer',
+    async (lostFence) => {
+      vi.useFakeTimers()
+      let claim: string | null = null
+      let claimBeats = 0
+      mocks.redisSet.mockImplementation(async (_key: string, value: string) => {
+        claim = value
+        return 'OK'
+      })
+      mocks.redisGet.mockImplementation(async () => claim)
+      mocks.redisEval.mockImplementation(async (...args: unknown[]) => {
+        if (args.length === 5) {
+          claimBeats += 1
+          if (lostFence === 'claim' && claimBeats >= 1) {
+            claim = 'runtime-2-claim'
+            return 0
+          }
+          return 1
+        }
+        if (claim === args[3]) claim = null
+        return 1
+      })
+      let requestBeats = 0
+      const heartbeatRequest = vi.fn(async () => {
+        requestBeats += 1
+        return lostFence === 'request' && requestBeats >= 2
+          ? { owned: false as const, reason: 'redis_lost' as const }
+          : { owned: true as const, leaseExpiresAt: new Date(Date.now() + 3_000) }
+      })
+      const transfer = Promise.withResolvers<void>()
+      const externalEffect = vi.fn()
+      const releaseRequestLease = vi.fn()
+      let dispatchFence: (() => Promise<boolean>) | undefined
+      let requestHeartbeatFence: (() => Promise<boolean>) | undefined
+      const running = reconcileProductionComfyRequest(
+        'request-1', { ...operationLimits(), leaseTtlMs: 3_000 },
+        new AbortController().signal,
+        {
+          reclaimRequest: vi.fn().mockResolvedValue(recoveryOwner()),
+          heartbeatRequest,
+          createReconciliationDependencies: vi.fn().mockResolvedValue({} as never),
+          reconcile: vi.fn().mockResolvedValue({ outcome: 'transferring', outputs: [] }),
+          createDispatcherDependencies: vi.fn(async (
+            _requestId, _limits, _signal, fence, heartbeatFence,
+          ) => {
+            dispatchFence = fence
+            requestHeartbeatFence = heartbeatFence
+            return {} as never
+          }),
+          dispatch: vi.fn(async () => {
+            await transfer.promise
+            const requestOwned = requestHeartbeatFence
+              ? await requestHeartbeatFence() : true
+            if (await dispatchFence?.() && requestOwned) {
+              externalEffect()
+              releaseRequestLease()
+            }
+            return { outcome: 'reconciling' as const, promptId: 'prompt-1' }
+          }),
+        },
+      )
+      for (let index = 0; index < 10 && !dispatchFence; index += 1) await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(claimBeats).toBeGreaterThanOrEqual(1)
+      if (lostFence === 'claim') {
+        expect(claim).toBe('runtime-2-claim')
+        expect(await dispatchFence?.()).toBe(false)
+      }
+      transfer.resolve()
+      await running
+
+      expect(externalEffect).not.toHaveBeenCalled()
+      expect(releaseRequestLease).not.toHaveBeenCalled()
+    },
+  )
 })
+
+function recoveryOwner() {
+  return {
+    requestId: 'request-1', userId: 'user-1', connectionId: 'connection-1',
+    leaseId: 'new-request-lease', ttlMs: 3_000,
+  }
+}
 
 function operationLimits() {
   return {
