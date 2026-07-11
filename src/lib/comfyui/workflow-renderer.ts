@@ -1,6 +1,7 @@
 import { COMFY_ERROR_CODE, ComfyError } from './errors'
 import {
   discoverComfyPlaceholders,
+  isComfyTransformCompatible,
   isSafeDottedPath,
   matchesComfyVariableType,
   validateComfyApiWorkflow,
@@ -24,6 +25,7 @@ export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflo
     if (!definitions.has(placeholder)) throw undeclaredVariable(placeholder)
   }
   for (const binding of input.bindings) {
+    assertSafeBinding(rendered, binding)
     const definition = definitions.get(binding.variable)
     if (!definition) throw undeclaredVariable(binding.variable)
     if (definition.type !== binding.valueType) {
@@ -31,6 +33,16 @@ export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflo
         COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
         `Binding type for workflow variable "${binding.variable}" does not match its definition.`,
         { details: { variable: binding.variable, reason: 'binding_type' } },
+      )
+    }
+    if (
+      binding.transform !== undefined
+      && !isComfyTransformCompatible(binding.transform, definition.type)
+    ) {
+      throw new ComfyError(
+        COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
+        `Transform for workflow variable "${binding.variable}" is incompatible with its type.`,
+        { details: { variable: binding.variable, reason: 'transform_type' } },
       )
     }
   }
@@ -41,7 +53,6 @@ export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflo
   }
 
   for (const binding of input.bindings) {
-    assertSafeBinding(rendered, binding)
     const value = variables[binding.variable]
     if (value !== undefined) {
       const transformed = transformBindingValue(binding, value, input.uploads)

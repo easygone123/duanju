@@ -160,6 +160,42 @@ describe('ComfyUI workflow compiler', () => {
     expect(discoverComfyPlaceholders(graph)).toEqual(['prompt', 'seed'])
   })
 
+  it('supports nonempty variable names containing hyphens and dots', () => {
+    const graph = validateComfyApiWorkflow({
+      '1': {
+        class_type: 'Node',
+        inputs: { label: '${style-name}', nested: 'look-${prompt.style}' },
+      },
+    })
+    const contract = {
+      graph,
+      variableDefinitions: [
+        { name: 'style-name', type: 'string' as const, required: true },
+        { name: 'prompt.style', type: 'string' as const, required: true },
+      ],
+      bindings: [
+        {
+          nodeId: '1', inputPath: 'nested', variable: 'prompt.style',
+          valueType: 'string' as const,
+        },
+      ],
+      outputs: [
+        {
+          name: 'result', nodeId: '1', fieldPath: 'images',
+          mediaType: 'image' as const, primary: true,
+        },
+      ],
+    }
+
+    expect(discoverComfyPlaceholders(graph)).toEqual(['style-name', 'prompt.style'])
+    expect(validateWorkflowContract(contract)).toEqual([])
+    expect(renderComfyWorkflow({
+      ...contract,
+      variables: { 'style-name': 'ink', 'prompt.style': 'cinematic' },
+      uploads: {},
+    })['1'].inputs).toEqual({ label: 'ink', nested: 'cinematic' })
+  })
+
   it('throws a deterministic error for a missing required variable', () => {
     const error = captureError(() =>
       renderComfyWorkflow({
@@ -288,6 +324,30 @@ describe('ComfyUI workflow compiler', () => {
     expect(uploads).toEqual({ image: upload, images: [upload, secondUpload] })
   })
 
+  it('rejects transform/type incompatibility during rendering', () => {
+    const error = captureError(() =>
+      renderComfyWorkflow({
+        graph: { '1': { class_type: 'Node', inputs: { filename: '' } } },
+        variables: { label: 'not-media' },
+        variableDefinitions: [{ name: 'label', type: 'string', required: true }],
+        bindings: [
+          {
+            nodeId: '1', inputPath: 'filename', variable: 'label',
+            valueType: 'string', transform: 'filename',
+          },
+        ],
+        uploads: {
+          label: { name: 'input.png', subfolder: '', type: 'input' },
+        },
+      }),
+    ) as ComfyError
+
+    expect(error).toMatchObject({
+      code: COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
+      details: { variable: 'label', reason: 'transform_type' },
+    })
+  })
+
   it.each([
     [
       'malformed upload entry',
@@ -410,6 +470,7 @@ describe('ComfyUI workflow compiler', () => {
       variableDefinitions: [
         null,
         { name: 42, type: 'string', required: true },
+        { name: '   ', type: 'string', required: true },
         { name: 'bad.name', type: 'string', required: true },
         { name: 'wrongType', type: 'expression', required: true },
         { name: 'wrongRequired', type: 'string', required: 'yes' },

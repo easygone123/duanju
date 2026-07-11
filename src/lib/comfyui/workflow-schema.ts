@@ -12,7 +12,6 @@ const PLACEHOLDER_PATTERN = /\$\{([^{}]+)\}/g
 const NUMERIC_LINK_INDEX = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
 const BLOCKED_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor'])
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9_-]+$/
-const SAFE_VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 const VARIABLE_TYPES = new Set<ComfyVariableType>([
   'string', 'number', 'boolean', 'image_ref', 'image_ref_list', 'video_ref',
 ])
@@ -91,8 +90,7 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
     }
     const binding = rawBinding
     const nodeIdValid = typeof binding.nodeId === 'string' && binding.nodeId.length > 0
-    const variableValid = typeof binding.variable === 'string'
-      && SAFE_VARIABLE_NAME.test(binding.variable)
+    const variableValid = isValidVariableName(binding.variable)
     const valueTypeValid = typeof binding.valueType === 'string'
       && VARIABLE_TYPES.has(binding.valueType as ComfyVariableType)
     const transformValid = binding.transform === undefined
@@ -137,7 +135,7 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
     } else if (
       binding.transform !== undefined
       && definition
-      && !isTransformCompatible(binding.transform as string, definition.type)
+      && !isComfyTransformCompatible(binding.transform as string, definition.type)
     ) {
       issues.push(issue(
         'COMFY_BINDING_TRANSFORM_TYPE_INVALID', `${path}.transform`,
@@ -157,7 +155,7 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
     const definition = rawDefinition
     if (
       typeof definition.name !== 'string'
-      || !SAFE_VARIABLE_NAME.test(definition.name)
+      || !isValidVariableName(definition.name)
       || typeof definition.required !== 'boolean'
       || !VARIABLE_TYPES.has(definition.type as ComfyVariableType)
     ) return
@@ -208,7 +206,10 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
   return issues
 }
 
-function isTransformCompatible(transform: string, type: ComfyVariableType): boolean {
+export function isComfyTransformCompatible(
+  transform: string,
+  type: ComfyVariableType,
+): boolean {
   if (transform === 'filename_list') return type === 'image_ref_list'
   return (transform === 'filename' || transform === 'image_ref')
     && (type === 'image_ref' || type === 'video_ref')
@@ -240,8 +241,7 @@ function validateDefinitions(
       return
     }
     const definition = rawDefinition
-    const nameValid = typeof definition.name === 'string'
-      && SAFE_VARIABLE_NAME.test(definition.name)
+    const nameValid = isValidVariableName(definition.name)
     const duplicateName = nameValid && seenNames.has(definition.name as string)
     if (!nameValid) {
       issues.push(issue('COMFY_VARIABLE_NAME_INVALID', `${path}.name`, 'Variable name is invalid.'))
@@ -305,6 +305,10 @@ export function matchesComfyVariableType(
 
 function isMediaRef(value: unknown): boolean {
   return isObject(value) && typeof value.storageKey === 'string'
+}
+
+function isValidVariableName(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
 }
 
 function issue(code: string, path: string, message: string): WorkflowValidationIssue {
