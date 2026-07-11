@@ -534,6 +534,33 @@ describe('ComfyUI workflow library', () => {
     expect(submitPromptMock).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['ordinary STRING', ['STRING', {}]],
+    ['empty enum', [[], { model_folder: 'checkpoints' }]],
+    ['malformed schema', { type: 'MODEL' }],
+    ['missing field', undefined],
+  ])('does not classify a %s loader field as a missing model in live test', async (_label, spec) => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    getObjectInfoMock.mockResolvedValue({
+      CheckpointLoaderSimple: {
+        input: { required: spec === undefined ? {} : { ckpt_name: spec } },
+      },
+      SaveImage: { input: { required: {} } },
+    })
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/test-run/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/test-run', method: 'POST',
+      body: { versionId: 'version-1', connectionId: 'connection-1', variables: { seed: 11 } },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(submitPromptMock).toHaveBeenCalledOnce()
+  })
+
   it('releases the test lease when execution fails and does not record success', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')

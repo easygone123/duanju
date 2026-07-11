@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { COMFY_ERROR_CODE, ComfyError } from './errors'
 import type { ComfyApiWorkflow, ComfyWorkflowRequirements } from './types'
 
 export interface ComfyCompatibilityResult {
@@ -32,10 +33,18 @@ interface InputEnum {
 }
 
 const MODEL_FOLDER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+export const MAX_COMFY_COMPATIBILITY_CANDIDATES = 256
+export const MAX_COMFY_MODEL_FOLDERS = 32
+export const MAX_COMFY_MODEL_PROBE_CONCURRENCY = 4
+const MAX_COMFY_MODEL_CATALOG_ENTRIES = 10_000
+const MAX_COMFY_MODEL_NAME_LENGTH = 1_024
 
 export async function checkComfyCompatibility(
   input: CheckComfyCompatibilityInput,
 ): Promise<ComfyCompatibilityResult> {
+  if (input.requirements.candidateLoaderInputs.length > MAX_COMFY_COMPATIBILITY_CANDIDATES) {
+    throw incompatible('Too many workflow model candidates')
+  }
   const objectInfo = await input.client.getObjectInfo()
   const candidateEnums = input.requirements.candidateLoaderInputs.map((candidate) => ({
     candidate,
@@ -43,8 +52,15 @@ export async function checkComfyCompatibility(
   }))
   const modelFolders = [...new Set(candidateEnums.flatMap(({ inputEnum }) =>
     inputEnum?.modelFolder ? [inputEnum.modelFolder] : []))].sort()
-  const modelsByFolder = Object.fromEntries(await Promise.all(modelFolders.map(async (folder) =>
-    [folder, normalizeStringArray(await input.client.getModels(folder))] as const)))
+  if (modelFolders.length > MAX_COMFY_MODEL_FOLDERS) {
+    throw incompatible('Too many workflow model folders')
+  }
+  const folderEntries = await mapWithConcurrency(
+    modelFolders,
+    MAX_COMFY_MODEL_PROBE_CONCURRENCY,
+    async (folder) => [folder, validateModelCatalog(await input.client.getModels(folder))] as const,
+  )
+  const modelsByFolder = Object.fromEntries(folderEntries)
   const capabilityFingerprint = fingerprint({ objectInfo, modelsByFolder })
   const cacheKey = compatibilityCacheKey(
     input.connectionId,
@@ -65,7 +81,7 @@ export async function checkComfyCompatibility(
         candidate.nodeId,
         candidate.inputName,
       )
-      return !inputEnum?.values.includes(candidate.value)
+      return inputEnum !== null && !inputEnum.values.includes(candidate.value)
     })
     .map((candidate) => ({
       nodeId: candidate.nodeId,
@@ -133,6 +149,37 @@ function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return [...new Set(value.filter((entry): entry is string =>
     typeof entry === 'string' && entry.length > 0))].sort()
+}
+
+function validateModelCatalog(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > MAX_COMFY_MODEL_CATALOG_ENTRIES
+    || value.some((entry) => typeof entry !== 'string'
+      || entry.length === 0 || entry.length > MAX_COMFY_MODEL_NAME_LENGTH)) {
+    throw incompatible('Invalid ComfyUI model catalog')
+  }
+  return normalizeStringArray(value)
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  operation: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length)
+  let nextIndex = 0
+  async function worker() {
+    while (nextIndex < values.length) {
+      const index = nextIndex
+      nextIndex += 1
+      results[index] = await operation(values[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker))
+  return results
+}
+
+function incompatible(message: string) {
+  return new ComfyError(COMFY_ERROR_CODE.WORKFLOW_INCOMPATIBLE, message)
 }
 
 function fingerprint(value: unknown) {

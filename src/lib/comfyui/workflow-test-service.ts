@@ -288,9 +288,10 @@ function schemaAcceptsValue(schema: unknown, inputName: string, value: string): 
     if (!isObject(section) || !Object.hasOwn(section, inputName)) continue
     const spec = section[inputName]
     if (!Array.isArray(spec) || !Array.isArray(spec[0])) return true
+    if (spec[0].length === 0) return true
     return spec[0].includes(value)
   }
-  return false
+  return true
 }
 
 function connectionAuth(connection: ComfyConnection): ComfyConnectionAuth {

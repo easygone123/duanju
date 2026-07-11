@@ -22,7 +22,14 @@ export interface ComfyHealthMonitorDependencies {
     graph: ComfyApiWorkflow
     requirements: ComfyWorkflowRequirements
   }): Promise<ComfyCompatibilityResult>
-  cacheSet(key: string, value: string, mode: 'PX', ttlMs: number): Promise<unknown>
+  cacheEval(
+    script: string,
+    keyCount: number,
+    key: string,
+    checkedAt: string,
+    value: string,
+    ttlMs: number,
+  ): Promise<unknown>
 }
 
 export interface MonitorComfyHealthInput {
@@ -37,51 +44,104 @@ export interface MonitorComfyHealthInput {
 export interface MonitoredComfyHealth {
   health: ComfyHealthSummary
   compatibility?: ComfyCompatibilityResult
+  compatibilityError?: {
+    code: 'COMFY_COMPATIBILITY_CHECK_FAILED'
+    message: 'Compatibility check unavailable'
+  }
 }
+
+interface ComfyHealthCacheEvalClient {
+  eval(
+    script: string,
+    keyCount: number,
+    key: string,
+    checkedAt: string,
+    value: string,
+    ttlMs: number,
+  ): Promise<unknown>
+}
+
+const CACHE_IF_NEWER_SCRIPT = `
+local current = redis.call('get', KEYS[1])
+if current then
+  local ok, decoded = pcall(cjson.decode, current)
+  if ok and decoded['checkedAt'] and decoded['checkedAt'] >= ARGV[1] then
+    return 0
+  end
+end
+redis.call('set', KEYS[1], ARGV[2], 'PX', ARGV[3])
+return 1
+`
 
 export async function monitorComfyHealth(
   input: MonitorComfyHealthInput,
   dependencies: ComfyHealthMonitorDependencies,
 ): Promise<MonitoredComfyHealth> {
   const checkedAt = input.checkedAt ?? new Date()
-  let health: ComfyHealthSummary
+  let baseHealth: ComfyHealthSummary
   let compatibility: ComfyCompatibilityResult | undefined
+  let compatibilityError: MonitoredComfyHealth['compatibilityError']
   try {
     await dependencies.authorize()
     const systemStats = await dependencies.getSystemStats()
     const queue = await dependencies.getQueue()
     const hasLease = await dependencies.hasLease(input.connectionId)
-    if (input.workflowHash && input.graph && input.requirements) {
+    baseHealth = deriveComfyHealth({
+      checkedAt,
+      systemStats,
+      queue,
+      ownedNonterminalCount: hasLease ? 1 : 0,
+    })
+  } catch (error) {
+    baseHealth = deriveComfyHealth({ checkedAt, error, ownedNonterminalCount: 0 })
+  }
+  if (baseHealth.state !== 'offline' && baseHealth.state !== 'auth_failed'
+    && input.workflowHash && input.graph && input.requirements) {
+    try {
       compatibility = await dependencies.checkCompatibility({
         connectionId: input.connectionId,
         workflowHash: input.workflowHash,
         graph: input.graph,
         requirements: input.requirements,
       })
+    } catch {
+      compatibilityError = {
+        code: 'COMFY_COMPATIBILITY_CHECK_FAILED',
+        message: 'Compatibility check unavailable',
+      }
     }
-    health = deriveComfyHealth({
-      checkedAt,
-      systemStats,
-      queue,
-      ownedNonterminalCount: hasLease ? 1 : 0,
-    })
-    if (compatibility && !compatibility.compatible) {
-      health = { ...health, state: 'workflow_incompatible' }
-    }
-  } catch (error) {
-    health = deriveComfyHealth({ checkedAt, error, ownedNonterminalCount: 0 })
   }
-  await dependencies.cacheSet(
-    comfyHealthKey(input.connectionId),
-    JSON.stringify(health),
-    'PX',
-    input.ttlMs,
+  await cacheComfyHealthIfNewer(
+    { eval: dependencies.cacheEval }, input.connectionId, baseHealth, input.ttlMs,
   )
-  return { health, ...(compatibility ? { compatibility } : {}) }
+  const health = compatibility && !compatibility.compatible
+    ? { ...baseHealth, state: 'workflow_incompatible' as const }
+    : baseHealth
+  return {
+    health,
+    ...(compatibility ? { compatibility } : {}),
+    ...(compatibilityError ? { compatibilityError } : {}),
+  }
 }
 
 export function comfyHealthKey(connectionId: string) {
   return `comfy:health:${connectionId}`
+}
+
+export async function cacheComfyHealthIfNewer(
+  client: ComfyHealthCacheEvalClient,
+  connectionId: string,
+  health: ComfyHealthSummary,
+  ttlMs: number,
+) {
+  return client.eval(
+    CACHE_IF_NEWER_SCRIPT,
+    1,
+    comfyHealthKey(connectionId),
+    health.checkedAt,
+    JSON.stringify(health),
+    ttlMs,
+  )
 }
 
 interface DeriveComfyHealthInput {

@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   checkComfyCompatibility,
+  MAX_COMFY_COMPATIBILITY_CANDIDATES,
+  MAX_COMFY_MODEL_FOLDERS,
+  MAX_COMFY_MODEL_PROBE_CONCURRENCY,
   type ComfyCompatibilityClient,
 } from '@/lib/comfyui/compatibility'
 import type { ComfyWorkflowRequirements } from '@/lib/comfyui/types'
@@ -169,5 +172,102 @@ describe('checkComfyCompatibility', () => {
     ])
     expect(complete.missingModels).toEqual([])
     expect(complete.compatible).toBe(true)
+  })
+
+  it.each([
+    ['ordinary STRING', ['STRING', { multiline: true }]],
+    ['empty enum', [[], { model_folder: 'empty' }]],
+    ['malformed schema', { type: 'MODEL' }],
+    ['missing field', undefined],
+  ])('does not misreport %s inputs as missing models', async (_label, fieldSchema) => {
+    const required = fieldSchema === undefined ? {} : { model_name: fieldSchema }
+    const comfy = client({ Loader: { input: { required } } })
+
+    const result = await checkComfyCompatibility({
+      connectionId: 'connection-1', workflowHash: 'workflow-schema',
+      graph: { '1': { class_type: 'Loader', inputs: { model_name: 'wanted' } } },
+      requirements: {
+        nodeClasses: ['Loader'],
+        candidateLoaderInputs: [{ nodeId: '1', inputName: 'model_name', value: 'wanted' }],
+      },
+      client: comfy,
+    })
+
+    expect(result.missingModels).toEqual([])
+    expect(comfy.getModels).not.toHaveBeenCalled()
+  })
+
+  it('fails closed before probing when candidate or identified folder limits are exceeded', async () => {
+    const comfy = client({})
+    const tooManyCandidates = Array.from(
+      { length: MAX_COMFY_COMPATIBILITY_CANDIDATES + 1 },
+      (_, index) => ({ nodeId: String(index), inputName: 'model', value: 'wanted' }),
+    )
+    await expect(checkComfyCompatibility({
+      connectionId: 'connection-1', workflowHash: 'too-many-candidates', graph: {},
+      requirements: { nodeClasses: [], candidateLoaderInputs: tooManyCandidates }, client: comfy,
+    })).rejects.toMatchObject({ code: 'COMFY_WORKFLOW_INCOMPATIBLE' })
+    expect(comfy.getObjectInfo).not.toHaveBeenCalled()
+
+    const folderCount = MAX_COMFY_MODEL_FOLDERS + 1
+    const info: Record<string, unknown> = {}
+    const folderGraph: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {}
+    const folderCandidates = Array.from({ length: folderCount }, (_, index) => {
+      const nodeId = String(index)
+      const classType = `Loader${index}`
+      info[classType] = {
+        input: { required: { model: [['wanted'], { model_folder: `folder-${index}` }] } },
+      }
+      folderGraph[nodeId] = { class_type: classType, inputs: { model: 'wanted' } }
+      return { nodeId, inputName: 'model', value: 'wanted' }
+    })
+    comfy.getObjectInfo.mockResolvedValue(info)
+    await expect(checkComfyCompatibility({
+      connectionId: 'connection-1', workflowHash: 'too-many-folders', graph: folderGraph,
+      requirements: {
+        nodeClasses: Object.keys(info), candidateLoaderInputs: folderCandidates,
+      },
+      client: comfy,
+    })).rejects.toMatchObject({ code: 'COMFY_WORKFLOW_INCOMPATIBLE' })
+    expect(comfy.getModels).not.toHaveBeenCalled()
+  })
+
+  it('bounds model folder probe concurrency and rejects malformed model catalogs', async () => {
+    const folderCount = MAX_COMFY_MODEL_PROBE_CONCURRENCY + 2
+    const info: Record<string, unknown> = {}
+    const folderGraph: Record<string, { class_type: string; inputs: Record<string, unknown> }> = {}
+    const folderCandidates = Array.from({ length: folderCount }, (_, index) => {
+      const nodeId = String(index)
+      const classType = `Loader${index}`
+      info[classType] = {
+        input: { required: { model: [['wanted'], { model_folder: `folder-${index}` }] } },
+      }
+      folderGraph[nodeId] = { class_type: classType, inputs: { model: 'wanted' } }
+      return { nodeId, inputName: 'model', value: 'wanted' }
+    })
+    const comfy = client(info)
+    let active = 0
+    let peak = 0
+    comfy.getModels.mockImplementation(async () => {
+      active += 1
+      peak = Math.max(peak, active)
+      await new Promise((resolve) => setTimeout(resolve, 2))
+      active -= 1
+      return ['wanted']
+    })
+
+    await checkComfyCompatibility({
+      connectionId: 'connection-1', workflowHash: 'bounded-folders', graph: folderGraph,
+      requirements: { nodeClasses: Object.keys(info), candidateLoaderInputs: folderCandidates },
+      client: comfy,
+    })
+    expect(peak).toBeLessThanOrEqual(MAX_COMFY_MODEL_PROBE_CONCURRENCY)
+
+    comfy.getModels.mockResolvedValue({ secret: 'not-an-array' })
+    await expect(checkComfyCompatibility({
+      connectionId: 'connection-1', workflowHash: 'malformed-catalog', graph: folderGraph,
+      requirements: { nodeClasses: Object.keys(info), candidateLoaderInputs: folderCandidates },
+      client: comfy,
+    })).rejects.toMatchObject({ code: 'COMFY_WORKFLOW_INCOMPATIBLE' })
   })
 })

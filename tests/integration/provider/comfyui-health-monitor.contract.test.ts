@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComfyError, COMFY_ERROR_CODE } from '@/lib/comfyui/errors'
 import {
   comfyHealthKey,
+  cacheComfyHealthIfNewer,
   monitorComfyHealth,
   type ComfyHealthMonitorDependencies,
 } from '@/lib/comfyui/health'
@@ -20,7 +21,7 @@ function dependencies(): ComfyHealthMonitorDependencies & {
   getQueue: ReturnType<typeof vi.fn>
   hasLease: ReturnType<typeof vi.fn>
   checkCompatibility: ReturnType<typeof vi.fn>
-  cacheSet: ReturnType<typeof vi.fn>
+  cacheEval: ReturnType<typeof vi.fn>
 } {
   return {
     authorize: vi.fn().mockResolvedValue(undefined),
@@ -31,7 +32,7 @@ function dependencies(): ComfyHealthMonitorDependencies & {
       compatible: true, missingNodes: [], missingModels: [], workflowHash: 'workflow-a',
       capabilityFingerprint: 'f'.repeat(64),
     }),
-    cacheSet: vi.fn().mockResolvedValue('OK'),
+    cacheEval: vi.fn().mockResolvedValue(1),
   }
 }
 
@@ -76,13 +77,15 @@ describe('ComfyUI health monitor contract', () => {
 
     await monitor(deps)
 
-    expect(deps.cacheSet).toHaveBeenCalledWith(
+    expect(deps.cacheEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('get'"),
+      1,
       comfyHealthKey('connection-1'),
+      checkedAt.toISOString(),
       JSON.stringify({
         state: 'online_idle', checkedAt: checkedAt.toISOString(), version: '0.3.50',
         runningCount: 0, pendingCount: 0,
       }),
-      'PX',
       12_000,
     )
   })
@@ -98,7 +101,7 @@ describe('ComfyUI health monitor contract', () => {
     expect(result.health.state).toBe('auth_failed')
     expect(JSON.stringify(result)).not.toContain('top-secret')
     expect(deps.getQueue).not.toHaveBeenCalled()
-    expect(deps.cacheSet).toHaveBeenCalledOnce()
+    expect(deps.cacheEval).toHaveBeenCalledOnce()
   })
 
   it('classifies policy or transport failure as offline without leaking diagnostics', async () => {
@@ -146,5 +149,70 @@ describe('ComfyUI health monitor contract', () => {
       workflowHash: 'workflow-a',
       capabilityFingerprint: 'a'.repeat(64),
     })
+    const cachedPayload = JSON.parse(deps.cacheEval.mock.calls[0][4])
+    expect(cachedPayload.state).toBe('online_idle')
+  })
+
+  it('keeps compatibility probe failures separate from base connection health', async () => {
+    const deps = dependencies()
+    deps.checkCompatibility.mockRejectedValue(new Error('model probe token=top-secret'))
+
+    const result = await monitor(deps)
+
+    expect(result.health.state).toBe('online_idle')
+    expect(result.compatibilityError).toEqual({
+      code: 'COMFY_COMPATIBILITY_CHECK_FAILED',
+      message: 'Compatibility check unavailable',
+    })
+    expect(JSON.stringify(result)).not.toContain('top-secret')
+    expect(JSON.parse(deps.cacheEval.mock.calls[0][4]).state).toBe('online_idle')
+  })
+
+  it('uses an atomic freshness CAS so inverse completion cannot overwrite newer health', async () => {
+    let stored: { checkedAt: string; payload: string } | undefined
+    const cacheEval = vi.fn(async (
+      _script: string, _keys: number, _key: string, candidateAt: string, payload: string,
+    ) => {
+      if (stored && stored.checkedAt >= candidateAt) return 0
+      stored = { checkedAt: candidateAt, payload }
+      return 1
+    })
+    const older = dependencies()
+    const newer = dependencies()
+    older.cacheEval = cacheEval
+    newer.cacheEval = cacheEval
+    const releaseOlder = Promise.withResolvers<void>()
+    older.getQueue.mockImplementation(async () => {
+      await releaseOlder.promise
+      return { running: [], pending: [] }
+    })
+    newer.getQueue.mockResolvedValue({ running: [['manual']], pending: [] })
+
+    const oldProbe = monitorComfyHealth({
+      connectionId: 'connection-1', checkedAt: new Date('2026-07-11T08:00:00.000Z'), ttlMs: 12_000,
+    }, older)
+    await monitorComfyHealth({
+      connectionId: 'connection-1', checkedAt: new Date('2026-07-11T08:00:01.000Z'), ttlMs: 12_000,
+    }, newer)
+    releaseOlder.resolve()
+    await oldProbe
+
+    expect(JSON.parse(stored!.payload).state).toBe('online_busy_external')
+    expect(cacheEval).toHaveBeenCalledTimes(2)
+  })
+
+  it('exports the Redis CAS writer with the same health key and TTL contract', async () => {
+    const evalClient = { eval: vi.fn().mockResolvedValue(1) }
+    const health = {
+      state: 'online_idle' as const, checkedAt: checkedAt.toISOString(),
+      runningCount: 0, pendingCount: 0,
+    }
+
+    await cacheComfyHealthIfNewer(evalClient, 'connection-1', health, 12_000)
+
+    expect(evalClient.eval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('get'"), 1, comfyHealthKey('connection-1'),
+      checkedAt.toISOString(), JSON.stringify(health), 12_000,
+    )
   })
 })
