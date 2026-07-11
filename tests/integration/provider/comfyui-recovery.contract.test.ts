@@ -7,10 +7,20 @@ import {
   findComfyPromptByClientId,
   reconcileComfyRequest,
   reclaimComfyRecoveryLease,
+  recordComfyAttemptAbsenceWithStore,
   recordComfyAcceptedPromptWithStore,
   type ComfyCancellationDependencies,
   type ComfyReconciliationDependencies,
 } from '@/lib/comfyui/dispatcher'
+
+function reconciliationSafetyDefaults() {
+  return {
+    recordAttemptAbsence: vi.fn().mockResolvedValue({ outcome: 'reconciling', checkCount: 1 }),
+    deleteQueuedPrompt: vi.fn(), interruptPrompt: vi.fn(),
+    persistRecoveredCancellation: vi.fn().mockResolvedValue(true),
+    releaseLease: vi.fn().mockResolvedValue(true),
+  }
+}
 
 describe('ComfyUI recovery and cancellation contract', () => {
   it('atomically fences submission against cancellation and records the attempt before POST', async () => {
@@ -77,6 +87,7 @@ describe('ComfyUI recovery and cancellation contract', () => {
     }, {}, 'client-1')).toBe('prompt-1')
     const persistDiscoveredPrompt = vi.fn().mockResolvedValue(true)
     const deps = {
+      ...reconciliationSafetyDefaults(),
       loadContext: vi.fn().mockResolvedValue({
         request: {
           id: 'request-1', userId: 'user-1', status: 'reconciling',
@@ -100,8 +111,128 @@ describe('ComfyUI recovery and cancellation contract', () => {
     }))
   })
 
+  it('persists unknown-submit absence checks across restart and fails only at the configured threshold', async () => {
+    const attempt = {
+      id: 'attempt-1', requestId: 'request-1', userId: 'user-1', connectionId: 'connection-1',
+      clientId: 'client-1', createdAt: new Date(0), firstCheckedAt: null as Date | null,
+      lastCheckedAt: null as Date | null, checkCount: 0, status: 'fenced',
+      reconcileDeadlineAt: null as Date | null,
+      request: { leaseId: 'lease-1', status: 'reconciling', cancelRequestedAt: null as Date | null },
+    }
+    const finishRequest = vi.fn(async () => ({ count: 1 }))
+    const store: NonNullable<Parameters<typeof recordComfyAttemptAbsenceWithStore>[1]> = {
+      transaction: async (operation) => operation({
+        findAttempt: vi.fn(async () => ({ ...attempt, request: { ...attempt.request } })),
+        recordCheck: vi.fn(async (value) => {
+          const input = value as { where: { checkCount: number }; data: Record<string, unknown> }
+          if (input.where.checkCount !== attempt.checkCount) return { count: 0 }
+          Object.assign(attempt, input.data)
+          return { count: 1 }
+        }),
+        finishRequest,
+      }),
+    }
+    const input = {
+      requestId: 'request-1', userId: 'user-1', connectionId: 'connection-1',
+      leaseId: 'lease-1', attemptId: 'attempt-1', clientId: 'client-1',
+      policy: { minChecks: 3, minAgeMs: 30_000, deadlineMs: 120_000 },
+    }
+    await expect(recordComfyAttemptAbsenceWithStore({ ...input, now: new Date(10_000) }, store))
+      .resolves.toEqual({ outcome: 'reconciling', checkCount: 1 })
+    await expect(recordComfyAttemptAbsenceWithStore({ ...input, now: new Date(20_000) }, store))
+      .resolves.toEqual({ outcome: 'reconciling', checkCount: 2 })
+    expect(finishRequest).not.toHaveBeenCalled()
+    await expect(recordComfyAttemptAbsenceWithStore({ ...input, now: new Date(31_000) }, store))
+      .resolves.toEqual({ outcome: 'failed', checkCount: 3 })
+    expect(attempt.firstCheckedAt).toEqual(new Date(10_000))
+    expect(attempt.reconcileDeadlineAt).toEqual(new Date(120_000))
+    expect(attempt.checkCount).toBe(3)
+    expect(finishRequest).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'failed', errorCode: 'COMFY_RECONCILIATION_REQUIRED' }),
+    }))
+  })
+
+  it('recovers a cancellation after response loss by interrupting only the discovered owned prompt', async () => {
+    const interruptPrompt = vi.fn()
+    const persistRecoveredCancellation = vi.fn().mockResolvedValue(true)
+    const releaseLease = vi.fn().mockResolvedValue(true)
+    const verifyLeaseOwner = vi.fn().mockResolvedValue(true)
+    const deps = {
+      ...reconciliationSafetyDefaults(),
+      loadContext: vi.fn().mockResolvedValue({
+        request: {
+          id: 'request-1', userId: 'user-1', status: 'reconciling',
+          connectionId: 'connection-1', leaseId: 'recovery-lease', cancelRequestedAt: new Date(100),
+          submissionAttempt: { id: 'attempt-1', clientId: 'client-1' },
+        }, version: { outputs: [] },
+      }),
+      verifyLeaseOwner,
+      findPromptByClientId: vi.fn().mockResolvedValue('prompt-1'),
+      persistDiscoveredPrompt: vi.fn().mockResolvedValue(true),
+      getHistory: vi.fn().mockResolvedValue({}),
+      getQueue: vi.fn().mockResolvedValue({ running: [[0, 'prompt-1']], pending: [[0, 'manual']] }),
+      persistRecoveredState: vi.fn(), interruptPrompt,
+      deleteQueuedPrompt: vi.fn(), persistRecoveredCancellation, releaseLease,
+    } satisfies ComfyReconciliationDependencies
+    await expect(reconcileComfyRequest('request-1', deps)).resolves.toMatchObject({ outcome: 'canceled' })
+    expect(interruptPrompt).toHaveBeenCalledWith('prompt-1')
+    expect(verifyLeaseOwner).toHaveBeenCalledTimes(2)
+    expect(persistRecoveredCancellation).toHaveBeenCalledWith(expect.objectContaining({
+      promptId: 'prompt-1', leaseId: 'recovery-lease',
+    }))
+    expect(releaseLease).toHaveBeenCalled()
+  })
+
+  it('terminalizes an unknown canceled submission as canceled after the durable threshold', async () => {
+    const finishRequest = vi.fn().mockResolvedValue({ count: 1 })
+    const store: NonNullable<Parameters<typeof recordComfyAttemptAbsenceWithStore>[1]> = {
+      transaction: async (operation) => operation({
+        findAttempt: vi.fn().mockResolvedValue({
+          id: 'attempt-1', requestId: 'request-1', userId: 'user-1',
+          connectionId: 'connection-1', clientId: 'client-1', createdAt: new Date(0),
+          firstCheckedAt: new Date(10_000), lastCheckedAt: new Date(20_000),
+          reconcileDeadlineAt: new Date(120_000), checkCount: 2, status: 'checking_absence',
+          request: { leaseId: 'lease-1', status: 'reconciling', cancelRequestedAt: new Date(5_000) },
+        }),
+        recordCheck: vi.fn().mockResolvedValue({ count: 1 }), finishRequest,
+      }),
+    }
+    await expect(recordComfyAttemptAbsenceWithStore({
+      requestId: 'request-1', userId: 'user-1', connectionId: 'connection-1',
+      leaseId: 'lease-1', attemptId: 'attempt-1', clientId: 'client-1', now: new Date(31_000),
+      policy: { minChecks: 3, minAgeMs: 30_000, deadlineMs: 120_000 },
+    }, store)).resolves.toEqual({ outcome: 'canceled', checkCount: 3 })
+    expect(finishRequest).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'canceled', canceledAt: new Date(31_000) }),
+    }))
+  })
+
+  it('never cancels external work or acts after recovery ownership is lost', async () => {
+    for (const [queue, ownerResults] of [
+      [{ running: [[0, 'manual']], pending: [] }, [true]],
+      [{ running: [[0, 'prompt-1']], pending: [] }, [true, false]],
+    ] as const) {
+      const interruptPrompt = vi.fn()
+      const deps = {
+        ...reconciliationSafetyDefaults(),
+        loadContext: vi.fn().mockResolvedValue({ request: {
+          id: 'request-1', userId: 'user-1', status: 'reconciling', connectionId: 'connection-1',
+          leaseId: 'lease-1', promptId: 'prompt-1', cancelRequestedAt: new Date(1),
+        }, version: { outputs: [] } }),
+        verifyLeaseOwner: vi.fn().mockResolvedValueOnce(ownerResults[0]).mockResolvedValueOnce(ownerResults[1]),
+        getHistory: vi.fn().mockResolvedValue({}), getQueue: vi.fn().mockResolvedValue(queue),
+        persistRecoveredState: vi.fn(), interruptPrompt, deleteQueuedPrompt: vi.fn(),
+        persistRecoveredCancellation: vi.fn(), releaseLease: vi.fn(),
+      } satisfies ComfyReconciliationDependencies
+      const result = await reconcileComfyRequest('request-1', deps).catch((error) => error)
+      expect(interruptPrompt).not.toHaveBeenCalled()
+      expect(result).toBeTruthy()
+    }
+  })
+
   it('recovers a recorded prompt from history without resubmission', async () => {
     const deps: ComfyReconciliationDependencies = {
+      ...reconciliationSafetyDefaults(),
       loadContext: vi.fn().mockResolvedValue({
         request: { id: 'request-1', userId: 'user-1', status: 'reconciling', connectionId: 'connection-1', leaseId: 'lease-1', promptId: 'prompt-1' },
         version: { outputs: [{ name: 'result', nodeId: '2', fieldPath: 'images', mediaType: 'image', primary: true }] },
@@ -125,6 +256,7 @@ describe('ComfyUI recovery and cancellation contract', () => {
     ] as const) {
       const persistRecoveredState = vi.fn().mockResolvedValue(true)
       const deps = {
+        ...reconciliationSafetyDefaults(),
         loadContext: vi.fn().mockResolvedValue({ request: { id: 'request-1', userId: 'user-1', status: 'reconciling', connectionId: 'connection-1', leaseId: 'lease-1', promptId: 'prompt-1' }, version: { outputs: [] } }),
         verifyLeaseOwner: vi.fn().mockResolvedValue(true), getQueue: vi.fn().mockResolvedValue(queue),
         getHistory: vi.fn().mockResolvedValue({}), persistRecoveredState,
@@ -136,6 +268,7 @@ describe('ComfyUI recovery and cancellation contract', () => {
   it('marks an explicit history execution error failed with a stable code', async () => {
     const persistRecoveredState = vi.fn().mockResolvedValue(true)
     const deps = {
+      ...reconciliationSafetyDefaults(),
       loadContext: vi.fn().mockResolvedValue({ request: { id: 'request-1', userId: 'user-1', status: 'reconciling', connectionId: 'connection-1', leaseId: 'lease-1', promptId: 'prompt-1' }, version: { outputs: [] } }),
       verifyLeaseOwner: vi.fn().mockResolvedValue(true), getQueue: vi.fn(),
       getHistory: vi.fn().mockResolvedValue({ 'prompt-1': { status: { status_str: 'error' } } }),
@@ -150,6 +283,7 @@ describe('ComfyUI recovery and cancellation contract', () => {
   it('does not declare a missing prompt failed until absence is conclusive', async () => {
     const persistRecoveredState = vi.fn().mockResolvedValue(true)
     const base = {
+      ...reconciliationSafetyDefaults(),
       loadContext: vi.fn().mockResolvedValue({ request: { id: 'request-1', userId: 'user-1', status: 'reconciling', connectionId: 'connection-1', leaseId: 'lease-1', promptId: 'prompt-1' }, version: { outputs: [] } }),
       verifyLeaseOwner: vi.fn().mockResolvedValue(true),
       getQueue: vi.fn().mockResolvedValue({ running: [], pending: [] }),

@@ -28,6 +28,7 @@ export {
   claimComfySubmissionFenceWithStore,
   claimExpiredComfyRequestWithStore,
   reclaimComfyRecoveryLease,
+  recordComfyAttemptAbsenceWithStore,
   recordComfyAcceptedPromptWithStore,
 } from './submission'
 
@@ -358,6 +359,13 @@ export interface ComfyReconciliationDependencies {
   persistDiscoveredPrompt?(input: OwnerInput & {
     attemptId: string; clientId: string; promptId: string
   }): Promise<boolean>
+  recordAttemptAbsence(input: OwnerInput & {
+    attemptId: string; clientId: string
+  }): Promise<{ outcome: 'reconciling' | 'failed' | 'canceled'; checkCount: number }>
+  deleteQueuedPrompt(promptId: string): Promise<void>
+  interruptPrompt(promptId: string): Promise<void>
+  persistRecoveredCancellation(input: OwnerInput & { promptId: string }): Promise<boolean>
+  releaseLease(input: OwnerInput): Promise<boolean>
   isAbsenceConclusive?(input: OwnerInput & { promptId: string }): Promise<boolean>
   persistRecoveredState(input: OwnerInput & {
     promptId: string
@@ -378,7 +386,17 @@ export async function reconcileComfyRequest(
   let promptId = request.promptId ?? request.submissionAttempt?.promptId ?? undefined
   if (!promptId && request.submissionAttempt) {
     promptId = await dependencies.findPromptByClientId?.(request.submissionAttempt.clientId) ?? undefined
-    if (!promptId) return { outcome: 'reconciling' as const }
+    if (!promptId) {
+      const absence = await dependencies.recordAttemptAbsence({
+        ...owner, attemptId: request.submissionAttempt.id,
+        clientId: request.submissionAttempt.clientId,
+      })
+      if (absence.outcome === 'reconciling') {
+        return { outcome: 'reconciling' as const }
+      }
+      await dependencies.releaseLease(owner).catch(() => false)
+      return { outcome: absence.outcome }
+    }
     if (!dependencies.persistDiscoveredPrompt
       || !await dependencies.persistDiscoveredPrompt({
         ...owner, attemptId: request.submissionAttempt.id,
@@ -386,6 +404,22 @@ export async function reconcileComfyRequest(
       })) throw lostLease()
   }
   if (!promptId) return { outcome: 'reconciling' as const }
+  let queue: { running: unknown[]; pending: unknown[] } | undefined
+  if (request.cancelRequestedAt) {
+    queue = await dependencies.getQueue()
+    const queued = queueContainsPrompt(queue.pending, promptId)
+    const running = queueContainsPrompt(queue.running, promptId)
+    if (!queued && !running) return { outcome: 'reconciling' as const }
+    if (!await dependencies.verifyLeaseOwner(owner)) throw lostLease()
+    if (queued) {
+      await dependencies.deleteQueuedPrompt(promptId)
+    } else {
+      await dependencies.interruptPrompt(promptId)
+    }
+    if (!await dependencies.persistRecoveredCancellation({ ...owner, promptId })) throw lostLease()
+    await dependencies.releaseLease(owner).catch(() => false)
+    return { outcome: 'canceled' as const }
+  }
   const history = await dependencies.getHistory(promptId)
   if (historyShowsExecutionFailure(history, promptId)) {
     await mustOwn(dependencies.persistRecoveredState({
@@ -398,7 +432,7 @@ export async function reconcileComfyRequest(
     await mustOwn(dependencies.persistRecoveredState({ ...owner, promptId, status: 'transferring', outputs }))
     return { outcome: 'transferring' as const, outputs }
   }
-  const queue = await dependencies.getQueue()
+  queue ??= await dependencies.getQueue()
   const status = queueContainsPrompt(queue.running, promptId)
     ? 'running' as const
     : queueContainsPrompt(queue.pending, promptId)

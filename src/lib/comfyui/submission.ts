@@ -4,6 +4,7 @@ import { ApiError } from '@/lib/api-errors'
 import { prisma } from '@/lib/prisma'
 
 import { acquireComfyRequestLease, releaseComfyRequestLease } from './lease'
+import { COMFY_ERROR_CODE } from './errors'
 
 export interface ComfyOwnerInput {
   requestId: string
@@ -213,4 +214,118 @@ export async function reclaimComfyRecoveryLease(
     return { outcome: 'lost' as const }
   }
   return { outcome: 'reclaimed' as const, leaseId: input.newLeaseId }
+}
+
+export interface ComfyAttemptAbsencePolicy {
+  minChecks: number
+  minAgeMs: number
+  deadlineMs: number
+}
+
+interface AttemptAbsenceStore {
+  transaction<T>(operation: (client: {
+    findAttempt(input: Record<string, unknown>): Promise<Record<string, unknown> | null>
+    recordCheck(input: Record<string, unknown>): Promise<{ count: number }>
+    finishRequest(input: Record<string, unknown>): Promise<{ count: number }>
+  }) => Promise<T>): Promise<T>
+}
+
+const defaultAttemptAbsenceStore: AttemptAbsenceStore = {
+  transaction: (operation) => prisma.$transaction((tx) => operation({
+    findAttempt: (input) => tx.comfySubmissionAttempt.findFirst(
+      input as Prisma.ComfySubmissionAttemptFindFirstArgs,
+    ) as Promise<Record<string, unknown> | null>,
+    recordCheck: (input) => tx.comfySubmissionAttempt.updateMany(
+      input as Prisma.ComfySubmissionAttemptUpdateManyArgs,
+    ),
+    finishRequest: (input) => tx.comfyGenerationRequest.updateMany(
+      input as Prisma.ComfyGenerationRequestUpdateManyArgs,
+    ),
+  }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }),
+}
+
+export async function recordComfyAttemptAbsenceWithStore(
+  input: ComfyOwnerInput & {
+    attemptId: string
+    clientId: string
+    now: Date
+    policy: ComfyAttemptAbsencePolicy
+  },
+  store: AttemptAbsenceStore = defaultAttemptAbsenceStore,
+) {
+  validateAbsencePolicy(input.policy)
+  return store.transaction(async (client) => {
+    const attempt = await client.findAttempt({
+      where: {
+        id: input.attemptId, requestId: input.requestId, userId: input.userId,
+        connectionId: input.connectionId, clientId: input.clientId,
+        promptId: null, status: { in: ['fenced', 'checking_absence'] },
+      },
+      include: { request: { select: { leaseId: true, status: true, cancelRequestedAt: true } } },
+    })
+    if (!attempt || !isRecord(attempt.request)
+      || attempt.request.leaseId !== input.leaseId) throw new ApiError('CONFLICT')
+    const createdAt = asDate(attempt.createdAt)
+    const firstCheckedAt = attempt.firstCheckedAt == null
+      ? input.now
+      : asDate(attempt.firstCheckedAt)
+    const previousCount = nonnegativeInteger(attempt.checkCount)
+    const checkCount = previousCount + 1
+    const deadlineAt = attempt.reconcileDeadlineAt == null
+      ? new Date(createdAt.getTime() + input.policy.deadlineMs)
+      : asDate(attempt.reconcileDeadlineAt)
+    const oldEnough = input.now.getTime() - createdAt.getTime() >= input.policy.minAgeMs
+    const conclusive = checkCount >= input.policy.minChecks
+      && (oldEnough || input.now.getTime() >= deadlineAt.getTime())
+    const terminal = attempt.request.cancelRequestedAt ? 'canceled' as const : 'failed' as const
+    const recorded = await client.recordCheck({
+      where: {
+        id: input.attemptId, checkCount: previousCount, promptId: null,
+        status: { in: ['fenced', 'checking_absence'] },
+      },
+      data: {
+        firstCheckedAt, lastCheckedAt: input.now, checkCount, reconcileDeadlineAt: deadlineAt,
+        status: conclusive ? 'not_accepted' : 'checking_absence',
+      },
+    })
+    if (recorded.count !== 1) throw new ApiError('CONFLICT')
+    if (!conclusive) return { outcome: 'reconciling' as const, checkCount }
+    const finished = await client.finishRequest({
+      where: {
+        id: input.requestId, userId: input.userId, connectionId: input.connectionId,
+        leaseId: input.leaseId, promptId: null,
+        status: { in: ['submitting', 'reconciling'] },
+      },
+      data: terminal === 'canceled'
+        ? { status: 'canceled', canceledAt: input.now }
+        : {
+            status: 'failed', failedAt: input.now,
+            errorCode: COMFY_ERROR_CODE.RECONCILIATION_REQUIRED,
+            errorMessage: 'ComfyUI submission was not accepted',
+          },
+    })
+    if (finished.count !== 1) throw new ApiError('CONFLICT')
+    return { outcome: terminal, checkCount }
+  })
+}
+
+function validateAbsencePolicy(policy: ComfyAttemptAbsencePolicy) {
+  if (!Number.isInteger(policy.minChecks) || policy.minChecks < 2 || policy.minChecks > 1_000
+    || !Number.isInteger(policy.minAgeMs) || policy.minAgeMs < 1_000
+    || !Number.isInteger(policy.deadlineMs) || policy.deadlineMs < policy.minAgeMs
+    || policy.deadlineMs > 30 * 24 * 60 * 60 * 1_000) throw new ApiError('INVALID_PARAMS')
+}
+
+function asDate(value: unknown) {
+  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw new ApiError('CONFLICT')
+  return value
+}
+
+function nonnegativeInteger(value: unknown) {
+  if (!Number.isInteger(value) || (value as number) < 0) throw new ApiError('CONFLICT')
+  return value as number
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

@@ -1172,6 +1172,10 @@ model ComfySubmissionAttempt {
   promptId              String?                  @unique
   status                String                   @default("fenced")
   acceptedAt            DateTime?
+  firstCheckedAt        DateTime?
+  lastCheckedAt         DateTime?
+  checkCount            Int                      @default(0)
+  reconcileDeadlineAt   DateTime?
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @default(now()) @updatedAt
 
