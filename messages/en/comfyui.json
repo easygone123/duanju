@@ -27,6 +27,8 @@
   "pending": "pending",
   "device": "Device",
   "vram": "VRAM",
+  "version": "ComfyUI version",
+  "unknownVersion": "—",
   "ownedTask": "Current waoowaoo task",
   "ownedTaskActive": "Active owned generation",
   "deleteBlockedOwned": "This instance cannot be deleted while it is running owned work",

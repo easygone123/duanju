@@ -10,6 +10,7 @@ import ConnectionCard from '@/app/[locale]/profile/components/comfyui/Connection
 import ConnectionEditor from '@/app/[locale]/profile/components/comfyui/ConnectionEditor'
 import {
   buildConnectionPayload,
+  safelyRunConnectionAction,
   statusPollingInterval,
   type ComfyConnectionView,
   type ComfyStatusView,
@@ -23,6 +24,7 @@ const messages = {
     addConnection: 'Add connection', edit: 'Edit', test: 'Test', delete: 'Delete',
     enable: 'Enable', disable: 'Disable', lastCheck: 'Last check', never: 'Never',
     queue: 'Queue', running: 'running', pending: 'pending', device: 'Device', vram: 'VRAM',
+    version: 'Version', unknownVersion: '—',
     ownedTask: 'Current waoowaoo task', ownedTaskActive: 'Active owned generation',
     deleteBlockedOwned: 'Owned work is active',
     preservedCredential: 'Leave blank to keep the saved credential',
@@ -96,6 +98,7 @@ describe('ComfyUI connection settings', () => {
     const status: ComfyStatusView = {
       connectionId: connection.id, state, checkedAt: '2026-07-11T08:00:00.000Z',
       runningCount: state.includes('busy') ? 1 : 0, pendingCount: 2,
+      ownedTask: null,
       devices: [{ name: 'RTX 4090', vramTotalBytes: 24 * 1024 ** 3, vramFreeBytes: 16 * 1024 ** 3 }],
     }
     const html = render(createElement(ConnectionCard, {
@@ -120,12 +123,32 @@ describe('ComfyUI connection settings', () => {
       status: {
         connectionId: connection.id, state: 'online_busy_owned',
         checkedAt: '2026-07-11T08:00:00.000Z', runningCount: 1, pendingCount: 0,
-        ownedTask: { taskId: 'task-42' },
+        version: '0.3.50', ownedTask: { requestId: 'request-9', taskId: 'task-42', status: 'running' },
       },
       onEdit: () => undefined, onProbe: async () => undefined,
       onToggle: async () => undefined, onDelete: async () => undefined,
     }))
     expect(html).toContain('task-42')
+    expect(html).toContain('running')
+    expect(html).toContain('0.3.50')
     expect(html).toMatch(/disabled=""[^>]*aria-label="Delete"/)
+  })
+
+  it('catches rejected card actions and reports only a localized safe error', async () => {
+    const errors: Array<string | null> = []
+    await expect(safelyRunConnectionAction(
+      () => Promise.reject(new Error('Authorization: Bearer top-secret server trace')),
+      (error) => errors.push(error),
+    )).resolves.toBeUndefined()
+    expect(errors).toEqual([null, 'requestFailed'])
+    expect(JSON.stringify(errors)).not.toContain('top-secret')
+  })
+
+  it('uses responsive profile navigation and content layout on narrow screens', () => {
+    const source = readFileSync('src/app/[locale]/profile/page.tsx', 'utf8')
+    expect(source).toContain('flex-col md:flex-row')
+    expect(source).toContain('w-full md:w-64')
+    expect(source).toContain('overflow-x-auto md:overflow-visible')
+    expect(source).toContain('min-w-0')
   })
 })

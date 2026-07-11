@@ -31,7 +31,7 @@ export interface ComfyStatusView {
   version?: string
   devices?: ComfyDeviceSummary[]
   message?: string
-  ownedTask?: { taskId: string }
+  ownedTask: { requestId: string; taskId: string; status: string } | null
 }
 
 export interface ConnectionFormValues {
@@ -73,6 +73,18 @@ export function buildConnectionPayload(values: ConnectionFormValues, editing: bo
 
 export function statusPollingInterval(visibility: DocumentVisibilityState | undefined) {
   return visibility === 'visible' ? 5_000 : false
+}
+
+export async function safelyRunConnectionAction(
+  action: () => Promise<unknown>,
+  setError: (error: 'requestFailed' | null) => void,
+): Promise<void> {
+  setError(null)
+  try {
+    await action()
+  } catch {
+    setError('requestFailed')
+  }
 }
 
 async function readJson<T>(url: string, init?: RequestInit): Promise<T> {

@@ -36,12 +36,12 @@ export default function ProfilePage() {
     <div className="glass-page min-h-screen">
       <Navbar />
 
-      <main className="max-w-[1400px] mx-auto px-6 py-8">
-        <div className="flex gap-6 h-[calc(100vh-140px)]">
+      <main className="mx-auto max-w-[1400px] px-4 py-5 sm:px-6 sm:py-8">
+        <div className="flex flex-col md:flex-row min-h-[calc(100vh-120px)] gap-4 md:h-[calc(100vh-140px)] md:gap-6">
 
           {/* 左侧侧边栏 */}
-          <div className="w-64 flex-shrink-0">
-            <div className="glass-surface-elevated h-full flex flex-col p-5">
+          <div className="w-full md:w-64 flex-shrink-0">
+            <div className="glass-surface-elevated flex h-auto flex-col p-4 md:h-full md:p-5">
 
               {/* 用户信息 */}
               <div className="mb-6">
@@ -58,10 +58,10 @@ export default function ProfilePage() {
               </div>
 
               {/* 导航菜单 */}
-              <nav className="flex-1 space-y-2">
+              <nav className="flex flex-1 gap-2 overflow-x-auto md:overflow-visible md:block md:space-y-2">
                 <button
                   onClick={() => setActiveSection('apiConfig')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all cursor-pointer ${activeSection === 'apiConfig'
+                  className={`w-auto min-w-max md:w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all cursor-pointer ${activeSection === 'apiConfig'
                     ? 'glass-btn-base glass-btn-tone-info'
                     : 'text-[var(--glass-text-secondary)] hover:bg-[var(--glass-bg-muted)]'
                     }`}
@@ -72,7 +72,7 @@ export default function ProfilePage() {
 
                 <button
                   onClick={() => setActiveSection('comfyui')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all cursor-pointer ${activeSection === 'comfyui'
+                  className={`w-auto min-w-max md:w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all cursor-pointer ${activeSection === 'comfyui'
                     ? 'glass-btn-base glass-btn-tone-info'
                     : 'text-[var(--glass-text-secondary)] hover:bg-[var(--glass-bg-muted)]'
                     }`}
@@ -83,7 +83,7 @@ export default function ProfilePage() {
 
                 <button
                   onClick={() => setActiveSection('billing')}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all cursor-pointer ${activeSection === 'billing'
+                  className={`w-auto min-w-max md:w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all cursor-pointer ${activeSection === 'billing'
                     ? 'glass-btn-base glass-btn-tone-info'
                     : 'text-[var(--glass-text-secondary)] hover:bg-[var(--glass-bg-muted)]'
                     }`}

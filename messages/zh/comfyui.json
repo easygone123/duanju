@@ -27,6 +27,8 @@
   "pending": "等待中",
   "device": "设备",
   "vram": "显存",
+  "version": "ComfyUI 版本",
+  "unknownVersion": "—",
   "ownedTask": "当前 waoowaoo 任务",
   "ownedTaskActive": "正在执行本系统任务",
   "deleteBlockedOwned": "节点正在执行本系统任务，暂时不能删除",

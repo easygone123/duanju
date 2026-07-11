@@ -15,6 +15,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   comfyGenerationRequest: {
     count: vi.fn(),
+    findFirst: vi.fn(),
     updateMany: vi.fn(),
   },
 }))
@@ -93,6 +94,7 @@ describe('ComfyUI private connection routes', () => {
     redisMock.eval.mockResolvedValue(1)
     prismaMock.comfyConnection.updateMany.mockResolvedValue({ count: 1 })
     prismaMock.comfyGenerationRequest.count.mockResolvedValue(0)
+    prismaMock.comfyGenerationRequest.findFirst.mockResolvedValue(null)
     prismaMock.comfyGenerationRequest.updateMany.mockResolvedValue({ count: 0 })
     getSystemStatsMock.mockResolvedValue({ system: { comfyui_version: '0.3.50' }, devices: [] })
     getQueueMock.mockResolvedValue({ running: [], pending: [] })
@@ -507,6 +509,39 @@ describe('ComfyUI private connection routes', () => {
       ['offline', 'offline'],
       ['auth', 'auth_failed'],
     ])
+  })
+
+  it('returns only the owner-scoped active task summary for an owned-busy connection', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findMany.mockResolvedValue([connection({ id: 'owned' })])
+    prismaMock.comfyGenerationRequest.count.mockResolvedValue(1)
+    prismaMock.comfyGenerationRequest.findFirst.mockResolvedValue({
+      id: 'request-1', taskId: 'task-42', status: 'running',
+      promptId: 'must-not-leak', leaseId: 'must-not-leak',
+    })
+    getSystemStatsMock.mockResolvedValue({ system: { comfyui_version: '0.3.50' } })
+    getQueueMock.mockResolvedValue({ running: [['owned']], pending: [] })
+    const route = await import('@/app/api/comfyui/connections/status/route')
+    const response = await route.GET(buildMockRequest({
+      path: '/api/comfyui/connections/status', method: 'GET',
+    }), collectionContext)
+
+    expect(response.status).toBe(200)
+    const body = await responseJson(response)
+    expect(body.statuses).toEqual([expect.objectContaining({
+      connectionId: 'owned', state: 'online_busy_owned', version: '0.3.50',
+      ownedTask: { requestId: 'request-1', taskId: 'task-42', status: 'running' },
+    })])
+    expect(prismaMock.comfyGenerationRequest.findFirst).toHaveBeenCalledWith({
+      where: {
+        connectionId: 'owned', userId: 'user-1',
+        status: { notIn: ['completed', 'failed', 'canceled'] },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, taskId: true, status: true },
+    })
+    expect(JSON.stringify(body)).not.toContain('must-not-leak')
   })
 
   it('bounds status fan-out to the configured safe probe concurrency', async () => {

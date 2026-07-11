@@ -7,6 +7,7 @@ import ConnectionCard from './ConnectionCard'
 import ConnectionEditor from './ConnectionEditor'
 import {
   buildConnectionPayload,
+  safelyRunConnectionAction,
   useComfyConnectionActions,
   useComfyConnections,
   useComfyStatuses,
@@ -20,6 +21,7 @@ export default function ConnectionPoolPanel() {
   const statusesQuery = useComfyStatuses(!connectionsQuery.isLoading)
   const actions = useComfyConnectionActions()
   const [editing, setEditing] = useState<ComfyConnectionView | 'new' | null>(null)
+  const [actionError, setActionError] = useState<'requestFailed' | null>(null)
   const connections = connectionsQuery.data?.connections ?? []
   const statuses = new Map((statusesQuery.data?.statuses ?? []).map((status) => [status.connectionId, status]))
   const mutating = actions.create.isPending || actions.update.isPending
@@ -54,11 +56,16 @@ export default function ConnectionPoolPanel() {
           </div>}
         <div className="grid gap-4 xl:grid-cols-2">
           {connections.map((connection) => <ConnectionCard key={connection.id} connection={connection} status={statuses.get(connection.id)} busy={mutating}
-            onEdit={() => setEditing(connection)} onProbe={async () => { await actions.probe.mutateAsync(connection.id) }}
-            onToggle={async () => { await actions.update.mutateAsync({ id: connection.id, payload: { enabled: !connection.enabled } }) }}
-            onDelete={() => remove(connection)} />)}
+            onEdit={() => { setActionError(null); setEditing(connection) }}
+            onProbe={() => safelyRunConnectionAction(() => actions.probe.mutateAsync(connection.id), setActionError)}
+            onToggle={() => safelyRunConnectionAction(
+              () => actions.update.mutateAsync({ id: connection.id, payload: { enabled: !connection.enabled } }),
+              setActionError,
+            )}
+            onDelete={() => safelyRunConnectionAction(() => remove(connection), setActionError)} />)}
         </div>
         {statusesQuery.isError && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t('statusFailed')}</p>}
+        {actionError && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t(actionError)}</p>}
       </div>
     </section>
   )

@@ -34,6 +34,8 @@ export default function ConnectionCard({ connection, status, busy, onEdit, onPro
         <span className="glass-badge rounded-full px-3 py-1 text-xs font-medium">{t(`states.${state}`)}</span>
       </div>
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+        <div><dt className="text-[var(--glass-text-tertiary)]">{t('version')}</dt>
+          <dd className="text-[var(--glass-text-secondary)]">{status?.version ?? connection.lastSeenVersion ?? t('unknownVersion')}</dd></div>
         <div><dt className="text-[var(--glass-text-tertiary)]">{t('lastCheck')}</dt>
           <dd className="text-[var(--glass-text-secondary)]">{checkedAt ? new Date(checkedAt).toLocaleString() : t('never')}</dd></div>
         <div><dt className="text-[var(--glass-text-tertiary)]">{t('queue')}</dt>
@@ -44,7 +46,8 @@ export default function ConnectionCard({ connection, status, busy, onEdit, onPro
           <dd className="text-xs text-[var(--glass-text-tertiary)]">{t('vram')}: {formatBytes(device.vramFreeBytes)} / {formatBytes(device.vramTotalBytes)}</dd>
         </div>)}
         {owned && <div><dt className="text-[var(--glass-text-tertiary)]">{t('ownedTask')}</dt>
-          <dd className="text-[var(--glass-text-secondary)]">{status?.ownedTask?.taskId ?? t('ownedTaskActive')}</dd></div>}
+          <dd className="text-[var(--glass-text-secondary)]">{status?.ownedTask
+            ? `${status.ownedTask.taskId} · ${status.ownedTask.status}` : t('ownedTaskActive')}</dd></div>}
       </dl>
       {status?.message && <p className="mt-3 text-xs text-[var(--glass-text-tertiary)]">{status.message}</p>}
       <div className="mt-5 flex flex-wrap gap-2">

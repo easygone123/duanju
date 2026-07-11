@@ -26,8 +26,8 @@ export default function ConnectionEditor({ connection, onSubmit, onCancel }: Pro
     event.preventDefault()
     setSubmitting(true)
     setError('')
-    try { await onSubmit(values) } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t('requestFailed'))
+    try { await onSubmit(values) } catch {
+      setError(t('requestFailed'))
     } finally { setSubmitting(false) }
   }
 

@@ -217,6 +217,7 @@ export async function probeOwnedConnectionStatuses(
         return {
           connectionId: record.id,
           ...summary,
+          ownedTask: await findOwnedActiveRequest(record.id, userId),
         }
       } catch (error) {
         if (error instanceof ApiError
@@ -321,6 +322,19 @@ async function countOwnedNonterminal(connectionId: string, userId: string) {
       status: { notIn: [...TERMINAL_REQUEST_STATUSES] },
     },
   })
+}
+
+async function findOwnedActiveRequest(connectionId: string, userId: string) {
+  const request = await prisma.comfyGenerationRequest.findFirst({
+    where: {
+      connectionId,
+      userId,
+      status: { notIn: [...TERMINAL_REQUEST_STATUSES] },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, taskId: true, status: true },
+  })
+  return request ? { requestId: request.id, taskId: request.taskId, status: request.status } : null
 }
 
 async function findOwnedConnection(userId: string, connectionId: string): Promise<ComfyConnection> {
