@@ -41,17 +41,24 @@ export async function* iterateComfyWebSocket(
     values.length = 0
     queuedBytes = 0
   }
-  const overflow = (reason: 'queue_count_limit' | 'queue_bytes_limit') => {
+  const closeWithFailure = (error: ComfyError) => {
     clearQueue()
-    failure = new ComfyError(
-      COMFY_ERROR_CODE.EXECUTION_FAILED,
-      'ComfyUI WebSocket event queue exceeded its limit',
-      { details: { reason }, retryable: true },
-    )
+    failure = error
     ended = true
     cleanup()
     if (websocket.readyState === WebSocket.OPEN) websocket.terminate()
+    else if (websocket.readyState === WebSocket.CONNECTING) {
+      websocket.once('error', ignoreCleanupError)
+      websocket.terminate()
+    }
     notify()
+  }
+  const overflow = (reason: 'queue_count_limit' | 'queue_bytes_limit') => {
+    closeWithFailure(new ComfyError(
+      COMFY_ERROR_CODE.EXECUTION_FAILED,
+      'ComfyUI WebSocket event queue exceeded its limit',
+      { details: { reason }, retryable: true },
+    ))
   }
   const enqueue = (event: ComfyExecutionEvent): boolean => {
     const bytes = Buffer.byteLength(JSON.stringify(event), 'utf8')
@@ -91,7 +98,16 @@ export async function* iterateComfyWebSocket(
   const onOpen = () => resetIdleTimer()
   const onMessage = (raw: RawData, isBinary: boolean) => {
     if (isBinary || signal.aborted) return
-    const event = mapExecutionEvent(raw, promptId, auth)
+    let event: ComfyExecutionEvent | undefined
+    try {
+      event = mapExecutionEvent(raw, promptId, auth)
+    } catch {
+      closeWithFailure(new ComfyError(
+        COMFY_ERROR_CODE.EXECUTION_FAILED,
+        'ComfyUI WebSocket sent an invalid event',
+      ))
+      return
+    }
     if (!event) return
     if (!enqueue(event)) return
     resetIdleTimer()
@@ -183,16 +199,19 @@ function mapExecutionEvent(
   promptId: string,
   auth: ComfyConnectionAuth,
 ): ComfyExecutionEvent | undefined {
-  let message: { type?: string; data?: Record<string, unknown> }
+  let parsed: unknown
   try {
-    message = JSON.parse(raw.toString()) as typeof message
+    parsed = JSON.parse(raw.toString()) as unknown
   } catch {
     return undefined
   }
-  const data = message.data ?? {}
-  if (message.type !== 'status' && data.prompt_id !== promptId) return undefined
+  if (!isRecord(parsed) || typeof parsed.type !== 'string') throw new Error('invalid event')
+  if (!isKnownEventType(parsed.type)) return undefined
+  if (!isRecord(parsed.data)) throw new Error('invalid event data')
+  const { type, data } = parsed
+  if (type !== 'status' && data.prompt_id !== promptId) return undefined
   const publicPromptId = safePromptId(promptId)
-  if (message.type === 'status') {
+  if (type === 'status') {
     const status = data.status as { exec_info?: { queue_remaining?: unknown } } | undefined
     const queueRemaining = status?.exec_info?.queue_remaining
     return {
@@ -200,15 +219,20 @@ function mapExecutionEvent(
       ...(isBoundedCount(queueRemaining) ? { queueRemaining } : {}),
     }
   }
-  if (message.type === 'execution_start') return { type: 'execution_start', promptId: publicPromptId }
-  if (message.type === 'executing') {
+  if (type === 'execution_start') return { type: 'execution_start', promptId: publicPromptId }
+  if (type === 'executing') {
+    if (data.node === null) {
+      return { type: 'executing', promptId: publicPromptId, nodeId: null }
+    }
+    const nodeId = sanitizeComfyExecutionNodeId(data.node, auth)
+    if (!nodeId) return undefined
     return {
       type: 'executing',
       promptId: publicPromptId,
-      nodeId: sanitizeComfyExecutionNodeId(data.node, auth) ?? null,
+      nodeId,
     }
   }
-  if (message.type === 'progress' && isBoundedProgress(data.value, data.max)) {
+  if (type === 'progress' && isBoundedProgress(data.value, data.max)) {
     const nodeId = sanitizeComfyExecutionNodeId(data.node, auth)
     return {
       type: 'progress', promptId: publicPromptId,
@@ -216,14 +240,16 @@ function mapExecutionEvent(
       value: Number(data.value), max: Number(data.max),
     }
   }
-  if (message.type === 'executed') {
+  if (type === 'executed') {
+    const nodeId = sanitizeComfyExecutionNodeId(data.node, auth)
+    if (!nodeId) return undefined
     return {
       type: 'executed',
       promptId: publicPromptId,
-      nodeId: sanitizeComfyExecutionNodeId(data.node, auth) ?? null,
+      nodeId,
     }
   }
-  if (message.type === 'execution_error') {
+  if (type === 'execution_error') {
     const nodeId = sanitizeComfyExecutionNodeId(data.node_id, auth)
     return {
       type: 'execution_error', promptId: publicPromptId,
@@ -232,6 +258,21 @@ function mapExecutionEvent(
     }
   }
   return undefined
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isKnownEventType(value: string): boolean {
+  return [
+    'status',
+    'execution_start',
+    'executing',
+    'progress',
+    'executed',
+    'execution_error',
+  ].includes(value)
 }
 
 function safePromptId(value: string): string {

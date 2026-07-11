@@ -192,12 +192,19 @@ describe('ComfyClient contract', () => {
       type: 'executing', data: { prompt_id: 'prompt-1', node: 'branch-secret-token' },
     })
     server.send({
+      type: 'executing', data: { prompt_id: 'prompt-1', node: '4' },
+    })
+    server.send({
       type: 'progress',
       data: { prompt_id: 'prompt-1', node: 'branch-secret-token', value: 2, max: 5, extra: 'branch-secret-token' },
     })
     server.send({
       type: 'executed',
       data: { prompt_id: 'prompt-1', node: 'branch-secret-token', output: { token: 'branch-secret-token' } },
+    })
+    server.send({
+      type: 'executed',
+      data: { prompt_id: 'prompt-1', node: '5', output: { token: 'branch-secret-token' } },
     })
     server.send({
       type: 'execution_error',
@@ -215,13 +222,45 @@ describe('ComfyClient contract', () => {
     expect(events).toEqual([
       { type: 'status', queueRemaining: 2 },
       { type: 'execution_start', promptId: 'prompt-1' },
-      { type: 'executing', promptId: 'prompt-1', nodeId: null },
+      { type: 'executing', promptId: 'prompt-1', nodeId: '4' },
       { type: 'progress', promptId: 'prompt-1', value: 2, max: 5 },
-      { type: 'executed', promptId: 'prompt-1', nodeId: null },
+      { type: 'executed', promptId: 'prompt-1', nodeId: '5' },
       { type: 'execution_error', promptId: 'prompt-1', message: 'Execution failed' },
     ])
     expect(JSON.stringify(events)).not.toContain('branch-secret-token')
     expect(JSON.stringify(events)).not.toMatch(/my_prompt_secret|PROMPT_SECRET/)
+    controller.abort()
+  })
+
+  it.each([null, [], 42, 'primitive-secret']) (
+    'fails closed on structurally malformed JSON WebSocket frames: %j',
+    async (frame) => {
+      const next = client().watchPrompt('prompt-1', 'client-1', new AbortController().signal)
+        [Symbol.asyncIterator]().next()
+      await server.waitForSocket()
+      server.send(frame)
+
+      const error = await next.catch((caught: unknown) => caught)
+      expect(error).toBeInstanceOf(ComfyError)
+      expect(error).toMatchObject({ code: 'COMFY_EXECUTION_FAILED' })
+      expect(String(error)).not.toContain('primitive-secret')
+    },
+  )
+
+  it('uses only executing.node=null as terminal and discards other malformed node events', async () => {
+    const controller = new AbortController()
+    const iterator = client().watchPrompt('prompt-1', 'client-1', controller.signal)[Symbol.asyncIterator]()
+    const events = [iterator.next(), iterator.next()]
+    await server.waitForSocket()
+    server.send({ type: 'executing', data: { prompt_id: 'prompt-1', node: 'not-a-node' } })
+    server.send({ type: 'executing', data: { prompt_id: 'prompt-1', node: null } })
+    server.send({ type: 'executed', data: { prompt_id: 'prompt-1', node: null } })
+    server.send({ type: 'executed', data: { prompt_id: 'prompt-1', node: '9' } })
+
+    await expect(Promise.all(events)).resolves.toEqual([
+      { done: false, value: { type: 'executing', promptId: 'prompt-1', nodeId: null } },
+      { done: false, value: { type: 'executed', promptId: 'prompt-1', nodeId: '9' } },
+    ])
     controller.abort()
   })
 

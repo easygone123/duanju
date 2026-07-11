@@ -183,7 +183,7 @@ export type ComfyExecutionEvent =
   | { type: 'execution_start'; promptId: string }
   | { type: 'executing'; promptId: string; nodeId: string | null }
   | { type: 'progress'; promptId: string; nodeId?: string; value: number; max: number }
-  | { type: 'executed'; promptId: string; nodeId: string | null }
+  | { type: 'executed'; promptId: string; nodeId: string }
   | {
       type: 'execution_error'
       promptId: string
