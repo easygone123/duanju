@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import type { ComfyWorkflowRequirements } from './types'
+import type { ComfyApiWorkflow, ComfyWorkflowRequirements } from './types'
 
 export interface ComfyCompatibilityResult {
   compatible: boolean
@@ -20,6 +20,7 @@ export type ComfyCompatibilityCache = Map<string, ComfyCompatibilityResult>
 export interface CheckComfyCompatibilityInput {
   connectionId: string
   workflowHash: string
+  graph: ComfyApiWorkflow
   requirements: ComfyWorkflowRequirements
   client: ComfyCompatibilityClient
   cache?: ComfyCompatibilityCache
@@ -36,9 +37,12 @@ export async function checkComfyCompatibility(
   input: CheckComfyCompatibilityInput,
 ): Promise<ComfyCompatibilityResult> {
   const objectInfo = await input.client.getObjectInfo()
-  const inputEnums = collectInputEnums(objectInfo, input.requirements.nodeClasses)
-  const modelFolders = [...new Set(inputEnums.flatMap((entry) =>
-    entry.modelFolder ? [entry.modelFolder] : []))].sort()
+  const candidateEnums = input.requirements.candidateLoaderInputs.map((candidate) => ({
+    candidate,
+    inputEnum: readCandidateInputEnum(objectInfo, input.graph, candidate.nodeId, candidate.inputName),
+  }))
+  const modelFolders = [...new Set(candidateEnums.flatMap(({ inputEnum }) =>
+    inputEnum?.modelFolder ? [inputEnum.modelFolder] : []))].sort()
   const modelsByFolder = Object.fromEntries(await Promise.all(modelFolders.map(async (folder) =>
     [folder, normalizeStringArray(await input.client.getModels(folder))] as const)))
   const capabilityFingerprint = fingerprint({ objectInfo, modelsByFolder })
@@ -54,8 +58,15 @@ export async function checkComfyCompatibility(
     .filter((classType) => !isRecord(objectInfo[classType]))
     .sort()
   const missingModels = input.requirements.candidateLoaderInputs
-    .filter((candidate) => !inputEnums.some((entry) =>
-      entry.inputName === candidate.inputName && entry.values.includes(candidate.value)))
+    .filter((candidate) => {
+      const inputEnum = readCandidateInputEnum(
+        objectInfo,
+        input.graph,
+        candidate.nodeId,
+        candidate.inputName,
+      )
+      return !inputEnum?.values.includes(candidate.value)
+    })
     .map((candidate) => ({
       nodeId: candidate.nodeId,
       field: candidate.inputName,
@@ -86,24 +97,22 @@ export function compatibilityCacheKey(
   return `${connectionId}:${workflowHash}:${capabilityFingerprint}`
 }
 
-function collectInputEnums(
+function readCandidateInputEnum(
   objectInfo: Record<string, unknown>,
-  requiredClasses: string[],
-): Array<InputEnum & { inputName: string }> {
-  const entries: Array<InputEnum & { inputName: string }> = []
-  for (const classType of requiredClasses) {
-    const schema = objectInfo[classType]
-    if (!isRecord(schema) || !isRecord(schema.input)) continue
-    for (const groupName of ['required', 'optional']) {
-      const group = schema.input[groupName]
-      if (!isRecord(group)) continue
-      for (const [inputName, definition] of Object.entries(group)) {
-        const parsed = parseInputEnum(definition)
-        if (parsed) entries.push({ inputName, ...parsed })
-      }
-    }
+  graph: ComfyApiWorkflow,
+  nodeId: string,
+  inputName: string,
+): InputEnum | null {
+  const node = graph[nodeId]
+  if (!node) return null
+  const schema = objectInfo[node.class_type]
+  if (!isRecord(schema) || !isRecord(schema.input)) return null
+  for (const groupName of ['required', 'optional']) {
+    const group = schema.input[groupName]
+    if (!isRecord(group) || !(inputName in group)) continue
+    return parseInputEnum(group[inputName])
   }
-  return entries
+  return null
 }
 
 function parseInputEnum(value: unknown): InputEnum | null {

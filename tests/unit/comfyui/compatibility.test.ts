@@ -6,6 +6,11 @@ import {
 } from '@/lib/comfyui/compatibility'
 import type { ComfyWorkflowRequirements } from '@/lib/comfyui/types'
 
+const graph = {
+  '4': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: 'wanted.safetensors' } },
+  '5': { class_type: 'KSampler', inputs: {} },
+}
+
 const requirements: ComfyWorkflowRequirements = {
   nodeClasses: ['CheckpointLoaderSimple', 'KSampler'],
   candidateLoaderInputs: [
@@ -45,7 +50,7 @@ describe('checkComfyCompatibility', () => {
     })
 
     await expect(checkComfyCompatibility({
-      connectionId: 'connection-1', workflowHash: 'workflow-a', requirements, client: comfy,
+      connectionId: 'connection-1', workflowHash: 'workflow-a', graph, requirements, client: comfy,
     })).resolves.toEqual({
       compatible: false,
       missingNodes: ['KSampler'],
@@ -60,7 +65,7 @@ describe('checkComfyCompatibility', () => {
     const comfy = client(objectInfo())
 
     const result = await checkComfyCompatibility({
-      connectionId: 'connection-1', workflowHash: 'workflow-a', requirements, client: comfy,
+      connectionId: 'connection-1', workflowHash: 'workflow-a', graph, requirements, client: comfy,
     })
 
     expect(result.compatible).toBe(true)
@@ -73,7 +78,7 @@ describe('checkComfyCompatibility', () => {
     comfy.getModels.mockResolvedValue(['wanted.safetensors'])
 
     const result = await checkComfyCompatibility({
-      connectionId: 'connection-1', workflowHash: 'workflow-a', requirements, client: comfy,
+      connectionId: 'connection-1', workflowHash: 'workflow-a', graph, requirements, client: comfy,
     })
 
     expect(result.missingModels).toEqual([
@@ -95,7 +100,7 @@ describe('checkComfyCompatibility', () => {
     })
 
     await checkComfyCompatibility({
-      connectionId: 'connection-1', workflowHash: 'workflow-a', requirements, client: comfy,
+      connectionId: 'connection-1', workflowHash: 'workflow-a', graph, requirements, client: comfy,
     })
 
     expect(comfy.getModels).toHaveBeenCalledTimes(1)
@@ -107,11 +112,11 @@ describe('checkComfyCompatibility', () => {
     const cache = new Map()
 
     const first = await checkComfyCompatibility({
-      connectionId: 'connection-1', workflowHash: 'workflow-a', requirements, client: comfy, cache,
+      connectionId: 'connection-1', workflowHash: 'workflow-a', graph, requirements, client: comfy, cache,
     })
     comfy.getObjectInfo.mockResolvedValue(objectInfo(['other.safetensors']))
     const second = await checkComfyCompatibility({
-      connectionId: 'connection-1', workflowHash: 'workflow-a', requirements, client: comfy, cache,
+      connectionId: 'connection-1', workflowHash: 'workflow-a', graph, requirements, client: comfy, cache,
     })
 
     expect(first.compatible).toBe(true)
@@ -120,5 +125,49 @@ describe('checkComfyCompatibility', () => {
     expect([...cache.keys()]).toEqual([
       `connection-1:workflow-a:${second.capabilityFingerprint}`,
     ])
+  })
+
+  it('binds a candidate node to its own class instead of another class with the same field', async () => {
+    const comfy = client({
+      LoaderA: {
+        input: { required: { model_name: [['wanted.safetensors'], { model_folder: 'a' }] } },
+      },
+      LoaderB: {
+        input: { required: { model_name: [['other.safetensors'], { model_folder: 'b' }] } },
+      },
+    })
+    const sharedFieldRequirements: ComfyWorkflowRequirements = {
+      nodeClasses: ['LoaderA', 'LoaderB'],
+      candidateLoaderInputs: [
+        { nodeId: '20', inputName: 'model_name', value: 'wanted.safetensors' },
+      ],
+    }
+
+    const missing = await checkComfyCompatibility({
+      connectionId: 'connection-1',
+      workflowHash: 'workflow-b',
+      graph: {
+        '10': { class_type: 'LoaderA', inputs: { model_name: 'wanted.safetensors' } },
+        '20': { class_type: 'LoaderB', inputs: { model_name: 'wanted.safetensors' } },
+      },
+      requirements: sharedFieldRequirements,
+      client: comfy,
+    })
+    const complete = await checkComfyCompatibility({
+      connectionId: 'connection-1',
+      workflowHash: 'workflow-c',
+      graph: {
+        '10': { class_type: 'LoaderB', inputs: { model_name: 'other.safetensors' } },
+        '20': { class_type: 'LoaderA', inputs: { model_name: 'wanted.safetensors' } },
+      },
+      requirements: sharedFieldRequirements,
+      client: comfy,
+    })
+
+    expect(missing.missingModels).toEqual([
+      { nodeId: '20', field: 'model_name', value: 'wanted.safetensors' },
+    ])
+    expect(complete.missingModels).toEqual([])
+    expect(complete.compatible).toBe(true)
   })
 })

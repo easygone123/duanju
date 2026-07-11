@@ -1,6 +1,7 @@
 import { COMFY_ERROR_CODE, ComfyError } from './errors'
 import type {
   ComfyDeviceSummary,
+  ComfyApiWorkflow,
   ComfyHealthSummary,
   ComfyQueueSnapshot,
   ComfySystemStats,
@@ -18,6 +19,7 @@ export interface ComfyHealthMonitorDependencies {
   checkCompatibility(input: {
     connectionId: string
     workflowHash: string
+    graph: ComfyApiWorkflow
     requirements: ComfyWorkflowRequirements
   }): Promise<ComfyCompatibilityResult>
   cacheSet(key: string, value: string, mode: 'PX', ttlMs: number): Promise<unknown>
@@ -26,6 +28,7 @@ export interface ComfyHealthMonitorDependencies {
 export interface MonitorComfyHealthInput {
   connectionId: string
   workflowHash?: string
+  graph?: ComfyApiWorkflow
   requirements?: ComfyWorkflowRequirements
   checkedAt?: Date
   ttlMs: number
@@ -48,10 +51,11 @@ export async function monitorComfyHealth(
     const systemStats = await dependencies.getSystemStats()
     const queue = await dependencies.getQueue()
     const hasLease = await dependencies.hasLease(input.connectionId)
-    if (input.workflowHash && input.requirements) {
+    if (input.workflowHash && input.graph && input.requirements) {
       compatibility = await dependencies.checkCompatibility({
         connectionId: input.connectionId,
         workflowHash: input.workflowHash,
+        graph: input.graph,
         requirements: input.requirements,
       })
     }

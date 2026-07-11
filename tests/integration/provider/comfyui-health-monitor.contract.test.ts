@@ -12,6 +12,7 @@ const checkedAt = new Date('2026-07-11T08:00:00.000Z')
 const requirements: ComfyWorkflowRequirements = {
   nodeClasses: ['KSampler'], candidateLoaderInputs: [],
 }
+const graph = { '1': { class_type: 'KSampler', inputs: {} } }
 
 function dependencies(): ComfyHealthMonitorDependencies & {
   authorize: ReturnType<typeof vi.fn>
@@ -38,6 +39,7 @@ async function monitor(deps: ComfyHealthMonitorDependencies) {
   return monitorComfyHealth({
     connectionId: 'connection-1',
     workflowHash: 'workflow-a',
+    graph,
     requirements,
     checkedAt,
     ttlMs: 12_000,
