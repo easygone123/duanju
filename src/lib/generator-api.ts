@@ -20,6 +20,11 @@ import {
 } from './model-gateway'
 import { generateBailianAudio, generateBailianImage, generateBailianVideo } from './providers/bailian'
 import { generateSiliconFlowAudio, generateSiliconFlowImage, generateSiliconFlowVideo } from './providers/siliconflow'
+import {
+    submitComfyImageGeneration,
+    submitComfyVideoGeneration,
+    type ComfyProviderInvocation,
+} from './comfyui/provider'
 
 const OFFICIAL_ONLY_PROVIDER_KEYS = new Set(['bailian', 'siliconflow'])
 
@@ -59,10 +64,32 @@ export async function generateImage(
         outputFormat?: string
         keepOriginalAspectRatio?: boolean  // 🔥 编辑时保持原图比例
         size?: string  // 🔥 直接指定像素尺寸如 "5016x3344"（优先于 aspectRatio）
+        comfy?: ComfyProviderInvocation
     }
 ): Promise<GenerateResult> {
     const selection = await resolveModelSelection(userId, modelKey, 'image')
     _ulogInfo(`[generateImage] resolved model selection: ${selection.modelKey}`)
+    const comfy = options?.comfy
+    if (selection.provider === 'comfyui') {
+        if (!comfy) throw new Error('COMFY_CONTEXT_REQUIRED')
+        const size = options?.size?.match(/^(\d+)x(\d+)$/)
+        return submitComfyImageGeneration({
+            userId,
+            workflowId: selection.modelId,
+            prompt,
+            context: comfy.context,
+            variables: {
+                ...(options?.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
+                ...(size ? { width: Number(size[1]), height: Number(size[2]) } : {}),
+                ...(comfy.variables ?? {}),
+            },
+        })
+    }
+    if (options?.comfy) {
+        const cloudOptions = { ...options }
+        delete cloudOptions.comfy
+        options = cloudOptions
+    }
     const providerConfig = await getProviderConfig(userId, selection.provider)
     const providerKey = getProviderKey(selection.provider).toLowerCase()
     if (providerKey === 'bailian') {
@@ -188,11 +215,33 @@ export async function generateVideo(
         aspectRatio?: string     // '16:9' | '9:16'
         generateAudio?: boolean  // 仅 Seedance 1.5 Pro 支持
         lastFrameImageUrl?: string  // 首尾帧模式的尾帧图片
-        [key: string]: string | number | boolean | undefined
+        comfy?: ComfyProviderInvocation
+        [key: string]: string | number | boolean | ComfyProviderInvocation | undefined
     }
 ): Promise<GenerateResult> {
     const selection = await resolveModelSelection(userId, modelKey, 'video')
     _ulogInfo(`[generateVideo] resolved model selection: ${selection.modelKey}`)
+    const comfy = options?.comfy
+    if (selection.provider === 'comfyui') {
+        if (!comfy) throw new Error('COMFY_CONTEXT_REQUIRED')
+        return submitComfyVideoGeneration({
+            userId,
+            workflowId: selection.modelId,
+            prompt: options?.prompt,
+            context: comfy.context,
+            variables: {
+                ...(typeof options?.duration === 'number' ? { duration_seconds: options.duration } : {}),
+                ...(typeof options?.fps === 'number' ? { fps: options.fps } : {}),
+                ...(options?.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
+                ...(comfy.variables ?? {}),
+            },
+        })
+    }
+    if (options?.comfy) {
+        const cloudOptions = { ...options }
+        delete cloudOptions.comfy
+        options = cloudOptions
+    }
     const providerKey = getProviderKey(selection.provider).toLowerCase()
     if (providerKey === 'bailian') {
         return await generateBailianVideo({

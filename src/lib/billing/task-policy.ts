@@ -8,6 +8,7 @@ import {
 } from './cost'
 import { BillingOperationError } from './errors'
 import { BUILTIN_PRICING_VERSION } from '@/lib/model-pricing/version'
+import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { TASK_TYPE, type TaskType } from '@/lib/task/types'
 import type { TaskBillingInfo } from './types'
 
@@ -119,6 +120,7 @@ function buildTextTaskInfo(taskType: TaskType, payload: AnyPayload): TaskBilling
 function buildImageTaskInfo(taskType: TaskType, payload: AnyPayload): TaskBillingInfo | null {
   const model = pickFirstString([payload?.imageModel, payload?.modelId, payload?.model])
   if (!model) return null
+  if (isComfyModelKey(model)) return comfySkippedBilling()
   const quantity = Math.max(1, Math.floor(toNumber(payload?.candidateCount ?? payload?.count, 1)))
   const generationOptions = toRecord(payload?.generationOptions)
   const resolution = readString(generationOptions.resolution) || readString(payload?.resolution)
@@ -159,6 +161,7 @@ function buildVideoTaskInfo(taskType: TaskType, payload: AnyPayload): TaskBillin
     firstLastFramePayload.flModel,
   ])
   if (!model) return null
+  if (isComfyModelKey(model)) return comfySkippedBilling()
   const generationOptions = toRecord(payload?.generationOptions)
   const resolution = readString(generationOptions.resolution) || readString(payload?.resolution)
   const duration = readNumber(generationOptions.duration) ?? readNumber(payload?.duration)
@@ -199,6 +202,14 @@ function buildVideoTaskInfo(taskType: TaskType, payload: AnyPayload): TaskBillin
     metadata,
     status: 'quoted',
   }
+}
+
+function comfySkippedBilling(): TaskBillingInfo {
+  return { billable: false, source: 'task', status: 'skipped' }
+}
+
+function isComfyModelKey(model: string) {
+  return parseModelKeyStrict(model)?.provider === 'comfyui'
 }
 
 function buildVoiceTaskInfo(taskType: TaskType, payload: AnyPayload): TaskBillingInfo {

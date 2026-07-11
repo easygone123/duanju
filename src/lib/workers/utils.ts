@@ -4,7 +4,12 @@ import { createScopedLogger } from '@/lib/logging/core'
 import { withLogContext } from '@/lib/logging/context'
 import { generateImage, generateVideo } from '@/lib/generator-api'
 import { generateLipSync } from '@/lib/lipsync'
-import { pollAsyncTask } from '@/lib/async-poll'
+import {
+  advanceExternalExecutionClock,
+  externalPollProgress,
+  pollAsyncTask,
+  type ExternalExecutionClock,
+} from '@/lib/async-poll'
 import { getSignedUrl, toFetchableUrl } from '@/lib/storage'
 import { initializeFonts, createLabelSVG } from '@/lib/fonts'
 import { processMediaResult } from '@/lib/media-process'
@@ -94,6 +99,7 @@ export async function waitExternalResult(
   const progressStart = opts?.progressStart ?? 40
   const progressEnd = opts?.progressEnd ?? 90
   const startAt = Date.now()
+  const executionClock: ExternalExecutionClock = {}
   const logger = scopedWorkerUtilLogger(job, 'worker.external.poll')
 
   logger.info({
@@ -107,7 +113,7 @@ export async function waitExternalResult(
 
   await trySetTaskExternalId(job.data.taskId, externalId)
 
-  while (Date.now() - startAt <= timeoutMs) {
+  while (executionClock.startedAt === undefined || Date.now() - executionClock.startedAt <= timeoutMs) {
     await assertTaskActive(job, 'polling_external')
     const status = await pollAsyncTask(externalId, userId)
 
@@ -144,10 +150,15 @@ export async function waitExternalResult(
       throw new Error(status.error || `External task failed: ${externalId}`)
     }
 
-    const elapsed = Date.now() - startAt
-    const ratio = Math.max(0, Math.min(1, elapsed / timeoutMs))
-    const progress = progressStart + Math.floor((progressEnd - progressStart) * ratio)
-    await reportTaskProgress(job, progress, { stage: 'polling_external', externalId })
+    const executionElapsed = advanceExternalExecutionClock(executionClock, status, Date.now())
+    const progressUpdate = externalPollProgress({
+      result: status, executionElapsed, timeoutMs, progressStart, progressEnd,
+    })
+    await reportTaskProgress(job, progressUpdate.progress, {
+      stage: progressUpdate.stage,
+      externalId,
+      ...(status.waitingForCapacity === true ? { waitingForCapacity: true } : {}),
+    })
     await assertTaskActive(job, 'polling_external_wait')
     await sleep(intervalMs)
   }
@@ -238,6 +249,13 @@ export async function resolveImageSourceFromGeneration(
     () => generateImage(params.userId, params.modelId, params.prompt, {
       ...params.options,
       ...capabilityOptions,
+      comfy: {
+        context: {
+          projectId: job.data.projectId,
+          taskId: job.data.taskId,
+          invocationKey: `${job.data.taskId}:image:0`,
+        },
+      },
     }),
   )
   if (!result.success) {
@@ -324,7 +342,7 @@ export async function resolveImageSourcesFromGeneration(
         progressStart: params.pollProgress?.start ?? 40,
         progressEnd: params.pollProgress?.end ?? 92,
       })
-      return [polled.url]
+      return polled.status.resultUrls?.length ? polled.status.resultUrls : [polled.url]
     }
   }
 
@@ -352,6 +370,13 @@ export async function resolveImageSourcesFromGeneration(
     () => generateImage(params.userId, params.modelId, params.prompt, {
       ...params.options,
       ...capabilityOptions,
+      comfy: {
+        context: {
+          projectId: job.data.projectId,
+          taskId: job.data.taskId,
+          invocationKey: `${job.data.taskId}:image:0`,
+        },
+      },
     }),
   )
   if (!result.success) {
@@ -402,7 +427,7 @@ export async function resolveImageSourcesFromGeneration(
     durationMs: Date.now() - startedAt,
     details: { externalId },
   })
-  return [polled.url]
+  return polled.status.resultUrls?.length ? polled.status.resultUrls : [polled.url]
 }
 
 export async function resolveVideoSourceFromGeneration(
@@ -496,6 +521,13 @@ export async function resolveVideoSourceFromGeneration(
     () => generateVideo(params.userId, params.modelId, params.imageUrl, {
       ...providerRequestOptions,
       ...providerCapabilityOptions,
+      comfy: {
+        context: {
+          projectId: job.data.projectId,
+          taskId: job.data.taskId,
+          invocationKey: `${job.data.taskId}:video:0`,
+        },
+      },
     }),
   )
   if (!result.success) {

@@ -326,6 +326,10 @@ export async function resolveModelSelection(
   mediaType: ModelMediaType,
 ): Promise<ModelSelection> {
   const parsed = assertModelKey(model, `${mediaType} model`)
+  if (parsed.provider === 'comfyui') {
+    const { resolveComfyWorkflowSelection } = await import('./comfyui/provider')
+    return resolveComfyWorkflowSelection(userId, parsed.modelId, mediaType)
+  }
   const models = await getModelsByType(userId, mediaType)
 
   const exact = findModelByKey(models, parsed.modelKey)

@@ -21,6 +21,8 @@ import { queryGeminiBatchStatus, querySeedanceVideoStatus, queryGoogleVideoStatu
 import { getProviderConfig, getUserModels } from './api-config'
 import { buildRenderedTemplateRequest, buildTemplateVariables, normalizeResponseJson, readJsonPath } from './openai-compat-template-runtime'
 import { composeModelKey } from './model-config-contract'
+import { parseComfyExternalId } from './comfyui/external-id'
+import { pollComfyGenerationRequest, type ComfyProgressStage } from './comfyui/provider'
 
 const OPENAI_COMPAT_PROVIDER_PREFIX = 'openai-compatible:'
 const PROVIDER_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -33,6 +35,41 @@ export interface PollResult {
     actualVideoTokens?: number
     downloadHeaders?: Record<string, string>
     error?: string
+    stage?: ComfyProgressStage
+    resultUrls?: string[]
+    waitingForCapacity?: boolean
+}
+
+export interface ExternalExecutionClock {
+    startedAt?: number
+}
+
+export function advanceExternalExecutionClock(
+    clock: ExternalExecutionClock,
+    result: Pick<PollResult, 'waitingForCapacity'>,
+    now: number,
+): number | null {
+    if (result.waitingForCapacity === true) {
+        delete clock.startedAt
+        return null
+    }
+    if (clock.startedAt === undefined) clock.startedAt = now
+    return Math.max(0, now - clock.startedAt)
+}
+
+export function externalPollProgress(input: {
+    result: Pick<PollResult, 'stage'>
+    executionElapsed: number | null
+    timeoutMs: number
+    progressStart: number
+    progressEnd: number
+}): { progress: number; stage: string } {
+    if (input.result.stage) return { progress: input.progressStart, stage: input.result.stage }
+    const ratio = Math.max(0, Math.min(1, (input.executionElapsed ?? 0) / input.timeoutMs))
+    return {
+        progress: input.progressStart + Math.floor((input.progressEnd - input.progressStart) * ratio),
+        stage: 'polling_external',
+    }
 }
 
 function getErrorMessage(error: unknown): string {
@@ -48,13 +85,21 @@ function getErrorMessage(error: unknown): string {
  * 解析 externalId 获取 provider、type 和请求信息
  */
 export function parseExternalId(externalId: string): {
-    provider: 'FAL' | 'ARK' | 'GEMINI' | 'GOOGLE' | 'MINIMAX' | 'VIDU' | 'OPENAI' | 'OCOMPAT' | 'BAILIAN' | 'SILICONFLOW' | 'UNKNOWN'
+    provider: 'FAL' | 'ARK' | 'GEMINI' | 'GOOGLE' | 'MINIMAX' | 'VIDU' | 'OPENAI' | 'OCOMPAT' | 'BAILIAN' | 'SILICONFLOW' | 'COMFY' | 'UNKNOWN'
     type: 'VIDEO' | 'IMAGE' | 'BATCH' | 'UNKNOWN'
     endpoint?: string
     requestId: string
     providerToken?: string
     modelKeyToken?: string
 } {
+    if (externalId.startsWith('COMFY:')) {
+        const parsed = parseComfyExternalId(externalId)
+        return {
+            provider: 'COMFY',
+            type: parsed.mediaType.toUpperCase() as 'IMAGE' | 'VIDEO',
+            requestId: parsed.requestId,
+        }
+    }
     // 标准格式：PROVIDER:TYPE:...
     if (externalId.startsWith('FAL:')) {
         const parts = externalId.split(':')
@@ -252,6 +297,12 @@ export async function pollAsyncTask(
             return await pollBailianTask(parsed.requestId, userId)
         case 'SILICONFLOW':
             return await pollSiliconFlowTask(parsed.requestId)
+        case 'COMFY':
+            return await pollComfyGenerationRequest({
+                requestId: parsed.requestId,
+                userId,
+                mediaType: parsed.type.toLowerCase() as 'image' | 'video',
+            })
         default:
             // 🔥 移除 fallback：未知 provider 直接抛出错误
             throw new Error(`未知的 Provider: ${parsed.provider}`)

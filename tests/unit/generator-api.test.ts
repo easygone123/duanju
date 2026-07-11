@@ -37,6 +37,12 @@ const generateBailianAudioMock = vi.hoisted(() => vi.fn(async () => ({ success: 
 const generateSiliconFlowImageMock = vi.hoisted(() => vi.fn(async () => ({ success: true, imageUrl: 'siliconflow-image' })))
 const generateSiliconFlowVideoMock = vi.hoisted(() => vi.fn(async () => ({ success: true, videoUrl: 'siliconflow-video' })))
 const generateSiliconFlowAudioMock = vi.hoisted(() => vi.fn(async () => ({ success: true, audioUrl: 'siliconflow-audio' })))
+const submitComfyImageGenerationMock = vi.hoisted(() => vi.fn(async () => ({
+  success: true, async: true, externalId: 'COMFY:IMAGE:request-1',
+})))
+const submitComfyVideoGenerationMock = vi.hoisted(() => vi.fn(async () => ({
+  success: true, async: true, externalId: 'COMFY:VIDEO:request-2',
+})))
 
 vi.mock('@/lib/api-config', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-config')>()
@@ -77,6 +83,11 @@ vi.mock('@/lib/providers/siliconflow', () => ({
   generateSiliconFlowAudio: generateSiliconFlowAudioMock,
 }))
 
+vi.mock('@/lib/comfyui/provider', () => ({
+  submitComfyImageGeneration: submitComfyImageGenerationMock,
+  submitComfyVideoGeneration: submitComfyVideoGenerationMock,
+}))
+
 import { generateAudio, generateImage, generateVideo } from '@/lib/generator-api'
 
 describe('generator-api gateway routing', () => {
@@ -91,6 +102,45 @@ describe('generator-api gateway routing', () => {
       apiMode: undefined,
       gatewayRoute: undefined,
     })
+  })
+
+  it('routes ComfyUI images before provider API-key resolution', async () => {
+    resolveModelSelectionMock.mockResolvedValueOnce({
+      provider: 'comfyui', modelId: 'wf-image', modelKey: 'comfyui::wf-image', mediaType: 'image',
+    })
+    const result = await generateImage('user-1', 'comfyui::wf-image', 'rain', {
+      comfy: {
+        context: { projectId: 'project-1', taskId: 'task-1', invocationKey: 'task-1:image:0' },
+        variables: { seed: 42 },
+      },
+    })
+    expect(result).toEqual({ success: true, async: true, externalId: 'COMFY:IMAGE:request-1' })
+    expect(submitComfyImageGenerationMock).toHaveBeenCalledWith({
+      userId: 'user-1', workflowId: 'wf-image', prompt: 'rain',
+      context: { projectId: 'project-1', taskId: 'task-1', invocationKey: 'task-1:image:0' },
+      variables: { seed: 42 },
+    })
+    expect(getProviderConfigMock).not.toHaveBeenCalled()
+  })
+
+  it('routes ComfyUI videos before provider API-key resolution', async () => {
+    resolveModelSelectionMock.mockResolvedValueOnce({
+      provider: 'comfyui', modelId: 'wf-video', modelKey: 'comfyui::wf-video', mediaType: 'video',
+    })
+    const result = await generateVideo('user-1', 'comfyui::wf-video', '', {
+      prompt: 'move',
+      comfy: {
+        context: { projectId: 'project-1', taskId: 'task-2', invocationKey: 'task-2:video:0' },
+        variables: { duration_seconds: 5 },
+      },
+    })
+    expect(result).toEqual({ success: true, async: true, externalId: 'COMFY:VIDEO:request-2' })
+    expect(submitComfyVideoGenerationMock).toHaveBeenCalledWith({
+      userId: 'user-1', workflowId: 'wf-video', prompt: 'move',
+      context: { projectId: 'project-1', taskId: 'task-2', invocationKey: 'task-2:video:0' },
+      variables: { duration_seconds: 5 },
+    })
+    expect(getProviderConfigMock).not.toHaveBeenCalled()
   })
 
   it('routes openai-compatible image requests to openai-compat gateway', async () => {
@@ -132,6 +182,21 @@ describe('generator-api gateway routing', () => {
     expect(createImageGeneratorMock).toHaveBeenCalledWith('google', 'imagen-4.0')
     expect(generateImageViaOpenAICompatMock).not.toHaveBeenCalled()
     expect(result).toEqual({ success: true, imageUrl: 'official-image' })
+  })
+
+  it('never forwards internal ComfyUI context to a cloud provider', async () => {
+    resolveModelSelectionMock.mockResolvedValueOnce({
+      provider: 'google', modelId: 'imagen-4.0', modelKey: 'google::imagen-4.0', mediaType: 'image',
+    })
+    await generateImage('user-1', 'google::imagen-4.0', 'draw house', {
+      aspectRatio: '1:1',
+      comfy: {
+        context: { projectId: 'project-1', taskId: 'task-1', invocationKey: 'task-1:image:0' },
+      },
+    })
+    expect(imageGeneratorGenerateMock).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.not.objectContaining({ comfy: expect.anything() }),
+    }))
   })
 
   it('routes gemini-compatible image to official generator', async () => {

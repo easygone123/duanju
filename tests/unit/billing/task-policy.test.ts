@@ -79,4 +79,36 @@ describe('billing/task-policy', () => {
     expect(info.model).toBe('vidu::vidu-lipsync')
     expect(info.quantity).toBe(1)
   })
+
+  it.each([
+    [TASK_TYPE.IMAGE_PANEL, { imageModel: 'comfyui::wf-image' }],
+    [TASK_TYPE.VIDEO_PANEL, { videoModel: 'comfyui::wf-video' }],
+  ])('marks ComfyUI generation as skipped and freezes zero for %s', (taskType, payload) => {
+    expect(buildDefaultTaskBillingInfo(taskType, payload)).toEqual({
+      billable: false,
+      source: 'task',
+      status: 'skipped',
+    })
+  })
+
+  it('keeps existing cloud image and video billing unchanged', () => {
+    const image = expectBillableInfo(buildDefaultTaskBillingInfo(TASK_TYPE.IMAGE_PANEL, {
+      imageModel: 'seedream4',
+      candidateCount: 2,
+    }))
+    const video = expectBillableInfo(buildDefaultTaskBillingInfo(TASK_TYPE.VIDEO_PANEL, {
+      videoModel: 'doubao-seedance-1-5-pro-251215',
+      duration: 5,
+    }))
+    expect(image).toMatchObject({ billable: true, apiType: 'image', quantity: 2 })
+    expect(video).toMatchObject({ billable: true, apiType: 'video', quantity: 1 })
+  })
+
+  it.each(['comfyui::', 'comfyui:remote::wf-image', 'other::comfyui::wf-image']) (
+    'does not grant zero billing to a malformed or non-native key %s',
+    (model) => {
+      expect(buildDefaultTaskBillingInfo(TASK_TYPE.IMAGE_PANEL, { imageModel: model }))
+        .toMatchObject({ billable: true })
+    },
+  )
 })
