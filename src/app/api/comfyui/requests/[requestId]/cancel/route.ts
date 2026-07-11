@@ -85,6 +85,33 @@ function createCancellationDependencies(): ComfyCancellationDependencies {
       ])
       return count === 1 && leaseValue === comfyRequestLeaseValue(owner)
     },
+    requestCancellation: async (input) => prisma.$transaction(async (tx) => {
+      if (input.observedStatus === 'leased' || input.observedStatus === 'uploading') {
+        const local = await tx.comfyGenerationRequest.updateMany({
+          where: {
+            id: input.requestId, userId: input.userId, connectionId: input.connectionId,
+            leaseId: input.leaseId, status: input.observedStatus,
+            promptId: null, cancelRequestedAt: null,
+          },
+          data: { status: 'canceled', cancelRequestedAt: new Date(), canceledAt: new Date() },
+        })
+        if (local.count === 1) return 'canceled' as const
+      }
+      const requested = await tx.comfyGenerationRequest.updateMany({
+        where: {
+          id: input.requestId, userId: input.userId, connectionId: input.connectionId,
+          leaseId: input.leaseId,
+          status: { in: ['submitting', 'submitted', 'running', 'transferring', 'reconciling'] },
+          ...(input.promptId ? { promptId: input.promptId } : {}),
+        },
+        data: { cancelRequestedAt: new Date() },
+      })
+      if (requested.count === 1) return 'requested' as const
+      const current = await tx.comfyGenerationRequest.findFirst({
+        where: { id: input.requestId, userId: input.userId }, select: { status: true },
+      })
+      return current?.status === 'canceled' ? 'canceled' as const : 'lost' as const
+    }, { isolationLevel: 'Serializable' }),
     getQueue: () => requireClient().getQueue(),
     deleteQueuedPrompt: (promptId) => requireClient().deleteQueuedPrompt(promptId),
     interruptPrompt: (promptId) => requireClient().interruptPrompt(promptId),
@@ -94,6 +121,7 @@ function createCancellationDependencies(): ComfyCancellationDependencies {
           id: input.requestId, userId: input.userId, connectionId: input.connectionId,
           leaseId: input.leaseId,
           ...(input.promptId ? { promptId: input.promptId } : { promptId: null }),
+          cancelRequestedAt: { not: null },
           status: { notIn: ['completed', 'failed', 'canceled'] },
         },
         data: { status: 'canceled', canceledAt: new Date() },

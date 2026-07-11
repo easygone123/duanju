@@ -68,7 +68,7 @@ describe('ComfyUI request leases', () => {
       where: {
         id: 'request-1', connectionId: 'connection-1', leaseId: 'lease-1',
         status: { in: [
-          'leased', 'uploading', 'submitted', 'running', 'transferring', 'reconciling',
+          'leased', 'uploading', 'submitting', 'submitted', 'running', 'transferring', 'reconciling',
         ] },
       },
       data: { leaseExpiresAt: new Date(150) },
@@ -349,7 +349,7 @@ describe('ComfyUI database assignment CAS', () => {
         connectionId: 'connection-1',
         id: { not: 'request-1' },
         status: { in: [
-          'leased', 'uploading', 'submitted', 'running', 'transferring', 'reconciling',
+          'leased', 'uploading', 'submitting', 'submitted', 'running', 'transferring', 'reconciling',
         ] },
       },
     })

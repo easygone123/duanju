@@ -30,6 +30,14 @@ export interface ComfyHealthMonitorDependencies {
     value: string,
     ttlMs: number,
   ): Promise<unknown>
+  recordState?(input: {
+    connectionId: string
+    state: ComfyHealthSummary['state']
+    up: 0 | 1
+    idle: 0 | 1
+    ownedBusy: 0 | 1
+    externalBusy: 0 | 1
+  }): void
 }
 
 export interface MonitorComfyHealthInput {
@@ -114,6 +122,14 @@ export async function monitorComfyHealth(
   await cacheComfyHealthIfNewer(
     { eval: dependencies.cacheEval }, input.connectionId, baseHealth, input.ttlMs,
   )
+  dependencies.recordState?.({
+    connectionId: input.connectionId,
+    state: baseHealth.state,
+    up: baseHealth.state === 'offline' || baseHealth.state === 'auth_failed' ? 0 : 1,
+    idle: baseHealth.state === 'online_idle' ? 1 : 0,
+    ownedBusy: baseHealth.state === 'online_busy_owned' ? 1 : 0,
+    externalBusy: baseHealth.state === 'online_busy_external' ? 1 : 0,
+  })
   const health = compatibility && !compatibility.compatible
     ? { ...baseHealth, state: 'workflow_incompatible' as const }
     : baseHealth

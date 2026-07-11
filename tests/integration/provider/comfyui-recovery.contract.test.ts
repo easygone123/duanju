@@ -2,12 +2,104 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   cancelComfyRequest,
+  claimComfySubmissionFenceWithStore,
+  claimExpiredComfyRequestWithStore,
+  findComfyPromptByClientId,
   reconcileComfyRequest,
+  reclaimComfyRecoveryLease,
+  recordComfyAcceptedPromptWithStore,
   type ComfyCancellationDependencies,
   type ComfyReconciliationDependencies,
 } from '@/lib/comfyui/dispatcher'
 
 describe('ComfyUI recovery and cancellation contract', () => {
+  it('atomically fences submission against cancellation and records the attempt before POST', async () => {
+    const events: string[] = []
+    const store: NonNullable<Parameters<typeof claimComfySubmissionFenceWithStore>[1]> = {
+      transaction: async (operation) => operation({
+        fenceRequest: vi.fn(async () => { events.push('fence-request'); return { count: 1 } }),
+        createAttempt: vi.fn(async () => { events.push('create-attempt'); return {} }),
+        findRequest: vi.fn(),
+      }),
+    }
+    const result = await claimComfySubmissionFenceWithStore({
+      requestId: 'request-1', userId: 'user-1', connectionId: 'connection-1', leaseId: 'lease-1',
+      attemptId: 'attempt-1', clientId: 'client-1',
+    }, store)
+    expect(result).toEqual({ outcome: 'claimed', attemptId: 'attempt-1', clientId: 'client-1' })
+    expect(events).toEqual(['fence-request', 'create-attempt'])
+  })
+
+  it('durably records accepted prompt on the attempt even if request owner CAS is lost', async () => {
+    const events: string[] = []
+    const updateAttempt = vi.fn(async () => { events.push('attempt'); return { count: 1 } })
+    const updateRequest = vi.fn(async () => { events.push('request'); return { count: 0 } })
+    const result = await recordComfyAcceptedPromptWithStore({
+      requestId: 'request-1', userId: 'user-1', connectionId: 'connection-1', leaseId: 'lease-1',
+      attemptId: 'attempt-1', clientId: 'client-1', promptId: 'prompt-1',
+    }, { transaction: async (operation) => operation({ updateAttempt, updateRequest, findAttempt: vi.fn() }) })
+    expect(result).toEqual({ outcome: 'attempt_recorded' })
+    expect(events).toEqual(['attempt', 'request'])
+  })
+
+  it('reclaims an expired recorded submission on the same connection and never submits', async () => {
+    const acquireLease = vi.fn().mockResolvedValue(true)
+    const claimExpiredRequest = vi.fn().mockResolvedValue(true)
+    const result = await reclaimComfyRecoveryLease({
+      requestId: 'request-1', userId: 'user-1', connectionId: 'connection-1',
+      previousLeaseId: 'expired-lease', newLeaseId: 'recovery-lease', ttlMs: 30_000,
+      leaseExpiredAt: new Date(0), now: new Date(1000), hasSubmissionAttempt: true,
+    }, { acquireLease, claimExpiredRequest, releaseLease: vi.fn() })
+    expect(result).toMatchObject({ outcome: 'reclaimed', leaseId: 'recovery-lease' })
+    expect(acquireLease).toHaveBeenCalled()
+    expect(claimExpiredRequest).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: 'connection-1', previousLeaseId: 'expired-lease',
+    }))
+  })
+
+  it('fails closed when another active request already owns the recovery connection', async () => {
+    const claimRequest = vi.fn()
+    const claimed = await claimExpiredComfyRequestWithStore({
+      requestId: 'request-1', userId: 'user-1', connectionId: 'connection-1',
+      previousLeaseId: 'expired-lease', newLeaseId: 'recovery-lease', ttlMs: 30_000,
+      leaseExpiredAt: new Date(0), leaseExpiresAt: new Date(31_000),
+      now: new Date(1000), hasSubmissionAttempt: true,
+    }, { transaction: async (operation) => operation({
+      countCompeting: vi.fn().mockResolvedValue(1), claimRequest,
+    }) })
+    expect(claimed).toBe(false)
+    expect(claimRequest).not.toHaveBeenCalled()
+  })
+
+  it('discovers a running accepted prompt by durable client correlation and reconciles only', async () => {
+    expect(findComfyPromptByClientId({
+      running: [[0, 'prompt-1', {}, { client_id: 'client-1' }, []]], pending: [],
+    }, {}, 'client-1')).toBe('prompt-1')
+    const persistDiscoveredPrompt = vi.fn().mockResolvedValue(true)
+    const deps = {
+      loadContext: vi.fn().mockResolvedValue({
+        request: {
+          id: 'request-1', userId: 'user-1', status: 'reconciling',
+          connectionId: 'connection-1', leaseId: 'recovery-lease',
+          submissionAttempt: { id: 'attempt-1', clientId: 'client-1' },
+        },
+        version: { outputs: [] },
+      }),
+      verifyLeaseOwner: vi.fn().mockResolvedValue(true),
+      findPromptByClientId: vi.fn().mockResolvedValue('prompt-1'),
+      persistDiscoveredPrompt,
+      getQueue: vi.fn().mockResolvedValue({
+        running: [[0, 'prompt-1', {}, { client_id: 'client-1' }, []]], pending: [],
+      }),
+      getHistory: vi.fn().mockResolvedValue({}),
+      persistRecoveredState: vi.fn().mockResolvedValue(true),
+    } satisfies ComfyReconciliationDependencies
+    await expect(reconcileComfyRequest('request-1', deps)).resolves.toMatchObject({ outcome: 'running' })
+    expect(persistDiscoveredPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      attemptId: 'attempt-1', promptId: 'prompt-1', leaseId: 'recovery-lease',
+    }))
+  })
+
   it('recovers a recorded prompt from history without resubmission', async () => {
     const deps: ComfyReconciliationDependencies = {
       loadContext: vi.fn().mockResolvedValue({
@@ -78,6 +170,9 @@ describe('ComfyUI recovery and cancellation contract', () => {
     return {
       loadOwnedRequest: vi.fn().mockResolvedValue({ id: 'request-1', userId: 'user-1', status, connectionId: 'connection-1', leaseId: 'lease-1', promptId: status === 'submitted' || status === 'running' ? 'prompt-1' : undefined }),
       cancelLocal: vi.fn().mockResolvedValue(true), verifyLeaseOwner: vi.fn().mockResolvedValue(true),
+      requestCancellation: vi.fn().mockResolvedValue(
+        status === 'leased' || status === 'uploading' ? 'canceled' : 'requested',
+      ),
       getQueue: vi.fn().mockResolvedValue(queue), deleteQueuedPrompt: vi.fn().mockResolvedValue(undefined),
       interruptPrompt: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(true),
       markCanceledOwned: vi.fn().mockResolvedValue(true),
@@ -95,7 +190,10 @@ describe('ComfyUI recovery and cancellation contract', () => {
     const deps = cancellation('uploading')
     await cancelComfyRequest('request-1', 'user-1', deps)
     expect(deps.getQueue).not.toHaveBeenCalled()
-    expect(deps.markCanceledOwned).toHaveBeenCalledWith(expect.objectContaining({ leaseId: 'lease-1' }))
+    expect(deps.requestCancellation).toHaveBeenCalledWith(expect.objectContaining({
+      leaseId: 'lease-1', observedStatus: 'uploading',
+    }))
+    expect(deps.markCanceledOwned).not.toHaveBeenCalled()
     expect(deps.release).toHaveBeenCalled()
   })
 

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-
 import { ApiError } from '@/lib/api-errors'
 
 import { COMFY_ERROR_CODE, ComfyError } from './errors'
@@ -23,6 +22,14 @@ import type {
 } from './types'
 import { extractComfyOutputs } from './workflow-output'
 import { renderComfyWorkflow } from './workflow-renderer'
+import type { ComfyAcceptedPromptResult, ComfySubmissionFenceResult } from './submission'
+
+export {
+  claimComfySubmissionFenceWithStore,
+  claimExpiredComfyRequestWithStore,
+  reclaimComfyRecoveryLease,
+  recordComfyAcceptedPromptWithStore,
+} from './submission'
 
 type RequestRecord = {
   id: string
@@ -39,7 +46,9 @@ type RequestRecord = {
   leaseId?: string | null
   promptId?: string | null
   clientId?: string | null
+  cancelRequestedAt?: Date | null
   outputRefs?: ComfyOutputRef[] | null
+  submissionAttempt?: { id: string; clientId: string; promptId?: string | null } | null
 }
 
 type ExecutionContext = {
@@ -72,7 +81,13 @@ export interface ComfyDispatcherDependencies extends ComfyMediaDependencies {
   heartbeat(owner: OwnerInput & { ttlMs: number }): Promise<boolean>
   release(owner: OwnerInput & { ttlMs: number }): Promise<boolean>
   transition(input: OwnerInput & { from: ComfyRequestStatus; to: ComfyRequestStatus }): Promise<boolean>
-  persistSubmission(input: OwnerInput & { promptId: string; clientId: string }): Promise<boolean>
+  claimSubmissionFence(input: OwnerInput & {
+    attemptId: string; clientId: string
+  }): Promise<ComfySubmissionFenceResult>
+  recordAcceptedPrompt(input: OwnerInput & {
+    attemptId: string; clientId: string; promptId: string
+  }): Promise<ComfyAcceptedPromptResult>
+  cancelIfRequested(input: OwnerInput & { attemptId: string; promptId: string }): Promise<boolean>
   persistProgress(input: OwnerInput & { promptId: string; event: ComfyExecutionEvent; value?: number; max?: number }): Promise<boolean>
   persistOutputRefs(input: OwnerInput & { promptId: string; outputs: ComfyOutputRef[] }): Promise<boolean>
   persistCompletedOutputs(input: OwnerInput & { promptId: string; outputs: ComfyStoredOutputRef[] }): Promise<boolean>
@@ -92,6 +107,7 @@ export type ComfyDispatchResult =
   | { outcome: 'waiting_capacity' }
   | { outcome: 'reconciling'; promptId: string }
   | { outcome: 'failed'; code: string }
+  | { outcome: 'canceled' }
 
 export async function dispatchComfyRequest(
   requestId: string,
@@ -102,10 +118,14 @@ export async function dispatchComfyRequest(
   const owner = { ...requireOwner(request), ttlMs: dependencies.leaseTtlMs }
   const heartbeat = startHeartbeat(owner, dependencies)
   let promptId = request.promptId ?? undefined
+  let submissionAttemptId: string | undefined
   let terminal = false
   try {
     assertContext(context, owner)
-    if (!await dependencies.recheckClaim(context, owner)) throw lostLease()
+    if (!await dependencies.recheckClaim(context, owner)) {
+      dependencies.observation?.increment('lease_contention', { outcome: 'claim_recheck' })
+      throw lostLease()
+    }
 
     if ((request.status === 'transferring' || request.status === 'reconciling')
       && request.outputRefs?.length) {
@@ -118,6 +138,10 @@ export async function dispatchComfyRequest(
       await dependencies.markReconciling({ ...owner, promptId, errorCode: COMFY_ERROR_CODE.RECONCILIATION_REQUIRED })
       dependencies.observation?.increment('reconciliation', { outcome: 'recorded_prompt' })
       return { outcome: 'reconciling', promptId }
+    }
+    if (request.status === 'submitting' || request.clientId) {
+      dependencies.observation?.increment('reconciliation', { outcome: 'submission_attempt' })
+      return { outcome: 'reconciling', promptId: '' }
     }
 
     await mustOwn(dependencies.transition({ ...owner, from: request.status, to: 'uploading' }))
@@ -137,12 +161,34 @@ export async function dispatchComfyRequest(
       uploads,
     })
     await heartbeat.assertOwned()
-    if (!await dependencies.recheckClaim(context, owner)) throw lostLease()
+    if (!await dependencies.recheckClaim(context, owner)) {
+      dependencies.observation?.increment('lease_contention', { outcome: 'claim_recheck' })
+      throw lostLease()
+    }
     const clientId = dependencies.randomId?.() ?? randomUUID()
+    const attemptId = dependencies.randomId?.() ?? randomUUID()
+    const fence = await dependencies.claimSubmissionFence({ ...owner, clientId, attemptId })
+    if (fence.outcome === 'canceled') return { outcome: 'canceled' }
+    if (fence.outcome !== 'claimed') {
+      dependencies.observation?.increment('lease_contention', { outcome: 'submission_fence' })
+      return { outcome: 'reconciling', promptId: '' }
+    }
+    submissionAttemptId = fence.attemptId
     const submission = await dependencies.client.submitPrompt(graph, clientId)
     promptId = submission.promptId
-    await mustOwn(dependencies.persistSubmission({ ...owner, promptId, clientId }))
+    const receipt = await dependencies.recordAcceptedPrompt({
+      ...owner, promptId, clientId, attemptId: fence.attemptId,
+    })
+    if (receipt.outcome === 'attempt_recorded') {
+      dependencies.observation?.increment('reconciliation', { outcome: 'detached_receipt' })
+      return { outcome: 'reconciling', promptId }
+    }
+    if (await dependencies.cancelIfRequested({ ...owner, promptId, attemptId: fence.attemptId })) {
+      terminal = true
+      return { outcome: 'canceled' }
+    }
 
+    const executionStartedAt = Date.now()
     try {
       await consumePromptEvents(
         dependencies.client, promptId, clientId, owner, dependencies,
@@ -152,6 +198,10 @@ export async function dispatchComfyRequest(
       dependencies.observation?.increment('reconciliation', { outcome: 'websocket_fallback' })
     }
     const history = await readCompletedHistory(promptId, dependencies.client)
+    dependencies.observation?.observe(
+      'execution_duration_ms', Date.now() - executionStartedAt,
+      { mediaType: request.mediaType ?? 'image' },
+    )
     const outputs = extractComfyOutputs(history, context.version.outputs)
     await heartbeat.assertOwned()
     await mustOwn(dependencies.persistOutputRefs({ ...owner, promptId, outputs }))
@@ -181,6 +231,10 @@ export async function dispatchComfyRequest(
         { code: errorCode },
       )
       return { outcome: 'reconciling', promptId }
+    }
+    if (submissionAttemptId) {
+      dependencies.observation?.increment('reconciliation', { outcome: 'uncertain_submission' })
+      return { outcome: 'reconciling', promptId: '' }
     }
     const errorCode = safeErrorCode(error, COMFY_ERROR_CODE.CONNECTION_OFFLINE)
     await dependencies.returnToWaiting({
@@ -300,6 +354,10 @@ export interface ComfyReconciliationDependencies {
   verifyLeaseOwner(input: OwnerInput): Promise<boolean>
   getQueue(): Promise<{ running: unknown[]; pending: unknown[] }>
   getHistory(promptId: string): Promise<Record<string, unknown>>
+  findPromptByClientId?(clientId: string): Promise<string | null>
+  persistDiscoveredPrompt?(input: OwnerInput & {
+    attemptId: string; clientId: string; promptId: string
+  }): Promise<boolean>
   isAbsenceConclusive?(input: OwnerInput & { promptId: string }): Promise<boolean>
   persistRecoveredState(input: OwnerInput & {
     promptId: string
@@ -316,8 +374,18 @@ export async function reconcileComfyRequest(
   const context = await dependencies.loadContext(requestId)
   const request = context.request
   const owner = requireOwner(request)
-  if (!request.promptId || !await dependencies.verifyLeaseOwner(owner)) throw lostLease()
-  const promptId = request.promptId
+  if (!await dependencies.verifyLeaseOwner(owner)) throw lostLease()
+  let promptId = request.promptId ?? request.submissionAttempt?.promptId ?? undefined
+  if (!promptId && request.submissionAttempt) {
+    promptId = await dependencies.findPromptByClientId?.(request.submissionAttempt.clientId) ?? undefined
+    if (!promptId) return { outcome: 'reconciling' as const }
+    if (!dependencies.persistDiscoveredPrompt
+      || !await dependencies.persistDiscoveredPrompt({
+        ...owner, attemptId: request.submissionAttempt.id,
+        clientId: request.submissionAttempt.clientId, promptId,
+      })) throw lostLease()
+  }
+  if (!promptId) return { outcome: 'reconciling' as const }
   const history = await dependencies.getHistory(promptId)
   if (historyShowsExecutionFailure(history, promptId)) {
     await mustOwn(dependencies.persistRecoveredState({
@@ -346,10 +414,31 @@ export async function reconcileComfyRequest(
   return { outcome: status ?? 'failed' }
 }
 
+export function findComfyPromptByClientId(
+  queue: { running: unknown[]; pending: unknown[] },
+  history: Record<string, unknown>,
+  clientId: string,
+) {
+  for (const entry of [...queue.running, ...queue.pending].slice(0, 10_000)) {
+    if (Array.isArray(entry) && typeof entry[1] === 'string'
+      && isRecord(entry[3]) && entry[3].client_id === clientId) return entry[1]
+  }
+  for (const [promptId, rawEntry] of Object.entries(history).slice(0, 10_000)) {
+    if (!isRecord(rawEntry)) continue
+    const prompt = rawEntry.prompt
+    const extra = Array.isArray(prompt) ? prompt[3] : rawEntry.extra_data
+    if (isRecord(extra) && extra.client_id === clientId) return promptId
+  }
+  return null
+}
+
 export interface ComfyCancellationDependencies {
   loadOwnedRequest(requestId: string, userId: string): Promise<RequestRecord | null>
   cancelLocal(input: { requestId: string; userId: string; status: ComfyRequestStatus }): Promise<boolean>
   verifyLeaseOwner(input: OwnerInput): Promise<boolean>
+  requestCancellation(input: OwnerInput & {
+    observedStatus: ComfyRequestStatus; promptId?: string
+  }): Promise<'canceled' | 'requested' | 'lost'>
   getQueue(): Promise<{ running: unknown[]; pending: unknown[] }>
   deleteQueuedPrompt(promptId: string): Promise<void>
   interruptPrompt(promptId: string): Promise<void>
@@ -372,6 +461,15 @@ export async function cancelComfyRequest(
   const owner = requireOwner(request)
   if (!await dependencies.verifyLeaseOwner(owner)) throw new ApiError('CONFLICT')
   const promptId = request.promptId ?? undefined
+  const cancellation = await dependencies.requestCancellation({
+    ...owner, observedStatus: request.status, ...(promptId ? { promptId } : {}),
+  })
+  if (cancellation === 'lost') throw new ApiError('CONFLICT')
+  if (cancellation === 'canceled') {
+    await dependencies.release(owner).catch(() => false)
+    return { outcome: 'canceled' as const }
+  }
+  if (!promptId) return { outcome: 'canceling' as const }
   if (promptId) {
     const queue = await dependencies.getQueue()
     if (queueContainsPrompt(queue.pending, promptId)) {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { dispatchComfyRequest, type ComfyDispatcherDependencies } from '@/lib/comfyui/dispatcher'
 import { ComfyError } from '@/lib/comfyui/errors'
+import { createComfyObservability } from '@/lib/comfyui/observability'
 import { prepareComfyMediaUploads } from '@/lib/comfyui/media'
 import type { ComfyOutputRef } from '@/lib/comfyui/types'
 
@@ -42,7 +43,11 @@ function dependencies(overrides: Partial<ComfyDispatcherDependencies> = {}): Com
     heartbeat: vi.fn().mockResolvedValue(true),
     release: vi.fn().mockResolvedValue(true),
     transition: vi.fn().mockResolvedValue(true),
-    persistSubmission: vi.fn().mockResolvedValue(true),
+    claimSubmissionFence: vi.fn().mockResolvedValue({
+      outcome: 'claimed', attemptId: 'attempt-1', clientId: 'client-1',
+    }),
+    recordAcceptedPrompt: vi.fn().mockResolvedValue({ outcome: 'request_recorded' }),
+    cancelIfRequested: vi.fn().mockResolvedValue(false),
     persistProgress: vi.fn().mockResolvedValue(true),
     persistOutputRefs: vi.fn().mockResolvedValue(true),
     persistCompletedOutputs: vi.fn().mockResolvedValue(true),
@@ -86,8 +91,11 @@ describe('ComfyUI dispatcher contract', () => {
     const graph = (deps.client.submitPrompt as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(graph['1'].inputs.image).toBe('uploaded.png')
     const submittedClientId = (deps.client.submitPrompt as ReturnType<typeof vi.fn>).mock.calls[0][1]
-    expect(deps.persistSubmission).toHaveBeenCalledWith(expect.objectContaining({
-      promptId: 'prompt-1', clientId: submittedClientId,
+    expect(deps.claimSubmissionFence).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: submittedClientId,
+    }))
+    expect(deps.recordAcceptedPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      promptId: 'prompt-1', clientId: submittedClientId, attemptId: 'attempt-1',
     }))
     expect(deps.persistProgress).toHaveBeenCalledWith(expect.objectContaining({ value: 1, max: 2 }))
     expect(deps.persistOutputRefs).toHaveBeenCalledWith(expect.objectContaining({
@@ -114,10 +122,21 @@ describe('ComfyUI dispatcher contract', () => {
   })
 
   it('returns to capacity on pre-submit failure but pins a persisted prompt for reconciliation', async () => {
-    const pre = dependencies({ client: { ...dependencies().client, submitPrompt: vi.fn().mockRejectedValue(new Error('offline')) } })
+    const pre = dependencies({
+      client: { ...dependencies().client, uploadImage: vi.fn().mockRejectedValue(new Error('offline')) },
+    })
     await expect(dispatchComfyRequest('request-1', pre)).resolves.toMatchObject({ outcome: 'waiting_capacity' })
     expect(pre.returnToWaiting).toHaveBeenCalled()
     expect(pre.release).toHaveBeenCalled()
+
+    const uncertainSubmit = dependencies({
+      client: { ...dependencies().client, submitPrompt: vi.fn().mockRejectedValue(new Error('response lost')) },
+    })
+    await expect(dispatchComfyRequest('request-1', uncertainSubmit)).resolves.toMatchObject({
+      outcome: 'reconciling', promptId: '',
+    })
+    expect(uncertainSubmit.returnToWaiting).not.toHaveBeenCalled()
+    expect(uncertainSubmit.release).not.toHaveBeenCalled()
 
     const post = dependencies({
       client: {
@@ -132,6 +151,25 @@ describe('ComfyUI dispatcher contract', () => {
     }))
     expect(post.returnToWaiting).not.toHaveBeenCalled()
     expect(post.release).not.toHaveBeenCalled()
+  })
+
+  it('never submits when cancellation wins the atomic submission fence', async () => {
+    const deps = dependencies({
+      claimSubmissionFence: vi.fn().mockResolvedValue({ outcome: 'canceled' }),
+    })
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({ outcome: 'canceled' })
+    expect(deps.client.submitPrompt).not.toHaveBeenCalled()
+    expect(deps.returnToWaiting).not.toHaveBeenCalled()
+  })
+
+  it('keeps an accepted prompt recoverable when request ownership changes after POST', async () => {
+    const deps = dependencies({
+      recordAcceptedPrompt: vi.fn().mockResolvedValue({ outcome: 'attempt_recorded' }),
+    })
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({ outcome: 'reconciling' })
+    expect(deps.markReconciling).not.toHaveBeenCalled()
+    expect(deps.returnToWaiting).not.toHaveBeenCalled()
+    expect(deps.release).not.toHaveBeenCalled()
   })
 
   it('fails deterministic pre-submit errors instead of retrying another instance', async () => {
@@ -222,5 +260,23 @@ describe('ComfyUI dispatcher contract', () => {
     )
     const outputKeys = (completed.uploadObject as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[1])
     expect(new Set(outputKeys).size).toBe(2)
+  })
+
+  it('records execution duration and lease contention without sensitive labels', async () => {
+    const metrics = { increment: vi.fn(), observe: vi.fn(), gauge: vi.fn() }
+    const observation = createComfyObservability({
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }, metrics,
+      context: { requestId: 'request-1', connectionId: 'connection-1' },
+    })
+    await dispatchComfyRequest('request-1', dependencies({ observation }))
+    expect(metrics.observe).toHaveBeenCalledWith(
+      'comfy.execution_duration_ms', expect.any(Number), expect.objectContaining({ requestId: 'request-1' }),
+    )
+
+    const contended = dependencies({ observation, recheckClaim: vi.fn().mockResolvedValue(false) })
+    await dispatchComfyRequest('request-1', contended)
+    expect(metrics.increment).toHaveBeenCalledWith(
+      'comfy.lease_contention', 1, expect.objectContaining({ requestId: 'request-1' }),
+    )
   })
 })

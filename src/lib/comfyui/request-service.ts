@@ -21,7 +21,8 @@ export const ALLOWED_COMFY_REQUEST_TRANSITIONS: Record<
   waiting_capacity: ['blocked_no_compatible_instance', 'leased', 'canceled'],
   blocked_no_compatible_instance: ['waiting_capacity', 'canceled'],
   leased: ['uploading', 'waiting_capacity', 'reconciling', 'failed', 'canceled'],
-  uploading: ['submitted', 'waiting_capacity', 'reconciling', 'failed', 'canceled'],
+  uploading: ['submitting', 'waiting_capacity', 'reconciling', 'failed', 'canceled'],
+  submitting: ['submitted', 'reconciling', 'failed', 'canceled'],
   submitted: ['running', 'transferring', 'reconciling', 'failed', 'canceled'],
   running: ['transferring', 'reconciling', 'failed', 'canceled'],
   transferring: ['completed', 'reconciling', 'failed', 'canceled'],
@@ -166,6 +167,7 @@ const TRANSITION_PATCH_FIELDS: Record<ComfyRequestStatus, readonly (keyof ComfyT
   blocked_no_compatible_instance: [],
   leased: ['connectionId', 'leaseId', 'leaseExpiresAt'],
   uploading: [],
+  submitting: ['clientId'],
   submitted: ['promptId', 'clientId'],
   running: ['promptId', 'clientId'],
   transferring: ['outputRefs'],
@@ -212,6 +214,7 @@ export async function transitionComfyGenerationRequest(
 
 const LEASE_OWNED_STATUSES = new Set<ComfyRequestStatus>([
   'leased', 'uploading', 'submitted', 'running', 'transferring', 'reconciling',
+  'submitting',
 ])
 
 function validOwnerToken(value: unknown): value is string {
@@ -335,7 +338,7 @@ function sanitizeMediaRef(value: ComfyMediaRef) {
 
 function phaseTimestamp(status: ComfyRequestStatus, now: Date) {
   const field: Partial<Record<ComfyRequestStatus, string>> = {
-    leased: 'leasedAt', uploading: 'uploadingAt', submitted: 'submittedAt',
+    leased: 'leasedAt', uploading: 'uploadingAt', submitting: 'submittingAt', submitted: 'submittedAt',
     running: 'runningAt', transferring: 'transferringAt', reconciling: 'reconcilingAt',
     completed: 'completedAt', failed: 'failedAt', canceled: 'canceledAt',
   }

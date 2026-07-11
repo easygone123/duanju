@@ -129,6 +129,27 @@ describe('ComfyUI health monitor contract', () => {
     })
   })
 
+  it('records exact connection uptime and idle/owned/external state metrics', async () => {
+    const recordState = vi.fn()
+    const idle = dependencies()
+    idle.recordState = recordState
+    await monitor(idle)
+    const external = dependencies()
+    external.recordState = recordState
+    external.getQueue.mockResolvedValue({ running: [['manual']], pending: [] })
+    await monitor(external)
+    const owned = dependencies()
+    owned.recordState = recordState
+    owned.hasLease.mockResolvedValue(true)
+    await monitor(owned)
+    expect(recordState.mock.calls.map((call) => call[0].state)).toEqual([
+      'online_idle', 'online_busy_external', 'online_busy_owned',
+    ])
+    expect(recordState).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: 'connection-1', up: 1, idle: 1, ownedBusy: 0, externalBusy: 0,
+    }))
+  })
+
   it('returns workflow_incompatible with exact missing requirements', async () => {
     const deps = dependencies()
     deps.checkCompatibility.mockResolvedValue({

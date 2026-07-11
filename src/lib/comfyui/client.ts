@@ -233,6 +233,14 @@ export class ComfyClient {
     )
   }
 
+  getHistoryAll(): Promise<Record<string, unknown>> {
+    return this.requestJson(
+      'history',
+      { method: 'GET' },
+      COMFY_ERROR_CODE.CONNECTION_OFFLINE,
+    )
+  }
+
   downloadOutput(ref: ComfyOutputRef): Promise<Buffer> {
     const query = new URLSearchParams({
       filename: ref.filename,
