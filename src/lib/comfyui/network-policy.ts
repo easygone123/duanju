@@ -22,6 +22,17 @@ export interface ComfyResolvedAddress {
 
 export type ComfyResolver = (hostname: string) => Promise<ComfyResolvedAddress[]>
 
+// Exact well-known cloud credential endpoints. Trusted mode still blocks these addresses.
+const CLOUD_CREDENTIAL_ENDPOINTS = [
+  '169.254.169.254', // AWS EC2 IMDS, GCP metadata, Azure IMDS
+  '169.254.170.2', // AWS ECS task credentials
+  '169.254.170.23', // AWS EKS Pod Identity
+  '100.100.100.200', // Alibaba Cloud metadata
+  '192.0.0.192', // Oracle Cloud metadata
+  'fd00:ec2::254', // AWS EC2 IMDS IPv6
+  'fd00:ec2::23', // AWS EKS Pod Identity IPv6
+] as const
+
 export const resolveComfyHost: ComfyResolver = async (hostname) => {
   const answers = await lookup(hostname, { all: true, verbatim: true })
   return answers.map(({ address, family }) => ({ address, family: family as 4 | 6 }))
@@ -184,13 +195,9 @@ function isAlwaysBlocked(address: ParsedAddress): boolean {
     inCidr(address, '224.0.0.0/4') ||
     inCidr(address, '::/128') ||
     inCidr(address, 'ff00::/8') ||
-    [
-      '169.254.169.254',
-      '169.254.170.2',
-      '100.100.100.200',
-      '192.0.0.192',
-      'fd00:ec2::254',
-    ].some((metadataAddress) => sameAddress(address, parseAddress(metadataAddress)))
+    CLOUD_CREDENTIAL_ENDPOINTS.some(
+      (metadataAddress) => sameAddress(address, parseAddress(metadataAddress)),
+    )
   )
 }
 

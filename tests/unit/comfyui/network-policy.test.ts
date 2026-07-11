@@ -87,9 +87,11 @@ describe('authorizeComfyTarget', () => {
   it.each([
     '169.254.169.254',
     '169.254.170.2',
+    '169.254.170.23',
     '100.100.100.200',
     '192.0.0.192',
     'fd00:ec2::254',
+    'fd00:ec2::23',
     '::ffff:169.254.169.254',
   ]) (
     'blocks cloud metadata and mapped metadata targets even in trusted mode: %s',
@@ -103,6 +105,24 @@ describe('authorizeComfyTarget', () => {
       ).rejects.toMatchObject({ code: 'COMFY_NETWORK_TARGET_BLOCKED' })
     },
   )
+
+  it('blocks EKS Pod Identity in every DNS answer and despite an explicit CIDR allowlist', async () => {
+    await expect(
+      authorizeComfyTarget(
+        'https://comfy.example.com',
+        allowlist,
+        resolver('203.0.113.10', '169.254.170.23'),
+      ),
+    ).rejects.toMatchObject({ code: 'COMFY_NETWORK_TARGET_BLOCKED' })
+
+    await expect(
+      authorizeComfyTarget(
+        'http://[fd00:ec2::23]',
+        { mode: 'allowlist', allowedHosts: [], allowedCidrs: ['fd00:ec2::/64'] },
+        resolver('fd00:ec2::23'),
+      ),
+    ).rejects.toMatchObject({ code: 'COMFY_NETWORK_TARGET_BLOCKED' })
+  })
 
   it('rejects empty DNS results', async () => {
     await expect(

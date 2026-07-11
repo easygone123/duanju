@@ -1,11 +1,17 @@
 import { Agent, fetch as undiciFetch, FormData, type Dispatcher } from 'undici'
-import WebSocket, { type ClientOptions, type RawData } from 'ws'
+import WebSocket, { type ClientOptions } from 'ws'
 import { Agent as HttpAgent } from 'node:http'
 import { Agent as HttpsAgent } from 'node:https'
 import type { LookupFunction } from 'node:net'
 
 import { buildComfyAuthorization, comfyAuthSecrets } from './auth'
 import { COMFY_ERROR_CODE, ComfyError, type ComfyErrorCode } from './errors'
+import {
+  buildComfyHttpError,
+  readComfySuccessBody,
+  sanitizeComfyNodeErrors,
+  type ComfyHttpErrorContext,
+} from './http-response'
 import {
   authorizeComfyTarget,
   resolveComfyHost,
@@ -22,6 +28,7 @@ import type {
   ComfyUploadedFile,
   ComfyUploadInput,
 } from './types'
+import { iterateComfyWebSocket } from './websocket-events'
 
 type FetchInit = RequestInit & { dispatcher?: Dispatcher }
 export type ComfyFetch = (input: string | URL, init?: FetchInit) => Promise<Response>
@@ -37,6 +44,7 @@ export interface ComfyClientOptions {
   maxErrorBytes?: number
   maxWorkflowBytes?: number
   maxInputBytes?: number
+  wsIdleTimeoutMs?: number
   maxRedirects?: number
   resolveHost?: ComfyResolver
   fetchImpl?: ComfyFetch
@@ -59,6 +67,7 @@ export class ComfyClient {
   private readonly maxErrorBytes: number
   private readonly maxWorkflowBytes: number
   private readonly maxInputBytes: number
+  private readonly wsIdleTimeoutMs: number
   private readonly maxRedirects: number
   private readonly resolveHost: ComfyResolver
   private readonly fetchImpl: ComfyFetch
@@ -72,6 +81,7 @@ export class ComfyClient {
     this.maxErrorBytes = options.maxErrorBytes ?? DEFAULT_MAX_ERROR_BYTES
     this.maxWorkflowBytes = options.maxWorkflowBytes ?? DEFAULT_MAX_WORKFLOW_BYTES
     this.maxInputBytes = options.maxInputBytes ?? DEFAULT_MAX_INPUT_BYTES
+    this.wsIdleTimeoutMs = options.wsIdleTimeoutMs ?? this.timeoutMs
     this.maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS
     this.resolveHost = options.resolveHost ?? resolveComfyHost
     this.fetchImpl = options.fetchImpl ?? (undiciFetch as unknown as ComfyFetch)
@@ -136,10 +146,16 @@ export class ComfyClient {
       'prompt',
       { method: 'POST', body, headers: jsonHeaders() },
       COMFY_ERROR_CODE.PROMPT_REJECTED,
+      { auth: this.options.auth, workflow: graph },
     )
     if (typeof result.prompt_id !== 'string' || result.prompt_id.length === 0) {
       throw new ComfyError(COMFY_ERROR_CODE.PROMPT_REJECTED, 'ComfyUI did not return a prompt id', {
-        details: { nodeErrors: this.sanitize(result.node_errors) },
+        details: {
+          nodeErrors: sanitizeComfyNodeErrors(result.node_errors, {
+            auth: this.options.auth,
+            workflow: graph,
+          }),
+        },
       })
     }
     return { promptId: result.prompt_id }
@@ -172,14 +188,22 @@ export class ComfyClient {
       maxPayload: this.maxJsonBytes,
       agent: websocketAgent,
     })
-    const events = createEventQueue(signal, websocket)
     try {
-      for await (const raw of events) {
-        const event = mapExecutionEvent(raw, promptId, this.sanitize.bind(this))
-        if (event) yield event
+      for await (const event of iterateComfyWebSocket(
+        websocket,
+        promptId,
+        signal,
+        this.wsIdleTimeoutMs,
+        this.sanitize.bind(this),
+      )) {
+        yield event
       }
     } finally {
-      websocket.close()
+      if (websocket.readyState === WebSocket.OPEN) websocket.close()
+      else if (websocket.readyState === WebSocket.CONNECTING) {
+        websocket.once('error', ignoreWebSocketCleanupError)
+        websocket.terminate()
+      }
       websocketAgent.destroy()
     }
   }
@@ -222,8 +246,13 @@ export class ComfyClient {
     )
   }
 
-  private async requestJson<T>(endpoint: string, init: FetchInit, code: ComfyErrorCode): Promise<T> {
-    const bytes = await this.requestBytes(endpoint, init, code, this.maxJsonBytes)
+  private async requestJson<T>(
+    endpoint: string,
+    init: FetchInit,
+    code: ComfyErrorCode,
+    errorContext?: ComfyHttpErrorContext,
+  ): Promise<T> {
+    const bytes = await this.requestBytes(endpoint, init, code, this.maxJsonBytes, errorContext)
     try {
       return JSON.parse(bytes.toString('utf8')) as T
     } catch (cause) {
@@ -236,12 +265,14 @@ export class ComfyClient {
     init: FetchInit,
     code: ComfyErrorCode,
     limit: number,
+    errorContext: ComfyHttpErrorContext = { auth: this.options.auth },
   ): Promise<Buffer> {
     let url = this.endpoint(endpoint)
     for (let redirects = 0; ; redirects += 1) {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
       let agent: Agent | undefined
+      let failed = false
       try {
         const authorized = await abortable(
           authorizeComfyTarget(url, this.options.networkPolicy, this.resolveHost),
@@ -264,6 +295,8 @@ export class ComfyClient {
           signal: controller.signal,
         })
         if (isRedirect(response.status)) {
+          const cancellation = response.body?.cancel()
+          if (cancellation) await abortable(cancellation, controller.signal)
           const location = response.headers.get('location')
           if (!location || redirects >= this.maxRedirects) throw this.networkBlocked()
           const redirected = new URL(location, authorized.url)
@@ -273,32 +306,15 @@ export class ComfyClient {
           ) {
             throw this.networkBlocked()
           }
-          await response.body?.cancel()
           url = redirected
           continue
         }
         if (!response.ok) {
-          const errorBody = await readErrorBody(response, this.maxErrorBytes)
-          const responseText = errorBody.bytes.toString('utf8')
-          const responseJson = parseJsonObject(responseText)
-          throw new ComfyError(
-            code,
-            `ComfyUI request failed (${response.status}): ${
-              errorBody.truncated ? 'response body omitted' : this.sanitizeText(responseText)
-            }`,
-            {
-              details: {
-                httpStatus: response.status,
-                bodyTruncated: errorBody.truncated,
-                ...(code === COMFY_ERROR_CODE.PROMPT_REJECTED
-                  ? { nodeErrors: this.sanitize(responseJson?.node_errors) }
-                  : {}),
-              },
-            },
-          )
+          throw await buildComfyHttpError(response, this.maxErrorBytes, code, errorContext)
         }
-        return await readBounded(response, limit)
+        return await readComfySuccessBody(response, limit, code)
       } catch (error) {
+        failed = true
         if (error instanceof ComfyError) throw error
         if (controller.signal.aborted) {
           throw new ComfyError(COMFY_ERROR_CODE.EXECUTION_TIMEOUT, 'ComfyUI request timed out', {
@@ -308,8 +324,26 @@ export class ComfyClient {
         }
         throw new ComfyError(code, 'ComfyUI request failed', { cause: error, retryable: true })
       } finally {
-        clearTimeout(timeout)
-        await agent?.close()
+        try {
+          if (agent) {
+            if (failed || controller.signal.aborted) {
+              await agent.destroy()
+            } else {
+              await abortable(agent.close(), controller.signal)
+            }
+          }
+        } catch {
+          await agent?.destroy()
+          if (controller.signal.aborted && !failed) {
+            throw new ComfyError(
+              COMFY_ERROR_CODE.EXECUTION_TIMEOUT,
+              'ComfyUI transport cleanup timed out',
+              { retryable: true },
+            )
+          }
+        } finally {
+          clearTimeout(timeout)
+        }
       }
     }
   }
@@ -393,55 +427,8 @@ function isRedirect(status: number): boolean {
   return status >= 300 && status < 400
 }
 
-async function readBounded(response: Response, limit: number): Promise<Buffer> {
-  const declaredLength = Number(response.headers.get('content-length'))
-  if (Number.isFinite(declaredLength) && declaredLength > limit) throw bodyTooLarge()
-  if (!response.body) return Buffer.alloc(0)
-  const chunks: Buffer[] = []
-  let size = 0
-  for await (const rawChunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-    const chunk = Buffer.from(rawChunk)
-    size += chunk.length
-    if (size > limit) throw bodyTooLarge()
-    chunks.push(chunk)
-  }
-  return Buffer.concat(chunks)
-}
-
-async function readErrorBody(
-  response: Response,
-  limit: number,
-): Promise<{ bytes: Buffer; truncated: boolean }> {
-  const declaredHeader = response.headers.get('content-length')
-  const declaredLength = declaredHeader === null ? undefined : Number(declaredHeader)
-  if (declaredLength !== undefined && Number.isFinite(declaredLength) && declaredLength > limit) {
-    await response.body?.cancel()
-    return { bytes: Buffer.alloc(0), truncated: true }
-  }
-  if (!response.body) return { bytes: Buffer.alloc(0), truncated: false }
-
-  const reader = response.body.getReader()
-  const chunks: Buffer[] = []
-  let size = 0
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) return { bytes: Buffer.concat(chunks), truncated: false }
-      const chunk = Buffer.from(value)
-      size += chunk.length
-      if (size > limit) {
-        await reader.cancel()
-        return { bytes: Buffer.alloc(0), truncated: true }
-      }
-      chunks.push(chunk)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-}
-
-function bodyTooLarge(): ComfyError {
-  return new ComfyError(COMFY_ERROR_CODE.OUTPUT_TRANSFER_FAILED, 'ComfyUI response exceeded size limit')
+function ignoreWebSocketCleanupError(): void {
+  // ws emits an expected asynchronous error when a CONNECTING socket is terminated.
 }
 
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -451,99 +438,4 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
     signal.addEventListener('abort', abort, { once: true })
     promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort))
   })
-}
-
-function parseJsonObject(value: string): Record<string, unknown> | undefined {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : undefined
-  } catch {
-    return undefined
-  }
-}
-
-async function* createEventQueue(signal: AbortSignal, websocket: WebSocket): AsyncIterable<RawData> {
-  const values: RawData[] = []
-  let wake: (() => void) | undefined
-  let ended = false
-  const notify = () => {
-    wake?.()
-    wake = undefined
-  }
-  const onMessage = (value: RawData, isBinary: boolean) => {
-    if (!isBinary) values.push(value)
-    notify()
-  }
-  const onEnd = () => {
-    ended = true
-    notify()
-  }
-  const onAbort = () => {
-    ended = true
-    websocket.close()
-    notify()
-  }
-  websocket.on('message', onMessage)
-  websocket.on('close', onEnd)
-  websocket.on('error', onEnd)
-  signal.addEventListener('abort', onAbort, { once: true })
-  try {
-    while (!ended || values.length > 0) {
-      if (values.length > 0) {
-        yield values.shift()!
-        continue
-      }
-      await new Promise<void>((resolve) => { wake = resolve })
-    }
-  } finally {
-    signal.removeEventListener('abort', onAbort)
-    websocket.off('message', onMessage)
-    websocket.off('close', onEnd)
-    websocket.off('error', onEnd)
-  }
-}
-
-function mapExecutionEvent(
-  raw: RawData,
-  promptId: string,
-  sanitize: (value: unknown) => unknown,
-): ComfyExecutionEvent | undefined {
-  let message: { type?: string; data?: Record<string, unknown> }
-  try {
-    message = JSON.parse(raw.toString()) as typeof message
-  } catch {
-    return undefined
-  }
-  const data = message.data ?? {}
-  if (message.type !== 'status' && data.prompt_id !== promptId) return undefined
-  if (message.type === 'status') {
-    const status = data.status as { exec_info?: { queue_remaining?: unknown } } | undefined
-    const queueRemaining = status?.exec_info?.queue_remaining
-    return { type: 'status', queueRemaining: typeof queueRemaining === 'number' ? queueRemaining : undefined }
-  }
-  if (message.type === 'execution_start') return { type: 'execution_start', promptId }
-  if (message.type === 'executing') {
-    return { type: 'executing', promptId, nodeId: typeof data.node === 'string' ? data.node : null }
-  }
-  if (message.type === 'progress' && typeof data.value === 'number' && typeof data.max === 'number') {
-    return {
-      type: 'progress', promptId,
-      nodeId: typeof data.node === 'string' ? data.node : undefined,
-      value: data.value, max: data.max,
-    }
-  }
-  if (message.type === 'executed' && typeof data.node === 'string') {
-    return { type: 'executed', promptId, nodeId: data.node, output: data.output }
-  }
-  if (message.type === 'execution_error') {
-    return {
-      type: 'execution_error', promptId,
-      nodeId: typeof data.node_id === 'string' ? data.node_id : undefined,
-      message: typeof data.exception_message === 'string' ? String(sanitize(data.exception_message)) : 'Execution failed',
-      nodeErrors: sanitize(data.node_errors),
-    }
-  }
-  return undefined
 }

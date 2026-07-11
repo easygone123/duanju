@@ -18,10 +18,19 @@ export class FakeComfyUiServer {
   private readonly overrides = new Map<string, RouteOverride>()
   private readonly server = createServer((request, response) => void this.handle(request, response))
   private readonly websocketServer = new WebSocketServer({ noServer: true })
+  private websocketRejectionStatus?: number
 
   constructor(readonly prefix = '/proxy/comfy') {
     this.server.on('upgrade', (request, socket, head) => {
       if (new URL(request.url ?? '/', 'http://localhost').pathname !== `${this.prefix}/ws`) {
+        socket.destroy()
+        return
+      }
+      if (this.websocketRejectionStatus) {
+        socket.write(
+          `HTTP/1.1 ${this.websocketRejectionStatus} Rejected\r\n` +
+          'Connection: close\r\nContent-Length: 0\r\n\r\n',
+        )
         socket.destroy()
         return
       }
@@ -49,6 +58,10 @@ export class FakeComfyUiServer {
 
   override(path: string, handler: RouteOverride): void {
     this.overrides.set(path, handler)
+  }
+
+  rejectWebSockets(status: number): void {
+    this.websocketRejectionStatus = status
   }
 
   send(event: unknown): void {

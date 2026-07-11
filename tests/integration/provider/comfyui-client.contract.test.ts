@@ -110,19 +110,34 @@ describe('ComfyClient contract', () => {
       response.end(JSON.stringify({
         error: { message: 'bad Bearer top-secret-token' },
         node_errors: {
-          '3': { errors: [{ message: 'token=top-secret-token' }] },
+          '3': {
+            class_type: 'KSampler',
+            errors: [{
+              type: 'top-secret-token',
+              code: 'top-secret-prompt',
+              message: 'bad top-secret-prompt token=top-secret-token',
+              extra_info: { submitted_prompt: 'top-secret-prompt' },
+            }],
+            extra_info: { raw: 'must-not-survive' },
+          },
           'top-secret-token': { errors: [] },
         },
       }))
     })
 
-    await expect(client({ type: 'bearer', token: 'top-secret-token' }).submitPrompt({}, 'client-1'))
+    await expect(client({ type: 'bearer', token: 'top-secret-token' }).submitPrompt({
+      '1': { class_type: 'TextNode', inputs: { prompt: 'top-secret-prompt' } },
+    }, 'client-1'))
       .rejects.toMatchObject({
         code: 'COMFY_PROMPT_REJECTED',
         details: {
           nodeErrors: {
-            '3': { errors: [{ message: '[REDACTED]' }] },
-            '[REDACTED]': { errors: [] },
+            '3': {
+              nodeId: '3',
+              classType: 'KSampler',
+              errors: [{ type: '[REDACTED]', code: '[REDACTED]', message: '[REDACTED]' }],
+            },
+            '[REDACTED]': { nodeId: '[REDACTED]', errors: [] },
           },
         },
       })
@@ -157,6 +172,51 @@ describe('ComfyClient contract', () => {
       'executing', 'progress', 'executed', 'execution_error',
     ])
 
+    controller.abort()
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+  })
+
+  it('throws a stable connection error when the WebSocket handshake is refused', async () => {
+    server.rejectWebSockets(503)
+    const next = client().watchPrompt('prompt-1', 'client-1', new AbortController().signal)
+      [Symbol.asyncIterator]().next()
+
+    await expect(next).rejects.toMatchObject({ code: 'COMFY_CONNECTION_OFFLINE' })
+  })
+
+  it.each([401, 403])('maps a WebSocket HTTP %s handshake to auth failed', async (status) => {
+    server.rejectWebSockets(status)
+    const next = client().watchPrompt('prompt-1', 'client-1', new AbortController().signal)
+      [Symbol.asyncIterator]().next()
+
+    await expect(next).rejects.toMatchObject({
+      code: 'COMFY_AUTH_FAILED', details: { httpStatus: status },
+    })
+  })
+
+  it('terminates an idle WebSocket with a stable timeout error', async () => {
+    const next = client({ type: 'none' }, { wsIdleTimeoutMs: 25 })
+      .watchPrompt('prompt-1', 'client-1', new AbortController().signal)
+      [Symbol.asyncIterator]().next()
+    await server.waitForSocket()
+
+    await expect(next).rejects.toMatchObject({ code: 'COMFY_EXECUTION_TIMEOUT' })
+  })
+
+  it('resets the WebSocket idle timeout on each correlated event', async () => {
+    const controller = new AbortController()
+    const iterator = client({ type: 'none' }, { wsIdleTimeoutMs: 100 })
+      .watchPrompt('prompt-1', 'client-1', controller.signal)[Symbol.asyncIterator]()
+    const first = iterator.next()
+    await server.waitForSocket()
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    server.send({ type: 'execution_start', data: { prompt_id: 'prompt-1' } })
+    await expect(first).resolves.toMatchObject({ value: { type: 'execution_start' } })
+
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    const second = iterator.next()
+    server.send({ type: 'executing', data: { prompt_id: 'prompt-1', node: '4' } })
+    await expect(second).resolves.toMatchObject({ value: { type: 'executing' } })
     controller.abort()
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
   })
@@ -246,10 +306,51 @@ describe('ComfyClient contract', () => {
     expect(server.requests[0].headers.authorization).toBe('Bearer prefix-secret')
   })
 
+  it.each([
+    ['169.254.170.23', 4 as const],
+    ['fd00:ec2::23', 6 as const],
+  ])('blocks EKS credential address %s while reauthorizing a redirect', async (address, family) => {
+    const resolveHost = vi.fn()
+      .mockResolvedValueOnce([{ address: '203.0.113.10', family: 4 as const }])
+      .mockResolvedValueOnce([{ address, family }])
+    const fetchImpl = vi.fn(async () => new Response(null, {
+      status: 302,
+      headers: { location: 'http://comfy.example/proxy/comfy/system_stats' },
+    }))
+    const comfy = new ComfyClient({
+      baseUrl: 'http://comfy.example/proxy/comfy',
+      auth: { type: 'none' },
+      networkPolicy: { mode: 'allowlist', allowedHosts: ['comfy.example'], allowedCidrs: [] },
+      resolveHost,
+      fetchImpl,
+    })
+
+    await expect(comfy.getSystemStats()).rejects.toMatchObject({
+      code: 'COMFY_NETWORK_TARGET_BLOCKED',
+    })
+    expect(resolveHost).toHaveBeenCalledTimes(2)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects an adversarial streaming redirect within the request timeout', async () => {
+    server.override('/proxy/comfy/system_stats', (_request, response) => {
+      response.statusCode = 302
+      response.setHeader('location', '/outside-prefix')
+      response.write('never-ending redirect body')
+    })
+    const startedAt = Date.now()
+
+    await expect(client({ type: 'none' }, { timeoutMs: 30 }).getSystemStats())
+      .rejects.toBeInstanceOf(ComfyError)
+    expect(Date.now() - startedAt).toBeLessThan(250)
+  })
+
   it('pins the authorized address for both HTTP and WebSocket connections', async () => {
     const resolveHost = vi.fn(async () => [{ address: '127.0.0.1', family: 4 as const }])
+    const deliberatelyUnresolvableBase = new URL(server.baseUrl)
+    deliberatelyUnresolvableBase.hostname = 'comfy.invalid'
     const comfy = new ComfyClient({
-      baseUrl: server.baseUrl.replace('127.0.0.1', 'localhost'),
+      baseUrl: deliberatelyUnresolvableBase.href,
       auth: { type: 'none' },
       networkPolicy: { mode: 'trusted', allowedHosts: [], allowedCidrs: [] },
       resolveHost,
@@ -257,7 +358,7 @@ describe('ComfyClient contract', () => {
     })
 
     await expect(comfy.getSystemStats()).resolves.toHaveProperty('system')
-    expect(server.requests.at(-1)?.headers.host).toMatch(/^localhost:/)
+    expect(server.requests.at(-1)?.headers.host).toMatch(/^comfy\.invalid:/)
     const controller = new AbortController()
     const next = comfy.watchPrompt('prompt-1', 'client-1', controller.signal)
       [Symbol.asyncIterator]().next()
@@ -294,5 +395,37 @@ describe('ComfyClient contract', () => {
       details: { httpStatus: 500, bodyTruncated: true },
     })
     await expect(promise).rejects.not.toThrow(/oversized-secret|leak-marker/)
+  })
+
+  it.each([401, 403])('maps HTTP %s to auth failed without reflecting the body', async (status) => {
+    server.override('/proxy/comfy/system_stats', (_request, response) => {
+      response.statusCode = status
+      response.end('arbitrary-body-marker top-secret-token')
+    })
+    const promise = client({ type: 'bearer', token: 'top-secret-token' }).getSystemStats()
+
+    await expect(promise).rejects.toMatchObject({
+      code: 'COMFY_AUTH_FAILED', details: { httpStatus: status },
+    })
+    await expect(promise).rejects.not.toThrow(/arbitrary-body-marker|top-secret-token/)
+  })
+
+  it.each([
+    ['/proxy/comfy/system_stats', 'stats', 'COMFY_CONNECTION_OFFLINE'],
+    ['/proxy/comfy/history/prompt-1', 'history', 'COMFY_CONNECTION_OFFLINE'],
+    ['/proxy/comfy/upload/image', 'upload', 'COMFY_INPUT_UPLOAD_FAILED'],
+    ['/proxy/comfy/prompt', 'prompt', 'COMFY_PROMPT_REJECTED'],
+  ])('uses the operation code for oversized successful %s responses', async (path, operation, code) => {
+    server.override(path, (_request, response) => response.end('x'.repeat(80)))
+    const comfy = client({ type: 'none' }, { maxJsonBytes: 32 })
+    const request = operation === 'stats'
+      ? comfy.getSystemStats()
+      : operation === 'history'
+        ? comfy.getHistory('prompt-1')
+        : operation === 'upload'
+          ? comfy.uploadImage({ filename: 'x.png', contentType: 'image/png', bytes: new Uint8Array() })
+          : comfy.submitPrompt({}, 'client-1')
+
+    await expect(request).rejects.toMatchObject({ code })
   })
 })
