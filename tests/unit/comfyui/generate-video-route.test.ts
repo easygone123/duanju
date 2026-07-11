@@ -66,6 +66,7 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
       payload: expect.objectContaining({
         videoModel: 'comfyui::wf-video',
         comfyWorkflowVersionId: 'video-version-1',
+        comfyModelSnapshotVersion: 1,
       }),
     }))
   })

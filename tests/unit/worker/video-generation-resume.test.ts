@@ -22,6 +22,12 @@ const generatorApiMock = vi.hoisted(() => ({
   generateVideo: vi.fn(),
 }))
 
+const configServiceMock = vi.hoisted(() => ({
+  getProjectModelConfig: vi.fn(),
+  getUserModelConfig: vi.fn(),
+  resolveProjectModelCapabilityGenerationOptions: vi.fn(async () => ({})),
+}))
+
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/task/service', () => taskServiceMock)
 vi.mock('@/lib/async-poll', () => asyncPollMock)
@@ -33,8 +39,10 @@ vi.mock('@/lib/storage', () => ({
 }))
 vi.mock('@/lib/fonts', () => ({ initializeFonts: vi.fn(), createLabelSVG: vi.fn() }))
 vi.mock('@/lib/media-process', () => ({ processMediaResult: vi.fn() }))
-vi.mock('@/lib/config-service', () => ({
-  getProjectModelConfig: vi.fn(async () => ({
+vi.mock('@/lib/config-service', () => configServiceMock)
+
+function currentComfyConfig() {
+  return {
     characterModel: 'comfyui::wf-image',
     locationModel: 'comfyui::wf-image',
     storyboardModel: 'comfyui::wf-image',
@@ -42,10 +50,8 @@ vi.mock('@/lib/config-service', () => ({
     videoModel: 'comfyui::wf-video',
     comfyImageWorkflowVersionId: 'wf-image-version-1',
     comfyVideoWorkflowVersionId: 'wf-video-version-1',
-  })),
-  getUserModelConfig: vi.fn(),
-  resolveProjectModelCapabilityGenerationOptions: vi.fn(),
-}))
+  }
+}
 
 import { resolveImageSourceFromGeneration, resolveVideoSourceFromGeneration } from '@/lib/workers/utils'
 
@@ -68,6 +74,7 @@ function buildJob(): Job<TaskJobData> {
 describe('worker utils video generation resume', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    configServiceMock.getProjectModelConfig.mockResolvedValue(currentComfyConfig())
   })
 
   it('continues polling from existing externalId without re-submitting generation', async () => {
@@ -142,5 +149,56 @@ describe('worker utils video generation resume', () => {
     })
     expect(result).toBe('https://store/same.png')
     expect(generatorApiMock.generateImage).toHaveBeenCalledTimes(1)
+  })
+
+  it('backfills the trusted pin for an old unmarked Comfy image task when current selection is unchanged', async () => {
+    const job = buildJob()
+    job.data.payload = { imageModel: 'comfyui::wf-image' }
+    generatorApiMock.generateImage.mockResolvedValueOnce({
+      success: true, imageUrl: 'https://store/legacy-image.png',
+    })
+
+    await resolveImageSourceFromGeneration(job, {
+      userId: 'user-1', modelId: 'comfyui::wf-image',
+      invocationKey: 'task-1:legacy-image', prompt: 'legacy',
+    })
+
+    expect(generatorApiMock.generateImage).toHaveBeenCalledWith(
+      'user-1', 'comfyui::wf-image', 'legacy',
+      expect.objectContaining({
+        comfy: expect.objectContaining({ workflowVersionId: 'wf-image-version-1' }),
+      }),
+    )
+  })
+
+  it('rejects an old unmarked Comfy image task after current selection changes', async () => {
+    const job = buildJob()
+    job.data.payload = { imageModel: 'comfyui::old-image-workflow' }
+
+    await expect(resolveImageSourceFromGeneration(job, {
+      userId: 'user-1', modelId: 'comfyui::wf-image',
+      invocationKey: 'task-1:stale-image', prompt: 'legacy',
+    })).rejects.toThrow('TASK_MODEL_SNAPSHOT_INVALID')
+    expect(generatorApiMock.generateImage).not.toHaveBeenCalled()
+  })
+
+  it('backfills the trusted pin for an old unmarked Comfy video task when current selection is unchanged', async () => {
+    const job = buildJob()
+    job.data.payload = { videoModel: 'comfyui::wf-video' }
+    generatorApiMock.generateVideo.mockResolvedValueOnce({
+      success: true, videoUrl: 'https://store/legacy-video.mp4',
+    })
+
+    await resolveVideoSourceFromGeneration(job, {
+      userId: 'user-1', modelId: 'comfyui::wf-video',
+      invocationKey: 'task-1:legacy-video', imageUrl: '',
+    })
+
+    expect(generatorApiMock.generateVideo).toHaveBeenCalledWith(
+      'user-1', 'comfyui::wf-video', '',
+      expect.objectContaining({
+        comfy: expect.objectContaining({ workflowVersionId: 'wf-video-version-1' }),
+      }),
+    )
   })
 })

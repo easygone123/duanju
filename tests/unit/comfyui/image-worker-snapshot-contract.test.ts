@@ -42,4 +42,12 @@ describe('image worker snapshot integration contract', () => {
     expect(submitter).toMatch(/const nextPayload = \{\s*\.\.\.\(payload \|\| \{\}\),?\s*\}/)
     expect(queues).toContain('return await queue.add(data.type, data, {')
   })
+
+  it.each([
+    ['src/lib/config-service.ts', 'comfyModelSnapshotVersion: 1'],
+    ['src/app/api/novel-promotion/[projectId]/generate-video/route.ts', 'body.comfyModelSnapshotVersion = 1'],
+    ['src/app/api/novel-promotion/[projectId]/reference-to-character/route.ts', 'body.comfyModelSnapshotVersion = 1'],
+  ])('%s writes the trusted snapshot marker after sanitizing input', (path, marker) => {
+    expect(readFileSync(path, 'utf8')).toContain(marker)
+  })
 })

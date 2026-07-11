@@ -204,6 +204,7 @@ describe('api specific - project ComfyUI defaults', () => {
     expect(payload).toMatchObject({
       imageModel: 'comfyui::image-workflow',
       comfyWorkflowVersionId: 'image-version-1',
+      comfyModelSnapshotVersion: 1,
       candidateCount: 2,
     })
   })
@@ -221,6 +222,7 @@ describe('api specific - project ComfyUI defaults', () => {
     expect(payload).toMatchObject({
       imageModel: 'comfyui::asset-workflow',
       comfyWorkflowVersionId: 'task-image-version-1',
+      comfyModelSnapshotVersion: 1,
       assetId: 'asset-1',
     })
   })
@@ -238,12 +240,14 @@ describe('api specific - project ComfyUI defaults', () => {
         comfyImageWorkflowVersionId: 'attacker-alias',
         workflowVersionId: 'attacker-generic-alias',
         workflow_version_id: 'attacker-snake-alias',
+        comfyModelSnapshotVersion: 999,
         cloudRequestTag: 'preserved',
       },
     })
     expect(payload).toMatchObject({
       imageModel: 'comfyui::task-workflow',
       comfyWorkflowVersionId: 'task-image-version-1',
+      comfyModelSnapshotVersion: 1,
       cloudRequestTag: 'preserved',
     })
     expect(payload).not.toHaveProperty('comfyImageWorkflowVersionId')

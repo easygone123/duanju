@@ -212,6 +212,7 @@ export const POST = apiHandler(async (
     body,
     projectModels.comfyVideoWorkflowVersionId,
   )
+  body.comfyModelSnapshotVersion = 1
   requireVideoModelKeyFromPayload(body)
   const locale = resolveRequiredTaskLocale(request, body)
   const isBatch = body?.all === true

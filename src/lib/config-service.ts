@@ -137,6 +137,7 @@ const UNTRUSTED_COMFY_VERSION_FIELDS = [
   'workflow_version_id',
   'comfyWorkflowVersion',
   'comfyVersionId',
+  'comfyModelSnapshotVersion',
 ] as const
 
 export function applyTrustedComfyVersionSnapshot(
@@ -405,6 +406,7 @@ export async function buildImageBillingPayload(input: {
         : null,
     ),
     imageModel,
+    comfyModelSnapshotVersion: 1,
     ...(Object.keys(capabilityOptions).length > 0 ? { generationOptions: capabilityOptions } : {}),
   }
 }
@@ -443,6 +445,7 @@ export async function buildImageBillingPayloadFromUserConfig(input: {
   return {
     ...applyTrustedComfyVersionSnapshot({ ...basePayload }, comfyWorkflowVersionId),
     imageModel,
+    comfyModelSnapshotVersion: 1,
     ...(Object.keys(capabilityOptions).length > 0 ? { generationOptions: capabilityOptions } : {}),
   }
 }

@@ -42,6 +42,7 @@ export const POST = apiHandler(async (
   if (!projectModels.characterModel) throw new ApiError('INVALID_PARAMS')
   body.imageModel = projectModels.characterModel
   applyTrustedComfyVersionSnapshot(body, projectModels.comfyImageWorkflowVersionId)
+  body.comfyModelSnapshotVersion = 1
 
   const isBackgroundJob = body.isBackgroundJob === true || body.isBackgroundJob === 1 || body.isBackgroundJob === '1'
   const characterId = typeof body.characterId === 'string' ? body.characterId : ''

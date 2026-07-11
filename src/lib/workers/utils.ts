@@ -302,7 +302,16 @@ async function resolveImageGenerationSnapshot(
   params: { modelId: string; comfyWorkflowVersionId?: string },
 ): Promise<TaskModelSnapshot> {
   const payload = job.data.payload
-  if (hasTaskModelSnapshotFields(payload, 'image')) {
+  const payloadRecord = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {}
+  const hasMarker = Object.prototype.hasOwnProperty.call(payloadRecord, 'comfyModelSnapshotVersion')
+  const payloadModel = payloadRecord.imageModel
+  const needsLegacyComfyPin = !hasMarker
+    && typeof payloadModel === 'string'
+    && parseModelKeyStrict(payloadModel)?.provider === 'comfyui'
+    && !Object.prototype.hasOwnProperty.call(payloadRecord, 'comfyWorkflowVersionId')
+  if (hasTaskModelSnapshotFields(payload, 'image') && !needsLegacyComfyPin) {
     return resolveImageTaskSnapshot(payload, { model: params.modelId })
   }
   let legacyVersionId = params.comfyWorkflowVersionId
@@ -329,7 +338,16 @@ async function resolveVideoGenerationSnapshot(
   params: { modelId: string; comfyWorkflowVersionId?: string },
 ): Promise<TaskModelSnapshot> {
   const payload = job.data.payload
-  if (hasTaskModelSnapshotFields(payload, 'video')) {
+  const payloadRecord = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {}
+  const hasMarker = Object.prototype.hasOwnProperty.call(payloadRecord, 'comfyModelSnapshotVersion')
+  const payloadModel = payloadRecord.videoModel
+  const needsLegacyComfyPin = !hasMarker
+    && typeof payloadModel === 'string'
+    && parseModelKeyStrict(payloadModel)?.provider === 'comfyui'
+    && !Object.prototype.hasOwnProperty.call(payloadRecord, 'comfyWorkflowVersionId')
+  if (hasTaskModelSnapshotFields(payload, 'video') && !needsLegacyComfyPin) {
     return resolveVideoTaskSnapshot(payload, { model: params.modelId })
   }
   let legacyVersionId = params.comfyWorkflowVersionId

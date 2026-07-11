@@ -17,7 +17,9 @@ function hasOwn(record: Record<string, unknown>, field: string): boolean {
 
 export function hasTaskModelSnapshotFields(payload: unknown, mediaKind: MediaKind): boolean {
   if (!isRecord(payload)) return false
-  return hasOwn(payload, `${mediaKind}Model`) || hasOwn(payload, 'comfyWorkflowVersionId')
+  return hasOwn(payload, `${mediaKind}Model`)
+    || hasOwn(payload, 'comfyWorkflowVersionId')
+    || hasOwn(payload, 'comfyModelSnapshotVersion')
 }
 
 function resolveTaskModelSnapshot(
@@ -27,17 +29,34 @@ function resolveTaskModelSnapshot(
 ): TaskModelSnapshot {
   const record = isRecord(payload) ? payload : {}
   const modelField = `${mediaKind}Model`
-  const hasSnapshot = hasTaskModelSnapshotFields(record, mediaKind)
-  const rawModel = hasSnapshot ? record[modelField] : legacyConfig.model
-  const rawVersion = hasSnapshot
+  const hasMarker = hasOwn(record, 'comfyModelSnapshotVersion')
+  if (hasMarker && record.comfyModelSnapshotVersion !== 1) {
+    throw new Error('TASK_MODEL_SNAPSHOT_INVALID: comfyModelSnapshotVersion')
+  }
+  const hasPayloadModel = hasOwn(record, modelField)
+  const hasPayloadVersion = hasOwn(record, 'comfyWorkflowVersionId')
+  if (!hasPayloadModel && hasPayloadVersion) {
+    throw new Error(`TASK_MODEL_SNAPSHOT_INVALID: ${modelField}`)
+  }
+
+  const rawModel = hasMarker || hasPayloadModel ? record[modelField] : legacyConfig.model
+  let rawVersion = hasMarker || hasPayloadVersion
     ? record.comfyWorkflowVersionId
-    : legacyConfig.comfyWorkflowVersionId
+    : hasPayloadModel
+      ? undefined
+      : legacyConfig.comfyWorkflowVersionId
   if (typeof rawModel !== 'string' || !parseModelKeyStrict(rawModel)) {
     throw new Error(`TASK_MODEL_SNAPSHOT_INVALID: ${modelField}`)
   }
 
   const parsed = parseModelKeyStrict(rawModel)!
   if (parsed.provider === 'comfyui') {
+    if (!hasMarker && hasPayloadModel && !hasPayloadVersion) {
+      if (legacyConfig.model !== rawModel) {
+        throw new Error(`TASK_MODEL_SNAPSHOT_INVALID: ${modelField}`)
+      }
+      rawVersion = legacyConfig.comfyWorkflowVersionId
+    }
     if (typeof rawVersion !== 'string' || !rawVersion.trim()) {
       throw new Error('TASK_MODEL_SNAPSHOT_INVALID: comfyWorkflowVersionId')
     }
