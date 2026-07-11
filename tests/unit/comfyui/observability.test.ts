@@ -45,15 +45,17 @@ describe('ComfyUI observability', () => {
     observation.gauge('connection_busy', 1)
 
     expect(metrics.increment).toHaveBeenCalledWith('comfy.workflow_success', 1, {
-      state: 'completed', requestId: 'request-1', connectionId: 'connection-1',
+      state: 'completed',
     })
     expect(metrics.observe).toHaveBeenCalledWith(
       'comfy.transfer_duration_ms', 42,
-      { mediaType: 'image', requestId: 'request-1', connectionId: 'connection-1' },
+      { mediaType: 'image' },
     )
     expect(metrics.gauge).toHaveBeenCalledWith(
-      'comfy.connection_busy', 1, { requestId: 'request-1', connectionId: 'connection-1' },
+      'comfy.connection_busy', 1, {},
     )
+    expect(() => observation.increment('failure_code', { code: 'user-controlled-secret' }))
+      .toThrow(TypeError)
   })
 
   it('redacts nested secret and prompt-shaped keys without retaining error causes', () => {

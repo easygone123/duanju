@@ -114,7 +114,6 @@ function createCancellationDependencies(): ComfyCancellationDependencies {
     }, { isolationLevel: 'Serializable' }),
     getQueue: () => requireClient().getQueue(),
     deleteQueuedPrompt: (promptId) => requireClient().deleteQueuedPrompt(promptId),
-    interruptPrompt: (promptId) => requireClient().interruptPrompt(promptId),
     markCanceledOwned: async (input) => {
       const result = await prisma.comfyGenerationRequest.updateMany({
         where: {

@@ -1169,7 +1169,7 @@ model ComfySubmissionAttempt {
   connectionId          String
   leaseId               String
   clientId              String                   @unique
-  promptId              String?                  @unique
+  promptId              String?
   status                String                   @default("fenced")
   acceptedAt            DateTime?
   firstCheckedAt        DateTime?
@@ -1185,5 +1185,6 @@ model ComfySubmissionAttempt {
   @@index([requestId, createdAt])
   @@index([connectionId, status])
   @@index([userId, status])
+  @@unique([connectionId, promptId])
   @@map("comfy_submission_attempts")
 }

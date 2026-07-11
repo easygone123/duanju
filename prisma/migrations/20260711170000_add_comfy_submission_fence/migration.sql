@@ -23,7 +23,7 @@ CREATE TABLE `comfy_submission_attempts` (
   `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE INDEX `comfy_submission_attempts_clientId_key`(`clientId`),
-  UNIQUE INDEX `comfy_submission_attempts_promptId_key`(`promptId`),
+  UNIQUE INDEX `comfy_submission_attempts_connectionId_promptId_key`(`connectionId`, `promptId`),
   INDEX `comfy_submission_attempts_requestId_createdAt_idx`(`requestId`, `createdAt`),
   INDEX `comfy_submission_attempts_connectionId_status_idx`(`connectionId`, `status`),
   INDEX `comfy_submission_attempts_userId_status_idx`(`userId`, `status`),

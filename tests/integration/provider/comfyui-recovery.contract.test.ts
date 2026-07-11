@@ -8,6 +8,7 @@ import {
   reconcileComfyRequest,
   reclaimComfyRecoveryLease,
   recordComfyAttemptAbsenceWithStore,
+  persistComfyOutputReceiptWithStore,
   recordComfyAcceptedPromptWithStore,
   type ComfyCancellationDependencies,
   type ComfyReconciliationDependencies,
@@ -16,7 +17,7 @@ import {
 function reconciliationSafetyDefaults() {
   return {
     recordAttemptAbsence: vi.fn().mockResolvedValue({ outcome: 'reconciling', checkCount: 1 }),
-    deleteQueuedPrompt: vi.fn(), interruptPrompt: vi.fn(),
+    deleteQueuedPrompt: vi.fn(),
     persistRecoveredCancellation: vi.fn().mockResolvedValue(true),
     persistRecoveredDiagnostics: vi.fn().mockResolvedValue(true),
     releaseLease: vi.fn().mockResolvedValue(true),
@@ -39,6 +40,35 @@ describe('ComfyUI recovery and cancellation contract', () => {
     }, store)
     expect(result).toEqual({ outcome: 'claimed', attemptId: 'attempt-1', clientId: 'client-1' })
     expect(events).toEqual(['fence-request', 'create-attempt'])
+  })
+
+  it('CAS-persists each stored output receipt and is idempotent on retry', async () => {
+    const outputRefs: Array<Record<string, unknown>> = [{
+      name: 'result', nodeId: '2', mediaType: 'image', primary: true,
+      filename: 'out.png', subfolder: '', type: 'output',
+    }]
+    const updateRequest = vi.fn(async (value: Record<string, unknown>) => {
+      const data = value.data as { outputRefs: Array<Record<string, unknown>> }
+      outputRefs.splice(0, outputRefs.length, ...data.outputRefs)
+      return { count: 1 }
+    })
+    const store: NonNullable<Parameters<typeof persistComfyOutputReceiptWithStore>[1]> = {
+      transaction: async (operation) => operation({
+        findRequest: vi.fn(async () => ({ outputRefs: structuredClone(outputRefs) })),
+        updateRequest,
+      }),
+    }
+    const input = {
+      requestId: 'request-1', userId: 'user-1', connectionId: 'connection-1', leaseId: 'lease-1',
+      promptId: 'prompt-1', output: {
+        name: 'result', nodeId: '2', mediaType: 'image' as const, primary: true,
+        filename: 'out.png', subfolder: '', type: 'output',
+        storageKey: 'comfyui/result.png', url: '/api/files/result.png',
+      },
+    }
+    await expect(persistComfyOutputReceiptWithStore(input, store)).resolves.toBe(true)
+    await expect(persistComfyOutputReceiptWithStore(input, store)).resolves.toBe(true)
+    expect(updateRequest).toHaveBeenCalledTimes(1)
   })
 
   it('durably records accepted prompt on the attempt even if request owner CAS is lost', async () => {
@@ -112,6 +142,28 @@ describe('ComfyUI recovery and cancellation contract', () => {
     }))
   })
 
+  it('treats oversized queue/history scans as indeterminate without advancing absence', async () => {
+    const oversized: unknown[] = Array.from(
+      { length: 10_001 }, (_, index) => [index, `manual-${index}`],
+    )
+    oversized[10_000] = [10_000, 'prompt-tail', {}, { client_id: 'client-1' }]
+    expect(findComfyPromptByClientId({ running: oversized, pending: [] }, {}, 'client-1'))
+      .toBe('indeterminate')
+    const recordAttemptAbsence = vi.fn()
+    const deps = {
+      ...reconciliationSafetyDefaults(), recordAttemptAbsence,
+      loadContext: vi.fn().mockResolvedValue({ request: {
+        id: 'request-1', userId: 'user-1', status: 'reconciling', connectionId: 'connection-1',
+        leaseId: 'lease-1', submissionAttempt: { id: 'attempt-1', clientId: 'client-1' },
+      }, version: { outputs: [] } }),
+      verifyLeaseOwner: vi.fn().mockResolvedValue(true),
+      findPromptByClientId: vi.fn().mockResolvedValue('indeterminate'),
+      getQueue: vi.fn(), getHistory: vi.fn(), persistRecoveredState: vi.fn(),
+    } satisfies ComfyReconciliationDependencies
+    await expect(reconcileComfyRequest('request-1', deps)).resolves.toEqual({ outcome: 'reconciling' })
+    expect(recordAttemptAbsence).not.toHaveBeenCalled()
+  })
+
   it('persists unknown-submit absence checks across restart and fails only at the configured threshold', async () => {
     const attempt = {
       id: 'attempt-1', requestId: 'request-1', userId: 'user-1', connectionId: 'connection-1',
@@ -153,8 +205,7 @@ describe('ComfyUI recovery and cancellation contract', () => {
     }))
   })
 
-  it('recovers a cancellation after response loss by interrupting only the discovered owned prompt', async () => {
-    const interruptPrompt = vi.fn()
+  it('keeps a discovered running cancellation requested without global interrupt', async () => {
     const persistRecoveredCancellation = vi.fn().mockResolvedValue(true)
     const releaseLease = vi.fn().mockResolvedValue(true)
     const verifyLeaseOwner = vi.fn().mockResolvedValue(true)
@@ -172,16 +223,13 @@ describe('ComfyUI recovery and cancellation contract', () => {
       persistDiscoveredPrompt: vi.fn().mockResolvedValue(true),
       getHistory: vi.fn().mockResolvedValue({}),
       getQueue: vi.fn().mockResolvedValue({ running: [[0, 'prompt-1']], pending: [[0, 'manual']] }),
-      persistRecoveredState: vi.fn(), interruptPrompt,
+      persistRecoveredState: vi.fn(),
       deleteQueuedPrompt: vi.fn(), persistRecoveredCancellation, releaseLease,
     } satisfies ComfyReconciliationDependencies
-    await expect(reconcileComfyRequest('request-1', deps)).resolves.toMatchObject({ outcome: 'canceled' })
-    expect(interruptPrompt).toHaveBeenCalledWith('prompt-1')
+    await expect(reconcileComfyRequest('request-1', deps)).resolves.toMatchObject({ outcome: 'reconciling' })
     expect(verifyLeaseOwner).toHaveBeenCalledTimes(2)
-    expect(persistRecoveredCancellation).toHaveBeenCalledWith(expect.objectContaining({
-      promptId: 'prompt-1', leaseId: 'recovery-lease',
-    }))
-    expect(releaseLease).toHaveBeenCalled()
+    expect(persistRecoveredCancellation).not.toHaveBeenCalled()
+    expect(releaseLease).not.toHaveBeenCalled()
   })
 
   it('terminalizes an unknown canceled submission as canceled after the durable threshold', async () => {
@@ -253,7 +301,6 @@ describe('ComfyUI recovery and cancellation contract', () => {
     }))
     expect(persistRecoveredCancellation).toHaveBeenCalled()
     expect(deps.deleteQueuedPrompt).not.toHaveBeenCalled()
-    expect(deps.interruptPrompt).not.toHaveBeenCalled()
   })
 
   it('cancels explicit history failure with only a safe diagnostic code', async () => {
@@ -337,7 +384,6 @@ describe('ComfyUI recovery and cancellation contract', () => {
       [{ running: [[0, 'manual']], pending: [] }, [true]],
       [{ running: [[0, 'prompt-1']], pending: [] }, [true, false]],
     ] as const) {
-      const interruptPrompt = vi.fn()
       const deps = {
         ...reconciliationSafetyDefaults(),
         loadContext: vi.fn().mockResolvedValue({ request: {
@@ -346,11 +392,10 @@ describe('ComfyUI recovery and cancellation contract', () => {
         }, version: { outputs: [] } }),
         verifyLeaseOwner: vi.fn().mockResolvedValueOnce(ownerResults[0]).mockResolvedValueOnce(ownerResults[1]),
         getHistory: vi.fn().mockResolvedValue({}), getQueue: vi.fn().mockResolvedValue(queue),
-        persistRecoveredState: vi.fn(), interruptPrompt, deleteQueuedPrompt: vi.fn(),
+        persistRecoveredState: vi.fn(), deleteQueuedPrompt: vi.fn(),
         persistRecoveredCancellation: vi.fn(), releaseLease: vi.fn(),
       } satisfies ComfyReconciliationDependencies
       const result = await reconcileComfyRequest('request-1', deps).catch((error) => error)
-      expect(interruptPrompt).not.toHaveBeenCalled()
       expect(result).toBeTruthy()
     }
   })
@@ -403,6 +448,7 @@ describe('ComfyUI recovery and cancellation contract', () => {
     expect(persistRecoveredState).toHaveBeenCalledWith(expect.objectContaining({
       status: 'failed', errorCode: 'COMFY_EXECUTION_FAILED',
     }))
+    expect(deps.releaseLease).toHaveBeenCalled()
   })
 
   it('does not declare a missing prompt failed until absence is conclusive', async () => {
@@ -433,7 +479,7 @@ describe('ComfyUI recovery and cancellation contract', () => {
         status === 'leased' || status === 'uploading' ? 'canceled' : 'requested',
       ),
       getQueue: vi.fn().mockResolvedValue(queue), deleteQueuedPrompt: vi.fn().mockResolvedValue(undefined),
-      interruptPrompt: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(true),
+      release: vi.fn().mockResolvedValue(true),
       markCanceledOwned: vi.fn().mockResolvedValue(true),
     } satisfies ComfyCancellationDependencies
   }
@@ -456,27 +502,26 @@ describe('ComfyUI recovery and cancellation contract', () => {
     expect(deps.release).toHaveBeenCalled()
   })
 
-  it('deletes only its queued prompt and interrupts only its running prompt', async () => {
+  it('double-checks and deletes only its queued prompt but never globally interrupts running work', async () => {
     const queued = cancellation('submitted', { running: [['x', 'manual']], pending: [[0, 'prompt-1']] })
     await cancelComfyRequest('request-1', 'user-1', queued)
     expect(queued.deleteQueuedPrompt).toHaveBeenCalledWith('prompt-1')
-    expect(queued.interruptPrompt).not.toHaveBeenCalled()
+    expect(queued.getQueue).toHaveBeenCalledTimes(2)
 
     const running = cancellation('running', { running: [[0, 'prompt-1']], pending: [[0, 'manual']] })
-    await cancelComfyRequest('request-1', 'user-1', running)
-    expect(running.interruptPrompt).toHaveBeenCalledWith('prompt-1')
+    await expect(cancelComfyRequest('request-1', 'user-1', running)).resolves.toMatchObject({ outcome: 'canceling' })
     expect(running.deleteQueuedPrompt).not.toHaveBeenCalled()
+    expect(running.markCanceledOwned).not.toHaveBeenCalled()
+    expect(running.release).not.toHaveBeenCalled()
   })
 
   it('never interrupts or deletes external work when prompt or lease ownership differs', async () => {
     const external = cancellation('running', { running: [[0, 'manual-prompt']], pending: [] })
     await cancelComfyRequest('request-1', 'user-1', external)
-    expect(external.interruptPrompt).not.toHaveBeenCalled()
     expect(external.deleteQueuedPrompt).not.toHaveBeenCalled()
 
     const lost = cancellation('running', { running: [[0, 'prompt-1']], pending: [] })
     lost.verifyLeaseOwner.mockResolvedValue(false)
     await expect(cancelComfyRequest('request-1', 'user-1', lost)).rejects.toThrow()
-    expect(lost.interruptPrompt).not.toHaveBeenCalled()
   })
 })

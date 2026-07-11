@@ -13,6 +13,7 @@ import {
 import { isBoundedLiveVariables } from './workflow-limits'
 import { matchesComfyVariableType } from './workflow-schema'
 import type { ComfyVariableDefinition } from './types'
+import { isOpaqueStorageKey } from './media'
 
 export const ALLOWED_COMFY_REQUEST_TRANSITIONS: Record<
   ComfyRequestStatus,
@@ -103,7 +104,7 @@ export async function createComfyGenerationRequest(
         throw new ApiError('NOT_FOUND')
       }
       const variableSnapshot = sanitizeVariableSnapshot(
-        input.variables, currentVersion.variableDefinitions,
+        input.variables, currentVersion.variableDefinitions, input.userId, input.projectId,
       )
       return client.create({
         invocationKey: input.invocationKey,
@@ -281,6 +282,8 @@ function equalValue(left: unknown, right: unknown): boolean {
 function sanitizeVariableSnapshot(
   variables: Record<string, ComfyVariableValue>,
   rawDefinitions: unknown,
+  userId: string,
+  projectId: string,
 ) {
   if (!isBoundedLiveVariables(variables) || !Array.isArray(rawDefinitions)) {
     throw new ApiError('INVALID_PARAMS')
@@ -302,7 +305,7 @@ function sanitizeVariableSnapshot(
     if (!supplied && definition.required) throw new ApiError('INVALID_PARAMS')
     if (value === undefined) continue
     if (!matchesComfyVariableType(value, definition.type)) throw new ApiError('INVALID_PARAMS')
-    snapshot[definition.name] = sanitizeVariableValue(value, definition.type)
+    snapshot[definition.name] = sanitizeVariableValue(value, definition.type, userId, projectId)
   }
   if (!isBoundedLiveVariables(snapshot)) throw new ApiError('INVALID_PARAMS')
   return snapshot
@@ -318,17 +321,24 @@ function isVariableDefinition(value: unknown): value is ComfyVariableDefinition 
 function sanitizeVariableValue(
   value: ComfyVariableValue,
   type: ComfyVariableDefinition['type'],
+  userId: string,
+  projectId: string,
 ): ComfyVariableValue {
   if (type === 'image_ref_list') {
-    return (value as ComfyMediaRef[]).map(sanitizeMediaRef)
+    return (value as ComfyMediaRef[]).map((ref) => sanitizeMediaRef(ref, userId, projectId))
   }
   if (type === 'image_ref' || type === 'video_ref') {
-    return sanitizeMediaRef(value as ComfyMediaRef)
+    return sanitizeMediaRef(value as ComfyMediaRef, userId, projectId)
   }
   return value
 }
 
-function sanitizeMediaRef(value: ComfyMediaRef) {
+function sanitizeMediaRef(value: ComfyMediaRef, userId: string, projectId: string) {
+  if (!isOpaqueStorageKey(value.storageKey)
+    || (!value.storageKey.startsWith(`users/${userId}/`)
+      && !value.storageKey.startsWith(`projects/${projectId}/`))) {
+    throw new ApiError('INVALID_PARAMS')
+  }
   return {
     storageKey: value.storageKey,
     ...(typeof value.mimeType === 'string' ? { mimeType: value.mimeType } : {}),

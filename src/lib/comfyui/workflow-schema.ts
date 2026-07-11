@@ -179,6 +179,9 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
   if (rawOutputs.length === 0) {
     issues.push(issue('COMFY_OUTPUT_REQUIRED', 'outputs', 'At least one output is required.'))
   }
+  if (rawOutputs.length > 64) {
+    issues.push(issue('COMFY_OUTPUT_LIMIT_EXCEEDED', 'outputs', 'At most 64 outputs are allowed.'))
+  }
   const validOutputs = rawOutputs.filter(isObject)
   if (validOutputs.filter((output) => output.primary === true).length !== 1) {
     issues.push(issue(

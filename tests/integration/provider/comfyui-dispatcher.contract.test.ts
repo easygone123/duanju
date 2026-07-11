@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { dispatchComfyRequest, type ComfyDispatcherDependencies } from '@/lib/comfyui/dispatcher'
 import { ComfyError } from '@/lib/comfyui/errors'
 import { createComfyObservability } from '@/lib/comfyui/observability'
-import { prepareComfyMediaUploads } from '@/lib/comfyui/media'
+import { prepareComfyMediaUploads, transferComfyOutputs } from '@/lib/comfyui/media'
 import type { ComfyOutputRef } from '@/lib/comfyui/types'
 
 function context(overrides: Record<string, unknown> = {}) {
@@ -12,7 +12,7 @@ function context(overrides: Record<string, unknown> = {}) {
       id: 'request-1', taskId: 'task-1', invocationKey: 'invoke-1', userId: 'user-1',
       projectId: 'project-1', mediaType: 'image' as const, workflowId: 'workflow-1',
       workflowVersionId: 'version-1', variableSnapshot: {
-        input: { storageKey: '/api/files/source.png', mimeType: 'image/png', filename: 'source.png' },
+        input: { storageKey: 'users/user-1/source.png', mimeType: 'image/png', filename: 'source.png' },
       }, status: 'leased' as const, connectionId: 'connection-1', leaseId: 'lease-1',
     },
     connection: { id: 'connection-1', userId: 'user-1', enabled: true },
@@ -52,6 +52,7 @@ function dependencies(overrides: Partial<ComfyDispatcherDependencies> = {}): Com
     persistProgress: vi.fn().mockResolvedValue(true),
     persistOutputRefs: vi.fn().mockResolvedValue(true),
     persistCompletedOutputs: vi.fn().mockResolvedValue(true),
+    persistStoredOutputReceipt: vi.fn().mockResolvedValue(true),
     returnToWaiting: vi.fn().mockResolvedValue(true),
     markReconciling: vi.fn().mockResolvedValue(true),
     markFailed: vi.fn().mockResolvedValue(true),
@@ -68,11 +69,11 @@ function dependencies(overrides: Partial<ComfyDispatcherDependencies> = {}): Com
       } }),
       getQueue: vi.fn().mockResolvedValue({ running: [], pending: [] }),
       downloadOutput: vi.fn().mockResolvedValue(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
-      deleteQueuedPrompt: vi.fn(), interruptPrompt: vi.fn(),
+      deleteQueuedPrompt: vi.fn(),
     },
-    toFetchableUrl: vi.fn((value: string) => `http://storage.local${value}`),
-    fetchInput: vi.fn().mockResolvedValue(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+    readOwnedObject: vi.fn().mockResolvedValue(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
     uploadObject: vi.fn(async (_bytes, key) => key),
+    objectExists: vi.fn().mockResolvedValue(false),
     resolveStoredUrl: vi.fn((key) => `/api/files/${key}`),
     randomId: vi.fn().mockReturnValueOnce('client-1').mockReturnValue('random-1'),
     signal: new AbortController().signal,
@@ -175,7 +176,7 @@ describe('ComfyUI dispatcher contract', () => {
 
   it('fails deterministic pre-submit errors instead of retrying another instance', async () => {
     const deps = dependencies({
-      fetchInput: vi.fn().mockRejectedValue(new ComfyError(
+      readOwnedObject: vi.fn().mockRejectedValue(new ComfyError(
         'COMFY_INPUT_UPLOAD_FAILED', 'invalid input', { retryable: false },
       )),
     })
@@ -199,6 +200,20 @@ describe('ComfyUI dispatcher contract', () => {
     resolveHeartbeat(true)
     await pending
     expect(deps.release).toHaveBeenCalledTimes(1)
+  })
+
+  it('clamps an oversized heartbeat tick below TTL while staying non-reentrant', async () => {
+    const heartbeat = vi.fn().mockResolvedValue(true)
+    const deps = dependencies({
+      heartbeat, leaseTtlMs: 60, heartbeatTickMs: 10_000,
+      client: { ...dependencies().client, watchPrompt: async function* () {
+        await new Promise((resolve) => setTimeout(resolve, 55))
+        yield { type: 'executing' as const, promptId: 'prompt-1', nodeId: null }
+      } },
+    })
+    await dispatchComfyRequest('request-1', deps)
+    expect(heartbeat.mock.calls.length).toBeGreaterThanOrEqual(3)
+    expect(heartbeat.mock.calls.length).toBeLessThan(8)
   })
 
   it('falls back to history when WebSocket ends without a terminal event', async () => {
@@ -244,7 +259,7 @@ describe('ComfyUI dispatcher contract', () => {
   it('uses detected MIME and extension and rejects oversized inputs before upload', async () => {
     const deps = dependencies()
     await expect(prepareComfyMediaUploads({
-      userId: 'user-1', requestId: 'request-1',
+      userId: 'user-1', projectId: 'project-1', requestId: 'request-1',
       variables: { input: { storageKey: 'source' } },
       definitions: [{ name: 'input', type: 'image_ref', required: true }],
       client: deps.client, dependencies: deps,
@@ -271,13 +286,13 @@ describe('ComfyUI dispatcher contract', () => {
     })
     await dispatchComfyRequest('request-1', dependencies({ observation }))
     expect(metrics.observe).toHaveBeenCalledWith(
-      'comfy.execution_duration_ms', expect.any(Number), expect.objectContaining({ requestId: 'request-1' }),
+      'comfy.execution_duration_ms', expect.any(Number), { mediaType: 'image' },
     )
 
     const contended = dependencies({ observation, recheckClaim: vi.fn().mockResolvedValue(false) })
     await dispatchComfyRequest('request-1', contended)
     expect(metrics.increment).toHaveBeenCalledWith(
-      'comfy.lease_contention', 1, expect.objectContaining({ requestId: 'request-1' }),
+      'comfy.lease_contention', 1, { outcome: 'claim_recheck' },
     )
   })
 
@@ -296,5 +311,78 @@ describe('ComfyUI dispatcher contract', () => {
     }))
     expect(deps.client.downloadOutput).not.toHaveBeenCalled()
     expect(deps.uploadObject).not.toHaveBeenCalled()
+  })
+
+  it('rejects URL-like media refs before any storage or network read', async () => {
+    for (const storageKey of [
+      'http://169.254.169.254/latest/meta-data', 'https://127.0.0.1/secret',
+      'data:image/png;base64,AAAA', 'file:///etc/passwd', 'http://10.0.0.1/private',
+      'http://192.168.1.2/private', 'http://[::1]/secret', 'http://[fc00::1]/private',
+      '//metadata.google.internal/computeMetadata/v1',
+    ]) {
+      const deps = dependencies()
+      await expect(prepareComfyMediaUploads({
+        userId: 'user-1', projectId: 'project-1', requestId: 'request-1',
+        variables: { input: { storageKey } },
+        definitions: [{ name: 'input', type: 'image_ref', required: true }],
+        client: deps.client, dependencies: deps,
+      })).rejects.toMatchObject({ code: 'COMFY_INPUT_UPLOAD_FAILED' })
+      expect(deps.readOwnedObject).not.toHaveBeenCalled()
+      expect(deps.client.uploadImage).not.toHaveBeenCalled()
+    }
+  })
+
+  it('does not release when a terminal or failover DB write is not durable', async () => {
+    const terminal = dependencies({
+      readOwnedObject: vi.fn().mockRejectedValue(new ComfyError(
+        'COMFY_INPUT_UPLOAD_FAILED', 'invalid input', { retryable: false },
+      )),
+      markFailed: vi.fn().mockResolvedValue(false),
+    })
+    await expect(dispatchComfyRequest('request-1', terminal)).resolves.toMatchObject({ outcome: 'reconciling' })
+    expect(terminal.release).not.toHaveBeenCalled()
+
+    const failover = dependencies({
+      client: { ...dependencies().client, uploadImage: vi.fn().mockRejectedValue(new Error('offline')) },
+      returnToWaiting: vi.fn().mockResolvedValue(false),
+    })
+    await expect(dispatchComfyRequest('request-1', failover)).resolves.toMatchObject({ outcome: 'reconciling' })
+    expect(failover.release).not.toHaveBeenCalled()
+  })
+
+  it('bounds output count and cumulative bytes with stable transfer errors', async () => {
+    const deps = dependencies()
+    await expect(transferComfyOutputs({
+      userId: 'user-1', projectId: 'project-1', requestId: 'request-1',
+      outputs: Array.from({ length: 65 }, (_, index) => output(`out-${index}`, index === 0)),
+      client: deps.client, dependencies: deps,
+    })).rejects.toMatchObject({ code: 'COMFY_OUTPUT_TRANSFER_FAILED' })
+    expect(deps.client.downloadOutput).not.toHaveBeenCalled()
+
+    await expect(transferComfyOutputs({
+      userId: 'user-1', projectId: 'project-1', requestId: 'request-1',
+      outputs: [output('primary', true), output('second', false)],
+      client: deps.client, dependencies: deps, maxTotalOutputBytes: 12,
+    })).rejects.toMatchObject({ code: 'COMFY_OUTPUT_TRANSFER_FAILED' })
+  })
+
+  it('uses deterministic content-safe keys and skips durable output receipts on retry', async () => {
+    const deps = dependencies()
+    const first = await transferComfyOutputs({
+      userId: 'user-1', projectId: 'project-1', requestId: 'request-1',
+      outputs: [output('primary', true)], client: deps.client, dependencies: deps,
+    })
+    const key = first[0].storageKey
+    expect(key).toMatch(/comfyui\/user-1\/project-1\/request-1\/[a-f0-9]{64}-primary\.png$/)
+
+    const retry = dependencies()
+    const repeated = await transferComfyOutputs({
+      userId: 'user-1', projectId: 'project-1', requestId: 'request-1',
+      outputs: [output('primary', true)], existingStored: first,
+      client: retry.client, dependencies: retry,
+    })
+    expect(repeated).toEqual(first)
+    expect(retry.client.downloadOutput).not.toHaveBeenCalled()
+    expect(retry.uploadObject).not.toHaveBeenCalled()
   })
 })

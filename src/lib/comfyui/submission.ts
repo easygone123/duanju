@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 
 import { acquireComfyRequestLease, releaseComfyRequestLease } from './lease'
 import { COMFY_ERROR_CODE } from './errors'
+import type { ComfyOutputRef, ComfyStoredOutputRef } from './types'
 
 export interface ComfyOwnerInput {
   requestId: string
@@ -328,4 +329,73 @@ function nonnegativeInteger(value: unknown) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+interface OutputReceiptStore {
+  transaction<T>(operation: (client: {
+    findRequest(input: Record<string, unknown>): Promise<Record<string, unknown> | null>
+    updateRequest(input: Record<string, unknown>): Promise<{ count: number }>
+  }) => Promise<T>): Promise<T>
+}
+
+const defaultOutputReceiptStore: OutputReceiptStore = {
+  transaction: (operation) => prisma.$transaction((tx) => operation({
+    findRequest: (input) => tx.comfyGenerationRequest.findFirst(
+      input as Prisma.ComfyGenerationRequestFindFirstArgs,
+    ) as Promise<Record<string, unknown> | null>,
+    updateRequest: (input) => tx.comfyGenerationRequest.updateMany(
+      input as Prisma.ComfyGenerationRequestUpdateManyArgs,
+    ),
+  }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }),
+}
+
+export async function persistComfyOutputReceiptWithStore(
+  input: ComfyOwnerInput & { promptId: string; output: ComfyStoredOutputRef },
+  store: OutputReceiptStore = defaultOutputReceiptStore,
+) {
+  return store.transaction(async (client) => {
+    const request = await client.findRequest({
+      where: {
+        id: input.requestId, userId: input.userId, connectionId: input.connectionId,
+        leaseId: input.leaseId, promptId: input.promptId,
+        status: { in: ['transferring', 'reconciling'] },
+      },
+      select: { outputRefs: true },
+    })
+    if (!request || !Array.isArray(request.outputRefs) || request.outputRefs.length > 64) {
+      throw new ApiError('CONFLICT')
+    }
+    const refs = request.outputRefs.filter(isOutputRef).slice(0, 64)
+    const existingIndex = refs.findIndex((ref) => sameOutputIdentity(ref, input.output))
+    if (existingIndex >= 0 && isStoredOutput(refs[existingIndex])
+      && refs[existingIndex].storageKey === input.output.storageKey) return true
+    if (existingIndex >= 0) refs[existingIndex] = input.output
+    else if (refs.length < 64) refs.push(input.output)
+    else throw new ApiError('CONFLICT')
+    const updated = await client.updateRequest({
+      where: {
+        id: input.requestId, userId: input.userId, connectionId: input.connectionId,
+        leaseId: input.leaseId, promptId: input.promptId,
+        status: { in: ['transferring', 'reconciling'] },
+      },
+      data: { outputRefs: refs },
+    })
+    return updated.count === 1
+  })
+}
+
+function isOutputRef(value: unknown): value is ComfyOutputRef | ComfyStoredOutputRef {
+  return isRecord(value) && typeof value.name === 'string' && typeof value.nodeId === 'string'
+    && (value.mediaType === 'image' || value.mediaType === 'video')
+    && typeof value.primary === 'boolean' && typeof value.filename === 'string'
+    && typeof value.subfolder === 'string' && typeof value.type === 'string'
+}
+
+function isStoredOutput(value: ComfyOutputRef | ComfyStoredOutputRef): value is ComfyStoredOutputRef {
+  return 'storageKey' in value && typeof value.storageKey === 'string'
+}
+
+function sameOutputIdentity(left: ComfyOutputRef, right: ComfyOutputRef) {
+  return left.name === right.name && left.nodeId === right.nodeId
+    && left.filename === right.filename && left.subfolder === right.subfolder && left.type === right.type
 }
