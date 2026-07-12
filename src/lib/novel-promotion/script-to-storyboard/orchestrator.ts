@@ -24,6 +24,15 @@ import {
   DEFAULT_ANALYSIS_WORKFLOW_CONCURRENCY,
   normalizeWorkflowConcurrencyValue,
 } from '@/lib/workflow-concurrency'
+import type { ResolvedStoryboardRunSettings } from '@/lib/novel-promotion/six-grid/run-settings'
+import {
+  SixGridValidationError,
+  validateSixGridActingDirections,
+  validateSixGridEpisodePlan,
+  validateSixGridPhotographyRules,
+  validateAndNormalizeSixGridGroups,
+  type PlannedSixGridSceneGroup,
+} from '@/lib/novel-promotion/six-grid/scene-planner'
 
 type JsonRecord = Record<string, unknown>
 const orchestratorLogger = createScopedLogger({ module: 'worker.orchestrator.script_to_storyboard' })
@@ -66,11 +75,18 @@ export type ClipStoryboardPanels = {
   clipId: string
   clipIndex: number
   finalPanels: StoryboardPanel[]
+  groupId?: string
+  groupKey?: string
+  groupSequence?: number
+  sceneKey?: string
+  incomingContinuity?: string
+  outgoingContinuity?: string
 }
 
 export type ScriptToStoryboardOrchestratorInput = {
   concurrency?: number
   locale?: 'zh' | 'en'
+  runSettings?: ResolvedStoryboardRunSettings
   clips: ClipInput[]
   novelPromotionData: {
     characters: CharacterAsset[]
@@ -88,10 +104,15 @@ export type ScriptToStoryboardOrchestratorInput = {
 
 export type ScriptToStoryboardOrchestratorResult = {
   clipPanels: ClipStoryboardPanels[]
+  sixGridGroups?: ClipStoryboardPanels[]
   phase1PanelsByClipId: Record<string, StoryboardPanel[]>
   phase2CinematographyByClipId: Record<string, PhotographyRule[]>
   phase2ActingByClipId: Record<string, ActingDirection[]>
   phase3PanelsByClipId: Record<string, StoryboardPanel[]>
+  sixGridPhase1PanelsByGroupId?: Record<string, StoryboardPanel[]>
+  sixGridPhase2CinematographyByGroupId?: Record<string, PhotographyRule[]>
+  sixGridPhase2ActingByGroupId?: Record<string, ActingDirection[]>
+  sixGridPhase3PanelsByGroupId?: Record<string, StoryboardPanel[]>
   summary: {
     clipCount: number
     totalPanelCount: number
@@ -214,6 +235,7 @@ function computeRetryDelayMs(attempt: number) {
 
 function shouldRetryStepError(error: unknown, message: string, retryable: boolean) {
   if (error instanceof JsonParseError) return true
+  if (error instanceof SixGridValidationError) return true
   if (retryable) return true
   const lowerMessage = message.toLowerCase()
   if (lowerMessage.includes('ark responses 调用失败')) return false
@@ -224,6 +246,10 @@ function shouldRetryStepError(error: unknown, message: string, retryable: boolea
     || lowerMessage.includes('json format invalid')
     || lowerMessage.includes('invalid json output')
     || lowerMessage.includes('parse')
+}
+
+export function getScriptToStoryboardStepErrorCode(error: unknown, fallbackCode: string): string {
+  return error instanceof SixGridValidationError ? error.code : fallbackCode
 }
 
 async function runStepWithRetry<T>(
@@ -257,7 +283,7 @@ async function runStepWithRetry<T>(
       orchestratorLogger.error({
         action: 'orchestrator.step.retry',
         message: shouldRetry ? 'step failed, retrying' : 'step failed, no more retry',
-        errorCode: normalizedError.code,
+        errorCode: getScriptToStoryboardStepErrorCode(error, normalizedError.code),
         retryable: normalizedError.retryable,
         details: {
           stepId: baseMeta.stepId,
@@ -282,6 +308,202 @@ async function runStepWithRetry<T>(
   throw lastError!
 }
 
+async function runSixGridScriptToStoryboardOrchestrator(
+  input: ScriptToStoryboardOrchestratorInput,
+  concurrency: number,
+): Promise<ScriptToStoryboardOrchestratorResult> {
+  const { clips, novelPromotionData, promptTemplates, runStep } = input
+  const orderedClipIds = clips
+    .filter((clip) => typeof clip.content === 'string' && !!clip.content.trim())
+    .map((clip) => clip.id)
+  const episodePlanningPrompt = [
+    'Plan the complete episode into continuous six-shot scene groups.',
+    'Return one JSON array. Every group must contain sceneKey, clipId, incomingContinuity, outgoingContinuity, and exactly six panels.',
+    'Never cross a hard location boundary to fill a group. Adjacent groups in the same scene must copy the previous outgoingContinuity exactly into incomingContinuity.',
+    'Continuity anchors must preserve characters, clothing, props, lighting, and emotion.',
+    `Immutable run settings: ${JSON.stringify(input.runSettings)}`,
+    `Complete episode clips: ${JSON.stringify(clips, null, 2)}`,
+  ].join('\n\n')
+
+  const { parsed: plannedGroups } = await runStepWithRetry(
+    runStep,
+    withStepMeta(
+      'six_grid_episode_plan',
+      'progress.streamStep.storyboardPlan',
+      1,
+      clips.length * 3 + 2,
+      { groupId: 'six_grid_episode', parallelKey: 'phase1', retryable: true },
+    ),
+    episodePlanningPrompt,
+    'storyboard_six_grid_scene_plan',
+    8000,
+    (text) => validateSixGridEpisodePlan(
+      parseJsonArray<JsonRecord>(text, 'six-grid-scene-plan'),
+      orderedClipIds,
+    ),
+  )
+
+  const totalStepCount = plannedGroups.length * 3 + 2
+  const phase1PanelsByClipId = new Map<string, StoryboardPanel[]>()
+  const phase2CinematographyByClipId = new Map<string, PhotographyRule[]>()
+  const phase2ActingByClipId = new Map<string, ActingDirection[]>()
+  const phase3PanelsByClipId = new Map<string, StoryboardPanel[]>()
+
+  const clipPanels = await mapWithConcurrency(
+    plannedGroups,
+    concurrency,
+    async (group, index): Promise<ClipStoryboardPanels> => {
+      const clip = clips.find((candidate) => candidate.id === group.clipId)
+      if (!clip) throw new SixGridValidationError('SIX_GRID_CLIP_COVERAGE_INVALID')
+      const groupNumber = group.groupSequence
+      const stepPrefix = `six_grid_group_${groupNumber}`
+      phase1PanelsByClipId.set(group.groupId, group.panels)
+
+      const clipCharacters = parseClipCharacters(clip.characters)
+      const clipProps = parseClipProps(clip.props ?? null)
+      const filteredFullDescription = getFilteredFullDescription(
+        novelPromotionData.characters || [],
+        clipCharacters,
+      )
+      const filteredLocationsDescription = getFilteredLocationsDescription(
+        novelPromotionData.locations || [],
+        group.sceneKey,
+        input.locale ?? 'zh',
+      )
+      const filteredPropsDescription = compileAssetPromptFragments(buildPromptAssetContext({
+        characters: [],
+        locations: [],
+        props: novelPromotionData.props || [],
+        clipCharacters: [],
+        clipLocation: null,
+        clipProps,
+      })).propsDescriptionText
+
+      const phase2Meta = withStepMeta(
+        `${stepPrefix}_phase2_cinematography`,
+        'progress.streamStep.cinematographyRules',
+        1 + index * 3 + 1,
+        totalStepCount,
+        {
+          dependsOn: ['six_grid_episode_plan'],
+          groupId: stepPrefix,
+          parallelKey: 'phase2',
+          retryable: true,
+        },
+      )
+      const phase2ActingMeta = withStepMeta(
+        `${stepPrefix}_phase2_acting`,
+        'progress.streamStep.actingDirection',
+        1 + index * 3 + 2,
+        totalStepCount,
+        {
+          dependsOn: ['six_grid_episode_plan'],
+          groupId: stepPrefix,
+          parallelKey: 'phase2',
+          retryable: true,
+        },
+      )
+      const phase3Meta = withStepMeta(
+        `${stepPrefix}_phase3_detail`,
+        'progress.streamStep.storyboardDetailRefine',
+        1 + index * 3 + 3,
+        totalStepCount,
+        {
+          dependsOn: [phase2Meta.stepId, phase2ActingMeta.stepId],
+          groupId: stepPrefix,
+          parallelKey: 'phase3',
+          retryable: true,
+        },
+      )
+
+      const phase2Prompt = promptTemplates.phase2CinematographyTemplate
+        .replace('{panels_json}', JSON.stringify(group.panels, null, 2))
+        .replace(/\{panel_count\}/g, '6')
+        .replace('{locations_description}', filteredLocationsDescription)
+        .replace('{characters_info}', filteredFullDescription)
+        .replace('{props_description}', filteredPropsDescription)
+      const phase2ActingPrompt = promptTemplates.phase2ActingTemplate
+        .replace('{panels_json}', JSON.stringify(group.panels, null, 2))
+        .replace(/\{panel_count\}/g, '6')
+        .replace('{characters_info}', filteredFullDescription)
+      const phase3Prompt = promptTemplates.phase3DetailTemplate
+        .replace('{panels_json}', JSON.stringify(group.panels, null, 2))
+        .replace('{characters_age_gender}', filteredFullDescription)
+        .replace('{locations_description}', filteredLocationsDescription)
+        .replace('{props_description}', filteredPropsDescription)
+
+      const [{ parsed: photographyRules }, { parsed: actingDirections }] = await Promise.all([
+        runStepWithRetry(
+          runStep, phase2Meta, phase2Prompt, 'storyboard_phase2_cinematography', 2400,
+          (text) => validateSixGridPhotographyRules(
+            parseJsonArray<PhotographyRule>(text, `six-grid-cine:${groupNumber}`),
+          ),
+        ),
+        runStepWithRetry(
+          runStep, phase2ActingMeta, phase2ActingPrompt, 'storyboard_phase2_acting', 2400,
+          (text) => validateSixGridActingDirections(
+            parseJsonArray<ActingDirection>(text, `six-grid-acting:${groupNumber}`),
+          ),
+        ),
+      ])
+      const { parsed: finalPanels } = await runStepWithRetry(
+        runStep, phase3Meta, phase3Prompt, 'storyboard_phase3_detail', 2600,
+        (text) => validateFinalGroup(group, parseJsonArray<StoryboardPanel>(text, `six-grid-detail:${groupNumber}`)),
+      )
+
+      phase2CinematographyByClipId.set(group.groupId, photographyRules)
+      phase2ActingByClipId.set(group.groupId, actingDirections)
+      phase3PanelsByClipId.set(group.groupId, finalPanels)
+      return {
+        clipId: group.clipId,
+        clipIndex: clips.findIndex((candidate) => candidate.id === group.clipId) + 1,
+        groupId: group.groupId,
+        groupKey: group.groupKey,
+        groupSequence: group.groupSequence,
+        sceneKey: group.sceneKey,
+        incomingContinuity: group.incomingContinuity,
+        outgoingContinuity: group.outgoingContinuity,
+        finalPanels: mergePanelsWithRules({ finalPanels, photographyRules, actingDirections }),
+      }
+    },
+  )
+
+  const phase1ByGroupId = mapToRecord(phase1PanelsByClipId)
+  const phase2CinematographyByGroupId = mapToRecord(phase2CinematographyByClipId)
+  const phase2ActingByGroupId = mapToRecord(phase2ActingByClipId)
+  const phase3ByGroupId = mapToRecord(phase3PanelsByClipId)
+  return {
+    clipPanels,
+    sixGridGroups: clipPanels,
+    phase1PanelsByClipId: phase1ByGroupId,
+    phase2CinematographyByClipId: phase2CinematographyByGroupId,
+    phase2ActingByClipId: phase2ActingByGroupId,
+    phase3PanelsByClipId: phase3ByGroupId,
+    sixGridPhase1PanelsByGroupId: phase1ByGroupId,
+    sixGridPhase2CinematographyByGroupId: phase2CinematographyByGroupId,
+    sixGridPhase2ActingByGroupId: phase2ActingByGroupId,
+    sixGridPhase3PanelsByGroupId: phase3ByGroupId,
+    summary: {
+      clipCount: clips.length,
+      totalPanelCount: clipPanels.length * 6,
+      totalStepCount,
+    },
+  }
+}
+
+function validateFinalGroup(group: PlannedSixGridSceneGroup, panels: StoryboardPanel[]): StoryboardPanel[] {
+  return validateAndNormalizeSixGridGroups([{
+    ...group,
+    panels,
+  }])[0].panels
+}
+
+function mapToRecord<T>(source: Map<string, T>): Record<string, T> {
+  const output: Record<string, T> = {}
+  for (const [key, value] of source.entries()) output[key] = value
+  return output
+}
+
 export async function runScriptToStoryboardOrchestrator(
   input: ScriptToStoryboardOrchestratorInput,
 ): Promise<ScriptToStoryboardOrchestratorResult> {
@@ -293,6 +515,10 @@ export async function runScriptToStoryboardOrchestrator(
     rawConcurrency,
     DEFAULT_ANALYSIS_WORKFLOW_CONCURRENCY,
   )
+
+  if (input.runSettings?.storyboardGenerationMode === 'six_grid') {
+    return runSixGridScriptToStoryboardOrchestrator(input, concurrency)
+  }
 
   const totalStepCount = clips.length * 4 + 2
   const charactersLibName = (novelPromotionData.characters || []).map((c) => c.name).join(', ') || '无'
@@ -484,14 +710,6 @@ export async function runScriptToStoryboardOrchestrator(
   )
 
   const totalPanelCount = clipPanels.reduce((sum, item) => sum + item.finalPanels.length, 0)
-
-  const mapToRecord = <T>(source: Map<string, T>): Record<string, T> => {
-    const output: Record<string, T> = {}
-    for (const [key, value] of source.entries()) {
-      output[key] = value
-    }
-    return output
-  }
 
   return {
     clipPanels,

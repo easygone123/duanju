@@ -52,6 +52,7 @@ const parseVoiceLinesJsonMock = vi.hoisted(() => vi.fn())
 const persistStoryboardOutputsMock = vi.hoisted(() => vi.fn())
 const parseStoryboardRetryTargetMock = vi.hoisted(() => vi.fn())
 const runScriptToStoryboardAtomicRetryMock = vi.hoisted(() => vi.fn())
+const createArtifactMock = vi.hoisted(() => vi.fn(async () => undefined))
 const workflowLeaseMock = vi.hoisted(() => ({
   assertWorkflowRunActive: vi.fn(async () => undefined),
   withWorkflowRunLease: vi.fn(async (params: { run: () => Promise<unknown> }) => ({
@@ -175,6 +176,7 @@ vi.mock('@/lib/workers/handlers/script-to-storyboard-atomic-retry', () => ({
   runScriptToStoryboardAtomicRetry: runScriptToStoryboardAtomicRetryMock,
 }))
 vi.mock('@/lib/run-runtime/workflow-lease', () => workflowLeaseMock)
+vi.mock('@/lib/run-runtime/service', () => ({ createArtifact: createArtifactMock }))
 
 import { handleScriptToStoryboardTask } from '@/lib/workers/handlers/script-to-storyboard'
 
@@ -329,6 +331,94 @@ describe('worker script-to-storyboard behavior', () => {
         notIn: [1],
       },
     })
+  })
+
+  it('将任务中的不可变六宫格运行设置传给整集编排器', async () => {
+    const job = buildJob({
+      episodeId: 'episode-1',
+      storyboardGenerationMode: 'six_grid',
+      sixGridCellAspectRatio: '16:9',
+      sixGridProcessingOrder: 'sheet_upscale_then_crop',
+      storyboardUpscaleModel: 'comfyui::upscale-v1',
+      dialogueVideoModel: 'comfyui::dialogue-v1',
+    })
+
+    await handleScriptToStoryboardTask(job)
+
+    expect(runScriptToStoryboardOrchestratorMock).toHaveBeenCalledWith(expect.objectContaining({
+      runSettings: {
+        storyboardGenerationMode: 'six_grid',
+        sixGridCellAspectRatio: '16:9',
+        sixGridProcessingOrder: 'sheet_upscale_then_crop',
+        storyboardUpscaleModel: 'comfyui::upscale-v1',
+        dialogueVideoModel: 'comfyui::dialogue-v1',
+      },
+    }))
+  })
+
+  it('无效整集计划在 artifact 与持久化之前失败', async () => {
+    runScriptToStoryboardOrchestratorMock.mockRejectedValueOnce(
+      Object.assign(new Error('SIX_GRID_REQUIRES_EXACTLY_SIX_PANELS'), {
+        code: 'SIX_GRID_REQUIRES_EXACTLY_SIX_PANELS',
+      }),
+    )
+    const job = buildJob({
+      episodeId: 'episode-1',
+      storyboardGenerationMode: 'six_grid',
+      sixGridCellAspectRatio: '16:9',
+    })
+
+    await expect(handleScriptToStoryboardTask(job))
+      .rejects.toMatchObject({ code: 'SIX_GRID_REQUIRES_EXACTLY_SIX_PANELS' })
+    expect(createArtifactMock).not.toHaveBeenCalled()
+    expect(persistStoryboardOutputsMock).not.toHaveBeenCalled()
+  })
+
+  it('保留同 clip 多组身份并阻止 legacy upsert 持久化', async () => {
+    const sixGridGroups = [1, 2].map((groupSequence) => ({
+      clipId: 'clip-1',
+      clipIndex: 1,
+      groupId: `six-grid:${groupSequence}:clip-1:${groupSequence}`,
+      groupKey: `six-grid:${groupSequence}:clip-1:${groupSequence}`,
+      groupSequence,
+      sceneKey: 'Office',
+      incomingContinuity: groupSequence === 1 ? 'start' : 'anchor',
+      outgoingContinuity: groupSequence === 1 ? 'anchor' : 'end',
+      finalPanels: Array.from({ length: 6 }, (_, index) => ({
+        panel_number: index + 1,
+        shot_type: 'close-up',
+        camera_move: 'static',
+        description: `panel ${index + 1}`,
+        video_prompt: `prompt ${index + 1}`,
+        location: 'Office',
+        characters: ['Narrator'],
+      })),
+    }))
+    runScriptToStoryboardOrchestratorMock.mockResolvedValueOnce({
+      clipPanels: sixGridGroups,
+      sixGridGroups,
+      phase1PanelsByClipId: {},
+      phase2CinematographyByClipId: {},
+      phase2ActingByClipId: {},
+      phase3PanelsByClipId: {},
+      summary: { totalPanelCount: 12, totalStepCount: 8 },
+    } as never)
+    const job = buildJob({
+      episodeId: 'episode-1',
+      storyboardGenerationMode: 'six_grid',
+      sixGridCellAspectRatio: '16:9',
+    })
+
+    const result = await handleScriptToStoryboardTask(job)
+
+    expect(result).toMatchObject({
+      episodeId: 'episode-1',
+      panelCount: 12,
+      persistenceDeferred: true,
+      sixGridGroups,
+    })
+    expect(createArtifactMock).not.toHaveBeenCalled()
+    expect(persistStoryboardOutputsMock).not.toHaveBeenCalled()
   })
 
   it('voice 解析失败后会重试一次再成功', async () => {

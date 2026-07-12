@@ -36,6 +36,10 @@ import {
   parseStoryboardRetryTarget,
   runScriptToStoryboardAtomicRetry,
 } from './script-to-storyboard-atomic-retry'
+import {
+  parseStoryboardRunSettingsTask,
+  resolveStoryboardRunSettings,
+} from '@/lib/novel-promotion/six-grid/run-settings'
 
 type AnyObj = Record<string, unknown>
 const MAX_VOICE_ANALYZE_ATTEMPTS = 2
@@ -59,6 +63,9 @@ function isReasoningEffort(value: unknown): value is 'minimal' | 'low' | 'medium
 
 export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
   const payload = (job.data.payload || {}) as AnyObj
+  const runSettings = resolveStoryboardRunSettings({
+    task: parseStoryboardRunSettingsTask(payload),
+  })
   const projectId = job.data.projectId
   const episodeIdRaw = typeof payload.episodeId === 'string' ? payload.episodeId : (job.data.episodeId || '')
   const episodeId = episodeIdRaw.trim()
@@ -321,6 +328,7 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
                 return await runScriptToStoryboardOrchestrator({
                   concurrency: workflowConcurrency.analysis,
                   locale: job.data.locale,
+                  runSettings,
                   clips: selectedClips.map((clip) => ({
                     id: clip.id,
                     content: clip.content,
@@ -364,6 +372,24 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
           await callbacks.flush()
         }
       })()
+
+      if (runSettings.storyboardGenerationMode === 'six_grid') {
+        const sixGridGroups = orchestratorResult.sixGridGroups || orchestratorResult.clipPanels
+        await reportTaskProgress(job, 96, {
+          stage: 'script_to_storyboard_plan_ready',
+          stageLabel: 'progress.stage.scriptToStoryboardPersist',
+          displayMode: 'detail',
+          message: 'six-grid groups planned; persistence deferred',
+        })
+        return {
+          episodeId,
+          storyboardCount: 0,
+          panelCount: orchestratorResult.summary.totalPanelCount,
+          voiceLineCount: 0,
+          persistenceDeferred: true,
+          sixGridGroups,
+        }
+      }
 
       const phase1Map = orchestratorResult.phase1PanelsByClipId || {}
       const phase2CinematographyMap = orchestratorResult.phase2CinematographyByClipId || {}
