@@ -1,5 +1,18 @@
 import type { CapabilitySelections } from '@/lib/model-config-contract'
 import type { LocationAvailableSlot } from '@/lib/location-available-slots'
+import type {
+  NormalizedCropRect,
+  SixGridCellAspectRatio,
+  SixGridProcessingOrder,
+  StoryboardGenerationMode,
+} from '@/lib/novel-promotion/six-grid/contracts'
+
+export type {
+  NormalizedCropRect,
+  SixGridCellAspectRatio,
+  SixGridProcessingOrder,
+  StoryboardGenerationMode,
+} from '@/lib/novel-promotion/six-grid/contracts'
 
 // ============================================
 // 基础项目类型
@@ -190,6 +203,25 @@ export interface NovelPromotionPanel {
   sketchImageMedia?: MediaRef | null
   previousImageUrl?: string | null
   previousImageMedia?: MediaRef | null
+  gridCellIndex?: number | null
+  normalizedCropRect?: NormalizedCropRect | null
+  croppedImageUrl?: string | null
+  croppedImageMediaId?: string | null
+  croppedImageMedia?: MediaRef | null
+  upscaledImageUrl?: string | null
+  upscaledImageMediaId?: string | null
+  upscaledImageMedia?: MediaRef | null
+  imageDerivation?: string | null
+  imageLineage?: string | null
+  hasDialogue?: boolean
+  dialogueSpeaker?: string | null
+  dialogueText?: string | null
+  dialogueEmotion?: string | null
+  includeDialogueInVideoPrompt?: boolean
+  estimatedDuration?: number | null
+  durationOverride?: number | null
+  firstFrameSourceMeta?: string | null
+  lastFrameSourceMeta?: string | null
   photographyRules: string | null  // 单镜头摄影规则JSON
   actingNotes: string | null        // 演技指导数据JSON
   // 任务态字段（由 tasks + hook 派生，不再依赖数据库持久化）
@@ -210,6 +242,21 @@ export interface NovelPromotionStoryboard {
   candidateImages?: string | null
   lastError?: string | null  // 最后一次生成失败的错误信息
   photographyPlan?: string | null  // 摄影方案JSON
+  layoutMode?: StoryboardGenerationMode
+  groupSequence?: number | null
+  continuityAnchor?: string | null
+  sixGridCellAspectRatio?: SixGridCellAspectRatio | null
+  sixGridProcessingOrder?: SixGridProcessingOrder | null
+  sheetImageUrl?: string | null
+  sheetImageMediaId?: string | null
+  sheetImageMedia?: MediaRef | null
+  upscaledSheetImageUrl?: string | null
+  upscaledSheetImageMediaId?: string | null
+  upscaledSheetImageMedia?: MediaRef | null
+  sheetPromptSnapshot?: string | null
+  sheetModelSnapshot?: string | null
+  sheetGenerationOptionsSnapshot?: string | null
+  sheetArtifactVersion?: number
   panels?: NovelPromotionPanel[]
 }
 
@@ -252,6 +299,11 @@ export interface NovelPromotionProject {
   videoModel: string
   audioModel: string
   videoRatio: string
+  storyboardGenerationMode?: StoryboardGenerationMode
+  sixGridCellAspectRatio?: SixGridCellAspectRatio | null
+  sixGridProcessingOrder?: SixGridProcessingOrder
+  storyboardUpscaleModel?: string | null
+  dialogueVideoModel?: string | null
   capabilityOverrides?: CapabilitySelections | string | null
   ttsRate: string
   workflowMode: WorkflowMode  // 新增：工作流模式

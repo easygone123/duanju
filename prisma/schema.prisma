@@ -228,6 +228,25 @@ model NovelPromotionPanel {
   previousImageUrl  String?                   @db.Text
   previousImageMediaId String?
   previousImageMedia MediaObject?             @relation("NovelPromotionPanelPreviousImageMedia", fields: [previousImageMediaId], references: [id], onDelete: SetNull)
+  gridCellIndex     Int?
+  normalizedCropRect String?                  @db.Text
+  croppedImageUrl  String?                    @db.Text
+  croppedImageMediaId String?
+  croppedImageMedia MediaObject?              @relation("NovelPromotionPanelCroppedImageMedia", fields: [croppedImageMediaId], references: [id], onDelete: SetNull)
+  upscaledImageUrl String?                    @db.Text
+  upscaledImageMediaId String?
+  upscaledImageMedia MediaObject?             @relation("NovelPromotionPanelUpscaledImageMedia", fields: [upscaledImageMediaId], references: [id], onDelete: SetNull)
+  imageDerivation  String?                    @db.Text
+  imageLineage     String?                    @db.Text
+  hasDialogue      Boolean                    @default(false)
+  dialogueSpeaker  String?
+  dialogueText     String?                    @db.Text
+  dialogueEmotion  String?
+  includeDialogueInVideoPrompt Boolean       @default(true)
+  estimatedDuration Float?
+  durationOverride Float?
+  firstFrameSourceMeta String?                @db.Text
+  lastFrameSourceMeta String?                 @db.Text
   storyboard        NovelPromotionStoryboard  @relation(fields: [storyboardId], references: [id], onDelete: Cascade)
   matchedVoiceLines NovelPromotionVoiceLine[]
 
@@ -238,6 +257,8 @@ model NovelPromotionPanel {
   @@index([lipSyncVideoMediaId])
   @@index([sketchImageMediaId])
   @@index([previousImageMediaId])
+  @@index([croppedImageMediaId])
+  @@index([upscaledImageMediaId])
   @@map("novel_promotion_panels")
 }
 
@@ -265,6 +286,11 @@ model NovelPromotionProject {
   lastEpisodeId   String?
   imageResolution String                    @default("2K")
   importStatus    String?
+  storyboardGenerationMode String           @default("individual")
+  sixGridCellAspectRatio String?
+  sixGridProcessingOrder String              @default("crop_then_panel_upscale")
+  storyboardUpscaleModel String?
+  dialogueVideoModel String?
   characters      NovelPromotionCharacter[]
   episodes        NovelPromotionEpisode[]
   locations       NovelPromotionLocation[]
@@ -319,6 +345,21 @@ model NovelPromotionStoryboard {
   candidateImages     String?               @db.Text
   lastError           String?
   photographyPlan     String?               @db.Text
+  layoutMode          String                @default("individual")
+  groupSequence       Int?
+  continuityAnchor    String?               @db.Text
+  sixGridCellAspectRatio String?
+  sixGridProcessingOrder String?
+  sheetImageUrl       String?               @db.Text
+  sheetImageMediaId   String?
+  sheetImageMedia     MediaObject?          @relation("NovelPromotionStoryboardSheetImageMedia", fields: [sheetImageMediaId], references: [id], onDelete: SetNull)
+  upscaledSheetImageUrl String?              @db.Text
+  upscaledSheetImageMediaId String?
+  upscaledSheetImageMedia MediaObject?       @relation("NovelPromotionStoryboardUpscaledSheetImageMedia", fields: [upscaledSheetImageMediaId], references: [id], onDelete: SetNull)
+  sheetPromptSnapshot String?                @db.Text
+  sheetModelSnapshot String?                 @db.Text
+  sheetGenerationOptionsSnapshot String?     @db.Text
+  sheetArtifactVersion Int                   @default(0)
   panels              NovelPromotionPanel[]
   clip                NovelPromotionClip    @relation(fields: [clipId], references: [id], onDelete: Cascade)
   episode             NovelPromotionEpisode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
@@ -326,6 +367,9 @@ model NovelPromotionStoryboard {
 
   @@index([clipId])
   @@index([episodeId])
+  @@index([episodeId, layoutMode, groupSequence], map: "novel_storyboards_episode_layout_group_idx")
+  @@index([sheetImageMediaId])
+  @@index([upscaledSheetImageMediaId])
   @@map("novel_promotion_storyboards")
 }
 
@@ -979,6 +1023,10 @@ model MediaObject {
   novelPromotionPanelLipSyncVideos      NovelPromotionPanel[]       @relation("NovelPromotionPanelLipSyncVideoMedia")
   novelPromotionPanelSketchImages       NovelPromotionPanel[]       @relation("NovelPromotionPanelSketchMedia")
   novelPromotionPanelPreviousImages     NovelPromotionPanel[]       @relation("NovelPromotionPanelPreviousImageMedia")
+  novelPromotionPanelCroppedImages      NovelPromotionPanel[]       @relation("NovelPromotionPanelCroppedImageMedia")
+  novelPromotionPanelUpscaledImages     NovelPromotionPanel[]       @relation("NovelPromotionPanelUpscaledImageMedia")
+  novelPromotionStoryboardSheetImages   NovelPromotionStoryboard[]  @relation("NovelPromotionStoryboardSheetImageMedia")
+  novelPromotionStoryboardUpscaledSheetImages NovelPromotionStoryboard[] @relation("NovelPromotionStoryboardUpscaledSheetImageMedia")
   novelPromotionShotImages              NovelPromotionShot[]        @relation("NovelPromotionShotImageMedia")
   supplementaryPanelImages              SupplementaryPanel[]        @relation("SupplementaryPanelImageMedia")
   novelPromotionVoiceLineAudios         NovelPromotionVoiceLine[]   @relation("NovelPromotionVoiceLineAudioMedia")
