@@ -14,6 +14,11 @@ import {
   handlePanelImageTask,
   handlePanelVariantTask,
 } from './handlers/image-task-handlers'
+import {
+  handleStoryboardPanelUpscaleTask,
+  handleStoryboardSheetTask,
+} from './handlers/storyboard-sheet-task-handler'
+import { handleStoryboardCropTask } from './handlers/storyboard-crop-task-handler'
 
 type AnyObj = Record<string, unknown>
 
@@ -42,6 +47,13 @@ async function processImageTask(job: Job<TaskJobData>) {
       return await handlePanelImageTask(job)
     case TASK_TYPE.PANEL_VARIANT:
       return await handlePanelVariantTask(job)
+    case TASK_TYPE.STORYBOARD_SHEET_GENERATE:
+    case TASK_TYPE.STORYBOARD_SHEET_UPSCALE:
+      return await handleStoryboardSheetTask(job)
+    case TASK_TYPE.STORYBOARD_SHEET_CROP:
+      return await handleStoryboardCropTask(job)
+    case TASK_TYPE.STORYBOARD_PANEL_UPSCALE:
+      return await handleStoryboardPanelUpscaleTask(job)
     default:
       throw new Error(`Unsupported image task type: ${job.data.type}`)
   }

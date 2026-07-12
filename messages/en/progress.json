@@ -44,6 +44,10 @@
   "taskType": {
     "generic": "Task",
     "imagePanel": "Storyboard image",
+    "storyboardSheetGenerate": "Generate storyboard sheet",
+    "storyboardSheetUpscale": "Upscale storyboard sheet",
+    "storyboardSheetCrop": "Crop storyboard sheet",
+    "storyboardPanelUpscale": "Upscale storyboard panel",
     "imageCharacter": "Character image",
     "imageLocation": "Location image",
     "videoPanel": "Video generation",

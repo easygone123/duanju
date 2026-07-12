@@ -44,6 +44,10 @@
   "taskType": {
     "generic": "任务",
     "imagePanel": "分镜图片",
+    "storyboardSheetGenerate": "生成六宫格分镜",
+    "storyboardSheetUpscale": "放大六宫格原图",
+    "storyboardSheetCrop": "裁剪六宫格分镜",
+    "storyboardPanelUpscale": "放大单格分镜",
     "imageCharacter": "角色图片",
     "imageLocation": "场景图片",
     "videoPanel": "视频生成",

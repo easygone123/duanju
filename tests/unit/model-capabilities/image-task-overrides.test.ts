@@ -29,6 +29,13 @@ describe('image task capability overrides', () => {
     })).toThrow(/CAPABILITY_VALUE_NOT_ALLOWED/)
   })
 
+  it.each(['8:3', '27:32'])('rejects unsupported six-grid sheet ratio %s using the real catalog', (aspectRatio) => {
+    expect(() => resolveImageTaskGenerationOptions({
+      imageModel: 'fal::banana-2', projectModelConfig,
+      taskSelections: { aspectRatio },
+    })).toThrow(/CAPABILITY_VALUE_NOT_ALLOWED/)
+  })
+
   it('uses the published Comfy workflow variable options as its allowlist', () => {
     expect(resolveImageTaskGenerationOptions({
       imageModel: 'comfyui::workflow-1',

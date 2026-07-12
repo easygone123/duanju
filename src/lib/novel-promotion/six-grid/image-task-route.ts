@@ -1,0 +1,91 @@
+import { prisma } from '@/lib/prisma'
+import { ApiError } from '@/lib/api-errors'
+import type { NormalizedCropRect, SixGridProcessingOrder } from './contracts'
+import { buildSixGridTaskDedupeKey, type SixGridImageTaskSnapshot } from '@/lib/workers/handlers/storyboard-sheet-task-handler'
+import { validateWorkflowContract } from '@/lib/comfyui/workflow-schema'
+import type { ComfyInputBinding, ComfyOutputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
+
+function invalid(code: string, field?: string): never {
+  throw new ApiError('INVALID_PARAMS', { code, ...(field ? { field } : {}) })
+}
+
+export async function loadOwnedSixGrid(input: {
+  userId: string; projectId: string; episodeId: string; storyboardId: string
+}) {
+  const storyboard = await prisma.novelPromotionStoryboard.findFirst({
+    where: {
+      id: input.storyboardId, episodeId: input.episodeId,
+      episode: { novelPromotionProject: { projectId: input.projectId, project: { userId: input.userId } } },
+    },
+    include: { sheetImageMedia: true, upscaledSheetImageMedia: true, panels: { orderBy: { gridCellIndex: 'asc' }, include: { imageMedia: true, croppedImageMedia: true } } },
+  })
+  if (!storyboard) throw new ApiError('NOT_FOUND')
+  if (storyboard.layoutMode !== 'six_grid') invalid('SIX_GRID_LAYOUT_REQUIRED', 'storyboardId')
+  if (storyboard.panels.length !== 6 || new Set(storyboard.panels.map((panel) => panel.gridCellIndex)).size !== 6
+    || storyboard.panels.some((panel) => panel.gridCellIndex == null || panel.gridCellIndex < 0 || panel.gridCellIndex > 5)) {
+    invalid('SIX_GRID_EXACTLY_SIX_PANELS_REQUIRED', 'storyboardId')
+  }
+  if (storyboard.sixGridCellAspectRatio !== '16:9' && storyboard.sixGridCellAspectRatio !== '9:16') invalid('SIX_GRID_CELL_RATIO_INVALID')
+  if (storyboard.sixGridProcessingOrder !== 'sheet_upscale_then_crop' && storyboard.sixGridProcessingOrder !== 'crop_then_panel_upscale') invalid('SIX_GRID_PROCESSING_ORDER_INVALID')
+  return storyboard
+}
+
+export async function loadOwnedPublishedUpscaleWorkflow(input: {
+  userId: string; workflowId: string; workflowVersionId: string
+}) {
+  return loadOwnedPublishedTestedWorkflow({ ...input, purpose: 'upscale' })
+}
+
+export async function loadOwnedPublishedGenerationWorkflow(input: { userId: string; workflowId: string }) {
+  return loadOwnedPublishedTestedWorkflow({ ...input, purpose: 'generation' })
+}
+
+async function loadOwnedPublishedTestedWorkflow(input: {
+  userId: string
+  workflowId: string
+  workflowVersionId?: string
+  purpose: 'generation' | 'upscale'
+}) {
+  const prefix = input.purpose === 'generation' ? 'GENERATION' : 'UPSCALE'
+  const workflow = await prisma.comfyWorkflow.findFirst({
+    where: {
+      id: input.workflowId, userId: input.userId, mediaType: 'image', status: 'published',
+      ...(input.workflowVersionId ? { currentVersionId: input.workflowVersionId } : {}),
+    },
+    include: { currentVersion: { include: { lastTestConnection: { select: { userId: true } } } } },
+  })
+  const version = workflow?.currentVersion
+  const field = input.purpose === 'generation' ? 'imageModel' : 'workflowVersionId'
+  if (!workflow || !version || workflow.currentVersionId !== version.id
+    || (input.workflowVersionId && version.id !== input.workflowVersionId)) invalid(`${prefix}_WORKFLOW_NOT_FOUND`, field)
+  if (version.purpose !== input.purpose) invalid(`${prefix}_WORKFLOW_PURPOSE_INVALID`, field)
+  if (!version.publishedAt) invalid(`${prefix}_WORKFLOW_UNPUBLISHED`, field)
+  if (!version.lastSuccessfulTestAt || !version.lastTestConnection
+    || version.lastTestConnection.userId !== input.userId) invalid(`${prefix}_WORKFLOW_NOT_VALIDATED`, field)
+  const issues = validateWorkflowContract({
+    purpose: input.purpose, graph: version.apiFormatJson,
+    variableDefinitions: version.variableDefinitions as unknown as ComfyVariableDefinition[],
+    bindings: version.bindingSpec as unknown as ComfyInputBinding[],
+    outputs: version.outputSpec as unknown as ComfyOutputBinding[],
+  })
+  if (issues.length > 0) invalid(`${prefix}_WORKFLOW_CONTRACT_INVALID`, field)
+  return { workflow, version }
+}
+
+export function defaultCropRects(): Array<{ cellIndex: number; normalizedCropRect: NormalizedCropRect }> {
+  return Array.from({ length: 6 }, (_, cellIndex) => ({
+    cellIndex,
+    normalizedCropRect: { x: (cellIndex % 3) / 3, y: Math.floor(cellIndex / 3) / 2, width: 1 / 3, height: 1 / 2 },
+  }))
+}
+
+export function sourceForCrop(storyboard: Awaited<ReturnType<typeof loadOwnedSixGrid>>) {
+  const order = storyboard.sixGridProcessingOrder as SixGridProcessingOrder
+  const media = order === 'sheet_upscale_then_crop' ? storyboard.upscaledSheetImageMedia : storyboard.sheetImageMedia
+  if (!media) invalid(order === 'sheet_upscale_then_crop' ? 'UPSCALED_SHEET_REQUIRED' : 'SHEET_IMAGE_REQUIRED')
+  return { order, media }
+}
+
+export function finalizeSnapshot(snapshot: SixGridImageTaskSnapshot) {
+  return { snapshot, dedupeKey: buildSixGridTaskDedupeKey(snapshot) }
+}

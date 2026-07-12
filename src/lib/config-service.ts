@@ -417,6 +417,9 @@ async function loadOwnedPublishedComfyAspectRatioOptions(input: {
   const version = await prisma.comfyWorkflowVersion.findFirst({
     where: {
       id: input.workflowVersionId,
+      publishedAt: { not: null },
+      lastSuccessfulTestAt: { not: null },
+      lastTestConnection: { userId: input.userId },
       workflow: {
         userId: input.userId,
         mediaType: 'image',
@@ -427,6 +430,29 @@ async function loadOwnedPublishedComfyAspectRatioOptions(input: {
     select: { variableDefinitions: true },
   })
   return readComfyAspectRatioOptions(version?.variableDefinitions)
+}
+
+export async function resolveProjectImageTaskGenerationOptions(input: {
+  projectId: string
+  userId: string
+  imageModel: string
+  taskSelections: ImageTaskCapabilityOverrides
+  comfyWorkflowVersionId?: string
+}) {
+  const projectModelConfig = await getProjectModelConfig(input.projectId, input.userId)
+  const parsed = parseModelKeyStrict(input.imageModel)
+  const comfyAspectRatioOptions = parsed?.provider === 'comfyui'
+    ? await loadOwnedPublishedComfyAspectRatioOptions({
+      userId: input.userId,
+      workflowVersionId: input.comfyWorkflowVersionId ?? null,
+    })
+    : undefined
+  return resolveImageTaskGenerationOptions({
+    imageModel: input.imageModel,
+    projectModelConfig,
+    taskSelections: input.taskSelections,
+    comfyAspectRatioOptions,
+  })
 }
 
 /**

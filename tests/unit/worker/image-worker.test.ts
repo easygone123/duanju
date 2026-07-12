@@ -21,6 +21,9 @@ const handlerMock = vi.hoisted(() => ({
   handleModifyAssetImageTask: vi.fn(async () => ({ ok: true })),
   handlePanelImageTask: vi.fn(async () => ({ ok: true })),
   handlePanelVariantTask: vi.fn(async () => ({ ok: true })),
+  handleStoryboardSheetTask: vi.fn(async () => ({ ok: true })),
+  handleStoryboardCropTask: vi.fn(async () => ({ ok: true })),
+  handleStoryboardPanelUpscaleTask: vi.fn(async () => ({ ok: true })),
 }))
 
 const configServiceMock = vi.hoisted(() => ({
@@ -39,7 +42,7 @@ const gateMock = vi.hoisted(() => ({
 
 vi.mock('bullmq', () => ({
   Queue: class {
-    constructor(_name: string) {}
+    constructor() {}
 
     async add() {
       return { id: 'job-1' }
@@ -61,6 +64,13 @@ vi.mock('@/lib/workers/shared', () => sharedMock)
 vi.mock('@/lib/config-service', () => configServiceMock)
 vi.mock('@/lib/workers/user-concurrency-gate', () => gateMock)
 vi.mock('@/lib/workers/handlers/image-task-handlers', () => handlerMock)
+vi.mock('@/lib/workers/handlers/storyboard-sheet-task-handler', () => ({
+  handleStoryboardSheetTask: handlerMock.handleStoryboardSheetTask,
+  handleStoryboardPanelUpscaleTask: handlerMock.handleStoryboardPanelUpscaleTask,
+}))
+vi.mock('@/lib/workers/handlers/storyboard-crop-task-handler', () => ({
+  handleStoryboardCropTask: handlerMock.handleStoryboardCropTask,
+}))
 
 function buildJob(type: TaskJobData['type']): Job<TaskJobData> {
   return {
@@ -101,5 +111,18 @@ describe('worker image concurrency behavior', () => {
       limit: 5,
     }))
     expect(handlerMock.handlePanelImageTask).toHaveBeenCalledWith(job)
+  })
+
+  it.each([
+    [TASK_TYPE.STORYBOARD_SHEET_GENERATE, 'sheet'],
+    [TASK_TYPE.STORYBOARD_SHEET_UPSCALE, 'sheet'],
+    [TASK_TYPE.STORYBOARD_SHEET_CROP, 'crop'],
+    [TASK_TYPE.STORYBOARD_PANEL_UPSCALE, 'panel'],
+  ] as const)('dispatches %s to the six-grid handler', async (type, target) => {
+    await workerState.processor!(buildJob(type))
+    const expected = target === 'sheet' ? handlerMock.handleStoryboardSheetTask
+      : target === 'crop' ? handlerMock.handleStoryboardCropTask
+        : handlerMock.handleStoryboardPanelUpscaleTask
+    expect(expected).toHaveBeenCalledOnce()
   })
 })
