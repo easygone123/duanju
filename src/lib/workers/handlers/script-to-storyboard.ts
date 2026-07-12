@@ -36,10 +36,8 @@ import {
   parseStoryboardRetryTarget,
   runScriptToStoryboardAtomicRetry,
 } from './script-to-storyboard-atomic-retry'
-import {
-  parseStoryboardRunSettingsTask,
-  resolveStoryboardRunSettings,
-} from '@/lib/novel-promotion/six-grid/run-settings'
+import { persistSixGridPlanningArtifacts } from '@/lib/novel-promotion/six-grid/run-artifacts'
+import { resolveStoryboardRunSnapshot } from '@/lib/novel-promotion/six-grid/run-snapshot'
 
 type AnyObj = Record<string, unknown>
 const MAX_VOICE_ANALYZE_ATTEMPTS = 2
@@ -63,9 +61,6 @@ function isReasoningEffort(value: unknown): value is 'minimal' | 'low' | 'medium
 
 export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
   const payload = (job.data.payload || {}) as AnyObj
-  const runSettings = resolveStoryboardRunSettings({
-    task: parseStoryboardRunSettingsTask(payload),
-  })
   const projectId = job.data.projectId
   const episodeIdRaw = typeof payload.episodeId === 'string' ? payload.episodeId : (job.data.episodeId || '')
   const episodeId = episodeIdRaw.trim()
@@ -81,6 +76,23 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
   if (!episodeId) {
     throw new Error('episodeId is required')
   }
+  const payloadMeta = typeof payload.meta === 'object' && payload.meta !== null
+    ? (payload.meta as AnyObj)
+    : {}
+  const runId = typeof payload.runId === 'string' && payload.runId.trim()
+    ? payload.runId.trim()
+    : (typeof payloadMeta.runId === 'string' ? payloadMeta.runId.trim() : '')
+  if (!runId) {
+    throw new Error('runId is required for script_to_storyboard pipeline')
+  }
+  const runSnapshot = await resolveStoryboardRunSnapshot(runId)
+  if (!runSnapshot
+    || runSnapshot.projectId !== projectId
+    || runSnapshot.episodeId !== episodeId
+    || runSnapshot.workflowType !== 'script_to_storyboard_run') {
+    throw new Error('STORYBOARD_RUN_SNAPSHOT_INVALID')
+  }
+  const runSettings = runSnapshot.runSettings
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -155,15 +167,6 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
   const phase2CinematographyTemplate = getPromptTemplate(PROMPT_IDS.NP_AGENT_CINEMATOGRAPHER, job.data.locale)
   const phase2ActingTemplate = getPromptTemplate(PROMPT_IDS.NP_AGENT_ACTING_DIRECTION, job.data.locale)
   const phase3DetailTemplate = getPromptTemplate(PROMPT_IDS.NP_AGENT_STORYBOARD_DETAIL, job.data.locale)
-  const payloadMeta = typeof payload.meta === 'object' && payload.meta !== null
-    ? (payload.meta as AnyObj)
-    : {}
-  const runId = typeof payload.runId === 'string' && payload.runId.trim()
-    ? payload.runId.trim()
-    : (typeof payloadMeta.runId === 'string' ? payloadMeta.runId.trim() : '')
-  if (!runId) {
-    throw new Error('runId is required for script_to_storyboard pipeline')
-  }
   const workerId = buildWorkflowWorkerId(job, 'script_to_storyboard')
   const assertRunActive = async (stage: string) => {
     await assertWorkflowRunActive({
@@ -373,77 +376,58 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
         }
       })()
 
-      if (runSettings.storyboardGenerationMode === 'six_grid') {
-        const sixGridGroups = orchestratorResult.sixGridGroups || orchestratorResult.clipPanels
-        await reportTaskProgress(job, 96, {
-          stage: 'script_to_storyboard_plan_ready',
-          stageLabel: 'progress.stage.scriptToStoryboardPersist',
-          displayMode: 'detail',
-          message: 'six-grid groups planned; persistence deferred',
-        })
-        return {
-          episodeId,
-          storyboardCount: 0,
-          panelCount: orchestratorResult.summary.totalPanelCount,
-          voiceLineCount: 0,
-          persistenceDeferred: true,
-          sixGridGroups,
-        }
-      }
-
       const phase1Map = orchestratorResult.phase1PanelsByClipId || {}
       const phase2CinematographyMap = orchestratorResult.phase2CinematographyByClipId || {}
       const phase2ActingMap = orchestratorResult.phase2ActingByClipId || {}
       const phase3Map = orchestratorResult.phase3PanelsByClipId || {}
 
-      for (const clip of selectedClips) {
-        const phase1Panels = phase1Map[clip.id] || []
-        if (phase1Panels.length > 0) {
-          await createArtifact({
-            runId,
-            stepKey: `clip_${clip.id}_phase1`,
-            artifactType: 'storyboard.clip.phase1',
-            refId: clip.id,
-            payload: {
-              panels: phase1Panels,
-            },
-          })
-        }
-        const phase2Cinematography = phase2CinematographyMap[clip.id] || []
-        if (phase2Cinematography.length > 0) {
-          await createArtifact({
-            runId,
-            stepKey: `clip_${clip.id}_phase2_cinematography`,
-            artifactType: 'storyboard.clip.phase2.cine',
-            refId: clip.id,
-            payload: {
-              rules: phase2Cinematography,
-            },
-          })
-        }
-        const phase2Acting = phase2ActingMap[clip.id] || []
-        if (phase2Acting.length > 0) {
-          await createArtifact({
-            runId,
-            stepKey: `clip_${clip.id}_phase2_acting`,
-            artifactType: 'storyboard.clip.phase2.acting',
-            refId: clip.id,
-            payload: {
-              directions: phase2Acting,
-            },
-          })
-        }
-        const phase3Panels = phase3Map[clip.id] || []
-        if (phase3Panels.length > 0) {
-          await createArtifact({
-            runId,
-            stepKey: `clip_${clip.id}_phase3_detail`,
-            artifactType: 'storyboard.clip.phase3',
-            refId: clip.id,
-            payload: {
-              panels: phase3Panels,
-            },
-          })
+      if (runSettings.storyboardGenerationMode === 'six_grid') {
+        await persistSixGridPlanningArtifacts({
+          runSnapshot,
+          result: orchestratorResult,
+        })
+      } else {
+        for (const clip of selectedClips) {
+          const phase1Panels = phase1Map[clip.id] || []
+          if (phase1Panels.length > 0) {
+            await createArtifact({
+              runId,
+              stepKey: `clip_${clip.id}_phase1`,
+              artifactType: 'storyboard.clip.phase1',
+              refId: clip.id,
+              payload: { panels: phase1Panels },
+            })
+          }
+          const phase2Cinematography = phase2CinematographyMap[clip.id] || []
+          if (phase2Cinematography.length > 0) {
+            await createArtifact({
+              runId,
+              stepKey: `clip_${clip.id}_phase2_cinematography`,
+              artifactType: 'storyboard.clip.phase2.cine',
+              refId: clip.id,
+              payload: { rules: phase2Cinematography },
+            })
+          }
+          const phase2Acting = phase2ActingMap[clip.id] || []
+          if (phase2Acting.length > 0) {
+            await createArtifact({
+              runId,
+              stepKey: `clip_${clip.id}_phase2_acting`,
+              artifactType: 'storyboard.clip.phase2.acting',
+              refId: clip.id,
+              payload: { directions: phase2Acting },
+            })
+          }
+          const phase3Panels = phase3Map[clip.id] || []
+          if (phase3Panels.length > 0) {
+            await createArtifact({
+              runId,
+              stepKey: `clip_${clip.id}_phase3_detail`,
+              artifactType: 'storyboard.clip.phase3',
+              refId: clip.id,
+              payload: { panels: phase3Panels },
+            })
+          }
         }
       }
 
@@ -459,6 +443,8 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
           episodeId,
           clipPanels: orchestratorResult.clipPanels,
           voiceLineRows: null,
+          runId,
+          runSnapshot,
         })
         await reportTaskProgress(job, 96, {
           stage: 'script_to_storyboard_persist_done',
@@ -561,6 +547,8 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
         episodeId,
         clipPanels: orchestratorResult.clipPanels,
         voiceLineRows,
+        runId,
+        runSnapshot,
       })
 
       await reportTaskProgress(job, 96, {

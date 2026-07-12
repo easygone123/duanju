@@ -32,6 +32,24 @@ export const RUN_EVENT_TYPE = {
 
 export type RunEventType = (typeof RUN_EVENT_TYPE)[keyof typeof RUN_EVENT_TYPE]
 
+export const GRAPH_ARTIFACT_MAX_BYTES = 256 * 1024
+export const GRAPH_ARTIFACT_PAYLOAD_TOO_LARGE = 'GRAPH_ARTIFACT_PAYLOAD_TOO_LARGE'
+export const GRAPH_ARTIFACT_PAYLOAD_INVALID = 'GRAPH_ARTIFACT_PAYLOAD_INVALID'
+
+export const RUN_ARTIFACT_TYPE = {
+  SIX_GRID_STORYBOARD_GROUP: 'storyboard.six_grid.group',
+  SIX_GRID_STORYBOARD_PLAN: 'storyboard.six_grid.plan',
+  SIX_GRID_STORYBOARD_PHASE1: 'storyboard.six_grid.phase1',
+  SIX_GRID_STORYBOARD_PHASE2_CINE: 'storyboard.six_grid.phase2.cine',
+  SIX_GRID_STORYBOARD_PHASE2_ACTING: 'storyboard.six_grid.phase2.acting',
+  SIX_GRID_STORYBOARD_PHASE3: 'storyboard.six_grid.phase3',
+} as const
+
+export const RUN_ARTIFACT_STEP_KEY = {
+  SIX_GRID_PERSIST: 'six_grid_persist',
+  SIX_GRID_EPISODE_PLAN: 'six_grid_episode_plan',
+} as const
+
 export type RunEventInput = {
   runId: string
   projectId: string

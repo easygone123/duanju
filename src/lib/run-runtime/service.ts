@@ -3,6 +3,9 @@ import { selectRecoverableRun } from '@/lib/run-runtime/recovery'
 import { resolveRetryInvalidationStepKeys } from '@/lib/workflow-engine/dependencies'
 import {
   RUN_EVENT_TYPE,
+  GRAPH_ARTIFACT_MAX_BYTES,
+  GRAPH_ARTIFACT_PAYLOAD_INVALID,
+  GRAPH_ARTIFACT_PAYLOAD_TOO_LARGE,
   RUN_STATE_MAX_BYTES,
   RUN_STATUS,
   RUN_STEP_STATUS,
@@ -379,6 +382,18 @@ async function upsertArtifactStrict(params: {
   payload: unknown
 }) {
   await ensureGraphArtifactUniqueIndex()
+  return await upsertArtifactRow(params)
+}
+
+async function upsertArtifactRow(params: {
+  artifactModel: GraphArtifactModel
+  runId: string
+  stepKey: string
+  artifactType: string
+  refId: string
+  versionHash: string | null
+  payload: unknown
+}) {
   return await params.artifactModel.upsert({
     where: {
       runId_stepKey_artifactType_refId: {
@@ -401,6 +416,51 @@ async function upsertArtifactStrict(params: {
       payload: params.payload,
     },
   })
+}
+
+export function serializeGraphArtifactPayload(payload: JsonRecord | null) {
+  let serialized: string
+  try {
+    serialized = JSON.stringify(payload)
+  } catch {
+    throw new Error(GRAPH_ARTIFACT_PAYLOAD_INVALID)
+  }
+  if (typeof serialized !== 'string') throw new Error(GRAPH_ARTIFACT_PAYLOAD_INVALID)
+  const bytes = Buffer.byteLength(serialized, 'utf8')
+  if (bytes > GRAPH_ARTIFACT_MAX_BYTES) throw new Error(GRAPH_ARTIFACT_PAYLOAD_TOO_LARGE)
+  return {
+    serialized,
+    bytes,
+    payload: JSON.parse(serialized) as JsonRecord | null,
+  }
+}
+
+type GraphArtifactWriteInput = {
+  runId: string
+  stepKey?: string | null
+  artifactType: string
+  refId: string
+  versionHash?: string | null
+  payload?: JsonRecord | null
+}
+
+function prepareArtifactWrite(params: GraphArtifactWriteInput) {
+  const stepKey = typeof params.stepKey === 'string' && params.stepKey.trim()
+    ? params.stepKey.trim()
+    : '__run__'
+  const artifactType = params.artifactType.trim()
+  const refId = params.refId.trim()
+  if (!artifactType) throw new Error('artifactType is required')
+  if (!refId) throw new Error('refId is required')
+  const normalized = serializeGraphArtifactPayload(params.payload || null)
+  return {
+    runId: params.runId,
+    stepKey,
+    artifactType,
+    refId,
+    versionHash: params.versionHash || null,
+    payload: normalized.payload,
+  }
 }
 
 function buildStepProjection(input: RunEventInput) {
@@ -715,6 +775,37 @@ export async function getRunById(runId: string) {
   return mapRunRow(row)
 }
 
+export async function getRunInputSnapshot(runId: string) {
+  const run = await getRunById(runId)
+  if (!run) return null
+  return {
+    runId: run.id,
+    projectId: run.projectId,
+    episodeId: run.episodeId,
+    workflowType: run.workflowType,
+    input: Object.freeze({ ...run.input }),
+  }
+}
+
+export async function getRunIdentitySnapshot(runId: string) {
+  const run = await runtimeClient.graphRun.findUnique({
+    where: { id: runId },
+    select: {
+      id: true,
+      projectId: true,
+      episodeId: true,
+      workflowType: true,
+    },
+  })
+  if (!run) return null
+  return {
+    runId: run.id,
+    projectId: run.projectId,
+    episodeId: run.episodeId,
+    workflowType: run.workflowType,
+  }
+}
+
 export async function findReusableActiveRun(params: {
   userId: string
   projectId: string
@@ -1020,14 +1111,8 @@ export async function listCheckpoints(params: {
   })
 }
 
-export async function createArtifact(params: {
-  runId: string
-  stepKey?: string | null
-  artifactType: string
-  refId: string
-  versionHash?: string | null
-  payload?: JsonRecord | null
-}) {
+export async function createArtifact(params: GraphArtifactWriteInput) {
+  const prepared = prepareArtifactWrite(params)
   const artifactModel = (runtimeClient as unknown as { graphArtifact?: GraphArtifactModel }).graphArtifact
   if (!artifactModel || typeof artifactModel.upsert !== 'function') {
     if (process.env.NODE_ENV !== 'test') {
@@ -1036,36 +1121,44 @@ export async function createArtifact(params: {
     return {
       id: '',
       runId: params.runId,
-      stepKey: params.stepKey || '__run__',
-      artifactType: params.artifactType,
-      refId: params.refId,
-      versionHash: params.versionHash || null,
-      payload: params.payload || null,
+      stepKey: prepared.stepKey,
+      artifactType: prepared.artifactType,
+      refId: prepared.refId,
+      versionHash: prepared.versionHash,
+      payload: prepared.payload,
       createdAt: new Date().toISOString(),
     }
   }
-  const stepKey = typeof params.stepKey === 'string' && params.stepKey.trim()
-    ? params.stepKey.trim()
-    : '__run__'
-  const artifactType = params.artifactType.trim()
-  const refId = params.refId.trim()
-  if (!artifactType) {
-    throw new Error('artifactType is required')
-  }
-  if (!refId) {
-    throw new Error('refId is required')
-  }
-
   const row = await upsertArtifactStrict({
     artifactModel,
-    runId: params.runId,
-    stepKey,
-    artifactType,
-    refId,
-    versionHash: params.versionHash || null,
-    payload: params.payload || null,
+    ...prepared,
   })
   return mapArtifactRow(row)
+}
+
+export async function replaceArtifactsBatch(params: {
+  runId: string
+  artifactTypes: string[]
+  artifacts: GraphArtifactWriteInput[]
+}) {
+  const prepared = params.artifacts.map(prepareArtifactWrite)
+  if (prepared.some((artifact) => artifact.runId !== params.runId)) {
+    throw new Error('artifact runId mismatch')
+  }
+  await ensureGraphArtifactUniqueIndex()
+  return await runtimeClient.$transaction(async (tx) => {
+    await tx.graphArtifact.deleteMany({
+      where: {
+        runId: params.runId,
+        artifactType: { in: params.artifactTypes },
+      },
+    })
+    const rows: GraphArtifactRow[] = []
+    for (const artifact of prepared) {
+      rows.push(await upsertArtifactRow({ artifactModel: tx.graphArtifact, ...artifact }))
+    }
+    return rows.map(mapArtifactRow)
+  })
 }
 
 export async function listArtifacts(params: {

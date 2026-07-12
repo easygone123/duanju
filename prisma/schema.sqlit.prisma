@@ -174,7 +174,7 @@ model NovelPromotionClip {
   screenplay String?
   episode    NovelPromotionEpisode     @relation(fields: [episodeId], references: [id], onDelete: Cascade)
   shots      NovelPromotionShot[]
-  storyboard NovelPromotionStoryboard?
+  storyboards NovelPromotionStoryboard[]
 
   @@index([episodeId])
   @@map("novel_promotion_clips")
@@ -329,7 +329,7 @@ model NovelPromotionShot {
 model NovelPromotionStoryboard {
   id                  String                @id @default(uuid())
   episodeId           String
-  clipId              String                @unique
+  clipId              String
   storyboardImageUrl  String?
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @default(now()) @updatedAt
@@ -361,7 +361,7 @@ model NovelPromotionStoryboard {
 
   @@index([clipId])
   @@index([episodeId])
-  @@index([episodeId, layoutMode, groupSequence], map: "novel_storyboards_episode_layout_group_idx")
+  @@unique([episodeId, layoutMode, groupSequence], map: "novel_storyboards_episode_layout_group_idx")
   @@index([sheetImageMediaId])
   @@index([upscaledSheetImageMediaId])
   @@map("novel_promotion_storyboards")

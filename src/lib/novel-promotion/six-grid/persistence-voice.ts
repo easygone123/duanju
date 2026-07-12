@@ -1,0 +1,98 @@
+import type { Prisma } from '@prisma/client'
+import type { JsonRecord } from './persistence-contract'
+
+export async function persistSixGridVoiceLines(params: {
+  tx: Prisma.TransactionClient
+  episodeId: string
+  voiceLineRows: JsonRecord[]
+  storyboardIdByRef: Map<string, string>
+  panelIdByStoryboardRef: Map<string, string>
+}) {
+  const created: Array<{ id: string }> = []
+  for (let index = 0; index < params.voiceLineRows.length; index += 1) {
+    const row = params.voiceLineRows[index]
+    const matchedPanel = isRecord(row.matchedPanel) ? row.matchedPanel : null
+    let matchedStoryboardId: string | null = null
+    let matchedPanelId: string | null = null
+    let matchedPanelIndex: number | null = null
+    if (matchedPanel) {
+      const storyboardRef = readRequiredText(
+        matchedPanel.storyboardId,
+        `voice line ${index + 1} has invalid matchedPanel reference`,
+      )
+      matchedPanelIndex = readPanelIndex(matchedPanel.panelIndex, index)
+      matchedStoryboardId = params.storyboardIdByRef.get(storyboardRef) || null
+      matchedPanelId = params.panelIdByStoryboardRef.get(`${storyboardRef}:${matchedPanelIndex}`) || null
+      if (!matchedStoryboardId || !matchedPanelId) {
+        throw new Error(`voice line ${index + 1} references non-existent panel`)
+      }
+    }
+    const lineIndex = readPositiveInt(row.lineIndex, `voice line ${index + 1} has invalid lineIndex`)
+    const speaker = readRequiredText(row.speaker, `voice line ${index + 1} is missing valid speaker`)
+    const content = readRequiredText(row.content, `voice line ${index + 1} is missing valid content`)
+    if (typeof row.emotionStrength !== 'number' || !Number.isFinite(row.emotionStrength)) {
+      throw new Error(`voice line ${index + 1} is missing valid emotionStrength`)
+    }
+    const emotionStrength = Math.min(1, Math.max(0.1, row.emotionStrength))
+    created.push(await params.tx.novelPromotionVoiceLine.upsert({
+      where: { episodeId_lineIndex: { episodeId: params.episodeId, lineIndex } },
+      create: {
+        episodeId: params.episodeId,
+        lineIndex,
+        speaker,
+        content,
+        emotionStrength,
+        matchedPanelId,
+        matchedStoryboardId,
+        matchedPanelIndex,
+      },
+      update: {
+        speaker,
+        content,
+        emotionStrength,
+        matchedPanelId,
+        matchedStoryboardId,
+        matchedPanelIndex,
+      },
+      select: { id: true },
+    }))
+  }
+  const lineIndexes = params.voiceLineRows.map((row) => row.lineIndex as number)
+  await params.tx.novelPromotionVoiceLine.deleteMany({
+    where: {
+      episodeId: params.episodeId,
+      ...(lineIndexes.length > 0 ? { lineIndex: { notIn: lineIndexes } } : {}),
+    },
+  })
+  return created
+}
+
+export function validateSixGridVoiceLineRows(rows: JsonRecord[] | null) {
+  const seen = new Set<number>()
+  for (let index = 0; index < (rows || []).length; index += 1) {
+    const lineIndex = readPositiveInt(rows![index].lineIndex, `voice line ${index + 1} has invalid lineIndex`)
+    if (seen.has(lineIndex)) throw new Error('voice line indexes must be unique')
+    seen.add(lineIndex)
+  }
+}
+
+function readRequiredText(value: unknown, message: string) {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(message)
+  return value.trim()
+}
+
+function readPositiveInt(value: unknown, message: string) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) throw new Error(message)
+  return value
+}
+
+function readPanelIndex(value: unknown, rowIndex: number) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 5) {
+    throw new Error(`voice line ${rowIndex + 1} has invalid matchedPanel reference`)
+  }
+  return value
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}

@@ -1,6 +1,9 @@
 import { safeParseJson, safeParseJsonArray } from '@/lib/json-repair'
 import { prisma } from '@/lib/prisma'
 import type { StoryboardPanel } from '@/lib/storyboard-phases'
+import { persistSixGridStoryboardOutputs } from '@/lib/novel-promotion/six-grid/persistence'
+import type { ResolvedStoryboardRunSnapshot } from '@/lib/novel-promotion/six-grid/run-snapshot'
+import { getRunIdentitySnapshot } from '@/lib/run-runtime/service'
 
 export type JsonRecord = Record<string, unknown>
 
@@ -8,6 +11,12 @@ export type ClipPanelsResult = {
   clipId: string
   clipIndex: number
   finalPanels: StoryboardPanel[]
+  groupId?: string
+  groupKey?: string
+  groupSequence?: number
+  sceneKey?: string
+  incomingContinuity?: string
+  outgoingContinuity?: string
 }
 
 export type PersistedStoryboard = {
@@ -118,7 +127,7 @@ export function buildStoryboardJsonFromClipPanels(clipPanels: ClipPanelsResult[]
     for (let index = 0; index < clipEntry.finalPanels.length; index += 1) {
       const panel = clipEntry.finalPanels[index]
       rows.push({
-        storyboardId: clipEntry.clipId,
+        storyboardId: clipEntry.groupId || clipEntry.clipId,
         panelIndex: index,
         text_segment: panel.source_text || '',
         description: panel.description || '',
@@ -148,9 +157,15 @@ export async function persistStoryboardsAndPanels(params: {
   return await prisma.$transaction(async (tx) => {
     const persisted: PersistedStoryboard[] = []
     for (const clipEntry of clipPanels) {
+      const existingStoryboard = await tx.novelPromotionStoryboard.findFirst({
+        where: { clipId: clipEntry.clipId, layoutMode: 'individual' },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      })
       const storyboard = await tx.novelPromotionStoryboard.upsert({
-        where: { clipId: clipEntry.clipId },
+        where: { id: existingStoryboard?.id || `individual:${episodeId}:${clipEntry.clipId}` },
         create: {
+          id: `individual:${episodeId}:${clipEntry.clipId}`,
           clipId: clipEntry.clipId,
           episodeId,
           panelCount: clipEntry.finalPanels.length,
@@ -226,16 +241,47 @@ export async function persistStoryboardOutputs(params: {
   episodeId: string
   clipPanels: ClipPanelsResult[]
   voiceLineRows: JsonRecord[] | null
+  runId?: string
+  runSnapshot?: ResolvedStoryboardRunSnapshot
 }) {
+  if (params.runId) {
+    const runSnapshot = params.runSnapshot
+    const identity = await getRunIdentitySnapshot(params.runId)
+    if (!runSnapshot
+      || runSnapshot.runId !== params.runId
+      || !identity
+      || identity.runId !== runSnapshot.runId
+      || identity.projectId !== runSnapshot.projectId
+      || identity.episodeId !== runSnapshot.episodeId
+      || identity.workflowType !== runSnapshot.workflowType
+      || runSnapshot.episodeId !== params.episodeId) {
+      throw new Error('STORYBOARD_RUN_SNAPSHOT_INVALID')
+    }
+    if (runSnapshot.runSettings.storyboardGenerationMode === 'six_grid') {
+      return await persistSixGridStoryboardOutputs({
+        episodeId: params.episodeId,
+        runId: params.runId,
+        clipPanels: params.clipPanels,
+        voiceLineRows: params.voiceLineRows,
+        runSnapshot,
+      })
+    }
+  }
   const persistedStoryboards = await prisma.$transaction(async (tx) => {
     const persisted: PersistedStoryboard[] = []
     const panelIdByStoryboardRef = new Map<string, string>()
     const storyboardIdByRef = new Map<string, string>()
 
     for (const clipEntry of params.clipPanels) {
+      const existingStoryboard = await tx.novelPromotionStoryboard.findFirst({
+        where: { clipId: clipEntry.clipId, layoutMode: 'individual' },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      })
       const storyboard = await tx.novelPromotionStoryboard.upsert({
-        where: { clipId: clipEntry.clipId },
+        where: { id: existingStoryboard?.id || `individual:${params.episodeId}:${clipEntry.clipId}` },
         create: {
+          id: `individual:${params.episodeId}:${clipEntry.clipId}`,
           clipId: clipEntry.clipId,
           episodeId: params.episodeId,
           panelCount: clipEntry.finalPanels.length,
