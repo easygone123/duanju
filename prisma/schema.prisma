@@ -1042,6 +1042,18 @@ model MediaObject {
   @@map("media_objects")
 }
 
+model SixGridCropClaim {
+  id         String   @id @default(uuid())
+  claimKey   String   @unique @db.VarChar(512)
+  ownerToken String   @db.VarChar(191)
+  leaseUntil DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@index([leaseUntil])
+  @@map("six_grid_crop_claims")
+}
+
 model LegacyMediaRefBackup {
   id          String   @id @default(uuid())
   runId       String
