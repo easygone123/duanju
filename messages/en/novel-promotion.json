@@ -166,7 +166,10 @@
     "dialogueVideoModelLabel": "Dialogue video model",
     "noUpscaleModel": "Do not use an upscale model",
     "saveFailed": "Failed to save storyboard settings. Server settings were restored.",
-    "useDefaultVideoModel": "Use default video model"
+    "useDefaultVideoModel": "Use default video model",
+    "sixGridPromptInvalid": "Six-grid prompt input is incomplete or invalid",
+    "videoDurationInvalid": "Video duration must be a finite positive number",
+    "videoDurationTooShort": "This model cannot generate a duration long enough for the panel"
   },
   "execution": {
     "selectEpisode": "Please select an episode first",

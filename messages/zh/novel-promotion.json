@@ -166,7 +166,10 @@
     "dialogueVideoModelLabel": "有台词视频模型",
     "noUpscaleModel": "不使用放大模型",
     "saveFailed": "分镜设置保存失败，已恢复服务器配置",
-    "useDefaultVideoModel": "使用默认视频模型"
+    "useDefaultVideoModel": "使用默认视频模型",
+    "sixGridPromptInvalid": "六宫格提示词输入不完整或无效",
+    "videoDurationInvalid": "视频时长必须是有限正数",
+    "videoDurationTooShort": "此模型无法生成足以覆盖该分镜的时长"
   },
   "execution": {
     "selectEpisode": "请先选择剧集",

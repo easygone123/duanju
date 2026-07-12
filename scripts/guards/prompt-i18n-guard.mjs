@@ -8,11 +8,16 @@ const root = process.cwd()
 const sourceExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'])
 const scanRoots = ['src', 'scripts']
 const allowedPromptTemplateReaders = new Set([
+  'src/lib/assistant-platform/system-prompts.ts',
   'src/lib/prompt-i18n/template-store.ts',
   'scripts/guards/prompt-i18n-guard.mjs',
   'scripts/guards/prompt-semantic-regression.mjs',
   'scripts/guards/prompt-ab-regression.mjs',
   'scripts/guards/prompt-json-canary-guard.mjs',
+])
+const allowedUnlocalizedPromptFiles = new Set([
+  'lib/prompts/skills/api-config-template.system.txt',
+  'lib/prompts/skills/tutorial.system.txt',
 ])
 const languageDirectiveAllowList = new Set([
   'scripts/guards/prompt-i18n-guard.mjs',
@@ -108,7 +113,10 @@ function collectLanguageDirectiveViolations() {
 function collectLegacyPromptFiles() {
   return walk(path.join(root, 'lib', 'prompts'))
     .map((fullPath) => toRel(fullPath))
-    .filter((relPath) => relPath.endsWith('.txt') && !relPath.endsWith('.zh.txt') && !relPath.endsWith('.en.txt'))
+    .filter((relPath) => relPath.endsWith('.txt')
+      && !relPath.endsWith('.zh.txt')
+      && !relPath.endsWith('.en.txt')
+      && !allowedUnlocalizedPromptFiles.has(relPath))
 }
 
 function verifyPromptCatalogCoverage() {
