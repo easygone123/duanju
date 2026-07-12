@@ -20,6 +20,11 @@ import {
   type WorkflowConcurrencyConfig,
   normalizeWorkflowConcurrencyConfig,
 } from '@/lib/workflow-concurrency'
+import type {
+  SixGridCellAspectRatio,
+  SixGridProcessingOrder,
+  StoryboardGenerationMode,
+} from '@/lib/novel-promotion/six-grid/contracts'
 
 export type ParsedModelKey = { provider: string, modelId: string }
 
@@ -110,6 +115,11 @@ export interface ProjectModelConfig {
   comfyVideoWorkflowVersionId: string | null
   videoRatio: string | null
   artStyle: string | null
+  storyboardGenerationMode: StoryboardGenerationMode
+  sixGridCellAspectRatio: SixGridCellAspectRatio | null
+  sixGridProcessingOrder: SixGridProcessingOrder
+  storyboardUpscaleModel: string | null
+  dialogueVideoModel: string | null
   capabilityDefaults: CapabilitySelections
   capabilityOverrides: CapabilitySelections
 }
@@ -214,6 +224,18 @@ export async function getProjectModelConfig(
     comfyVideoWorkflowVersionId: taskVideoModel ? taskVideoVersionId : comfyBinding?.videoWorkflowVersionId ?? null,
     videoRatio: projectData?.videoRatio || '16:9',
     artStyle: projectData?.artStyle || null,
+    storyboardGenerationMode: projectData?.storyboardGenerationMode === 'six_grid'
+      ? 'six_grid'
+      : 'individual',
+    sixGridCellAspectRatio: projectData?.sixGridCellAspectRatio === '16:9'
+      || projectData?.sixGridCellAspectRatio === '9:16'
+      ? projectData.sixGridCellAspectRatio
+      : null,
+    sixGridProcessingOrder: projectData?.sixGridProcessingOrder === 'sheet_upscale_then_crop'
+      ? 'sheet_upscale_then_crop'
+      : 'crop_then_panel_upscale',
+    storyboardUpscaleModel: extractModelKey(projectData?.storyboardUpscaleModel) || null,
+    dialogueVideoModel: extractModelKey(projectData?.dialogueVideoModel) || null,
     capabilityDefaults: parseCapabilitySelections(userPref?.capabilityDefaults),
     capabilityOverrides: parseCapabilitySelections(projectData?.capabilityOverrides),
   }

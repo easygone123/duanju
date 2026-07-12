@@ -5,6 +5,12 @@ import type { WorkspaceStageRuntimeValue } from '../WorkspaceStageRuntimeContext
 import type { CapabilitySelections, ModelCapabilities } from '@/lib/model-config-contract'
 import type { VideoPricingTier } from '@/lib/model-pricing/video-tier'
 import type { BatchVideoGenerationParams, VideoGenerationOptions } from '../components/video'
+import type {
+  SixGridCellAspectRatio,
+  SixGridProcessingOrder,
+  StoryboardGenerationMode,
+} from '@/lib/novel-promotion/six-grid/contracts'
+import type { StoryboardConfigKey } from './useWorkspaceConfigActions'
 
 interface UseWorkspaceStageRuntimeParams {
   assetsLoading: boolean
@@ -13,7 +19,13 @@ interface UseWorkspaceStageRuntimeParams {
   isConfirmingAssets: boolean
   isStartingStoryToScript: boolean
   isStartingScriptToStoryboard: boolean
+  isScriptToStoryboardRunning: boolean
   videoRatio: string | undefined
+  storyboardGenerationMode: StoryboardGenerationMode
+  sixGridCellAspectRatio: SixGridCellAspectRatio | null
+  sixGridProcessingOrder: SixGridProcessingOrder
+  storyboardUpscaleModel: string | null
+  dialogueVideoModel: string | null
   artStyle: string | undefined
   videoModel: string | undefined
   capabilityOverrides: CapabilitySelections
@@ -25,8 +37,16 @@ interface UseWorkspaceStageRuntimeParams {
     capabilities?: ModelCapabilities
     videoPricingTiers?: VideoPricingTier[]
   }> | undefined
+  userImageModels: Array<{
+    value: string
+    label: string
+    provider?: string
+    providerName?: string
+    capabilities?: ModelCapabilities
+  }> | undefined
   handleUpdateEpisode: (key: string, value: unknown) => Promise<void>
   handleUpdateConfig: (key: string, value: unknown) => Promise<void>
+  handleUpdateStoryboardConfig: (key: StoryboardConfigKey, value: unknown) => Promise<boolean>
   runWithRebuildConfirm: (action: 'storyToScript' | 'scriptToStoryboard', operation: () => Promise<void>) => Promise<void>
   runStoryToScriptFlow: () => Promise<void>
   runScriptToStoryboardFlow: () => Promise<void>
@@ -63,13 +83,21 @@ export function useWorkspaceStageRuntime({
   isConfirmingAssets,
   isStartingStoryToScript,
   isStartingScriptToStoryboard,
+  isScriptToStoryboardRunning,
   videoRatio,
+  storyboardGenerationMode,
+  sixGridCellAspectRatio,
+  sixGridProcessingOrder,
+  storyboardUpscaleModel,
+  dialogueVideoModel,
   artStyle,
   videoModel,
   capabilityOverrides,
   userVideoModels,
+  userImageModels,
   handleUpdateEpisode,
   handleUpdateConfig,
+  handleUpdateStoryboardConfig,
   runWithRebuildConfirm,
   runStoryToScriptFlow,
   runScriptToStoryboardFlow,
@@ -85,6 +113,10 @@ export function useWorkspaceStageRuntime({
     () => userVideoModels || [],
     [userVideoModels],
   )
+  const resolvedUserImageModels = useMemo(
+    () => userImageModels || [],
+    [userImageModels],
+  )
 
   return useMemo<WorkspaceStageRuntimeValue>(() => ({
     assetsLoading,
@@ -93,14 +125,22 @@ export function useWorkspaceStageRuntime({
     isConfirmingAssets,
     isStartingStoryToScript,
     isStartingScriptToStoryboard,
+    isScriptToStoryboardRunning,
     videoRatio,
+    storyboardGenerationMode,
+    sixGridCellAspectRatio,
+    sixGridProcessingOrder,
+    storyboardUpscaleModel,
+    dialogueVideoModel,
     artStyle,
     videoModel,
     capabilityOverrides,
     userVideoModels: resolvedUserVideoModels,
+    userImageModels: resolvedUserImageModels,
     onNovelTextChange: (value) => handleUpdateEpisode('novelText', value),
     onVideoRatioChange: (value) => handleUpdateConfig('videoRatio', value),
     onArtStyleChange: (value) => handleUpdateConfig('artStyle', value),
+    onStoryboardConfigChange: handleUpdateStoryboardConfig,
     onRunStoryToScript: () => runWithRebuildConfirm('storyToScript', runStoryToScriptFlow),
     onClipUpdate: (clipId, data) => {
       if (!data || typeof data !== 'object' || Array.isArray(data)) {
@@ -125,10 +165,12 @@ export function useWorkspaceStageRuntime({
     handleUpdateClip,
     handleUpdateConfig,
     handleUpdateEpisode,
+    handleUpdateStoryboardConfig,
     handleUpdatePanelVideoModel,
     handleUpdateVideoPrompt,
     isConfirmingAssets,
     isStartingScriptToStoryboard,
+    isScriptToStoryboardRunning,
     isStartingStoryToScript,
     isSubmittingTTS,
     isTransitioning,
@@ -137,8 +179,14 @@ export function useWorkspaceStageRuntime({
     runStoryToScriptFlow,
     runWithRebuildConfirm,
     resolvedUserVideoModels,
+    resolvedUserImageModels,
     capabilityOverrides,
     videoModel,
     videoRatio,
+    storyboardGenerationMode,
+    sixGridCellAspectRatio,
+    sixGridProcessingOrder,
+    storyboardUpscaleModel,
+    dialogueVideoModel,
   ])
 }

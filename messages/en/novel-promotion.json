@@ -145,6 +145,29 @@
       "singleEpisodeWarning": "All content will be processed as one episode"
     }
   },
+  "storyboardRunSettings": {
+    "title": "Storyboard generation settings",
+    "summary": "Launch snapshot: {mode} · {ratio}",
+    "locked": "Settings locked after the run started",
+    "modeLabel": "Storyboard mode",
+    "mode": {
+      "individual": "Individual panels",
+      "six_grid": "3×2 six-grid"
+    },
+    "cellRatioLabel": "Cell aspect ratio",
+    "inheritVideoRatio": "Inherit video ratio ({ratio})",
+    "notApplicable": "Not applicable",
+    "processingOrderLabel": "Crop and upscale order",
+    "processingOrder": {
+      "crop_then_panel_upscale": "Crop, then upscale each panel",
+      "sheet_upscale_then_crop": "Upscale the sheet, then crop"
+    },
+    "upscaleModelLabel": "Storyboard upscale model",
+    "dialogueVideoModelLabel": "Dialogue video model",
+    "noUpscaleModel": "Do not use an upscale model",
+    "saveFailed": "Failed to save storyboard settings. Server settings were restored.",
+    "useDefaultVideoModel": "Use default video model"
+  },
   "execution": {
     "selectEpisode": "Please select an episode first",
     "fillContentFirst": "Please enter content first",

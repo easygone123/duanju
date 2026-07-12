@@ -25,6 +25,8 @@ const MODEL_FIELDS = [
   'editModel',
   'videoModel',
   'audioModel',
+  'storyboardUpscaleModel',
+  'dialogueVideoModel',
 ] as const
 
 const MODEL_FIELD_TO_TYPE: Record<typeof MODEL_FIELDS[number], UnifiedModelType> = {
@@ -35,6 +37,8 @@ const MODEL_FIELD_TO_TYPE: Record<typeof MODEL_FIELDS[number], UnifiedModelType>
   editModel: 'image',
   videoModel: 'video',
   audioModel: 'audio',
+  storyboardUpscaleModel: 'image',
+  dialogueVideoModel: 'video',
 }
 
 const CAPABILITY_MODEL_TYPES: readonly UnifiedModelType[] = ['image', 'video', 'llm', 'audio', 'lipsync']
@@ -49,7 +53,15 @@ const PROJECT_PATCH_SCHEMA = z.object({
   editModel: MODEL_KEY_INPUT.optional(),
   videoModel: MODEL_KEY_INPUT.optional(),
   audioModel: MODEL_KEY_INPUT.optional(),
+  storyboardUpscaleModel: MODEL_KEY_INPUT.optional(),
+  dialogueVideoModel: MODEL_KEY_INPUT.optional(),
   videoRatio: z.string().max(64).optional(),
+  storyboardGenerationMode: z.enum(['individual', 'six_grid']).optional(),
+  sixGridCellAspectRatio: z.enum(['16:9', '9:16']).nullable().optional(),
+  sixGridProcessingOrder: z.enum([
+    'sheet_upscale_then_crop',
+    'crop_then_panel_upscale',
+  ]).optional(),
   artStyle: z.string().max(64).optional(),
   ttsRate: z.string().max(64).optional(),
   lipSyncEnabled: z.boolean().optional(),
@@ -163,6 +175,8 @@ function getNextProjectModelMap(
     editModel: string | null
     videoModel: string | null
     audioModel: string | null
+    storyboardUpscaleModel: string | null
+    dialogueVideoModel: string | null
   },
   updates: Record<string, unknown>,
 ): Record<string, CapabilityModelContext> {
@@ -266,6 +280,8 @@ export const GET = apiHandler(async (
         editModel: true,
         videoModel: true,
         audioModel: true,
+        storyboardUpscaleModel: true,
+        dialogueVideoModel: true,
       }}),
     prisma.projectComfyBinding.findUnique({
       where: { projectId_userId: { projectId, userId } },
@@ -283,6 +299,8 @@ export const GET = apiHandler(async (
       editModel: projectData.editModel,
       videoModel: projectData.videoModel,
       audioModel: projectData.audioModel,
+      storyboardUpscaleModel: projectData.storyboardUpscaleModel,
+      dialogueVideoModel: projectData.dialogueVideoModel,
     }, {})
     : {}
   const cleanedOverrides = sanitizeCapabilityOverrides(storedOverrides, modelContextMap)
@@ -322,6 +340,8 @@ export const PATCH = apiHandler(async (
       editModel: true,
       videoModel: true,
       audioModel: true,
+      storyboardUpscaleModel: true,
+      dialogueVideoModel: true,
     }})
   if (!currentProjectConfig) {
     throw new ApiError('NOT_FOUND')
@@ -330,6 +350,8 @@ export const PATCH = apiHandler(async (
   const allowedProjectFields = [
     'analysisModel', 'characterModel', 'locationModel', 'storyboardModel',
     'editModel', 'videoModel', 'audioModel', 'videoRatio', 'artStyle',
+    'storyboardGenerationMode', 'sixGridCellAspectRatio', 'sixGridProcessingOrder',
+    'storyboardUpscaleModel', 'dialogueVideoModel',
     'ttsRate', 'lipSyncEnabled', 'lipSyncMode', 'capabilityOverrides',
   ] as const
 

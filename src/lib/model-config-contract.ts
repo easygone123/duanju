@@ -1,4 +1,9 @@
 export type UnifiedModelType = 'llm' | 'image' | 'video' | 'audio' | 'lipsync'
+export const STORYBOARD_AUXILIARY_MODEL_TYPES = {
+  storyboardUpscaleModel: 'image',
+  dialogueVideoModel: 'video',
+} as const satisfies Record<string, UnifiedModelType>
+export type StoryboardAuxiliaryModelField = keyof typeof STORYBOARD_AUXILIARY_MODEL_TYPES
 export type CapabilityValue = string | number | boolean
 export type CapabilityOptionValue = CapabilityValue
 export type CapabilitySelections = Record<string, Record<string, CapabilityValue>>

@@ -30,6 +30,10 @@ export function useWorkspaceUserModels() {
     if (!userModelsForSettings || !Array.isArray(userModelsForSettings.video)) return []
     return userModelsForSettings.video
   }, [userModelsForSettings])
+  const userImageModels = useMemo<UserModelOption[]>(() => {
+    if (!userModelsForSettings || !Array.isArray(userModelsForSettings.image)) return []
+    return userModelsForSettings.image
+  }, [userModelsForSettings])
   const userModelsLoaded = userModelsQuery.isFetched
 
   useEffect(() => {
@@ -41,6 +45,7 @@ export function useWorkspaceUserModels() {
   return {
     userModelsForSettings,
     userVideoModels,
+    userImageModels,
     userModelsLoaded,
   }
 }

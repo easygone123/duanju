@@ -4,6 +4,12 @@ import { createContext, useContext, type ReactNode } from 'react'
 import type { CapabilitySelections, ModelCapabilities } from '@/lib/model-config-contract'
 import type { VideoPricingTier } from '@/lib/model-pricing/video-tier'
 import type { BatchVideoGenerationParams, VideoGenerationOptions } from './components/video'
+import type {
+  SixGridCellAspectRatio,
+  SixGridProcessingOrder,
+  StoryboardGenerationMode,
+} from '@/lib/novel-promotion/six-grid/contracts'
+import type { StoryboardConfigKey } from './hooks/useWorkspaceConfigActions'
 
 export interface WorkspaceStageVideoModelOption {
   value: string
@@ -21,14 +27,22 @@ export interface WorkspaceStageRuntimeValue {
   isConfirmingAssets: boolean
   isStartingStoryToScript: boolean
   isStartingScriptToStoryboard: boolean
+  isScriptToStoryboardRunning: boolean
   videoRatio: string | null | undefined
+  storyboardGenerationMode: StoryboardGenerationMode
+  sixGridCellAspectRatio: SixGridCellAspectRatio | null
+  sixGridProcessingOrder: SixGridProcessingOrder
+  storyboardUpscaleModel: string | null
+  dialogueVideoModel: string | null
   artStyle: string | null | undefined
   videoModel: string | null | undefined
   capabilityOverrides: CapabilitySelections
+  userImageModels: WorkspaceStageVideoModelOption[]
   userVideoModels: WorkspaceStageVideoModelOption[]
   onNovelTextChange: (value: string) => Promise<void>
   onVideoRatioChange: (value: string) => Promise<void>
   onArtStyleChange: (value: string) => Promise<void>
+  onStoryboardConfigChange: (key: StoryboardConfigKey, value: unknown) => Promise<boolean>
   onRunStoryToScript: () => Promise<void>
   onClipUpdate: (clipId: string, data: unknown) => Promise<void>
   onOpenAssetLibrary: () => void

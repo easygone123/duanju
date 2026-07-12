@@ -7,6 +7,12 @@ import {
   useScriptToStoryboardRunStream,
   useStoryToScriptRunStream,
 } from '@/lib/query/hooks'
+import type {
+  SixGridCellAspectRatio,
+  SixGridProcessingOrder,
+  StoryboardGenerationMode,
+} from '@/lib/novel-promotion/six-grid/contracts'
+import { resolveStoryboardRunSettings } from '@/lib/novel-promotion/six-grid/run-settings'
 
 interface UseWorkspaceExecutionParams {
   projectId: string
@@ -14,6 +20,12 @@ interface UseWorkspaceExecutionParams {
   currentStage: string
   analysisModel?: string | null
   novelText: string
+  videoRatio?: string | null
+  storyboardGenerationMode?: StoryboardGenerationMode
+  sixGridCellAspectRatio?: SixGridCellAspectRatio | null
+  sixGridProcessingOrder?: SixGridProcessingOrder
+  storyboardUpscaleModel?: string | null
+  dialogueVideoModel?: string | null
   t: (key: string) => string
   onRefresh: (options?: { scope?: string; mode?: string }) => Promise<void>
   onUpdateConfig: (key: string, value: unknown) => Promise<void>
@@ -63,6 +75,12 @@ export function useWorkspaceExecution({
   currentStage,
   analysisModel,
   novelText,
+  videoRatio,
+  storyboardGenerationMode,
+  sixGridCellAspectRatio,
+  sixGridProcessingOrder,
+  storyboardUpscaleModel,
+  dialogueVideoModel,
   t,
   onRefresh,
   onUpdateConfig,
@@ -228,6 +246,16 @@ export function useWorkspaceExecution({
     }
 
     try {
+      const runSettings = resolveStoryboardRunSettings({
+        project: {
+          storyboardGenerationMode,
+          sixGridCellAspectRatio,
+          sixGridProcessingOrder,
+          storyboardUpscaleModel,
+          dialogueVideoModel,
+          videoRatio,
+        },
+      })
       setScriptToStoryboardConsoleMinimized(false)
       setIsConfirmingAssets(true)
       setTransitionProgress({ message: t('execution.scriptToStoryboardRunning'), step: 'streaming' })
@@ -236,6 +264,7 @@ export function useWorkspaceExecution({
         model: analysisModel || undefined,
         temperature: 0.7,
         reasoning: true,
+        ...runSettings,
       })
       if (runResult.status !== 'completed') {
         throw new Error(runResult.errorMessage || t('execution.scriptToStoryboardFailed'))
@@ -252,7 +281,19 @@ export function useWorkspaceExecution({
       setIsConfirmingAssets(false)
       setTransitionProgress({ message: '', step: '' })
     }
-  }, [analysisModel, episodeId, finalizeScriptToStoryboardSuccess, scriptToStoryboardStream, t])
+  }, [
+    analysisModel,
+    dialogueVideoModel,
+    episodeId,
+    finalizeScriptToStoryboardSuccess,
+    scriptToStoryboardStream,
+    sixGridCellAspectRatio,
+    sixGridProcessingOrder,
+    storyboardGenerationMode,
+    storyboardUpscaleModel,
+    t,
+    videoRatio,
+  ])
 
   useEffect(() => {
     const active = (

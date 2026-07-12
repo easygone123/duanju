@@ -145,6 +145,29 @@
       "singleEpisodeWarning": "单集模式下，所有内容将作为一集处理"
     }
   },
+  "storyboardRunSettings": {
+    "title": "分镜生成设置",
+    "summary": "启动快照：{mode} · {ratio}",
+    "locked": "任务已启动，设置已锁定",
+    "modeLabel": "分镜方式",
+    "mode": {
+      "individual": "逐张分镜",
+      "six_grid": "3×2 六宫格"
+    },
+    "cellRatioLabel": "宫格比例",
+    "inheritVideoRatio": "继承视频比例（{ratio}）",
+    "notApplicable": "不适用",
+    "processingOrderLabel": "裁剪与放大顺序",
+    "processingOrder": {
+      "crop_then_panel_upscale": "先裁剪，再逐格放大",
+      "sheet_upscale_then_crop": "先放大原图，再裁剪"
+    },
+    "upscaleModelLabel": "分镜放大模型",
+    "dialogueVideoModelLabel": "有台词视频模型",
+    "noUpscaleModel": "不使用放大模型",
+    "saveFailed": "分镜设置保存失败，已恢复服务器配置",
+    "useDefaultVideoModel": "使用默认视频模型"
+  },
   "execution": {
     "selectEpisode": "请先选择剧集",
     "fillContentFirst": "请先填写内容",

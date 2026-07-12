@@ -323,4 +323,32 @@ describe('billing/submitter integration', () => {
       runId: run.id,
     })
   })
+
+  it('persists the immutable storyboard settings in both task payload and GraphRun input', async () => {
+    process.env.BILLING_MODE = 'OFF'
+    const user = await createTestUser()
+    const settings = {
+      storyboardGenerationMode: 'six_grid',
+      sixGridCellAspectRatio: '16:9',
+      sixGridProcessingOrder: 'sheet_upscale_then_crop',
+      storyboardUpscaleModel: null,
+      dialogueVideoModel: 'comfyui::dialogue-v1',
+    }
+
+    const result = await submitTask({
+      userId: user.id,
+      locale: 'zh',
+      projectId: 'project-snapshot',
+      episodeId: 'episode-snapshot',
+      type: TASK_TYPE.SCRIPT_TO_STORYBOARD_RUN,
+      targetType: 'NovelPromotionEpisode',
+      targetId: 'episode-snapshot',
+      payload: { episodeId: 'episode-snapshot', ...settings },
+    })
+
+    const task = await prisma.task.findUnique({ where: { id: result.taskId } })
+    const run = await prisma.graphRun.findUnique({ where: { id: result.runId || '' } })
+    expect(task?.payload).toMatchObject(settings)
+    expect(run?.input).toMatchObject(settings)
+  })
 })

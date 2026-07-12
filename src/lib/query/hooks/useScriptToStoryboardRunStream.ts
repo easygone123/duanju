@@ -4,6 +4,11 @@ import { useRunStreamState, type RunResult } from './useRunStreamState'
 import { TASK_TYPE } from '@/lib/task/types'
 import { apiFetch } from '@/lib/api-fetch'
 import { selectRecoverableRun } from '@/lib/run-runtime/recovery'
+import type {
+  SixGridCellAspectRatio,
+  SixGridProcessingOrder,
+  StoryboardGenerationMode,
+} from '@/lib/novel-promotion/six-grid/contracts'
 
 export type ScriptToStoryboardRunParams = {
   episodeId: string
@@ -11,6 +16,11 @@ export type ScriptToStoryboardRunParams = {
   temperature?: number
   reasoning?: boolean
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high'
+  storyboardGenerationMode: StoryboardGenerationMode
+  sixGridCellAspectRatio: SixGridCellAspectRatio | null
+  sixGridProcessingOrder: SixGridProcessingOrder
+  storyboardUpscaleModel: string | null
+  dialogueVideoModel: string | null
 }
 
 export type ScriptToStoryboardRunResult = RunResult
@@ -79,6 +89,11 @@ export function useScriptToStoryboardRunStream({ projectId, episodeId }: UseScri
       temperature: params.temperature,
       reasoning: params.reasoning,
       reasoningEffort: params.reasoningEffort,
+      storyboardGenerationMode: params.storyboardGenerationMode,
+      sixGridCellAspectRatio: params.sixGridCellAspectRatio,
+      sixGridProcessingOrder: params.sixGridProcessingOrder,
+      storyboardUpscaleModel: params.storyboardUpscaleModel,
+      dialogueVideoModel: params.dialogueVideoModel,
       async: true,
       displayMode: 'detail',
     }),
