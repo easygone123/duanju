@@ -33,7 +33,7 @@ export default function ConfigStage() {
     isActiveRunning: runtime.isScriptToStoryboardRunning,
   })
   const displayedCellRatio = runtime.sixGridCellAspectRatio || runtime.videoRatio || ''
-  const hasCurrentUpscaleModel = runtime.userImageModels.some(
+  const hasCurrentUpscaleModel = runtime.userUpscaleModels.some(
     (model) => model.value === runtime.storyboardUpscaleModel,
   )
   const hasCurrentDialogueModel = runtime.userVideoModels.some(
@@ -162,7 +162,7 @@ export default function ConfigStage() {
               {!hasCurrentUpscaleModel && runtime.storyboardUpscaleModel && (
                 <option value={runtime.storyboardUpscaleModel}>{runtime.storyboardUpscaleModel}</option>
               )}
-              {runtime.userImageModels.map((model) => (
+              {runtime.userUpscaleModels.map((model) => (
                 <option key={model.value} value={model.value}>{model.label}</option>
               ))}
             </select>

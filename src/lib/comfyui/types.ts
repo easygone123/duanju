@@ -28,6 +28,8 @@ export const COMFY_ACTIVE_REQUEST_STATUSES = [
 
 export type ComfyMediaType = 'image' | 'video'
 
+export type ComfyWorkflowPurpose = 'generation' | 'upscale'
+
 export type ComfyAuthType = 'none' | 'bearer' | 'basic'
 
 export type ComfyConnectionAuth =
@@ -91,6 +93,7 @@ export interface WorkflowValidationIssue {
 }
 
 export interface WorkflowContractInput {
+  purpose?: ComfyWorkflowPurpose
   graph: unknown
   variableDefinitions: ComfyVariableDefinition[]
   bindings: ComfyInputBinding[]

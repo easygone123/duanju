@@ -17,6 +17,7 @@ import type {
   ComfyVariableDefinition,
   ComfyVariableValue,
   ComfyWorkflowRequirements,
+  ComfyWorkflowPurpose,
 } from './types'
 import { extractComfyOutputs } from './workflow-output'
 import { renderComfyWorkflow } from './workflow-renderer'
@@ -248,6 +249,7 @@ async function prepareLiveTestUploads(
 
 function validationForVersion(version: ComfyWorkflowVersion) {
   return validateWorkflowContract({
+    purpose: (version.purpose ?? 'generation') as ComfyWorkflowPurpose,
     graph: version.apiFormatJson,
     variableDefinitions: version.variableDefinitions as unknown as ComfyVariableDefinition[],
     bindings: versionBindings(version),

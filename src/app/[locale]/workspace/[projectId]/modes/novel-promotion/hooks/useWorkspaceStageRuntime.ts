@@ -37,7 +37,7 @@ interface UseWorkspaceStageRuntimeParams {
     capabilities?: ModelCapabilities
     videoPricingTiers?: VideoPricingTier[]
   }> | undefined
-  userImageModels: Array<{
+  userUpscaleModels: Array<{
     value: string
     label: string
     provider?: string
@@ -94,7 +94,7 @@ export function useWorkspaceStageRuntime({
   videoModel,
   capabilityOverrides,
   userVideoModels,
-  userImageModels,
+  userUpscaleModels,
   handleUpdateEpisode,
   handleUpdateConfig,
   handleUpdateStoryboardConfig,
@@ -113,9 +113,9 @@ export function useWorkspaceStageRuntime({
     () => userVideoModels || [],
     [userVideoModels],
   )
-  const resolvedUserImageModels = useMemo(
-    () => userImageModels || [],
-    [userImageModels],
+  const resolvedUserUpscaleModels = useMemo(
+    () => userUpscaleModels || [],
+    [userUpscaleModels],
   )
 
   return useMemo<WorkspaceStageRuntimeValue>(() => ({
@@ -136,7 +136,7 @@ export function useWorkspaceStageRuntime({
     videoModel,
     capabilityOverrides,
     userVideoModels: resolvedUserVideoModels,
-    userImageModels: resolvedUserImageModels,
+    userUpscaleModels: resolvedUserUpscaleModels,
     onNovelTextChange: (value) => handleUpdateEpisode('novelText', value),
     onVideoRatioChange: (value) => handleUpdateConfig('videoRatio', value),
     onArtStyleChange: (value) => handleUpdateConfig('artStyle', value),
@@ -179,7 +179,7 @@ export function useWorkspaceStageRuntime({
     runStoryToScriptFlow,
     runWithRebuildConfirm,
     resolvedUserVideoModels,
-    resolvedUserImageModels,
+    resolvedUserUpscaleModels,
     capabilityOverrides,
     videoModel,
     videoRatio,

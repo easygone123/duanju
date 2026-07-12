@@ -4,6 +4,7 @@ import { useQuery, type QueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import type { ModelCapabilities } from '@/lib/model-config-contract'
 import type { VideoPricingTier } from '@/lib/model-pricing/video-tier'
+import type { ComfyWorkflowPurpose } from '@/lib/comfyui/types'
 import { queryKeys } from '../keys'
 import { apiFetch } from '@/lib/api-fetch'
 
@@ -14,6 +15,7 @@ export interface UserModelOption {
     providerName?: string
     capabilities?: ModelCapabilities
     videoPricingTiers?: VideoPricingTier[]
+    workflowPurpose?: ComfyWorkflowPurpose
 }
 
 export interface UserModelsPayload {
@@ -22,6 +24,7 @@ export interface UserModelsPayload {
     video: UserModelOption[]
     audio: UserModelOption[]
     lipsync: UserModelOption[]
+    upscale: UserModelOption[]
 }
 
 async function fetchUserModels(): Promise<UserModelsPayload> {
@@ -34,6 +37,7 @@ async function fetchUserModels(): Promise<UserModelsPayload> {
         video: Array.isArray(data?.video) ? data.video : [],
         audio: Array.isArray(data?.audio) ? data.audio : [],
         lipsync: Array.isArray(data?.lipsync) ? data.lipsync : [],
+        upscale: Array.isArray(data?.upscale) ? data.upscale : [],
     }
 }
 
@@ -46,6 +50,10 @@ export function userModelsQueryOptions(userId: string) {
 
 export function selectImageModelOptions(payload: UserModelsPayload | undefined): UserModelOption[] {
     return payload?.image ?? []
+}
+
+export function selectUpscaleModelOptions(payload: UserModelsPayload | undefined): UserModelOption[] {
+    return payload?.upscale ?? []
 }
 
 export function invalidateUserModels(queryClient: QueryClient) {

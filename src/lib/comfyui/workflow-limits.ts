@@ -50,6 +50,7 @@ export function assertBoundedWorkflowJson(value: unknown) {
 }
 
 export function assertBoundedWorkflowContract(value: {
+  purpose?: unknown
   graph: unknown
   variableDefinitions: unknown
   bindings: unknown

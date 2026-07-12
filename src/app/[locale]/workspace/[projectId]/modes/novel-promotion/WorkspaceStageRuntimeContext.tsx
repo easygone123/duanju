@@ -37,7 +37,7 @@ export interface WorkspaceStageRuntimeValue {
   artStyle: string | null | undefined
   videoModel: string | null | undefined
   capabilityOverrides: CapabilitySelections
-  userImageModels: WorkspaceStageVideoModelOption[]
+  userUpscaleModels: WorkspaceStageVideoModelOption[]
   userVideoModels: WorkspaceStageVideoModelOption[]
   onNovelTextChange: (value: string) => Promise<void>
   onVideoRatioChange: (value: string) => Promise<void>

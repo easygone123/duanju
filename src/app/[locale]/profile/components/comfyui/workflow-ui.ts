@@ -3,6 +3,7 @@ import type {
   ComfyMediaType,
   ComfyOutputBinding,
   ComfyVariableDefinition,
+  ComfyWorkflowPurpose,
   WorkflowValidationIssue,
 } from '@/lib/comfyui/types'
 
@@ -107,6 +108,7 @@ export const MAX_WORKFLOW_JSON_BYTES = 4 * 1024 * 1024
 export interface WorkflowVersionView {
   id: string
   version: number
+  purpose: ComfyWorkflowPurpose
   apiFormatJson: unknown
   variableDefinitions: ComfyVariableDefinition[]
   bindings: ComfyInputBinding[]
@@ -121,6 +123,7 @@ export interface WorkflowView {
   id: string
   name: string
   mediaType: ComfyMediaType
+  purpose: ComfyWorkflowPurpose
   status: 'draft' | 'published' | 'archived'
   currentVersionId: string | null
   currentVersion: WorkflowVersionView | null
@@ -131,6 +134,7 @@ export interface WorkflowView {
 export interface WorkflowAuthorDraft {
   name: string
   mediaType: ComfyMediaType
+  purpose: ComfyWorkflowPurpose
   apiFormatJson: string
   variableDefinitions: ComfyVariableDefinition[]
   bindings: ComfyInputBinding[]
@@ -138,7 +142,7 @@ export interface WorkflowAuthorDraft {
 }
 
 export function emptyWorkflowDraft(): WorkflowAuthorDraft {
-  return { name: '', mediaType: 'image', apiFormatJson: '', variableDefinitions: [], bindings: [], outputs: [] }
+  return { name: '', mediaType: 'image', purpose: 'generation', apiFormatJson: '', variableDefinitions: [], bindings: [], outputs: [] }
 }
 
 export function draftFromWorkflow(workflow: WorkflowView, version?: WorkflowVersionView | null): WorkflowAuthorDraft {
@@ -147,6 +151,7 @@ export function draftFromWorkflow(workflow: WorkflowView, version?: WorkflowVers
   return {
     name: workflow.name,
     mediaType: workflow.mediaType,
+    purpose: savedVersion.purpose ?? 'generation',
     apiFormatJson: JSON.stringify(savedVersion.apiFormatJson, null, 2),
     variableDefinitions: savedVersion.variableDefinitions.map((item) => ({ ...item })),
     bindings: savedVersion.bindings.map((item) => ({ ...item })),
@@ -188,6 +193,7 @@ export function removeWorkflowOutput(outputs: ComfyOutputBinding[], index: numbe
 
 export function workflowPayload(draft: WorkflowAuthorDraft) {
   return {
+    purpose: draft.purpose,
     apiFormatJson: parseWorkflowImportText(draft.apiFormatJson),
     variableDefinitions: draft.variableDefinitions,
     bindings: draft.bindings,

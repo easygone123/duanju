@@ -4,6 +4,7 @@ import type {
   ComfyVariableDefinition,
   ComfyVariableType,
   ComfyVariableValue,
+  ComfyWorkflowPurpose,
   WorkflowContractInput,
   WorkflowValidationIssue,
 } from './types'
@@ -52,6 +53,12 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
   }
 
   const issues: WorkflowValidationIssue[] = []
+  const purpose = resolveComfyWorkflowPurpose(input.purpose)
+  if (!purpose) {
+    issues.push(issue(
+      'COMFY_WORKFLOW_PURPOSE_INVALID', 'purpose', 'Workflow purpose is invalid.',
+    ))
+  }
   const rawDefinitions: unknown[] = Array.isArray(input.variableDefinitions)
     ? input.variableDefinitions
     : []
@@ -206,7 +213,71 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
     }
   })
 
+  if (purpose === 'upscale') {
+    validateUpscaleContract(rawDefinitions, rawBindings, rawOutputs, issues)
+  }
+
   return issues
+}
+
+export function resolveComfyWorkflowPurpose(value: unknown): ComfyWorkflowPurpose | null {
+  if (value === undefined || value === null) return 'generation'
+  return value === 'generation' || value === 'upscale' ? value : null
+}
+
+function validateUpscaleContract(
+  definitions: unknown[],
+  bindings: unknown[],
+  outputs: unknown[],
+  issues: WorkflowValidationIssue[],
+) {
+  const mediaDefinitions = definitions.filter((definition) => isObject(definition)
+    && ['image_ref', 'image_ref_list', 'video_ref'].includes(String(definition.type)))
+  const requiredImageDefinitions = mediaDefinitions.filter((definition) => isObject(definition)
+    && definition.type === 'image_ref' && definition.required === true)
+  const requiredImageNames = new Set(requiredImageDefinitions
+    .map((definition) => isObject(definition) ? definition.name : undefined)
+    .filter((name): name is string => typeof name === 'string'))
+  const mediaBindings = bindings.filter((binding) => isObject(binding)
+    && ['image_ref', 'image_ref_list', 'video_ref'].includes(String(binding.valueType)))
+  const imageBindings = mediaBindings.filter((binding) => isObject(binding)
+    && binding.valueType === 'image_ref'
+    && typeof binding.variable === 'string'
+    && requiredImageNames.has(binding.variable)
+    && (binding.transform === 'filename' || binding.transform === 'image_ref'))
+
+  if (mediaDefinitions.length === 0 && imageBindings.length === 0) {
+    issues.push(issue(
+      'COMFY_UPSCALE_INPUT_REQUIRED', 'bindings',
+      'Upscale workflows require one bound image input.',
+    ))
+  } else if (
+    mediaDefinitions.length !== 1
+    || requiredImageDefinitions.length !== 1
+    || mediaBindings.length !== 1
+    || imageBindings.length !== 1
+  ) {
+    issues.push(issue(
+      'COMFY_UPSCALE_BINDINGS_INVALID', 'bindings',
+      'Upscale workflows require exactly one required image input binding.',
+    ))
+  }
+
+  if (outputs.length === 0) {
+    issues.push(issue(
+      'COMFY_UPSCALE_OUTPUT_REQUIRED', 'outputs',
+      'Upscale workflows require one image output.',
+    ))
+  } else if (
+    outputs.length !== 1
+    || !isObject(outputs[0])
+    || outputs[0].mediaType !== 'image'
+  ) {
+    issues.push(issue(
+      'COMFY_UPSCALE_BINDINGS_INVALID', 'outputs',
+      'Upscale workflows require exactly one image output.',
+    ))
+  }
 }
 
 export function isComfyTransformCompatible(

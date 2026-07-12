@@ -1113,6 +1113,7 @@ model ComfyWorkflowVersion {
   id                    String                   @id @default(uuid())
   workflowId            String
   version               Int
+  purpose               String                   @default("generation")
   apiFormatJson         Json
   variableDefinitions   Json
   bindingSpec           Json

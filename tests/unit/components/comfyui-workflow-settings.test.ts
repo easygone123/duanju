@@ -82,9 +82,9 @@ describe('ComfyUI workflow settings UI contract', () => {
 
   it('copies a saved version into an independent author draft', () => {
     const workflow = {
-      id: 'wf-1', name: 'Portrait', mediaType: 'image', status: 'draft', currentVersionId: null,
+      id: 'wf-1', name: 'Portrait', mediaType: 'image', purpose: 'generation', status: 'draft', currentVersionId: null,
       currentVersion: null, validation: { valid: true, issues: [] }, versions: [{
-        id: 'v1', version: 1, apiFormatJson: { 1: { class_type: 'X', inputs: {} } },
+        id: 'v1', version: 1, purpose: 'generation', apiFormatJson: { 1: { class_type: 'X', inputs: {} } },
         variableDefinitions: [{ name: 'prompt', type: 'string', required: true }], bindings: [], outputs: [],
         contentHash: 'hash', publishedAt: null, lastSuccessfulTestAt: null, validation: { valid: true, issues: [] },
       }],
@@ -92,6 +92,7 @@ describe('ComfyUI workflow settings UI contract', () => {
     const draft = draftFromWorkflow(workflow)
     draft.variableDefinitions[0].name = 'changed'
     expect(workflow.versions[0].variableDefinitions[0].name).toBe('prompt')
+    expect(draft.purpose).toBe('generation')
   })
 
   it('mounts a separate workflow library beside the connection pool', () => {
@@ -121,6 +122,8 @@ describe('ComfyUI workflow settings UI contract', () => {
     expect(mapping).toContain('inputPath')
     expect(mapping).toContain("['filename', 'image_ref', 'filename_list']")
     expect(mapping).toContain('setPrimaryOutput')
+    expect(editor).toContain("value.purpose === 'upscale'")
+    expect(editor).toContain('purposeImmutable')
   })
 
   it('keeps the author form separate from saved versions and exposes draft actions', () => {
@@ -230,6 +233,8 @@ describe('ComfyUI workflow settings UI contract', () => {
       expect(messages.workflows.compatibilityStates.disabled).toBeTruthy()
       expect(messages.workflows.workflowRequestInvalid).toBeTruthy()
       expect(messages.workflows.projectDefaultsSaveFailed).toBeTruthy()
+      expect(messages.workflows.purposes.upscale).toBeTruthy()
+      expect(messages.workflows.upscaleContractHint).toBeTruthy()
     }
   })
 })

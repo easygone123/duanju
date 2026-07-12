@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { queryKeys } from '@/lib/query/keys'
 import {
   selectImageModelOptions,
+  selectUpscaleModelOptions,
   invalidateUserModels,
   userModelsQueryOptions,
 } from '@/lib/query/hooks/useUserModels'
@@ -10,10 +11,15 @@ import {
 const apiFetchMock = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/api-fetch', () => ({ apiFetch: apiFetchMock }))
 
-function response(image: Array<Record<string, unknown>>, video: Array<Record<string, unknown>> = []) {
-  return new Response(JSON.stringify({ llm: [], image, video, audio: [], lipsync: [] }), {
+function response(
+  image: Array<Record<string, unknown>>,
+  video: Array<Record<string, unknown>> = [],
+  upscale: Array<Record<string, unknown>> = [],
+) {
+  return new Response(JSON.stringify({ llm: [], image, video, audio: [], lipsync: [], upscale }), {
     status: 200, headers: { 'Content-Type': 'application/json' },
   })
+
 }
 
 function client() {
@@ -22,6 +28,24 @@ function client() {
 
 describe('user model query cache', () => {
   beforeEach(() => apiFetchMock.mockReset())
+
+  it('keeps generation and upscale workflow choices in separate selectors', async () => {
+    const queryClient = client()
+    const generation = {
+      value: 'comfyui::generate', label: 'Generate', provider: 'comfyui',
+      workflowPurpose: 'generation' as const,
+    }
+    const upscale = {
+      value: 'comfyui::upscale', label: 'Upscale', provider: 'comfyui',
+      workflowPurpose: 'upscale' as const,
+    }
+    apiFetchMock.mockResolvedValueOnce(response([generation], [], [upscale]))
+
+    const payload = await queryClient.fetchQuery(userModelsQueryOptions('user-a'))
+
+    expect(selectImageModelOptions(payload)).toEqual([generation])
+    expect(selectUpscaleModelOptions(payload)).toEqual([upscale])
+  })
 
   it('returns full image options and exposes a newly published workflow after invalidation', async () => {
     const queryClient = client()

@@ -175,7 +175,7 @@ export function useNovelPromotionWorkspaceController({
     videoModel: projectSnapshot.videoModel,
     capabilityOverrides: projectSnapshot.capabilityOverrides,
     userVideoModels: userModels.userVideoModels || [],
-    userImageModels: userModels.userImageModels || [],
+    userUpscaleModels: userModels.userUpscaleModels || [],
     handleUpdateEpisode: configActions.handleUpdateEpisode,
     handleUpdateConfig: configActions.handleUpdateConfig,
     handleUpdateStoryboardConfig: configActions.handleUpdateStoryboardConfig,

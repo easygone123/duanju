@@ -19,6 +19,13 @@ import {
 import { findBuiltinCapabilities } from '@/lib/model-capabilities/catalog'
 import { findBuiltinPricingCatalogEntry } from '@/lib/model-pricing/catalog'
 import type { VideoPricingTier } from '@/lib/model-pricing/video-tier'
+import { validateWorkflowContract } from '@/lib/comfyui/workflow-schema'
+import type {
+  ComfyInputBinding,
+  ComfyOutputBinding,
+  ComfyVariableDefinition,
+  ComfyWorkflowPurpose,
+} from '@/lib/comfyui/types'
 
 type StoredModelType = UnifiedModelType | string
 
@@ -43,6 +50,7 @@ interface UserModelOption {
   providerName?: string
   capabilities?: ModelCapabilities
   videoPricingTiers?: VideoPricingTier[]
+  workflowPurpose?: ComfyWorkflowPurpose
 }
 
 interface UserModelsPayload {
@@ -51,6 +59,7 @@ interface UserModelsPayload {
   video: UserModelOption[]
   audio: UserModelOption[]
   lipsync: UserModelOption[]
+  upscale: UserModelOption[]
 }
 
 const AUDIO_MODEL_EXCLUDED_IDS = new Set([
@@ -181,7 +190,12 @@ export const GET = apiHandler(async () => {
         currentVersionId: { not: null },
         currentVersion: { is: { publishedAt: { not: null } } },
       },
-      select: { id: true, name: true, mediaType: true },
+      select: {
+        id: true, name: true, mediaType: true,
+        currentVersion: {
+          select: { id: true, purpose: true, publishedAt: true },
+        },
+      },
       orderBy: [{ mediaType: 'asc' }, { name: 'asc' }, { id: 'asc' }],
       take: 500,
     }),
@@ -189,6 +203,38 @@ export const GET = apiHandler(async () => {
 
   const modelsRaw: StoredModel[] = parseStoredModels(pref?.customModels)
   const providers: StoredProvider[] = parseStoredProviders(pref?.customProviders)
+  const upscaleVersionIds = comfyWorkflows.flatMap((workflow) => (
+    workflow.mediaType === 'image'
+    && workflow.currentVersion?.purpose === 'upscale'
+    && typeof workflow.currentVersion.id === 'string'
+      ? [workflow.currentVersion.id]
+      : []
+  ))
+  const upscaleVersions = upscaleVersionIds.length > 0
+    ? await prisma.comfyWorkflowVersion.findMany({
+      where: { id: { in: upscaleVersionIds } },
+      select: {
+        id: true, workflowId: true, purpose: true, apiFormatJson: true,
+        variableDefinitions: true, bindingSpec: true, outputSpec: true,
+      },
+    })
+    : []
+  const validUpscaleWorkflowIds = new Set<string>()
+  for (const version of upscaleVersions) {
+    try {
+      if (version.purpose !== 'upscale') continue
+      const issues = validateWorkflowContract({
+        purpose: 'upscale',
+        graph: version.apiFormatJson,
+        variableDefinitions: version.variableDefinitions as unknown as ComfyVariableDefinition[],
+        bindings: version.bindingSpec as unknown as ComfyInputBinding[],
+        outputs: version.outputSpec as unknown as ComfyOutputBinding[],
+      })
+      if (issues.length === 0) validUpscaleWorkflowIds.add(version.workflowId)
+    } catch {
+      // A malformed legacy contract is omitted without breaking the model endpoint.
+    }
+  }
 
   const providerNameMap = new Map<string, string>()
   const providerIdsWithApiKey = new Set<string>()
@@ -208,6 +254,7 @@ export const GET = apiHandler(async () => {
     video: [],
     audio: [],
     lipsync: [],
+    upscale: [],
   }
 
   for (const model of modelsRaw) {
@@ -248,11 +295,19 @@ export const GET = apiHandler(async () => {
 
   for (const workflow of comfyWorkflows) {
     if (workflow.mediaType !== 'image' && workflow.mediaType !== 'video') continue
-    grouped[workflow.mediaType].push({
+    const purpose: ComfyWorkflowPurpose = workflow.currentVersion?.purpose === 'upscale'
+      ? 'upscale'
+      : 'generation'
+    if (purpose === 'upscale') {
+      if (workflow.mediaType !== 'image' || !validUpscaleWorkflowIds.has(workflow.id)) continue
+    }
+    const target = purpose === 'upscale' ? grouped.upscale : grouped[workflow.mediaType]
+    target.push({
       value: composeModelKey('comfyui', workflow.id),
       label: workflow.name,
       provider: 'comfyui',
       providerName: 'ComfyUI',
+      workflowPurpose: purpose,
     })
   }
 
@@ -262,5 +317,6 @@ export const GET = apiHandler(async () => {
     video: dedupeByModelKey(grouped.video),
     audio: dedupeByModelKey(grouped.audio),
     lipsync: dedupeByModelKey(grouped.lipsync),
+    upscale: dedupeByModelKey(grouped.upscale),
   } satisfies UserModelsPayload)
 })

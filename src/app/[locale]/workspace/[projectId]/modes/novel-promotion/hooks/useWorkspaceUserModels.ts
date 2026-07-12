@@ -5,6 +5,7 @@ import { logError as _ulogError } from '@/lib/logging/core'
 import { useUserModels } from '@/lib/query/hooks'
 import type { ModelCapabilities } from '@/lib/model-config-contract'
 import type { VideoPricingTier } from '@/lib/model-pricing/video-tier'
+import type { ComfyWorkflowPurpose } from '@/lib/comfyui/types'
 
 export interface UserModelOption {
   value: string
@@ -13,6 +14,7 @@ export interface UserModelOption {
   providerName?: string
   capabilities?: ModelCapabilities
   videoPricingTiers?: VideoPricingTier[]
+  workflowPurpose?: ComfyWorkflowPurpose
 }
 
 export interface UserModelsPayload {
@@ -21,6 +23,7 @@ export interface UserModelsPayload {
   video: UserModelOption[]
   audio: UserModelOption[]
   lipsync: UserModelOption[]
+  upscale: UserModelOption[]
 }
 
 export function useWorkspaceUserModels() {
@@ -30,9 +33,9 @@ export function useWorkspaceUserModels() {
     if (!userModelsForSettings || !Array.isArray(userModelsForSettings.video)) return []
     return userModelsForSettings.video
   }, [userModelsForSettings])
-  const userImageModels = useMemo<UserModelOption[]>(() => {
-    if (!userModelsForSettings || !Array.isArray(userModelsForSettings.image)) return []
-    return userModelsForSettings.image
+  const userUpscaleModels = useMemo<UserModelOption[]>(() => {
+    if (!userModelsForSettings || !Array.isArray(userModelsForSettings.upscale)) return []
+    return userModelsForSettings.upscale
   }, [userModelsForSettings])
   const userModelsLoaded = userModelsQuery.isFetched
 
@@ -45,7 +48,7 @@ export function useWorkspaceUserModels() {
   return {
     userModelsForSettings,
     userVideoModels,
-    userImageModels,
+    userUpscaleModels,
     userModelsLoaded,
   }
 }

@@ -37,6 +37,7 @@ import type {
   ComfyVariableDefinition,
   ComfyVariableValue,
   ComfyWorkflowRequirements,
+  ComfyWorkflowPurpose,
 } from './types'
 import type { ComfyRuntimeOperationLimits } from './runtime-deps'
 
@@ -311,6 +312,7 @@ async function loadRuntimeContext(requestId: string, limits: ComfyRuntimeOperati
     connection: { id: bundle.connection.id, userId: bundle.connection.userId, enabled: bundle.connection.enabled },
     version: {
       id: version.id, workflowId: version.workflowId,
+      purpose: (version.purpose ?? 'generation') as ComfyWorkflowPurpose,
       graph: version.apiFormatJson as never,
       variableDefinitions: version.variableDefinitions as unknown as ComfyVariableDefinition[],
       bindings: version.bindingSpec as unknown as ComfyInputBinding[],

@@ -177,7 +177,7 @@ export default function WorkflowLibraryPanel() {
     <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-5 2xl:grid-cols-[16rem_minmax(0,1fr)] sm:p-6">
       <nav aria-label={t('library')} className="space-y-2">{loading && <p role="status" className="text-sm">{t('loading')}</p>}
         {workflows.map((workflow) => <button key={workflow.id} type="button" onClick={() => selectWorkflow(workflow.id)} aria-current={selectedId === workflow.id ? 'page' : undefined}
-          className="glass-surface-soft w-full rounded-xl p-3 text-left"><span className="block truncate font-medium">{workflow.name}</span><span className="text-xs text-[var(--glass-text-tertiary)]">{t(workflow.mediaType)} · {t(`statuses.${workflow.status}`)}</span></button>)}</nav>
+          className="glass-surface-soft w-full rounded-xl p-3 text-left"><span className="block truncate font-medium">{workflow.name}</span><span className="text-xs text-[var(--glass-text-tertiary)]">{t(workflow.mediaType)} · {t(`purposes.${workflow.purpose}`)} · {t(`statuses.${workflow.status}`)}</span></button>)}</nav>
       <div className="min-w-0 space-y-6">
         <WorkflowEditor value={authorDraft} disabled={busy} identityLocked={selectedId !== 'new'} onChange={setAuthorDraft} onImportError={(key) => setError(key as ErrorKey)} />
         {savedVersion && <div className="glass-surface-soft rounded-xl p-3 text-xs" aria-label={t('savedVersion')}>

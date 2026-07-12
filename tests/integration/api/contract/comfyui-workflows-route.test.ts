@@ -67,6 +67,7 @@ const graph = {
   '2': { class_type: 'SaveImage', inputs: { images: ['1', 0], seed: '${seed}' } },
 }
 const contract: CreateVersionInput = {
+  purpose: 'generation',
   apiFormatJson: graph,
   variableDefinitions: [{ name: 'seed', type: 'number', required: false, defaultValue: 7 }],
   bindings: [],
@@ -146,6 +147,36 @@ describe('ComfyUI workflow library', () => {
     expect(prismaMock.comfyWorkflow.findMany).not.toHaveBeenCalled()
   })
 
+  it('round-trips an upscale purpose through owned list and get responses', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const saved = version({ purpose: 'upscale' })
+    const record = workflow({
+      purpose: 'upscale', versions: [saved], currentVersion: saved,
+      currentVersionId: saved.id,
+    })
+    prismaMock.comfyWorkflow.findMany.mockResolvedValue([record])
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(record)
+    const listRoute = await import('@/app/api/comfyui/workflows/route')
+    const detailRoute = await import('@/app/api/comfyui/workflows/[workflowId]/route')
+
+    const listed = await body(await listRoute.GET(buildMockRequest({
+      path: '/api/comfyui/workflows', method: 'GET',
+    }), { params: Promise.resolve({}) }))
+    const detailed = await body(await detailRoute.GET(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1', method: 'GET',
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) }))
+
+    expect(listed.workflows).toEqual([
+      expect.objectContaining({
+        purpose: 'upscale', versions: [expect.objectContaining({ purpose: 'upscale' })],
+      }),
+    ])
+    expect(detailed.workflow).toEqual(expect.objectContaining({
+      purpose: 'upscale', currentVersion: expect.objectContaining({ purpose: 'upscale' }),
+    }))
+  })
+
   it('creates an owned draft with version one and detailed static validation', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')
@@ -163,7 +194,49 @@ describe('ComfyUI workflow library', () => {
       versions: { create: expect.objectContaining({ version: 1, requirements: expect.any(Object), contentHash: expect.stringMatching(/^[a-f0-9]{64}$/) }) },
     }), include: expect.any(Object) })
     expect(await body(response)).toEqual(expect.objectContaining({
-      workflow: expect.objectContaining({ validation: { valid: true, issues: [] } }),
+      workflow: expect.objectContaining({
+        purpose: 'generation', validation: { valid: true, issues: [] },
+        versions: [expect.objectContaining({ purpose: 'generation' })],
+      }),
+    }))
+  })
+
+  it('rejects an explicitly invalid purpose at the route boundary', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const route = await import('@/app/api/comfyui/workflows/route')
+    for (const purpose of ['thumbnail']) {
+      const payload = { name: 'Invalid purpose', mediaType: 'image', ...contract } as Record<string, unknown>
+      if (purpose === undefined) delete payload.purpose
+      else payload.purpose = purpose
+      const response = await route.POST(buildMockRequest({
+        path: '/api/comfyui/workflows', method: 'POST', body: payload,
+      }), { params: Promise.resolve({}) })
+      expect(response.status).toBe(400)
+      expect((await body(response)).error).toEqual(expect.objectContaining({ code: 'INVALID_PARAMS' }))
+    }
+    expect(prismaMock.comfyWorkflow.create).not.toHaveBeenCalled()
+  })
+
+  it('defaults a legacy create request with omitted purpose to generation', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => workflow({
+      ...data,
+      versions: [version({ ...(data.versions as { create: Record<string, unknown> }).create })],
+    }))
+    const legacy = { name: 'Legacy', mediaType: 'image', ...contract } as Record<string, unknown>
+    delete legacy.purpose
+    const route = await import('@/app/api/comfyui/workflows/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows', method: 'POST', body: legacy,
+    }), { params: Promise.resolve({}) })
+
+    expect(response.status).toBe(201)
+    expect(await body(response)).toEqual(expect.objectContaining({
+      workflow: expect.objectContaining({
+        purpose: 'generation', versions: [expect.objectContaining({ purpose: 'generation' })],
+      }),
     }))
   })
 
@@ -222,7 +295,7 @@ describe('ComfyUI workflow library', () => {
     installAuthMocks()
     mockAuthenticated('user-1')
     prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
-    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue({ version: 4 })
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue({ version: 4, purpose: 'generation' })
     prismaMock.comfyWorkflowVersion.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => version({ ...data, id: 'version-5' }))
     const route = await import('@/app/api/comfyui/workflows/[workflowId]/versions/route')
     const response = await route.POST(buildMockRequest({
@@ -231,6 +304,45 @@ describe('ComfyUI workflow library', () => {
     expect(response.status).toBe(201)
     expect(prismaMock.comfyWorkflowVersion.create).toHaveBeenCalledWith({ data: expect.objectContaining({ workflowId: 'workflow-1', version: 5 }) })
     expect(prismaMock.$transaction).toHaveBeenCalled()
+  })
+
+  it('rejects purpose drift when creating a later immutable workflow version', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue({ version: 1, purpose: 'generation' })
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/versions/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/versions', method: 'POST',
+      body: { ...contract, purpose: 'upscale' },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+
+    expect(response.status).toBe(400)
+    expect((await body(response)).error).toEqual(expect.objectContaining({ code: 'INVALID_PARAMS' }))
+    expect(prismaMock.comfyWorkflowVersion.create).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['generation', 'generation'],
+    ['upscale', 'upscale'],
+  ])('inherits %s purpose for a legacy subsequent version request', async (latestPurpose, expected) => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue({ version: 1, purpose: latestPurpose })
+    prismaMock.comfyWorkflowVersion.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => version({ ...data }))
+    const legacy = { ...contract } as Record<string, unknown>
+    delete legacy.purpose
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/versions/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/versions', method: 'POST', body: legacy,
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+
+    expect(response.status).toBe(201)
+    expect(prismaMock.comfyWorkflowVersion.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ purpose: expected, version: 2 }),
+    })
+    expect((await body(response)).version).toEqual(expect.objectContaining({ purpose: expected }))
   })
 
   it('publishes a static-valid version without requiring a live test', async () => {
@@ -252,6 +364,76 @@ describe('ComfyUI workflow library', () => {
     }))
   })
 
+  it('publishes a valid upscale version without drifting its immutable purpose', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const upscale = {
+      purpose: 'upscale',
+      apiFormatJson: {
+        load: { class_type: 'LoadImage', inputs: { image: 'input.png' } },
+        save: { class_type: 'SaveImage', inputs: { images: ['load', 0] } },
+      },
+      variableDefinitions: [{ name: 'source', type: 'image_ref', required: true }],
+      bindingSpec: [{
+        nodeId: 'load', inputPath: 'image', variable: 'source',
+        valueType: 'image_ref', transform: 'filename',
+      }],
+      outputSpec: [{
+        name: 'result', nodeId: 'save', fieldPath: 'images', mediaType: 'image', primary: true,
+      }],
+    }
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version(upscale))
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/publish/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/publish', method: 'POST',
+      body: { versionId: 'version-1' },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(prismaMock.comfyWorkflowVersion.updateMany).toHaveBeenCalledWith({
+      where: { id: 'version-1', workflowId: 'workflow-1', publishedAt: null },
+      data: { publishedAt: expect.any(Date) },
+    })
+  })
+
+  it.each([
+    ['COMFY_UPSCALE_INPUT_REQUIRED', { variableDefinitions: [], bindingSpec: [] }],
+    ['COMFY_UPSCALE_OUTPUT_REQUIRED', { outputSpec: [] }],
+    ['COMFY_UPSCALE_BINDINGS_INVALID', {
+      bindingSpec: [{
+        nodeId: 'load', inputPath: 'image', variable: 'source', valueType: 'image_ref',
+      }],
+    }],
+  ])('rejects publishing an invalid upscale version with %s', async (code, override) => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version({
+      purpose: 'upscale',
+      apiFormatJson: {
+        load: { class_type: 'LoadImage', inputs: { image: 'input.png' } },
+        save: { class_type: 'SaveImage', inputs: { images: ['load', 0] } },
+      },
+      variableDefinitions: [{ name: 'source', type: 'image_ref', required: true }],
+      bindingSpec: [{ nodeId: 'load', inputPath: 'image', variable: 'source', valueType: 'image_ref' }],
+      outputSpec: [{ name: 'result', nodeId: 'save', fieldPath: 'images', mediaType: 'image', primary: true }],
+      ...override,
+    }))
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/publish/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/publish', method: 'POST',
+      body: { versionId: 'version-1' },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+
+    expect(response.status).toBe(400)
+    expect((await body(response)).error).toEqual(expect.objectContaining({
+      details: expect.objectContaining({
+        validationIssues: expect.arrayContaining([expect.objectContaining({ code })]),
+      }),
+    }))
+  })
+
   it('rejects an untested current version as a project default', async () => {
     prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow({
       status: 'published',
@@ -262,7 +444,10 @@ describe('ComfyUI workflow library', () => {
     await expect(assertWorkflowCanBeProjectDefault('user-1', 'workflow-1', 'image'))
       .rejects.toMatchObject({ code: 'CONFLICT' })
     expect(prismaMock.comfyWorkflow.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'workflow-1', userId: 'user-1', status: 'published', mediaType: 'image' },
+      where: {
+        id: 'workflow-1', userId: 'user-1', status: 'published', mediaType: 'image',
+        currentVersion: { is: { purpose: 'generation' } },
+      },
     }))
   })
 
@@ -619,6 +804,7 @@ describe('ComfyUI workflow library', () => {
     installAuthMocks()
     mockAuthenticated('user-1')
     const mediaContract: CreateVersionInput = {
+      purpose: 'generation',
       apiFormatJson: {
         '1': { class_type: 'LoadImage', inputs: { image: 'placeholder.png' } },
         '2': { class_type: 'SaveVideo', inputs: { images: ['1', 0], video: ['3', 0] } },

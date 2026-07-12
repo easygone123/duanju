@@ -12,6 +12,7 @@ import type {
   ComfyMediaType,
   ComfyOutputBinding,
   ComfyVariableDefinition,
+  ComfyWorkflowPurpose,
   ComfyWorkflowRequirements,
   WorkflowValidationIssue,
 } from './types'
@@ -23,6 +24,7 @@ export {
 export type { LiveTestInput, LiveTestUploadPayload } from './workflow-test-service'
 
 export interface CreateVersionInput {
+  purpose?: ComfyWorkflowPurpose
   apiFormatJson: unknown
   variableDefinitions: ComfyVariableDefinition[]
   bindings: ComfyInputBinding[]
@@ -51,14 +53,17 @@ export function parseWorkflowImport(value: unknown): unknown {
 }
 
 export function canonicalWorkflowHash(input: CreateVersionInput): string {
+  const purpose = input.purpose ?? 'generation'
   const graph = parseWorkflowImport(input.apiFormatJson)
   assertBoundedWorkflowContract({
+    purpose,
     graph,
     variableDefinitions: input.variableDefinitions,
     bindings: input.bindings,
     outputs: input.outputs,
   })
   return createHash('sha256').update(stableJson({
+    purpose,
     graph,
     variableDefinitions: input.variableDefinitions,
     bindings: input.bindings,
@@ -94,7 +99,8 @@ export async function updateOwnedWorkflowMetadata(userId: string, workflowId: st
 }
 
 export async function createWorkflowDraft(userId: string, input: CreateWorkflowInput) {
-  const prepared = prepareVersion(input)
+  const purpose = input.purpose ?? 'generation'
+  const prepared = prepareVersion({ ...input, purpose })
   const record = await prisma.comfyWorkflow.create({
     data: {
       userId,
@@ -113,7 +119,6 @@ export async function createWorkflowVersion(
   workflowId: string,
   input: CreateVersionInput,
 ) {
-  const prepared = prepareVersion(input)
   try {
     return await prisma.$transaction(async (tx) => {
       const workflow = await tx.comfyWorkflow.findFirst({
@@ -121,8 +126,14 @@ export async function createWorkflowVersion(
       })
       if (!workflow) throw new ApiError('NOT_FOUND')
       const latest = await tx.comfyWorkflowVersion.findFirst({
-        where: { workflowId }, orderBy: { version: 'desc' }, select: { version: true },
+        where: { workflowId }, orderBy: { version: 'desc' },
+        select: { version: true, purpose: true },
       })
+      const purpose = input.purpose ?? (
+        latest?.purpose === 'upscale' ? 'upscale' : 'generation'
+      )
+      if (latest && latest.purpose !== purpose) throw new ApiError('INVALID_PARAMS')
+      const prepared = prepareVersion({ ...input, purpose })
       return tx.comfyWorkflowVersion.create({
         data: { workflowId, version: (latest?.version ?? 0) + 1, ...prepared.data },
       })
@@ -150,6 +161,12 @@ export async function publishWorkflowVersion(
     })
     if (!version) throw new ApiError('NOT_FOUND')
     const issues = validationForVersion(version)
+    if ((version.purpose ?? 'generation') === 'upscale' && workflow.mediaType !== 'image') {
+      issues.push({
+        code: 'COMFY_UPSCALE_BINDINGS_INVALID', path: 'mediaType',
+        message: 'Upscale workflows must use image media type.',
+      })
+    }
     if (issues.length > 0) throw new ApiError('INVALID_PARAMS', { validationIssues: issues })
     const publishedAt = new Date()
     const versionResult = await tx.comfyWorkflowVersion.updateMany({
@@ -197,7 +214,10 @@ async function assertWorkflowCanBeProjectDefaultInTransaction(
   mediaType: ComfyMediaType,
 ) {
   const workflow = await tx.comfyWorkflow.findFirst({
-    where: { id: workflowId, userId, status: 'published', mediaType },
+    where: {
+      id: workflowId, userId, status: 'published', mediaType,
+      currentVersion: { is: { purpose: 'generation' } },
+    },
     include: {
       currentVersion: {
         include: { lastTestConnection: { select: { userId: true } } },
@@ -293,15 +313,17 @@ export async function updateProjectWithComfyDefaults(input: UpdateProjectWithCom
   throw new ApiError('CONFLICT')
 }
 
-function prepareVersion(input: CreateVersionInput) {
+function prepareVersion(input: CreateVersionInput & { purpose: ComfyWorkflowPurpose }) {
   const graph = parseWorkflowImport(input.apiFormatJson)
   assertBoundedWorkflowContract({
+    purpose: input.purpose,
     graph,
     variableDefinitions: input.variableDefinitions,
     bindings: input.bindings,
     outputs: input.outputs,
   })
   const issues = validateWorkflowContract({
+    purpose: input.purpose,
     graph, variableDefinitions: input.variableDefinitions, bindings: input.bindings, outputs: input.outputs,
   })
   let requirements: ComfyWorkflowRequirements = { nodeClasses: [], candidateLoaderInputs: [] }
@@ -313,6 +335,7 @@ function prepareVersion(input: CreateVersionInput) {
   return {
     issues,
     data: {
+      purpose: input.purpose,
       apiFormatJson: graph as Prisma.InputJsonValue,
       variableDefinitions: input.variableDefinitions as unknown as Prisma.InputJsonValue,
       bindingSpec: input.bindings as unknown as Prisma.InputJsonValue,
@@ -325,6 +348,7 @@ function prepareVersion(input: CreateVersionInput) {
 
 function validationForVersion(version: ComfyWorkflowVersion): WorkflowValidationIssue[] {
   return validateWorkflowContract({
+    purpose: (version.purpose ?? 'generation') as ComfyWorkflowPurpose,
     graph: version.apiFormatJson,
     variableDefinitions: version.variableDefinitions as unknown as ComfyVariableDefinition[],
     bindings: (
@@ -341,6 +365,7 @@ function toWorkflowDetail(record: Record<string, unknown>) {
   const versionDetails = versions.map((item) => toVersionDetail(item as Record<string, unknown>))
   return {
     id: record.id, name: record.name, mediaType: record.mediaType, status: record.status,
+    purpose: versionDetails[0]?.purpose ?? 'generation',
     currentVersionId: record.currentVersionId ?? null,
     createdAt: asIso(record.createdAt), updatedAt: asIso(record.updatedAt),
     currentVersion: record.currentVersion ? toVersionDetail(record.currentVersion as Record<string, unknown>) : null,
@@ -352,6 +377,7 @@ function toWorkflowDetail(record: Record<string, unknown>) {
 function toVersionDetail(version: Record<string, unknown>) {
   const shaped = {
     id: version.id, workflowId: version.workflowId, version: version.version,
+    purpose: (version.purpose === 'upscale' ? 'upscale' : 'generation') as ComfyWorkflowPurpose,
     apiFormatJson: version.apiFormatJson,
     variableDefinitions: version.variableDefinitions,
     bindings: version.bindingSpec ?? version.bindings,
@@ -361,6 +387,7 @@ function toVersionDetail(version: Record<string, unknown>) {
     lastTestConnectionId: version.lastTestConnectionId ?? null, createdAt: asIso(version.createdAt),
   }
   const issues = validateWorkflowContract({
+    purpose: shaped.purpose,
     graph: shaped.apiFormatJson,
     variableDefinitions: shaped.variableDefinitions as ComfyVariableDefinition[],
     bindings: shaped.bindings as ComfyInputBinding[],

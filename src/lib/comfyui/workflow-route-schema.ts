@@ -10,6 +10,7 @@ const uploadPayloadSchema = z.object({
 }).strict()
 
 export const workflowContractSchema = z.object({
+  purpose: z.enum(['generation', 'upscale']).optional(),
   apiFormatJson: z.union([z.string().max(4 * 1024 * 1024), z.record(z.string(), z.unknown())]),
   variableDefinitions: z.array(z.unknown()).max(256),
   bindings: z.array(z.unknown()).max(512),

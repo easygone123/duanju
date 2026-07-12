@@ -20,6 +20,7 @@ import type {
   ComfyVariableDefinition,
   ComfyVariableValue,
   ComfyWorkflowRequirements,
+  ComfyWorkflowPurpose,
 } from './types'
 import { extractComfyOutputs } from './workflow-output'
 import { renderComfyWorkflow } from './workflow-renderer'
@@ -60,6 +61,7 @@ type ExecutionContext = {
   version: {
     id?: string
     workflowId?: string
+    purpose?: ComfyWorkflowPurpose
     graph?: ComfyApiWorkflow
     variableDefinitions?: ComfyVariableDefinition[]
     bindings?: ComfyInputBinding[]
