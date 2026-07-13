@@ -296,10 +296,13 @@ async function resolveTrustedFirstLastFrame(
 
   const firstFrameSourcePanelId = await resolveFirstFrameSourcePanelId()
   const sourcePanelId = await resolvePersistedLastFrameSourcePanelId()
+  if (!firstFrameSourcePanelId || !sourcePanelId) {
+    throw new ApiError('INVALID_PARAMS', { code: 'FIRSTLASTFRAME_SOURCE_INVALID' })
+  }
   return {
     flModel,
     firstFrameSourcePanelId,
-    ...(sourcePanelId ? { sourcePanelId } : {}),
+    sourcePanelId,
   }
 }
 
@@ -311,12 +314,12 @@ export async function resolveAuthoritativePanelPayload(input: {
   routingMode?: 'single' | 'batch'
 }) {
   const panel = await applyDurationOverrideCas(input.body, input.panel)
-  const projectModels = await getProjectModelConfig(input.projectId, input.userId)
   const isBatch = input.routingMode === 'batch'
   const firstLast = !isBatch && isRecord(input.body.firstLastFrame) ? input.body.firstLastFrame : null
   const trustedFirstLastFrame = firstLast
     ? await resolveTrustedFirstLastFrame(firstLast, panel, input.projectId, input.userId)
     : null
+  const projectModels = await getProjectModelConfig(input.projectId, input.userId)
   const explicitModel = isBatch
     ? null
     : typeof trustedFirstLastFrame?.flModel === 'string'

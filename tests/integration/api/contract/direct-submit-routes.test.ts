@@ -104,12 +104,19 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(async () => ({})),
   },
   novelPromotionPanel: {
-    findFirst: vi.fn(async () => ({
-      id: 'panel-1', updatedAt: new Date('2026-07-13T00:00:00.000Z'),
-      hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
-      includeDialogueInVideoPrompt: true, videoPrompt: 'panel prompt',
-      estimatedDuration: null, durationOverride: null, duration: 3,
-    })),
+    findFirst: vi.fn(async ({ where }: { where?: { id?: string } } = {}) => (
+      where?.id === 'trusted-last-panel'
+        ? { id: 'trusted-last-panel' }
+        : {
+            id: 'panel-1', updatedAt: new Date('2026-07-13T00:00:00.000Z'),
+            hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+            includeDialogueInVideoPrompt: true, videoPrompt: 'panel prompt',
+            firstFrameSourceMeta: null,
+            lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'trusted-last-panel' }),
+            storyboard: { episodeId: 'episode-1' },
+            estimatedDuration: null, durationOverride: null, duration: 3,
+          }
+    )),
     findMany: vi.fn(async () => []),
     findUnique: vi.fn(async ({ where }: { where?: { id?: string } }) => {
       const id = where?.id || 'panel-1'
@@ -450,6 +457,7 @@ const DIRECT_CASES: ReadonlyArray<DirectRouteCase> = [
       firstLastFrame: {
         flModel: 'ark::doubao-seedance-2-0-260128',
         firstFrameSourcePanelId: 'panel-1',
+        sourcePanelId: 'trusted-last-panel',
       },
     },
   },

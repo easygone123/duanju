@@ -245,7 +245,7 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     expect(submitTaskMock).not.toHaveBeenCalled()
   })
 
-  it('keeps a persisted explicit last-frame clear despite forged client coordinates', async () => {
+  it('rejects a persisted explicit last-frame clear before model lookup or submission', async () => {
     panelFindFirstMock.mockResolvedValueOnce({
       id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
       hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
@@ -263,17 +263,13 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
       },
     }), { params: Promise.resolve({ projectId: 'project-1' }) })
 
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'FIRSTLASTFRAME_SOURCE_INVALID' })
     expect(panelFindFirstMock).toHaveBeenCalledTimes(1)
     expect(storyboardFindManyMock).not.toHaveBeenCalled()
-    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
-      payload: expect.objectContaining({
-        firstLastFrame: {
-          flModel: 'comfyui::wf-video',
-          firstFrameSourcePanelId: 'panel-1',
-        },
-      }),
-    }))
+    expect(getProjectModelConfigMock).not.toHaveBeenCalled()
+    expect(buildBillingInfoMock).not.toHaveBeenCalled()
+    expect(submitTaskMock).not.toHaveBeenCalled()
   })
 
   it.each([null, '', '{invalid'])('resolves legacy last-frame metadata %j from the owner-scoped episode snapshot', async (lastFrameSourceMeta) => {
@@ -409,6 +405,17 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
   })
 
   it('removes forged root and first-last-frame prompts from the submitted task payload', async () => {
+    panelFindFirstMock
+      .mockResolvedValueOnce({
+        id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: 'server visual prompt', firstLastFramePrompt: null,
+        estimatedDuration: 5, durationOverride: null, duration: 5,
+        firstFrameSourceMeta: null,
+        lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'panel-2' }),
+        storyboard: { episodeId: 'episode-1' },
+      })
+      .mockResolvedValueOnce({ id: 'panel-2' })
     const response = await POST(request({
       customPrompt: 'FORGED ROOT PROMPT',
       firstLastFrame: {
@@ -422,7 +429,7 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     expect(submitted.payload.videoPrompt).toBe('server visual prompt')
     expect(submitted.payload).not.toHaveProperty('customPrompt')
     expect(submitted.payload.firstLastFrame).toEqual({
-      flModel: 'comfyui::wf-video', firstFrameSourcePanelId: 'panel-1',
+      flModel: 'comfyui::wf-video', firstFrameSourcePanelId: 'panel-1', sourcePanelId: 'panel-2',
     })
   })
 
