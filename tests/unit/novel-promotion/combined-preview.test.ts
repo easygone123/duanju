@@ -4,6 +4,7 @@ import {
   buildCombinedPreviewTimeline,
   findCombinedPreviewItemIndexAtFrame,
   resolveCombinedPreviewOpacity,
+  type CombinedPreviewItem,
 } from '@/lib/novel-promotion/video/combined-preview'
 
 function panel(overrides: Partial<VideoPanel> = {}): VideoPanel {
@@ -47,6 +48,17 @@ describe('combined video preview projection', () => {
     expect(item.videoUrl).toBe('base.mp4')
   })
 
+  it('trims present panel ids and falls back for blank panel ids', () => {
+    const timeline = buildCombinedPreviewTimeline([
+      panel({ panelId: '  p  ' }),
+      panel({ panelId: '   ', storyboardId: 'storyboard-blank', panelIndex: 7 }),
+    ], new Map())
+
+    expect(timeline.items[0]).toMatchObject({ panelKey: 'p', panelId: 'p' })
+    expect(timeline.items[1].panelKey).toBe('storyboard-blank:7')
+    expect(timeline.items[1]).not.toHaveProperty('panelId')
+  })
+
   it('falls back from video to image and then to a missing placeholder', () => {
     const imageOnly = panel({ panelId: 'image', videoUrl: undefined })
     const missing = panel({ panelId: 'missing', videoUrl: undefined, imageUrl: undefined })
@@ -88,6 +100,17 @@ describe('combined video preview projection', () => {
     expect(timeline.itemByPanelKey.get('cell-0')).toBe(timeline.items[2])
   })
 
+  it('preserves explicit null group and grid metadata while omitting undefined metadata', () => {
+    const timeline = buildCombinedPreviewTimeline([
+      panel({ panelId: 'null-metadata', groupSequence: null, gridCellIndex: null }),
+      panel({ panelId: 'undefined-metadata', groupSequence: undefined, gridCellIndex: undefined }),
+    ], new Map())
+
+    expect(timeline.items[0]).toMatchObject({ groupSequence: null, gridCellIndex: null })
+    expect(timeline.items[1]).not.toHaveProperty('groupSequence')
+    expect(timeline.items[1]).not.toHaveProperty('gridCellIndex')
+  })
+
   it('reports generating and failed diagnostics without discarding fallback media', () => {
     const inputs = [
       panel({ panelId: 'generating-video', videoTaskRunning: true }),
@@ -122,6 +145,34 @@ describe('combined video preview projection', () => {
       { start: 53, end: 63, transitionIn: 2, transitionOut: 0 },
     ])
     expect(timeline.totalDurationInFrames).toBe(63)
+  })
+
+  it('caps transitions between long adjacent clips at exactly fifteen frames', () => {
+    const timeline = buildCombinedPreviewTimeline([
+      panel({ panelId: 'long-first', estimatedDuration: 4 }),
+      panel({ panelId: 'long-second', estimatedDuration: 4 }),
+    ], new Map(), 30)
+
+    expect(timeline.items[0].durationInFrames).toBe(120)
+    expect(timeline.items[0].transitionOutFrames).toBe(15)
+    expect(timeline.items[1].transitionInFrames).toBe(15)
+  })
+
+  it('freezes the timeline, item array, and projected items against mutation', () => {
+    const timeline = buildCombinedPreviewTimeline([panel()], new Map())
+
+    expect(Object.isFrozen(timeline)).toBe(true)
+    expect(Object.isFrozen(timeline.items)).toBe(true)
+    expect(Object.isFrozen(timeline.items[0])).toBe(true)
+    expect(() => {
+      (timeline as { totalDurationInFrames: number }).totalDurationInFrames = 999
+    }).toThrow(TypeError)
+    expect(() => {
+      (timeline.items as CombinedPreviewItem[]).push(timeline.items[0])
+    }).toThrow(TypeError)
+    expect(() => {
+      (timeline.items[0] as { startFrame: number }).startFrame = 999
+    }).toThrow(TypeError)
   })
 
   it('keeps outgoing and incoming opacity complementary at every overlap frame', () => {

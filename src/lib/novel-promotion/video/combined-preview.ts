@@ -12,8 +12,8 @@ export interface CombinedPreviewItem {
   readonly panelId?: string
   readonly storyboardId: string
   readonly panelIndex: number
-  readonly groupSequence?: number
-  readonly gridCellIndex?: number
+  readonly groupSequence?: number | null
+  readonly gridCellIndex?: number | null
   readonly videoUrl: string | null
   readonly imageUrl: string | null
   readonly durationInFrames: number
@@ -35,8 +35,8 @@ interface MutableCombinedPreviewItem {
   panelId?: string
   storyboardId: string
   panelIndex: number
-  groupSequence?: number
-  gridCellIndex?: number
+  groupSequence?: number | null
+  gridCellIndex?: number | null
   videoUrl: string | null
   imageUrl: string | null
   durationInFrames: number
@@ -101,8 +101,8 @@ export function buildCombinedPreviewTimeline(
       ...(panel.panelId?.trim() ? { panelId: panel.panelId.trim() } : {}),
       storyboardId: panel.storyboardId,
       panelIndex: panel.panelIndex,
-      ...(panel.groupSequence == null ? {} : { groupSequence: panel.groupSequence }),
-      ...(panel.gridCellIndex == null ? {} : { gridCellIndex: panel.gridCellIndex }),
+      ...(panel.groupSequence === undefined ? {} : { groupSequence: panel.groupSequence }),
+      ...(panel.gridCellIndex === undefined ? {} : { gridCellIndex: panel.gridCellIndex }),
       videoUrl,
       imageUrl,
       durationInFrames,
