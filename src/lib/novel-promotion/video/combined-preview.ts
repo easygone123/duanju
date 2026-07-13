@@ -4,6 +4,8 @@ import { buildVideoSubmissionKey } from '@/lib/novel-promotion/stages/video-stag
 const DEFAULT_FPS = 30
 const DEFAULT_DURATION_SECONDS = 3
 const MAX_TRANSITION_FRAMES = 15
+// A preview item longer than 24 hours at 240fps is not practical and risks numeric overflow.
+const MAX_ITEM_DURATION_IN_FRAMES = 24 * 60 * 60 * 240
 
 export type CombinedPreviewStatus = 'video' | 'image' | 'generating' | 'failed' | 'missing'
 
@@ -47,6 +49,47 @@ interface MutableCombinedPreviewItem {
   status: CombinedPreviewStatus
 }
 
+class ImmutableReadonlyMap<K, V> implements ReadonlyMap<K, V> {
+  readonly #backing: Map<K, V>
+
+  constructor(entries: Iterable<readonly [K, V]>) {
+    this.#backing = new Map(entries)
+    Object.freeze(this)
+  }
+
+  get size(): number {
+    return this.#backing.size
+  }
+
+  get(key: K): V | undefined {
+    return this.#backing.get(key)
+  }
+
+  has(key: K): boolean {
+    return this.#backing.has(key)
+  }
+
+  forEach(callback: (value: V, key: K, map: ReadonlyMap<K, V>) => void, thisArg?: unknown): void {
+    for (const [key, value] of this.#backing) callback.call(thisArg, value, key, this)
+  }
+
+  entries() {
+    return this.#backing.entries()
+  }
+
+  keys() {
+    return this.#backing.keys()
+  }
+
+  values() {
+    return this.#backing.values()
+  }
+
+  [Symbol.iterator]() {
+    return this.#backing[Symbol.iterator]()
+  }
+}
+
 function positiveFinite(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
 }
@@ -58,7 +101,7 @@ function resolveDurationInFrames(panel: VideoPanel, fps: number): number {
     panel.textPanel?.duration,
   ].find(positiveFinite) ?? DEFAULT_DURATION_SECONDS
 
-  return Math.max(1, Math.round(seconds * fps))
+  return Math.max(1, Math.min(MAX_ITEM_DURATION_IN_FRAMES, Math.round(seconds * fps)))
 }
 
 function resolveStatus(panel: VideoPanel, videoUrl: string | null, imageUrl: string | null): CombinedPreviewStatus {
@@ -130,7 +173,7 @@ export function buildCombinedPreviewTimeline(
   }
 
   const items = Object.freeze(mutableItems.map((item) => Object.freeze(item)))
-  const itemByPanelKey = new Map(items.map((item) => [item.panelKey, item] as const))
+  const itemByPanelKey = new ImmutableReadonlyMap(items.map((item) => [item.panelKey, item] as const))
 
   return Object.freeze({
     items,

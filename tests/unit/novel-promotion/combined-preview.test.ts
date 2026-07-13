@@ -83,6 +83,21 @@ describe('combined video preview projection', () => {
       .toBe(1)
   })
 
+  it('keeps extreme finite duration and fps inputs within finite safe frame coordinates', () => {
+    const timeline = buildCombinedPreviewTimeline([
+      panel({ panelId: 'huge-first', durationOverride: Number.MAX_VALUE }),
+      panel({ panelId: 'huge-second', durationOverride: Number.MAX_VALUE }),
+    ], new Map(), Number.MAX_VALUE)
+
+    for (const item of timeline.items) {
+      expect(Number.isSafeInteger(item.durationInFrames)).toBe(true)
+      expect(item.durationInFrames).toBeGreaterThan(0)
+      expect(Number.isSafeInteger(item.startFrame)).toBe(true)
+      expect(Number.isSafeInteger(item.endFrame)).toBe(true)
+    }
+    expect(Number.isSafeInteger(timeline.totalDurationInFrames)).toBe(true)
+  })
+
   it('preserves ordered individual and six-grid panel identity and metadata', () => {
     const inputs = [
       panel({ panelId: 'individual-2', storyboardId: 'individual', panelIndex: 2, groupSequence: undefined, gridCellIndex: undefined }),
@@ -173,6 +188,24 @@ describe('combined video preview projection', () => {
     expect(() => {
       (timeline.items[0] as { startFrame: number }).startFrame = 999
     }).toThrow(TypeError)
+  })
+
+  it('exposes a genuinely immutable frozen panel-key index at runtime', () => {
+    const timeline = buildCombinedPreviewTimeline([
+      panel({ panelId: 'first' }),
+      panel({ panelId: 'second' }),
+    ], new Map())
+    const index = timeline.itemByPanelKey
+    const mutableIndex = index as Map<string, CombinedPreviewItem>
+    const originalEntries = Array.from(index.entries())
+
+    expect(Object.isFrozen(index)).toBe(true)
+    expect(() => mutableIndex.set('injected', timeline.items[0])).toThrow(TypeError)
+    expect(() => mutableIndex.delete('first')).toThrow(TypeError)
+    expect(() => mutableIndex.clear()).toThrow(TypeError)
+    expect(index.size).toBe(2)
+    expect(index.get('first')).toBe(timeline.items[0])
+    expect(Array.from(index.entries())).toEqual(originalEntries)
   })
 
   it('keeps outgoing and incoming opacity complementary at every overlap frame', () => {
