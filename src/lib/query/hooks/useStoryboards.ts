@@ -263,11 +263,13 @@ export function useBatchGenerateVideos(projectId: string | null, episodeId: stri
                 all: boolean
                 episodeId: string
                 videoModel: string
+                useProjectRouting: true
                 generationOptions?: VideoGenerationOptions
             } = {
                 all: true,
                 episodeId,
                 videoModel: params.videoModel,
+                useProjectRouting: true,
             }
             if (params.generationOptions && typeof params.generationOptions === 'object') {
                 requestBody.generationOptions = params.generationOptions

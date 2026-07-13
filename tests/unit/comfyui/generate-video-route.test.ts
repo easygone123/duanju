@@ -1,9 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
+type PanelRow = {
+  id: string
+  updatedAt: Date
+  hasDialogue: boolean
+  dialogueSpeaker: string | null
+  dialogueText: string | null
+  dialogueEmotion: string | null
+  includeDialogueInVideoPrompt: boolean
+  videoPrompt: string
+  estimatedDuration: number
+  durationOverride: number | null
+  duration: number
+}
+
+type SubmittedTaskInput = {
+  targetId: string
+  payload: Record<string, unknown>
+}
+
 const capabilityMock = vi.hoisted(() => vi.fn())
-const submitTaskMock = vi.hoisted(() => vi.fn(async () => ({ id: 'task-1' })))
+const submitTaskMock = vi.hoisted(() => vi.fn<(input: SubmittedTaskInput) => Promise<{ id: string }>>(async (input) => {
+  void input
+  return { id: 'task-1' }
+}))
 const panelFindFirstMock = vi.hoisted(() => vi.fn())
+const panelFindManyMock = vi.hoisted(() => vi.fn<() => Promise<PanelRow[]>>(async () => []))
 const panelUpdateManyMock = vi.hoisted(() => vi.fn(async (args: unknown) => {
   void args
   return { count: 1 }
@@ -40,7 +63,7 @@ vi.mock('@/lib/model-pricing/lookup', () => ({
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     novelPromotionPanel: {
-      findMany: vi.fn(async () => []),
+      findMany: panelFindManyMock,
       findFirst: panelFindFirstMock,
       updateMany: panelUpdateManyMock,
     },
@@ -69,6 +92,7 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
       includeDialogueInVideoPrompt: true, videoPrompt: 'server visual prompt',
       estimatedDuration: 5, durationOverride: null, duration: 5,
     })
+    panelFindManyMock.mockResolvedValue([])
     panelUpdateManyMock.mockResolvedValue({ count: 1 })
     comfyVersionFindFirstMock.mockResolvedValue({
       id: 'video-version-1',
@@ -150,6 +174,59 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
         videoModelReason: 'dialogue_project_model',
       }),
     }))
+  })
+
+  it('removes forged root and first-last-frame prompts from the submitted task payload', async () => {
+    const response = await POST(request({
+      customPrompt: 'FORGED ROOT PROMPT',
+      firstLastFrame: {
+        flModel: 'comfyui::wf-video',
+        customPrompt: 'FORGED FIRST LAST PROMPT',
+      },
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    const submitted = submitTaskMock.mock.calls[0]?.[0] as { payload: Record<string, unknown> }
+    expect(submitted.payload.videoPrompt).toBe('server visual prompt')
+    expect(submitted.payload).not.toHaveProperty('customPrompt')
+    expect(submitted.payload.firstLastFrame).toEqual({ flModel: 'comfyui::wf-video' })
+  })
+
+  it('routes each batch panel through dialogue-aware project models', async () => {
+    panelFindManyMock.mockResolvedValue([
+      {
+        id: 'panel-dialogue', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: true, dialogueSpeaker: '阿青', dialogueText: '跟我走。', dialogueEmotion: '急切',
+        includeDialogueInVideoPrompt: true, videoPrompt: '人物推开门',
+        estimatedDuration: 5, durationOverride: null, duration: 5,
+      },
+      {
+        id: 'panel-normal', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: '空镜扫过街道',
+        estimatedDuration: 5, durationOverride: null, duration: 5,
+      },
+    ])
+    getProjectModelConfigMock.mockResolvedValue({
+      videoModel: 'cloud::normal', dialogueVideoModel: 'cloud::dialogue', comfyVideoWorkflowVersionId: null,
+    })
+
+    const response = await POST(request({
+      all: true,
+      episodeId: 'episode-1',
+      videoModel: 'cloud::normal',
+      useProjectRouting: true,
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(submitTaskMock.mock.calls.map(([input]) => ({
+      targetId: input.targetId,
+      videoModel: input.payload.videoModel,
+      reason: input.payload.videoModelReason,
+    }))).toEqual([
+      { targetId: 'panel-dialogue', videoModel: 'cloud::dialogue', reason: 'dialogue_project_model' },
+      { targetId: 'panel-normal', videoModel: 'cloud::normal', reason: 'normal_project_model' },
+    ])
   })
 
   it('rejects stale duration override before submission and never mutates the estimate', async () => {

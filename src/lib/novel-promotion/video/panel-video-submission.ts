@@ -52,6 +52,7 @@ export interface PanelVideoSubmission {
   modelReason: VideoModelReason
   visualPrompt: string
   dialogueFragment?: string
+  dialogueTimingInstruction?: string
   submittedPrompt: string
   requestedDuration: number
   effectiveDuration: number
@@ -169,16 +170,20 @@ function buildDialogueFragment(panel: PanelVideoMetadata): string | undefined {
     speaker: singleLine(panel.dialogueSpeaker, 120),
     emotion: singleLine(panel.dialogueEmotion, 120),
     acting: 'natural acting synchronized with speech',
-    mouth: 'natural mouth movement and accurate lip motion',
-    literalText: singleLine(panel.dialogueText, 1000),
+    mouth: 'natural mouth movement',
+    lip: 'accurate lip synchronization',
+    text: singleLine(panel.dialogueText, 1000),
   }
   return `[DIALOGUE_DATA] ${JSON.stringify(data)}`
 }
+
+const DIALOGUE_TIMING_INSTRUCTION = '[DIALOGUE_TIMING] Fit the complete literal dialogue naturally within the requested shot duration, preserving brief acting and reaction beats.'
 
 export function resolvePanelVideoSubmission(input: PanelVideoSubmissionInput): PanelVideoSubmission {
   const { model, reason } = resolveModel(input)
   const visualPrompt = singleLine(input.panel.videoPrompt, 8000)
   const dialogueFragment = buildDialogueFragment(input.panel)
+  const dialogueTimingInstruction = dialogueFragment ? DIALOGUE_TIMING_INSTRUCTION : undefined
   const { requested, source } = resolveRequestedDuration(input.panel, model.duration)
   const effectiveDuration = resolveEffectiveDuration(requested, model.duration)
   const comfyWorkflowVersionId = model.comfyWorkflowVersionId?.trim() || undefined
@@ -191,7 +196,8 @@ export function resolvePanelVideoSubmission(input: PanelVideoSubmissionInput): P
     modelReason: reason,
     visualPrompt,
     dialogueFragment,
-    submittedPrompt: dialogueFragment ? `${visualPrompt} ${dialogueFragment}`.trim() : visualPrompt,
+    dialogueTimingInstruction,
+    submittedPrompt: [visualPrompt, dialogueFragment, dialogueTimingInstruction].filter(Boolean).join(' '),
     requestedDuration: requested,
     effectiveDuration,
     durationSource: source,

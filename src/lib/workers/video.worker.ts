@@ -95,13 +95,10 @@ async function generateVideoForPanel(
     typeof payload.firstLastFrame === 'object' && payload.firstLastFrame !== null
       ? (payload.firstLastFrame as AnyObj)
       : null
-  const firstLastCustomPrompt = typeof firstLastFramePayload?.customPrompt === 'string' ? firstLastFramePayload.customPrompt : null
-  const persistedFirstLastPrompt = firstLastFramePayload ? panel.firstLastFramePrompt : null
-  const customPrompt = typeof payload.customPrompt === 'string' ? payload.customPrompt : null
   const queuedPrompt = typeof payload.videoPrompt === 'string' ? payload.videoPrompt : null
-  const prompt = firstLastCustomPrompt || persistedFirstLastPrompt || customPrompt || resolvePinnedVideoPrompt({
+  const prompt = resolvePinnedVideoPrompt({
     queuedPrompt,
-    persistedPrompt: panel.videoPrompt,
+    persistedPrompt: firstLastFramePayload ? panel.firstLastFramePrompt || panel.videoPrompt : panel.videoPrompt,
     persistedDescription: panel.description,
   })
   if (!prompt) {

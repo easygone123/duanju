@@ -55,8 +55,21 @@ describe('resolvePanelVideoSubmission', () => {
     expect(result.selectedModel).toBe('comfyui::dialogue')
     expect(result.modelReason).toBe('dialogue_project_model')
     expect(result.visualPrompt).toBe('人物转身走向门口')
-    expect(result.dialogueFragment).toContain('我们现在出发。')
+    const fragment = result.dialogueFragment || ''
+    const jsonText = fragment.match(/^\[DIALOGUE_DATA\] (\{.*\})$/)?.[1]
+    expect(jsonText).toBeTruthy()
+    expect(JSON.parse(jsonText || '{}')).toEqual({
+      speaker: '小雨',
+      emotion: '坚定',
+      acting: 'natural acting synchronized with speech',
+      mouth: 'natural mouth movement',
+      lip: 'accurate lip synchronization',
+      text: '我们现在出发。',
+    })
+    expect(fragment).not.toContain('literalText')
+    expect(result.dialogueTimingInstruction).toBe('[DIALOGUE_TIMING] Fit the complete literal dialogue naturally within the requested shot duration, preserving brief acting and reaction beats.')
     expect(result.submittedPrompt).toContain('[DIALOGUE_DATA]')
+    expect(result.submittedPrompt).toContain(result.dialogueTimingInstruction)
     expect(result.submittedPrompt).not.toContain('\n')
     expect(result.snapshot).toMatchObject({
       model: 'comfyui::dialogue',
@@ -80,6 +93,7 @@ describe('resolvePanelVideoSubmission', () => {
     })
 
     expect(result.dialogueFragment).toBeUndefined()
+    expect(result.dialogueTimingInstruction).toBeUndefined()
     expect(result.submittedPrompt).toBe('人物转身走向门口')
     expect(result.submittedPrompt).not.toContain('泄露秘密')
   })

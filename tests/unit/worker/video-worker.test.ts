@@ -203,6 +203,38 @@ describe('worker video processor behavior', () => {
     )
   })
 
+  it.each([
+    ['normal', {}],
+    ['first-last-frame', {
+      firstLastFrame: {
+        flModel: 'cloud::normal',
+        customPrompt: 'FORGED FIRST LAST PROMPT',
+      },
+    }],
+  ])('VIDEO_PANEL: %s execution always uses the queued authoritative videoPrompt', async (_mode, modePayload) => {
+    const processor = workerState.processor
+    expect(processor).toBeTruthy()
+
+    await processor!(buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: {
+        videoModel: 'cloud::normal',
+        videoPrompt: 'SERVER AUTHORITATIVE PROMPT',
+        customPrompt: 'FORGED ROOT PROMPT',
+        ...modePayload,
+      },
+    }))
+
+    expect(utilsMock.resolveVideoSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        options: expect.objectContaining({
+          prompt: 'SERVER AUTHORITATIVE PROMPT',
+        }),
+      }),
+    )
+  })
+
   it('VIDEO_PANEL: 将 Ark 返回的实际视频 token 用量透传到任务结果', async () => {
     const processor = workerState.processor
     expect(processor).toBeTruthy()

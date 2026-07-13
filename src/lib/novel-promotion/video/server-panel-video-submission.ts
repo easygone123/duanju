@@ -242,9 +242,15 @@ export async function resolveAuthoritativePanelPayload(input: {
   }
   const payload = { ...input.body }
   delete payload.submittedPrompt
+  delete payload.customPrompt
   delete payload.requestedDuration
   delete payload.effectiveDuration
   delete payload.comfyWorkflowVersionId
+  if (isRecord(payload.firstLastFrame)) {
+    const firstLastFrame = { ...payload.firstLastFrame }
+    delete firstLastFrame.customPrompt
+    payload.firstLastFrame = firstLastFrame
+  }
   payload.videoModel = submission.selectedModel
   payload.videoModelReason = submission.modelReason
   payload.videoPrompt = submission.submittedPrompt
