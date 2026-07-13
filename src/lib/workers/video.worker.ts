@@ -63,14 +63,18 @@ async function fetchPanelByStoryboardIndex(
   })
 }
 
+async function fetchFramePanelById(panelId: string, projectId: string, userId: string) {
+  return await prisma.novelPromotionPanel.findFirst({
+    where: {
+      id: panelId,
+      storyboard: { episode: { novelPromotionProject: { projectId, project: { userId } } } },
+    },
+  })
+}
+
 async function fetchLastFramePanel(firstLastFramePayload: AnyObj, projectId: string, userId: string) {
   if (typeof firstLastFramePayload.sourcePanelId === 'string' && firstLastFramePayload.sourcePanelId) {
-    return await prisma.novelPromotionPanel.findFirst({
-      where: {
-        id: firstLastFramePayload.sourcePanelId,
-        storyboard: { episode: { novelPromotionProject: { projectId, project: { userId } } } },
-      },
-    })
+    return await fetchFramePanelById(firstLastFramePayload.sourcePanelId, projectId, userId)
   }
   if (
     typeof firstLastFramePayload.lastFrameStoryboardId === 'string'
@@ -122,14 +126,27 @@ async function generateVideoForPanel(
   projectVideoRatio: string | null | undefined,
   generationOptions: VideoOptionMap,
 ): Promise<{ cosKey: string; generationMode: VideoGenerationMode; actualVideoTokens?: number }> {
-  if (!panel.imageUrl) {
-    throw new Error(`Panel ${panel.id} has no imageUrl`)
-  }
-
   const firstLastFramePayload =
     typeof payload.firstLastFrame === 'object' && payload.firstLastFrame !== null
       ? (payload.firstLastFrame as AnyObj)
       : null
+  let firstFramePanel = panel
+  if (
+    firstLastFramePayload
+    && typeof firstLastFramePayload.firstFrameSourcePanelId === 'string'
+    && firstLastFramePayload.firstFrameSourcePanelId
+  ) {
+    const trustedFirstFramePanel = await fetchFramePanelById(
+      firstLastFramePayload.firstFrameSourcePanelId,
+      job.data.projectId,
+      job.data.userId,
+    )
+    if (!trustedFirstFramePanel) throw new Error('VIDEO_FIRST_FRAME_SOURCE_FORBIDDEN')
+    firstFramePanel = trustedFirstFramePanel
+  }
+  if (!firstFramePanel.imageUrl) {
+    throw new Error(`Panel ${firstFramePanel.id} has no imageUrl`)
+  }
   const queuedPrompt = typeof payload.videoPrompt === 'string' ? payload.videoPrompt : null
   const prompt = resolvePinnedVideoPrompt({
     queuedPrompt,
@@ -140,9 +157,9 @@ async function generateVideoForPanel(
     throw new Error(`Panel ${panel.id} has no video prompt`)
   }
 
-  const sourceImageUrl = toSignedUrlIfCos(panel.imageUrl, 3600)
+  const sourceImageUrl = toSignedUrlIfCos(firstFramePanel.imageUrl, 3600)
   if (!sourceImageUrl) {
-    throw new Error(`Panel ${panel.id} image url invalid`)
+    throw new Error(`Panel ${firstFramePanel.id} image url invalid`)
   }
   const sourceImageBase64 = await normalizeToBase64ForGeneration(sourceImageUrl)
 
@@ -184,7 +201,7 @@ async function generateVideoForPanel(
       ? payload.comfyWorkflowVersionId
       : undefined,
     imageUrl: sourceImageBase64,
-    comfyFirstFrameSource: panel.imageUrl,
+    comfyFirstFrameSource: firstFramePanel.imageUrl,
     comfyLastFrameSource: lastFrameStorageValue,
     options: {
       prompt,

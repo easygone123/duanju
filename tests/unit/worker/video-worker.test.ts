@@ -300,6 +300,40 @@ describe('worker video processor behavior', () => {
     )
   })
 
+  it('VIDEO_PANEL: uses the trusted manual first-frame panel image instead of the target image', async () => {
+    prismaMock.novelPromotionPanel.findFirst.mockImplementation(async ({ where }: { where: { id?: string } }) => {
+      if (where.id === 'manual-first-panel') {
+        return buildPanel({ id: 'manual-first-panel', imageUrl: 'cos/manual-first.png' })
+      }
+      if (where.id === 'last-panel') {
+        return buildPanel({ id: 'last-panel', imageUrl: 'cos/last.png' })
+      }
+      return null
+    })
+
+    await workerState.processor!(buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: {
+        videoModel: 'comfyui::wf-video',
+        videoPrompt: 'SERVER FIRST LAST PROMPT',
+        firstLastFrame: {
+          flModel: 'comfyui::wf-video',
+          firstFrameSourcePanelId: 'manual-first-panel',
+          sourcePanelId: 'last-panel',
+        },
+      },
+    }))
+
+    expect(utilsMock.resolveVideoSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        imageUrl: 'https://signed.example/cos/manual-first.png',
+        comfyFirstFrameSource: 'cos/manual-first.png',
+        comfyLastFrameSource: 'cos/last.png',
+      }),
+    )
+  })
+
   it('VIDEO_PANEL: rejects a trusted-looking last-frame id that is outside the task project', async () => {
     prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(null)
 

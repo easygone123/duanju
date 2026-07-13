@@ -332,6 +332,7 @@ export function useVideoStageRuntime({
     panelIndex: number,
     videoModel?: string,
     firstLastFrame?: {
+      firstFrameSourcePanelId?: string
       lastFrameStoryboardId: string
       lastFramePanelIndex: number
       flModel: string

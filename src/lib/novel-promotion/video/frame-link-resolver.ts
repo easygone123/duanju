@@ -12,6 +12,7 @@ export interface FrameLinkPanel {
   gridCellIndex?: number | null
   firstFrameSourceMeta?: string | null
   lastFrameSourceMeta?: string | null
+  linkedToNextPanel?: boolean | null
 }
 
 export interface FlatFrameLinkPanel extends FrameLinkPanel {
@@ -113,7 +114,16 @@ function resolveAutomaticLastFrame(
   if (currentIndex < 0) return null
   const withinGroup = panels[currentIndex + 1]
   if (withinGroup) return { mode: 'automatic', sourcePanelId: withinGroup.id }
-  if (storyboard.layoutMode !== 'six_grid') return null
+  if (storyboard.layoutMode !== 'six_grid') {
+    const hasFrameSourceMetadata = panel.firstFrameSourceMeta != null
+      || panel.lastFrameSourceMeta != null
+    if (panel.linkedToNextPanel !== true || hasFrameSourceMetadata) return null
+    const storyboardIndex = storyboards.findIndex((candidate) => candidate.id === storyboard.id)
+    const nextStoryboard = storyboardIndex >= 0 ? storyboards[storyboardIndex + 1] : undefined
+    if (!nextStoryboard || nextStoryboard.layoutMode === 'six_grid') return null
+    const nextPanel = sortedPanels(nextStoryboard)[0]
+    return nextPanel ? { mode: 'automatic', sourcePanelId: nextPanel.id } : null
+  }
 
   const orderedGroups = storyboards
     .filter((candidate) => candidate.layoutMode === 'six_grid')
@@ -121,7 +131,9 @@ function resolveAutomaticLastFrame(
     .sort((left, right) => (left.groupSequence ?? 0) - (right.groupSequence ?? 0))
   const groupIndex = orderedGroups.findIndex((candidate) => candidate.id === storyboard.id)
   const nextGroup = groupIndex >= 0 ? orderedGroups[groupIndex + 1] : undefined
-  if (!nextGroup || readSceneKey(storyboard) !== readSceneKey(nextGroup)) return null
+  const currentSceneKey = readSceneKey(storyboard)
+  const nextSceneKey = nextGroup ? readSceneKey(nextGroup) : null
+  if (!nextGroup || !currentSceneKey || !nextSceneKey || currentSceneKey !== nextSceneKey) return null
   const nextPanel = sortedPanels(nextGroup)[0]
   return nextPanel ? { mode: 'automatic', sourcePanelId: nextPanel.id } : null
 }

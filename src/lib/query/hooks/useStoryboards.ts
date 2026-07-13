@@ -160,6 +160,7 @@ export function useGenerateVideo(projectId: string | null, episodeId: string | n
             videoModel: string
             generationOptions?: VideoGenerationOptions
             firstLastFrame?: {
+                firstFrameSourcePanelId?: string
                 lastFrameStoryboardId: string
                 lastFramePanelIndex: number
                 flModel: string
@@ -176,6 +177,7 @@ export function useGenerateVideo(projectId: string | null, episodeId: string | n
                 storyboardId: string
                 panelIndex: number
                 firstLastFrame?: {
+                    firstFrameSourcePanelId?: string
                     lastFrameStoryboardId: string
                     lastFramePanelIndex: number
                     flModel: string

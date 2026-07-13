@@ -77,6 +77,49 @@ describe('continuous first/last-frame resolver', () => {
     expect(resolveFrameLinkChoices({ panelId: 'g1-5', storyboards: [first, next] }).lastFrame).toBeNull()
   })
 
+  it.each([
+    [null, null],
+    [JSON.stringify({ sceneKey: 'office' }), null],
+    ['{malformed', JSON.stringify({ sceneKey: 'office' })],
+  ])('fails closed across groups when continuity scene keys are missing or invalid', (leftAnchor, rightAnchor) => {
+    const first = sixGridStoryboard({
+      id: 'group-1', groupSequence: 1, sceneKey: 'office',
+      panelIds: ['g1-0', 'g1-1', 'g1-2', 'g1-3', 'g1-4', 'g1-5'],
+    })
+    const next = sixGridStoryboard({
+      id: 'group-2', groupSequence: 2, sceneKey: 'office',
+      panelIds: ['g2-0', 'g2-1', 'g2-2', 'g2-3', 'g2-4', 'g2-5'],
+    })
+    first.continuityAnchor = leftAnchor
+    next.continuityAnchor = rightAnchor
+
+    expect(resolveFrameLinkChoices({ panelId: 'g1-5', storyboards: [first, next] }).lastFrame).toBeNull()
+  })
+
+  it('keeps legacy linked individual panels usable across storyboard boundaries', () => {
+    const first = {
+      id: 'legacy-1', layoutMode: 'individual', panels: [{
+        id: 'legacy-panel-1', storyboardId: 'legacy-1', panelIndex: 0,
+        linkedToNextPanel: true,
+      }],
+    } as FrameLinkStoryboard
+    const next: FrameLinkStoryboard = {
+      id: 'legacy-2', layoutMode: 'individual', panels: [{
+        id: 'legacy-panel-2', storyboardId: 'legacy-2', panelIndex: 0,
+      }],
+    }
+
+    const choices = resolveFrameLinkChoices({
+      panelId: 'legacy-panel-1', storyboards: [first, next],
+    })
+    expect(choices.lastFrame).toEqual({ mode: 'automatic', sourcePanelId: 'legacy-panel-2' })
+    expect(resolveFrameLinkSubmission({ choices, supportsFirstLastFrame: true }).submission)
+      .toEqual({
+        firstFrameSourcePanelId: 'legacy-panel-1',
+        lastFrameSourcePanelId: 'legacy-panel-2',
+      })
+  })
+
   it('leaves the final shot without an automatic last frame', () => {
     const group = sixGridStoryboard({
       id: 'group-1', groupSequence: 1, sceneKey: 'office',

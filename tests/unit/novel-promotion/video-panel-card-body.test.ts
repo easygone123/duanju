@@ -174,6 +174,30 @@ describe('VideoPanelCardBody', () => {
     expect(markup).toContain('生成首尾帧视频')
   })
 
+  it('offers replace and clear controls for a manual first-frame source', () => {
+    const base = createRuntime()
+    const markup = renderToStaticMarkup(React.createElement(VideoPanelCardBody, {
+      runtime: createRuntime({
+        layout: {
+          ...base.layout,
+          frameLinkChoices: {
+            firstFrame: { mode: 'manual', sourcePanelId: 'manual-first-panel' },
+            lastFrame: { mode: 'automatic', sourcePanelId: 'panel-3' },
+          },
+          flModelSupportsFirstLastFrame: true,
+        },
+        actions: {
+          ...base.actions,
+          onUpdateFrameLink: () => undefined,
+        },
+      }),
+    }))
+
+    expect(markup).toContain('first · manual')
+    expect(markup).toContain('replace first')
+    expect(markup).toContain('clear first')
+  })
+
   it('shows accessible dialogue routing and duration controls without relying on color', () => {
     const base = createRuntime()
     const markup = renderToStaticMarkup(

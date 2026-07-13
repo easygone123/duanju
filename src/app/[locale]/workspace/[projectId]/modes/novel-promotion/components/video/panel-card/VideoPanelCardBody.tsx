@@ -169,40 +169,54 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
       </div>
 
       <div className="mt-3 pt-3 border-t border-[var(--glass-stroke-base)]">
-        {(frameLinkChoices.firstFrame || frameLinkChoices.lastFrame) && (
-          <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px]">
-            {frameLinkChoices.firstFrame && (
-              <span className="rounded-full border border-[var(--glass-stroke-base)] px-2 py-0.5">
-                first · {frameLinkChoices.firstFrame.mode}
-              </span>
-            )}
-            {frameLinkChoices.lastFrame && (
-              <span className="rounded-full border border-[var(--glass-stroke-base)] px-2 py-0.5">
-                last · {frameLinkChoices.lastFrame.mode}
-              </span>
-            )}
-            {layout.isLinked && (
-              <>
-                <button
-                  type="button"
-                  className="underline"
-                  onClick={() => {
-                    const sourcePanelId = globalThis.prompt?.('Source panel ID', layout.nextPanel?.panelId || '')?.trim()
-                    if (sourcePanelId) void actions.onUpdateFrameLink(panelKey, panel.storyboardId, panel.panelIndex, {
-                      action: 'replace', frame: 'last', sourcePanelId,
-                    })
-                  }}
-                >replace</button>
-                <button type="button" className="underline" onClick={() => void actions.onUpdateFrameLink(
-                  panelKey, panel.storyboardId, panel.panelIndex, { action: 'clear', frame: 'last' },
-                )}>clear</button>
-              </>
-            )}
-            <button type="button" className="underline" onClick={() => void actions.onUpdateFrameLink(
-              panelKey, panel.storyboardId, panel.panelIndex, { action: 'restore-auto' },
-            )}>restore-auto</button>
-          </div>
-        )}
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+          {frameLinkChoices.firstFrame && (
+            <span className="rounded-full border border-[var(--glass-stroke-base)] px-2 py-0.5">
+              first · {frameLinkChoices.firstFrame.mode}
+            </span>
+          )}
+          {frameLinkChoices.lastFrame && (
+            <span className="rounded-full border border-[var(--glass-stroke-base)] px-2 py-0.5">
+              last · {frameLinkChoices.lastFrame.mode}
+            </span>
+          )}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => {
+              const sourcePanelId = globalThis.prompt?.(
+                'Source panel ID',
+                frameLinkChoices.firstFrame?.sourcePanelId || panel.panelId || '',
+              )?.trim()
+              if (sourcePanelId) void actions.onUpdateFrameLink(panelKey, panel.storyboardId, panel.panelIndex, {
+                action: 'replace', frame: 'first', sourcePanelId,
+              })
+            }}
+          >replace first</button>
+          <button type="button" className="underline" onClick={() => void actions.onUpdateFrameLink(
+            panelKey, panel.storyboardId, panel.panelIndex, { action: 'clear', frame: 'first' },
+          )}>clear first</button>
+          {layout.isLinked && (
+            <>
+              <button
+                type="button"
+                className="underline"
+                onClick={() => {
+                  const sourcePanelId = globalThis.prompt?.('Source panel ID', layout.nextPanel?.panelId || '')?.trim()
+                  if (sourcePanelId) void actions.onUpdateFrameLink(panelKey, panel.storyboardId, panel.panelIndex, {
+                    action: 'replace', frame: 'last', sourcePanelId,
+                  })
+                }}
+              >replace last</button>
+              <button type="button" className="underline" onClick={() => void actions.onUpdateFrameLink(
+                panelKey, panel.storyboardId, panel.panelIndex, { action: 'clear', frame: 'last' },
+              )}>clear last</button>
+            </>
+          )}
+          <button type="button" className="underline" onClick={() => void actions.onUpdateFrameLink(
+            panelKey, panel.storyboardId, panel.panelIndex, { action: 'restore-auto' },
+          )}>restore-auto</button>
+        </div>
         {!layout.flModelSupportsFirstLastFrame && layout.flModel && (
           <p role="alert" className="mb-2 text-xs text-[var(--glass-tone-danger-fg)]">
             FIRST_LAST_FRAME_MODEL_UNSUPPORTED

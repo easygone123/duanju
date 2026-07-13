@@ -16,6 +16,7 @@ import { projectVideoPricingTiersByFixedSelections } from '@/lib/model-pricing/v
 import {
   groupFrameLinkPanels,
   resolveAutomaticFrameLinkChoices,
+  resolveFrameLinkSubmission,
   type FrameLinkChoices,
 } from '@/lib/novel-promotion/video/frame-link-resolver'
 
@@ -52,6 +53,7 @@ interface UseVideoFirstLastFrameFlowParams {
     panelIndex: number,
     videoModel?: string,
     firstLastFrame?: {
+      firstFrameSourcePanelId?: string
       lastFrameStoryboardId: string
       lastFramePanelIndex: number
       flModel: string
@@ -224,6 +226,11 @@ export function useVideoFirstLastFrameFlow({
     generationOptions?: VideoGenerationOptions,
     firstPanelId?: string,
   ) => {
+    const resolvedFrameLink = resolveFrameLinkSubmission({
+      choices: frameLinkChoices.get(panelKey) || { firstFrame: null, lastFrame: null },
+      supportsFirstLastFrame: flModelSupportsFirstLastFrame,
+    })
+    if (!resolvedFrameLink.submission) return
     const persistedCustomPrompt = allPanels.find(
       (panel) =>
         panel.storyboardId === firstStoryboardId
@@ -231,13 +238,14 @@ export function useVideoFirstLastFrameFlow({
     )?.firstLastFramePrompt
     const customPrompt = flCustomPrompts.get(panelKey) ?? persistedCustomPrompt
     await onGenerateVideo(firstStoryboardId, firstPanelIndex, flModel, {
+      firstFrameSourcePanelId: resolvedFrameLink.submission.firstFrameSourcePanelId,
       lastFrameStoryboardId: lastStoryboardId,
       lastFramePanelIndex: lastPanelIndex,
       flModel,
       customPrompt,
       supportsFirstLastFrame: flModelSupportsFirstLastFrame,
     }, generationOptions ?? flGenerationOptions, firstPanelId)
-  }, [allPanels, flCustomPrompts, flGenerationOptions, flModel, flModelSupportsFirstLastFrame, onGenerateVideo])
+  }, [allPanels, flCustomPrompts, flGenerationOptions, flModel, flModelSupportsFirstLastFrame, frameLinkChoices, onGenerateVideo])
 
   const getDefaultFlPrompt = useCallback((firstPrompt?: string, lastPrompt?: string): string => {
     const first = firstPrompt || ''

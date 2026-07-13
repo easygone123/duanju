@@ -15,6 +15,7 @@ import {
   resolvePanelVideoSubmission,
   type AvailablePanelVideoModel,
 } from './panel-video-submission'
+import { parseFrameSourceMeta } from './frame-link-resolver'
 
 const LEGACY_REMOTE_VIDEO_DEFAULT_DURATION_SECONDS = 5
 
@@ -36,6 +37,7 @@ export type VideoPanelRecord = {
   includeDialogueInVideoPrompt: boolean
   videoPrompt: string | null
   firstLastFramePrompt: string | null
+  firstFrameSourceMeta: string | null
   estimatedDuration: number | null
   durationOverride: number | null
   duration: number | null
@@ -44,6 +46,7 @@ export type VideoPanelRecord = {
 export const VIDEO_PANEL_SELECT = {
   id: true, updatedAt: true, hasDialogue: true, dialogueSpeaker: true, dialogueText: true,
   dialogueEmotion: true, includeDialogueInVideoPrompt: true, videoPrompt: true, firstLastFramePrompt: true,
+  firstFrameSourceMeta: true,
   estimatedDuration: true, durationOverride: true, duration: true,
 } as const
 
@@ -202,13 +205,34 @@ async function applyDurationOverrideCas(
 
 async function resolveTrustedFirstLastFrame(
   input: Record<string, unknown>,
+  panel: VideoPanelRecord,
   projectId: string,
   userId: string,
-): Promise<{ flModel: string; sourcePanelId?: string }> {
+): Promise<{ flModel: string; firstFrameSourcePanelId: string; sourcePanelId?: string }> {
   const flModel = typeof input.flModel === 'string' ? input.flModel : ''
+  const storedFirstFrame = parseFrameSourceMeta(panel.firstFrameSourceMeta)
+  if (storedFirstFrame === null) {
+    throw new ApiError('INVALID_PARAMS', { code: 'FIRSTLASTFRAME_SOURCE_INVALID' })
+  }
+  const resolveFirstFrameSourcePanelId = async () => {
+    if (storedFirstFrame?.mode !== 'manual') return panel.id
+    const sourcePanel = await prisma.novelPromotionPanel.findFirst({
+      where: {
+        id: storedFirstFrame.sourcePanelId,
+        storyboard: { episode: { novelPromotionProject: { projectId, project: { userId } } } },
+      },
+      select: { id: true },
+    })
+    if (!sourcePanel) {
+      throw new ApiError('INVALID_PARAMS', { code: 'VIDEO_FIRST_FRAME_SOURCE_FORBIDDEN' })
+    }
+    return sourcePanel.id
+  }
   const hasStoryboard = Object.prototype.hasOwnProperty.call(input, 'lastFrameStoryboardId')
   const hasPanelIndex = Object.prototype.hasOwnProperty.call(input, 'lastFramePanelIndex')
-  if (!hasStoryboard && !hasPanelIndex) return { flModel }
+  if (!hasStoryboard && !hasPanelIndex) {
+    return { flModel, firstFrameSourcePanelId: await resolveFirstFrameSourcePanelId() }
+  }
 
   const storyboardId = typeof input.lastFrameStoryboardId === 'string'
     ? input.lastFrameStoryboardId.trim()
@@ -228,7 +252,11 @@ async function resolveTrustedFirstLastFrame(
   if (!sourcePanel) {
     throw new ApiError('INVALID_PARAMS', { code: 'VIDEO_LAST_FRAME_SOURCE_FORBIDDEN' })
   }
-  return { flModel, sourcePanelId: sourcePanel.id }
+  return {
+    flModel,
+    firstFrameSourcePanelId: await resolveFirstFrameSourcePanelId(),
+    sourcePanelId: sourcePanel.id,
+  }
 }
 
 export async function resolveAuthoritativePanelPayload(input: {
@@ -243,7 +271,7 @@ export async function resolveAuthoritativePanelPayload(input: {
   const isBatch = input.routingMode === 'batch'
   const firstLast = !isBatch && isRecord(input.body.firstLastFrame) ? input.body.firstLastFrame : null
   const trustedFirstLastFrame = firstLast
-    ? await resolveTrustedFirstLastFrame(firstLast, input.projectId, input.userId)
+    ? await resolveTrustedFirstLastFrame(firstLast, panel, input.projectId, input.userId)
     : null
   const explicitModel = isBatch
     ? null

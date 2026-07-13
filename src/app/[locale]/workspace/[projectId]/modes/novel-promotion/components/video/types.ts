@@ -141,6 +141,7 @@ export interface MatchedVoiceLine {
 }
 
 export interface FirstLastFrameParams {
+  firstFrameSourcePanelId?: string
   lastFrameStoryboardId: string
   lastFramePanelIndex: number
   flModel: string

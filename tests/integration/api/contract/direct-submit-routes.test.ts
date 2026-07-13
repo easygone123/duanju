@@ -449,6 +449,7 @@ const DIRECT_CASES: ReadonlyArray<DirectRouteCase> = [
       },
       firstLastFrame: {
         flModel: 'ark::doubao-seedance-2-0-260128',
+        firstFrameSourcePanelId: 'panel-1',
       },
     },
   },

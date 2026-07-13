@@ -144,9 +144,54 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
       payload: expect.objectContaining({
         videoModel: 'comfyui::wf-video',
         videoPrompt: 'first-last prompt',
-        firstLastFrame: { flModel: 'comfyui::wf-video', sourcePanelId: 'last-panel-1' },
+        firstLastFrame: {
+          flModel: 'comfyui::wf-video',
+          firstFrameSourcePanelId: 'panel-1',
+          sourcePanelId: 'last-panel-1',
+        },
         comfyWorkflowVersionId: 'video-version-1',
         comfyModelSnapshotVersion: 1,
+      }),
+    }))
+  })
+
+  it('resolves a persisted manual first-frame source through owner scope before task submission', async () => {
+    panelFindFirstMock
+      .mockResolvedValueOnce({
+        id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: 'normal prompt', firstLastFramePrompt: 'first-last prompt',
+        estimatedDuration: 5, durationOverride: null, duration: 5,
+        firstFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'manual-first-panel' }),
+      })
+      .mockResolvedValueOnce({ id: 'last-panel' })
+      .mockResolvedValueOnce({ id: 'manual-first-panel' })
+
+    const response = await POST(request({
+      firstLastFrame: {
+        flModel: 'comfyui::wf-video',
+        lastFrameStoryboardId: 'storyboard-2',
+        lastFramePanelIndex: 0,
+        firstFrameSourcePanelId: 'forged-client-first',
+      },
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(panelFindFirstMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: {
+        id: 'manual-first-panel',
+        storyboard: { episode: { novelPromotionProject: {
+          projectId: 'project-1', project: { userId: 'user-1' },
+        } } },
+      },
+    }))
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        firstLastFrame: {
+          flModel: 'comfyui::wf-video',
+          firstFrameSourcePanelId: 'manual-first-panel',
+          sourcePanelId: 'last-panel',
+        },
       }),
     }))
   })
@@ -272,7 +317,9 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     const submitted = submitTaskMock.mock.calls[0]?.[0] as { payload: Record<string, unknown> }
     expect(submitted.payload.videoPrompt).toBe('server visual prompt')
     expect(submitted.payload).not.toHaveProperty('customPrompt')
-    expect(submitted.payload.firstLastFrame).toEqual({ flModel: 'comfyui::wf-video' })
+    expect(submitted.payload.firstLastFrame).toEqual({
+      flModel: 'comfyui::wf-video', firstFrameSourcePanelId: 'panel-1',
+    })
   })
 
   it('routes each batch panel through dialogue-aware project models', async () => {
