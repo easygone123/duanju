@@ -47,6 +47,7 @@ export function useWorkspaceVideoActions({
       lastFramePanelIndex: number
       flModel: string
       customPrompt?: string
+      supportsFirstLastFrame?: boolean
     },
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
@@ -61,13 +62,25 @@ export function useWorkspaceVideoActions({
       alert('Video model is required')
       return
     }
+    if (firstLastFrame?.supportsFirstLastFrame === false) {
+      alert('FIRST_LAST_FRAME_MODEL_UNSUPPORTED')
+      return
+    }
+    const sanitizedFirstLastFrame = firstLastFrame
+      ? {
+          lastFrameStoryboardId: firstLastFrame.lastFrameStoryboardId,
+          lastFramePanelIndex: firstLastFrame.lastFramePanelIndex,
+          flModel: firstLastFrame.flModel,
+          ...(firstLastFrame.customPrompt === undefined ? {} : { customPrompt: firstLastFrame.customPrompt }),
+        }
+      : undefined
     try {
       await generateVideoMutation.mutateAsync({
         storyboardId,
         panelIndex,
         panelId,
         videoModel: normalizedVideoModel,
-        firstLastFrame,
+        firstLastFrame: sanitizedFirstLastFrame,
         generationOptions,
         ...submissionMeta,
       })

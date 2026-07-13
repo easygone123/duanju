@@ -27,11 +27,15 @@ export function useListProjectEpisodeVideoUrls(projectId: string) {
  * 更新 panel 首尾帧链接状态（项目）
  */
 export function useUpdateProjectPanelLink(projectId: string) {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (payload: {
       storyboardId: string
       panelIndex: number
-      linked: boolean
+      linked?: boolean
+      action?: 'replace' | 'clear' | 'unlink' | 'restore-auto'
+      frame?: 'first' | 'last'
+      sourcePanelId?: string
     }) =>
       await requestJsonWithError(
         `/api/novel-promotion/${projectId}/panel-link`,
@@ -42,6 +46,9 @@ export function useUpdateProjectPanelLink(projectId: string) {
         },
         '保存链接状态失败',
       ),
+    onSettled: () => {
+      invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+    },
   })
 }
 

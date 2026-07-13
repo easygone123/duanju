@@ -1,5 +1,6 @@
 import type { VideoPanel, MatchedVoiceLine, VideoModelOption, FirstLastFrameParams, VideoGenerationOptions } from '../types'
 import type { CapabilitySelections, CapabilityValue } from '@/lib/model-config-contract'
+import type { FrameLinkChoices } from '@/lib/novel-promotion/video/frame-link-resolver'
 
 export interface VideoPanelCardShellProps {
   panel: VideoPanel
@@ -32,6 +33,8 @@ export interface VideoPanelCardShellProps {
     value: CapabilityValue | undefined
   }>
   flMissingCapabilityFields: string[]
+  flModelSupportsFirstLastFrame: boolean
+  frameLinkChoices: FrameLinkChoices
   flCustomPrompt: string
   defaultFlPrompt: string
   localPrompt: string
@@ -53,6 +56,12 @@ export interface VideoPanelCardShellProps {
   ) => void
   onUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => void
   onToggleLink: (panelKey: string, storyboardId: string, panelIndex: number) => void
+  onUpdateFrameLink: (
+    panelKey: string,
+    storyboardId: string,
+    panelIndex: number,
+    input: { action: 'replace' | 'clear' | 'unlink' | 'restore-auto'; frame?: 'first' | 'last'; sourcePanelId?: string },
+  ) => void
   onFlModelChange: (model: string) => void
   onFlCapabilityChange: (field: string, rawValue: string) => void
   onFlCustomPromptChange: (panelKey: string, value: string) => void

@@ -68,4 +68,27 @@ describe('useWorkspaceVideoActions', () => {
 
     expect(globalThis.alert).toHaveBeenCalledWith('execution.generationFailed: video submit failed')
   })
+
+  it('preserves first/last frame choices but blocks an incompatible model before mutation', async () => {
+    const actions = useWorkspaceVideoActions({
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      t: (key: string) => key,
+    })
+    const choices = {
+      lastFrameStoryboardId: 'storyboard-2',
+      lastFramePanelIndex: 0,
+      flModel: 'fal::normal-only',
+      supportsFirstLastFrame: false,
+    }
+
+    await actions.handleGenerateVideo('storyboard-1', 5, 'fal::normal-only', choices)
+
+    expect(choices).toEqual(expect.objectContaining({
+      lastFrameStoryboardId: 'storyboard-2',
+      lastFramePanelIndex: 0,
+    }))
+    expect(generateVideoMutateAsyncMock).not.toHaveBeenCalled()
+    expect(globalThis.alert).toHaveBeenCalledWith('FIRST_LAST_FRAME_MODEL_UNSUPPORTED')
+  })
 })

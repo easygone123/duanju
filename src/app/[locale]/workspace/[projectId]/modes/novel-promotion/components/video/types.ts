@@ -50,6 +50,9 @@ export interface Panel {
   videoGenerationMode?: VideoGenerationMode | null
   videoModel?: string | null
   linkedToNextPanel?: boolean | null
+  gridCellIndex?: number | null
+  firstFrameSourceMeta?: string | null
+  lastFrameSourceMeta?: string | null
   videoTaskRunning?: boolean | null
   videoErrorMessage?: string | null  // 视频生成错误消息
   videoErrorCode?: string | null
@@ -72,6 +75,9 @@ export interface Panel {
 export interface Storyboard {
   id: string
   clipId?: string | null
+  layoutMode?: string | null
+  groupSequence?: number | null
+  continuityAnchor?: string | null
   panels?: Panel[]
   clip?: {
     start: number
@@ -101,6 +107,12 @@ export interface VideoPanel {
   videoErrorCode?: string
   videoModel?: string
   linkedToNextPanel?: boolean
+  layoutMode?: string | null
+  groupSequence?: number | null
+  continuityAnchor?: string | null
+  gridCellIndex?: number | null
+  firstFrameSourceMeta?: string | null
+  lastFrameSourceMeta?: string | null
   // 口型同步相关
   lipSyncVideoUrl?: string
   lipSyncTaskRunning?: boolean
@@ -133,6 +145,7 @@ export interface FirstLastFrameParams {
   lastFramePanelIndex: number
   flModel: string
   customPrompt?: string
+  supportsFirstLastFrame?: boolean
 }
 
 export type VideoGenerationOptionValue = string | number | boolean

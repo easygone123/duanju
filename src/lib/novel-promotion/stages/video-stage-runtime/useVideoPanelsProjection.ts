@@ -89,6 +89,12 @@ export function useVideoPanelsProjection({
               : panel.videoErrorMessage || undefined,
           videoModel: panel.videoModel || undefined,
           linkedToNextPanel: panel.linkedToNextPanel || false,
+          layoutMode: storyboard.layoutMode,
+          groupSequence: storyboard.groupSequence,
+          continuityAnchor: storyboard.continuityAnchor,
+          gridCellIndex: panel.gridCellIndex,
+          firstFrameSourceMeta: panel.firstFrameSourceMeta,
+          lastFrameSourceMeta: panel.lastFrameSourceMeta,
           lipSyncVideoUrl: panel.lipSyncVideoUrl || undefined,
           lipSyncTaskRunning: panelLipState?.phase === 'queued' || panelLipState?.phase === 'processing',
           lipSyncErrorCode:

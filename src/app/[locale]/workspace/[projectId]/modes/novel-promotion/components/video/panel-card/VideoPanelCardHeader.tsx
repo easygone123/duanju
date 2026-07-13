@@ -32,6 +32,7 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
 
   const hasVisibleBaseVideo = !!media.baseVideoUrl
   const showFirstLastFrameSwitch = layout.hasNext
+  const frameSourceMode = layout.frameLinkChoices?.lastFrame?.mode
 
   return (
     <div className="bg-[var(--glass-bg-muted)] flex items-center justify-center relative" style={{ aspectRatio: player.cssAspectRatio }}>
@@ -79,6 +80,12 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
         {panelIndex + 1}
       </div>
 
+      {frameSourceMode && (
+        <span className="absolute top-2 left-12 rounded-full bg-[var(--glass-bg-surface-strong)] px-2 py-0.5 text-[10px] font-medium text-[var(--glass-text-primary)]">
+          {frameSourceMode}
+        </span>
+      )}
+
       {/* 两卡片中间唯一的链接/断开按钮 */}
 
       {showFirstLastFrameSwitch && (
@@ -87,7 +94,9 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
             <button
               onClick={(event) => {
                 event.stopPropagation()
-                actions.onToggleLink(panelKey, panel.storyboardId, panel.panelIndex)
+                void actions.onUpdateFrameLink(panelKey, panel.storyboardId, panel.panelIndex, {
+                  action: layout.isLinked ? 'unlink' : 'restore-auto',
+                })
               }}
               onMouseEnter={() => setShowTooltip(true)}
               onMouseLeave={() => setShowTooltip(false)}

@@ -13,6 +13,11 @@ import {
 } from '@/lib/model-capabilities/video-effective'
 import { supportsFirstLastFrame } from '@/lib/model-capabilities/video-model-options'
 import { projectVideoPricingTiersByFixedSelections } from '@/lib/model-pricing/video-tier'
+import {
+  groupFrameLinkPanels,
+  resolveAutomaticFrameLinkChoices,
+  type FrameLinkChoices,
+} from '@/lib/novel-promotion/video/frame-link-resolver'
 
 interface FirstLastFrameCapabilityField {
   field: string
@@ -40,6 +45,7 @@ function toFieldLabel(field: string): string {
 interface UseVideoFirstLastFrameFlowParams {
   allPanels: VideoPanel[]
   linkedPanels: Map<string, boolean>
+  frameLinkChoices: Map<string, FrameLinkChoices>
   videoModelOptions: VideoModelOption[]
   onGenerateVideo: (
     storyboardId: string,
@@ -50,6 +56,7 @@ interface UseVideoFirstLastFrameFlowParams {
       lastFramePanelIndex: number
       flModel: string
       customPrompt?: string
+      supportsFirstLastFrame?: boolean
     },
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
@@ -60,15 +67,16 @@ interface UseVideoFirstLastFrameFlowParams {
 export function useVideoFirstLastFrameFlow({
   allPanels,
   linkedPanels,
+  frameLinkChoices,
   videoModelOptions,
   onGenerateVideo,
   t,
 }: UseVideoFirstLastFrameFlowParams) {
-  const firstLastFrameModelOptions = useMemo(
+  const compatibleModelOptions = useMemo(
     () => videoModelOptions.filter((option) => supportsFirstLastFrame(option)),
     [videoModelOptions],
   )
-  const [flModel, setFlModel] = useState(firstLastFrameModelOptions[0]?.value || '')
+  const [flModel, setFlModel] = useState(compatibleModelOptions[0]?.value || '')
   const [flGenerationOptions, setFlGenerationOptions] = useState<VideoGenerationOptions>({})
   const [flCustomPrompts, setFlCustomPrompts] = useState<Map<string, string>>(new Map())
 
@@ -94,19 +102,20 @@ export function useVideoFirstLastFrameFlow({
   }, [allPanels])
 
   useEffect(() => {
-    if (!flModel && firstLastFrameModelOptions.length > 0) {
-      setFlModel(firstLastFrameModelOptions[0].value)
+    if (!flModel && compatibleModelOptions.length > 0) {
+      setFlModel(compatibleModelOptions[0].value)
       return
     }
-    if (flModel && !firstLastFrameModelOptions.some((option) => option.value === flModel)) {
-      setFlModel(firstLastFrameModelOptions[0]?.value || '')
+    if (flModel && !videoModelOptions.some((option) => option.value === flModel)) {
+      setFlModel(compatibleModelOptions[0]?.value || '')
     }
-  }, [firstLastFrameModelOptions, flModel])
+  }, [compatibleModelOptions, flModel, videoModelOptions])
 
   const selectedFlModelOption = useMemo(
-    () => firstLastFrameModelOptions.find((option) => option.value === flModel),
-    [firstLastFrameModelOptions, flModel],
+    () => videoModelOptions.find((option) => option.value === flModel),
+    [videoModelOptions, flModel],
   )
+  const flModelSupportsFirstLastFrame = supportsFirstLastFrame(selectedFlModelOption || {})
   const flPricingTiers = useMemo(
     () => projectVideoPricingTiersByFixedSelections({
       tiers: selectedFlModelOption?.videoPricingTiers ?? [],
@@ -167,10 +176,13 @@ export function useVideoFirstLastFrameFlow({
   }, [flCapabilityDefinitions, flEffectiveFieldMap])
 
   const flMissingCapabilityFields = useMemo(
-    () => flEffectiveCapabilityFields
+    () => [
+      ...(!flModelSupportsFirstLastFrame ? ['firstlastframe'] : []),
+      ...flEffectiveCapabilityFields
       .filter((field) => field.options.length === 0 || field.value === undefined)
       .map((field) => field.field),
-    [flEffectiveCapabilityFields],
+    ],
+    [flEffectiveCapabilityFields, flModelSupportsFirstLastFrame],
   )
 
   const setFlCapabilityValue = useCallback((field: string, rawValue: string) => {
@@ -223,8 +235,9 @@ export function useVideoFirstLastFrameFlow({
       lastFramePanelIndex: lastPanelIndex,
       flModel,
       customPrompt,
+      supportsFirstLastFrame: flModelSupportsFirstLastFrame,
     }, generationOptions ?? flGenerationOptions, firstPanelId)
-  }, [allPanels, flCustomPrompts, flGenerationOptions, flModel, onGenerateVideo])
+  }, [allPanels, flCustomPrompts, flGenerationOptions, flModel, flModelSupportsFirstLastFrame, onGenerateVideo])
 
   const getDefaultFlPrompt = useCallback((firstPrompt?: string, lastPrompt?: string): string => {
     const first = firstPrompt || ''
@@ -235,21 +248,53 @@ export function useVideoFirstLastFrameFlow({
     return first
   }, [t])
 
-  const getNextPanel = useCallback((currentIndex: number): VideoPanel | null => {
-    if (currentIndex >= allPanels.length - 1) return null
-    return allPanels[currentIndex + 1]
+  const automaticFrameLinkChoices = useMemo(() => {
+    const map = new Map<string, FrameLinkChoices>()
+    const storyboards = groupFrameLinkPanels(allPanels.map((panel) => ({
+      ...panel,
+      id: panel.panelId || `${panel.storyboardId}-${panel.panelIndex}`,
+    })))
+    for (const panel of allPanels) {
+      const key = `${panel.storyboardId}-${panel.panelIndex}`
+      map.set(key, resolveAutomaticFrameLinkChoices({
+        panelId: panel.panelId || key,
+        storyboards,
+      }))
+    }
+    return map
   }, [allPanels])
 
+  const getNextPanel = useCallback((currentIndex: number): VideoPanel | null => {
+    const current = allPanels[currentIndex]
+    if (!current) return null
+    const key = `${current.storyboardId}-${current.panelIndex}`
+    const sourcePanelId = frameLinkChoices.get(key)?.lastFrame?.sourcePanelId
+      || automaticFrameLinkChoices.get(key)?.lastFrame?.sourcePanelId
+    if (!sourcePanelId) return null
+    return allPanels.find((panel) => panel.panelId === sourcePanelId) || null
+  }, [allPanels, automaticFrameLinkChoices, frameLinkChoices])
+
   const isLinkedAsLastFrame = useCallback((currentIndex: number): boolean => {
-    if (currentIndex === 0) return false
-    const previousPanel = allPanels[currentIndex - 1]
-    const previousKey = `${previousPanel.storyboardId}-${previousPanel.panelIndex}`
-    return linkedPanels.get(previousKey) || false
-  }, [allPanels, linkedPanels])
+    const current = allPanels[currentIndex]
+    if (!current?.panelId) return false
+    return allPanels.some((panel) => {
+      const key = `${panel.storyboardId}-${panel.panelIndex}`
+      return linkedPanels.get(key) === true
+        && frameLinkChoices.get(key)?.lastFrame?.sourcePanelId === current.panelId
+    })
+  }, [allPanels, frameLinkChoices, linkedPanels])
+
+  const getFrameLinkChoices = useCallback((currentIndex: number): FrameLinkChoices => {
+    const panel = allPanels[currentIndex]
+    if (!panel) return { firstFrame: null, lastFrame: null }
+    return frameLinkChoices.get(`${panel.storyboardId}-${panel.panelIndex}`)
+      || { firstFrame: null, lastFrame: null }
+  }, [allPanels, frameLinkChoices])
 
   return {
     flModel,
-    flModelOptions: firstLastFrameModelOptions,
+    flModelOptions: videoModelOptions,
+    flModelSupportsFirstLastFrame,
     flGenerationOptions,
     flCapabilityFields,
     flMissingCapabilityFields,
@@ -261,6 +306,7 @@ export function useVideoFirstLastFrameFlow({
     handleGenerateFirstLastFrame,
     getDefaultFlPrompt,
     getNextPanel,
+    getFrameLinkChoices,
     isLinkedAsLastFrame,
   }
 }

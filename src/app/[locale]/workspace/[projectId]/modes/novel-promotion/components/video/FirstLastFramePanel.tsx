@@ -8,6 +8,7 @@ import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapabilityDropdown'
 import { AppIcon } from '@/components/ui/icons'
+import type { FrameLinkChoices } from '@/lib/novel-promotion/video/frame-link-resolver'
 
 interface FirstLastFramePanelProps {
   panel: VideoPanel
@@ -28,6 +29,8 @@ interface FirstLastFramePanelProps {
   customPrompt: string
   defaultPrompt: string
   hasMissingCapabilities?: boolean
+  frameLinkChoices?: FrameLinkChoices
+  modelSupportsFirstLastFrame?: boolean
   videoRatio?: string  // 视频比例，如 "16:9", "3:2" 等
   onFlModelChange: (model: string) => void
   onFlCapabilityChange: (field: string, rawValue: string) => void
@@ -59,6 +62,8 @@ export default function FirstLastFramePanel({
   customPrompt,
   defaultPrompt,
   hasMissingCapabilities = false,
+  frameLinkChoices,
+  modelSupportsFirstLastFrame = true,
   videoRatio = '16:9',
   onFlModelChange,
   onFlCapabilityChange,
@@ -104,6 +109,12 @@ export default function FirstLastFramePanel({
             {t("firstLastFrame.unlinkAction")}
           </button>
         </div>
+        {frameLinkChoices && (
+          <div className="mb-2 flex gap-1 text-[10px]">
+            {frameLinkChoices.firstFrame && <span className="rounded-full border px-2 py-0.5">first · {frameLinkChoices.firstFrame.mode}</span>}
+            {frameLinkChoices.lastFrame && <span className="rounded-full border px-2 py-0.5">last · {frameLinkChoices.lastFrame.mode}</span>}
+          </div>
+        )}
         <div className="flex gap-2 items-center">
           <div className="flex-1 bg-[var(--glass-bg-muted)] rounded overflow-hidden relative" style={{ aspectRatio: cssAspectRatio }}>
             {panel.imageUrl && (
@@ -158,9 +169,12 @@ export default function FirstLastFramePanel({
         </div>
       </div>
       <div className="flex items-center gap-2">
+        {!modelSupportsFirstLastFrame && (
+          <span role="alert" className="text-xs text-[var(--glass-tone-danger-fg)]">FIRST_LAST_FRAME_MODEL_UNSUPPORTED</span>
+        )}
         <button
           onClick={() => onGenerate(panel.storyboardId, panel.panelIndex, nextPanel.storyboardId, nextPanel.panelIndex, panelKey, flGenerationOptions, panel.panelId)}
-          disabled={isVideoTaskRunning || !panel.imageUrl || !nextPanel.imageUrl || !flModel || hasMissingCapabilities}
+          disabled={isVideoTaskRunning || !panel.imageUrl || !nextPanel.imageUrl || !flModel || hasMissingCapabilities || !modelSupportsFirstLastFrame}
           className={`glass-btn-base flex-1 py-2 text-sm font-medium disabled:opacity-50 ${isFirstLastFrameGenerated
             ? 'bg-[var(--glass-tone-success-fg)] text-white'
             : isVideoTaskRunning

@@ -126,7 +126,7 @@ export function useVideoStageRuntime({
     onUpdateVideoPrompt,
   })
 
-  const { linkedPanels, handleToggleLink } = useVideoPanelLinking({
+  const { linkedPanels, frameLinkChoices, handleToggleLink, handleUpdateFrameLink } = useVideoPanelLinking({
     allPanels,
     updatePanelLinkMutation,
   })
@@ -396,6 +396,7 @@ export function useVideoStageRuntime({
     flCapabilityFields,
     flMissingCapabilityFields,
     flCustomPrompts,
+    flModelSupportsFirstLastFrame,
     setFlModel,
     setFlCapabilityValue,
     setFlCustomPrompt,
@@ -403,10 +404,12 @@ export function useVideoStageRuntime({
     handleGenerateFirstLastFrame,
     getDefaultFlPrompt,
     getNextPanel,
+    getFrameLinkChoices,
     isLinkedAsLastFrame,
   } = useVideoFirstLastFrameFlow({
     allPanels,
     linkedPanels,
+    frameLinkChoices,
     videoModelOptions: allVideoModelOptions,
     onGenerateVideo: handleGenerateVideoWithImmediateLock,
     t: (key) => t(key as never),
@@ -561,11 +564,13 @@ export function useVideoStageRuntime({
         flGenerationOptions={flGenerationOptions}
         flCapabilityFields={flCapabilityFields}
         flMissingCapabilityFields={flMissingCapabilityFields}
+        flModelSupportsFirstLastFrame={flModelSupportsFirstLastFrame}
         flCustomPrompts={flCustomPrompts}
         onGenerateVideo={handleGenerateVideoWithImmediateLock}
         onUpdatePanelVideoModel={onUpdatePanelVideoModel}
         onLipSync={handleLipSync}
         onToggleLink={handleToggleLink}
+        onUpdateFrameLink={handleUpdateFrameLink}
         onFlModelChange={setFlModel}
         onFlCapabilityChange={setFlCapabilityValue}
         onFlCustomPromptChange={setFlCustomPrompt}
@@ -574,6 +579,7 @@ export function useVideoStageRuntime({
         onPreviewImage={setPreviewImage}
         onToggleLipSyncVideo={toggleLipSyncVideo}
         getNextPanel={getNextPanel}
+        getFrameLinkChoices={getFrameLinkChoices}
         isLinkedAsLastFrame={isLinkedAsLastFrame}
         getDefaultFlPrompt={getDefaultFlPrompt}
         getLocalPrompt={getLocalPrompt}

@@ -71,6 +71,7 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
   const estimatedDuration = panel.estimatedDuration ?? panel.textPanel?.duration ?? null
   const durationOverride = dialogueRuntime.durationOverride ?? panel.durationOverride ?? null
   const durationInput = dialogueRuntime.durationInput ?? { min: 0.1, max: 360, step: 0.1 }
+  const frameLinkChoices = layout.frameLinkChoices || { firstFrame: null, lastFrame: null }
 
   return (
     <div className="p-4 space-y-2">
@@ -168,6 +169,45 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
       </div>
 
       <div className="mt-3 pt-3 border-t border-[var(--glass-stroke-base)]">
+        {(frameLinkChoices.firstFrame || frameLinkChoices.lastFrame) && (
+          <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+            {frameLinkChoices.firstFrame && (
+              <span className="rounded-full border border-[var(--glass-stroke-base)] px-2 py-0.5">
+                first · {frameLinkChoices.firstFrame.mode}
+              </span>
+            )}
+            {frameLinkChoices.lastFrame && (
+              <span className="rounded-full border border-[var(--glass-stroke-base)] px-2 py-0.5">
+                last · {frameLinkChoices.lastFrame.mode}
+              </span>
+            )}
+            {layout.isLinked && (
+              <>
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => {
+                    const sourcePanelId = globalThis.prompt?.('Source panel ID', layout.nextPanel?.panelId || '')?.trim()
+                    if (sourcePanelId) void actions.onUpdateFrameLink(panelKey, panel.storyboardId, panel.panelIndex, {
+                      action: 'replace', frame: 'last', sourcePanelId,
+                    })
+                  }}
+                >replace</button>
+                <button type="button" className="underline" onClick={() => void actions.onUpdateFrameLink(
+                  panelKey, panel.storyboardId, panel.panelIndex, { action: 'clear', frame: 'last' },
+                )}>clear</button>
+              </>
+            )}
+            <button type="button" className="underline" onClick={() => void actions.onUpdateFrameLink(
+              panelKey, panel.storyboardId, panel.panelIndex, { action: 'restore-auto' },
+            )}>restore-auto</button>
+          </div>
+        )}
+        {!layout.flModelSupportsFirstLastFrame && layout.flModel && (
+          <p role="alert" className="mb-2 text-xs text-[var(--glass-tone-danger-fg)]">
+            FIRST_LAST_FRAME_MODEL_UNSUPPORTED
+          </p>
+        )}
         {(showsIncomingLinkBadge || showsOutgoingLinkBadge) && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {showsIncomingLinkBadge && (
@@ -241,6 +281,7 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                       || !panel.imageUrl
                       || !linkedNextPanel.imageUrl
                       || !layout.flModel
+                      || !layout.flModelSupportsFirstLastFrame
                       || layout.flMissingCapabilityFields.length > 0
                     }
                     className="flex-shrink-0 min-w-[120px] py-2 px-3 text-sm font-medium rounded-lg shadow-sm transition-all disabled:opacity-50 bg-[var(--glass-accent-from)] text-white"
