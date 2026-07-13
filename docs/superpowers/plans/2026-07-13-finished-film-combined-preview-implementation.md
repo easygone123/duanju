@@ -12,7 +12,7 @@
 
 ## File Structure
 
-- Create `src/lib/novel-promotion/video/combined-preview.ts`: pure source selection, duration resolution, frame projection, active-node binary search, and crossfade opacity.
+- Create `src/lib/novel-promotion/video/combined-preview.ts`: pure source selection, duration resolution, frame projection, active-node binary search, and complementary crossfade audio envelope.
 - Create `tests/unit/novel-promotion/combined-preview.test.ts`: pure timeline and no-black invariants.
 - Create `src/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/combined-preview/CombinedPreviewComposition.tsx`: Remotion composition and resilient media layers.
 - Create `src/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/combined-preview/useCombinedPreviewPreload.ts`: bounded previous/current/next Remotion prefetch lifecycle.
@@ -94,9 +94,9 @@ function resolveDurationSeconds(panel: VideoPanel): number {
 }
 ```
 
-- [ ] **Step 4: Write failing overlap, opacity, and active-node tests**
+- [ ] **Step 4: Write failing overlap, audio-envelope, and active-node tests**
 
-Assert the second item starts before the first ends, total duration equals the last item end, opacity pairs sum to `1` at every integer frame in an overlap, and frame lookup selects the newly entered node. Add 1,024 items and an `onProbe` callback assertion limiting binary-search probes to at most 11.
+Assert the second item starts before the first ends, total duration equals the last item end, complementary audio-envelope values sum to `1` at every integer frame in an overlap, and frame lookup selects the newly entered node. Add 1,024 items and an `onProbe` callback assertion limiting binary-search probes to at most 11.
 
 ```ts
 for (let frame = second.startFrame; frame < first.endFrame; frame += 1) {
@@ -114,7 +114,7 @@ expect(probes).toBeLessThanOrEqual(11)
 
 Run the same Vitest command. Expected: source tests pass; overlap/search tests fail because the helpers are missing.
 
-- [ ] **Step 6: Implement timeline overlap, exact opacity, and binary search**
+- [ ] **Step 6: Implement timeline overlap, exact audio envelope, and binary search**
 
 For each adjacent pair, calculate:
 
@@ -129,7 +129,7 @@ current.transitionOutFrames = transitionFrames
 next.transitionInFrames = transitionFrames
 ```
 
-`resolveCombinedPreviewOpacity()` must use complementary progress for transition-in and transition-out. `findCombinedPreviewItemIndexAtFrame()` must use upper-bound binary search on `startFrame`, clamped to the first and last item.
+`resolveCombinedPreviewOpacity()` is the complementary audio envelope and must use complementary progress for transition-in and transition-out. `findCombinedPreviewItemIndexAtFrame()` must use upper-bound binary search on `startFrame`, clamped to the first and last item.
 
 - [ ] **Step 7: Run Task 1 tests and commit**
 
@@ -149,7 +149,7 @@ Expected: all commands pass and the commit succeeds.
 
 **Files:**
 - Create: `src/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/combined-preview/CombinedPreviewComposition.tsx`
-- Modify: `tests/unit/novel-promotion/combined-preview.test.ts`
+- Create: `tests/unit/novel-promotion/combined-preview-composition.test.ts`
 
 - [ ] **Step 1: Write failing composition contract tests**
 
@@ -168,14 +168,14 @@ expect(html).not.toContain('background-color:black')
 Run:
 
 ```bash
-npx vitest run tests/unit/novel-promotion/combined-preview.test.ts
+npx vitest run tests/unit/novel-promotion/combined-preview-composition.test.ts
 ```
 
 Expected: FAIL because the composition module does not exist.
 
 - [ ] **Step 3: Implement the composition and resilient media layer**
 
-Use one `AbsoluteFill` with a neutral surface color. Map items to overlapping `Sequence` components. Each sequence renders a base layer first, then conditionally renders `Video` above it. Keep video opacity at zero until `onCanPlay`; on `onError`, leave the base visible. Apply the pure opacity to the outer sequence layer.
+Use one `AbsoluteFill` with a neutral surface color. Map items to overlapping `Sequence` components. Each sequence renders a base layer first, then renders `Video` above it only when `status === 'video'` and `videoUrl` exists. Keep video opacity at zero until `onCanPlay`; on `onError`, leave the base visible. For source-over visuals, keep the outgoing outer layer at opacity `1` and fade only the incoming outer layer, so `incoming + outgoing * (1 - incoming) === 1`. Pass the complementary `resolveCombinedPreviewOpacity()` value as numeric video volume, so overlap volumes sum to `1` and non-overlap volume is `1`.
 
 ```tsx
 <AbsoluteFill style={{ backgroundColor: '#111827' }}>
@@ -187,18 +187,18 @@ Use one `AbsoluteFill` with a neutral surface color. Map items to overlapping `S
 </AbsoluteFill>
 ```
 
-The base uses Remotion `Img` when `imageUrl` exists; otherwise it renders a gradient placeholder with a localized-neutral visual mark but no hard-coded user text. The video uses `pauseWhenBuffering`, `muted={false}`, and `objectFit: 'cover'`.
+The base uses Remotion `Img` with `maxRetries={0}` when `imageUrl` exists; an image error removes that image node while retaining the gradient, and a URL change resets the local failure state. Otherwise the base renders a gradient placeholder with no hard-coded user text. The video uses `pauseWhenBuffering`, `muted={false}`, and `objectFit: 'cover'`.
 
 - [ ] **Step 4: Verify and commit Task 2**
 
 Run:
 
 ```bash
-npx vitest run tests/unit/novel-promotion/combined-preview.test.ts
+npx vitest run tests/unit/novel-promotion/combined-preview-composition.test.ts tests/unit/novel-promotion/combined-preview.test.ts
 npm run typecheck
 npx eslint 'src/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/combined-preview/CombinedPreviewComposition.tsx'
 git diff --check
-git add 'src/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/combined-preview/CombinedPreviewComposition.tsx' tests/unit/novel-promotion/combined-preview.test.ts
+git add 'src/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/combined-preview/CombinedPreviewComposition.tsx' tests/unit/novel-promotion/combined-preview-composition.test.ts
 git commit -m "feat: render no-black combined preview composition"
 ```
 

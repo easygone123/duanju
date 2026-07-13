@@ -15,6 +15,21 @@ const fillStyle = {
   height: '100%',
 } as const
 
+function PreviewImage({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false)
+
+  if (failed) return null
+
+  return (
+    <Img
+      src={src}
+      maxRetries={0}
+      onError={() => setFailed(true)}
+      style={{ ...fillStyle, objectFit: 'cover' }}
+    />
+  )
+}
+
 function PreviewBase({ item }: { item: CombinedPreviewItem }) {
   return (
     <div
@@ -28,16 +43,21 @@ function PreviewBase({ item }: { item: CombinedPreviewItem }) {
       }}
     >
       {item.imageUrl ? (
-        <Img
-          src={item.imageUrl}
-          style={{ ...fillStyle, objectFit: 'cover' }}
-        />
+        <PreviewImage key={item.imageUrl} src={item.imageUrl} />
       ) : null}
     </div>
   )
 }
 
-function PreviewVideo({ item }: { item: CombinedPreviewItem }) {
+export function resolveCombinedPreviewLayerOpacity(item: CombinedPreviewItem, localFrame: number): number {
+  if (localFrame >= 0 && localFrame < item.transitionInFrames) {
+    return localFrame / item.transitionInFrames
+  }
+
+  return 1
+}
+
+function PreviewVideo({ item, volume }: { item: CombinedPreviewItem; volume: number }) {
   const [ready, setReady] = useState(false)
 
   return (
@@ -47,6 +67,7 @@ function PreviewVideo({ item }: { item: CombinedPreviewItem }) {
       src={item.videoUrl ?? undefined}
       pauseWhenBuffering
       muted={false}
+      volume={volume}
       onCanPlay={() => setReady(true)}
       onError={() => setReady(false)}
       style={{
@@ -60,6 +81,7 @@ function PreviewVideo({ item }: { item: CombinedPreviewItem }) {
 
 function PreviewItem({ item }: { item: CombinedPreviewItem }) {
   const localFrame = useCurrentFrame()
+  const audioVolume = resolveCombinedPreviewOpacity(item, localFrame)
 
   return (
     <div
@@ -67,11 +89,13 @@ function PreviewItem({ item }: { item: CombinedPreviewItem }) {
       data-testid={`combined-preview-item-${item.panelKey}`}
       style={{
         ...fillStyle,
-        opacity: resolveCombinedPreviewOpacity(item, localFrame),
+        opacity: resolveCombinedPreviewLayerOpacity(item, localFrame),
       }}
     >
       <PreviewBase item={item} />
-      {item.videoUrl ? <PreviewVideo key={item.videoUrl} item={item} /> : null}
+      {item.status === 'video' && item.videoUrl ? (
+        <PreviewVideo key={item.videoUrl} item={item} volume={audioVolume} />
+      ) : null}
     </div>
   )
 }
