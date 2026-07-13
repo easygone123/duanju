@@ -196,23 +196,19 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
           <button type="button" className="underline" onClick={() => void actions.onUpdateFrameLink(
             panelKey, panel.storyboardId, panel.panelIndex, { action: 'clear', frame: 'first' },
           )}>clear first</button>
-          {layout.isLinked && (
-            <>
-              <button
-                type="button"
-                className="underline"
-                onClick={() => {
-                  const sourcePanelId = globalThis.prompt?.('Source panel ID', layout.nextPanel?.panelId || '')?.trim()
-                  if (sourcePanelId) void actions.onUpdateFrameLink(panelKey, panel.storyboardId, panel.panelIndex, {
-                    action: 'replace', frame: 'last', sourcePanelId,
-                  })
-                }}
-              >replace last</button>
-              <button type="button" className="underline" onClick={() => void actions.onUpdateFrameLink(
-                panelKey, panel.storyboardId, panel.panelIndex, { action: 'clear', frame: 'last' },
-              )}>clear last</button>
-            </>
-          )}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => {
+              const sourcePanelId = globalThis.prompt?.('Source panel ID', layout.nextPanel?.panelId || '')?.trim()
+              if (sourcePanelId) void actions.onUpdateFrameLink(panelKey, panel.storyboardId, panel.panelIndex, {
+                action: 'replace', frame: 'last', sourcePanelId,
+              })
+            }}
+          >replace last</button>
+          <button type="button" className="underline" onClick={() => void actions.onUpdateFrameLink(
+            panelKey, panel.storyboardId, panel.panelIndex, { action: 'clear', frame: 'last' },
+          )}>clear last</button>
           <button type="button" className="underline" onClick={() => void actions.onUpdateFrameLink(
             panelKey, panel.storyboardId, panel.panelIndex, { action: 'restore-auto' },
           )}>restore-auto</button>

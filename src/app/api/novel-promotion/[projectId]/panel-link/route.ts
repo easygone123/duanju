@@ -109,6 +109,7 @@ export const POST = apiHandler(async (
           gridCellIndex: true,
           firstFrameSourceMeta: true,
           lastFrameSourceMeta: true,
+          linkedToNextPanel: true,
         },
       },
     },
@@ -122,7 +123,11 @@ export const POST = apiHandler(async (
         ? { ...panel, firstFrameSourceMeta: null, lastFrameSourceMeta: null }
         : panel),
     }))
-    choices = resolveFrameLinkChoices({ panelId: target.id, storyboards: withoutOverrides })
+    choices = resolveFrameLinkChoices({
+      panelId: target.id,
+      storyboards: withoutOverrides,
+      restoreLegacyAuto: true,
+    })
   } else if (action === 'unlink') {
     choices = { firstFrame: null, lastFrame: null }
   } else {

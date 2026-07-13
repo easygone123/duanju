@@ -108,6 +108,7 @@ function resolveAutomaticLastFrame(
   panel: FrameLinkPanel,
   storyboard: FrameLinkStoryboard,
   storyboards: FrameLinkStoryboard[],
+  restoreLegacyAuto: boolean,
 ): FrameSourceMeta | null {
   const panels = sortedPanels(storyboard)
   const currentIndex = panels.findIndex((candidate) => candidate.id === panel.id)
@@ -117,7 +118,9 @@ function resolveAutomaticLastFrame(
   if (storyboard.layoutMode !== 'six_grid') {
     const hasFrameSourceMetadata = panel.firstFrameSourceMeta != null
       || panel.lastFrameSourceMeta != null
-    if (panel.linkedToNextPanel !== true || hasFrameSourceMetadata) return null
+    const canExplicitlyRestoreLegacy = restoreLegacyAuto
+      && (storyboard.layoutMode == null || storyboard.layoutMode === 'individual')
+    if ((panel.linkedToNextPanel !== true && !canExplicitlyRestoreLegacy) || hasFrameSourceMetadata) return null
     const storyboardIndex = storyboards.findIndex((candidate) => candidate.id === storyboard.id)
     const nextStoryboard = storyboardIndex >= 0 ? storyboards[storyboardIndex + 1] : undefined
     if (!nextStoryboard || nextStoryboard.layoutMode === 'six_grid') return null
@@ -154,6 +157,7 @@ function resolveStoredChoice(
 export function resolveFrameLinkChoices(input: {
   panelId: string
   storyboards: FrameLinkStoryboard[]
+  restoreLegacyAuto?: boolean
 }): FrameLinkChoices {
   const storyboard = input.storyboards.find((candidate) => (
     candidate.panels.some((panel) => panel.id === input.panelId)
@@ -168,7 +172,12 @@ export function resolveFrameLinkChoices(input: {
     mode: 'automatic',
     sourcePanelId: panel.id,
   }
-  const automaticLast = resolveAutomaticLastFrame(panel, storyboard, input.storyboards)
+  const automaticLast = resolveAutomaticLastFrame(
+    panel,
+    storyboard,
+    input.storyboards,
+    input.restoreLegacyAuto === true,
+  )
   return {
     firstFrame: resolveStoredChoice(panel.firstFrameSourceMeta, automaticFirst, ownedPanelIds),
     lastFrame: resolveStoredChoice(panel.lastFrameSourceMeta, automaticLast, ownedPanelIds),

@@ -135,6 +135,56 @@ describe('panel-link route contract', () => {
     })
   })
 
+  it('restores legacy visual adjacency after unlink without leaving project scope', async () => {
+    const legacyPanels = [
+      { ...panel('legacy-panel-1', 'legacy-storyboard-1', 0), linkedToNextPanel: true },
+      { ...panel('legacy-panel-2', 'legacy-storyboard-2', 0), linkedToNextPanel: false },
+    ]
+    const legacyStoryboards = [
+      { id: 'legacy-storyboard-1', layoutMode: 'individual', panels: [legacyPanels[0]] },
+      { id: 'legacy-storyboard-2', layoutMode: 'individual', panels: [legacyPanels[1]] },
+    ]
+    prismaMock.novelPromotionStoryboard.findMany.mockImplementation(async () => legacyStoryboards)
+    prismaMock.novelPromotionPanel.findFirst.mockImplementation(async ({ where }: {
+      where: { id?: string; storyboardId?: string; panelIndex?: number }
+    }) => legacyPanels.find((candidate) => (
+      where.id ? candidate.id === where.id : (
+        candidate.storyboardId === where.storyboardId && candidate.panelIndex === where.panelIndex
+      )
+    )) ?? null)
+    prismaMock.novelPromotionPanel.updateMany.mockImplementation(async ({ data }: {
+      data: { firstFrameSourceMeta: string; lastFrameSourceMeta: string; linkedToNextPanel: boolean }
+    }) => {
+      Object.assign(legacyPanels[0], data)
+      return { count: 1 }
+    })
+
+    const unlinkResponse = await post({
+      storyboardId: 'legacy-storyboard-1', panelIndex: 0, action: 'unlink',
+    })
+    expect(unlinkResponse.status).toBe(200)
+    expect((await unlinkResponse.json()).lastFrame).toBeNull()
+    expect(legacyPanels[0].linkedToNextPanel).toBe(false)
+
+    const restoreResponse = await post({
+      storyboardId: 'legacy-storyboard-1', panelIndex: 0, action: 'restore-auto',
+    })
+    expect(restoreResponse.status).toBe(200)
+    expect(await restoreResponse.json()).toMatchObject({
+      firstFrame: { mode: 'automatic', sourcePanelId: 'legacy-panel-1' },
+      lastFrame: { mode: 'automatic', sourcePanelId: 'legacy-panel-2' },
+    })
+    expect(legacyPanels[0].linkedToNextPanel).toBe(true)
+    expect(prismaMock.novelPromotionStoryboard.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        episode: { novelPromotionProject: { projectId: 'project-1', project: { userId: 'user-1' } } },
+      }),
+      select: expect.objectContaining({
+        panels: { select: expect.objectContaining({ linkedToNextPanel: true }) },
+      }),
+    }))
+  })
+
   it('returns not found when the target storyboard/panel is outside project and user scope', async () => {
     prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(null)
 

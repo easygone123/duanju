@@ -1,6 +1,9 @@
+// @vitest-environment jsdom
+
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import VideoPanelCardBody from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video/panel-card/VideoPanelCardBody'
 import type { VideoPanelRuntime } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video/panel-card/hooks/useVideoPanelActions'
 
@@ -15,6 +18,11 @@ vi.mock('@/components/ui/config-modals/ModelCapabilityDropdown', () => ({
 vi.mock('@/components/ui/icons', () => ({
   AppIcon: ({ name }: { name: string }) => React.createElement('span', null, name),
 }))
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 function createRuntime(overrides: Partial<VideoPanelRuntime> = {}): VideoPanelRuntime {
   const translate = (key: string, values?: Record<string, unknown>) => {
@@ -196,6 +204,37 @@ describe('VideoPanelCardBody', () => {
     expect(markup).toContain('first · manual')
     expect(markup).toContain('replace first')
     expect(markup).toContain('clear first')
+  })
+
+  it.each([
+    ['cleared automatic link', { hasNext: true, nextPanel: { storyboardId: 'sb-1', panelIndex: 3, imageUrl: 'next.jpg' } }],
+    ['scene boundary', { hasNext: true, nextPanel: null }],
+    ['final shot', { hasNext: false, nextPanel: null }],
+  ])('allows a manual last-frame replacement while unlinked at a %s', (_label, layoutState) => {
+    const base = createRuntime()
+    const onUpdateFrameLink = vi.fn()
+    vi.spyOn(globalThis, 'prompt').mockReturnValue('manual-last-panel')
+    const view = render(React.createElement(VideoPanelCardBody, {
+      runtime: createRuntime({
+        layout: {
+          ...base.layout,
+          ...layoutState,
+          isLinked: false,
+          frameLinkChoices: {
+            firstFrame: { mode: 'automatic', sourcePanelId: 'panel-2' },
+            lastFrame: null,
+          },
+        },
+        actions: { ...base.actions, onUpdateFrameLink },
+      }),
+    }))
+
+    fireEvent.click(view.getByRole('button', { name: 'replace last' }))
+
+    expect(onUpdateFrameLink).toHaveBeenCalledWith(
+      'sb-1-2', 'sb-1', 2,
+      { action: 'replace', frame: 'last', sourcePanelId: 'manual-last-panel' },
+    )
   })
 
   it('shows accessible dialogue routing and duration controls without relying on color', () => {
