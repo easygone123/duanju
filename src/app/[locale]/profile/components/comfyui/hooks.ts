@@ -52,6 +52,24 @@ type ConnectionPayload = Partial<{
 }>
 
 export type ConnectionCredentialError = 'credentialsRequired' | 'basicCredentialsPair'
+export type ConnectionRequestError =
+  | 'requestUnauthorized'
+  | 'connectionConflict'
+  | 'connectionInvalid'
+  | 'serverUnavailable'
+  | 'requestFailed'
+
+type ConnectionRequestFailure = Error & { status?: number; code?: string }
+
+export function resolveConnectionRequestError(error: unknown): ConnectionRequestError {
+  if (!error || typeof error !== 'object') return 'requestFailed'
+  const failure = error as { status?: unknown; code?: unknown }
+  if (failure.status === 401 || failure.code === 'UNAUTHORIZED') return 'requestUnauthorized'
+  if (failure.status === 409 || failure.code === 'CONFLICT') return 'connectionConflict'
+  if (failure.status === 400 || failure.code === 'INVALID_PARAMS') return 'connectionInvalid'
+  if (typeof failure.status === 'number' && failure.status >= 500) return 'serverUnavailable'
+  return 'requestFailed'
+}
 
 export function initialConnectionValues(connection?: ComfyConnectionView | null): ConnectionFormValues {
   return {
@@ -131,7 +149,19 @@ export async function safelyRunConnectionAction(
 
 async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(url, init)
-  if (!response.ok) throw new Error(`ComfyUI request failed (${response.status})`)
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({})) as {
+      code?: unknown
+      error?: { code?: unknown }
+    }
+    const error = new Error(`ComfyUI request failed (${response.status})`) as ConnectionRequestFailure
+    error.status = response.status
+    const code = typeof payload.error?.code === 'string'
+      ? payload.error.code
+      : typeof payload.code === 'string' ? payload.code : undefined
+    if (code) error.code = code
+    throw error
+  }
   return response.json() as Promise<T>
 }
 

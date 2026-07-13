@@ -24,6 +24,11 @@ const defaults: Readonly<Record<string, string>> = {
 }
 
 describe('Docker Compose ComfyUI environment contract', () => {
+  it('builds the app from the checked-out source instead of silently running only the remote image', () => {
+    const compose = fs.readFileSync(path.resolve(process.cwd(), 'docker-compose.yml'), 'utf8')
+    expect(compose).toContain('  app:\n    build:\n      context: .\n      dockerfile: Dockerfile')
+  })
+
   it('uses safe shell interpolation for every ComfyUI setting without hardcoding deployment values', () => {
     const compose = fs.readFileSync(path.resolve(process.cwd(), 'docker-compose.yml'), 'utf8')
     for (const [name, fallback] of Object.entries(defaults)) {
