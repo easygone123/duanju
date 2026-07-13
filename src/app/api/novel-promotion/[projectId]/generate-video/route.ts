@@ -192,8 +192,6 @@ export const POST = apiHandler(async (
   const locale = resolveRequiredTaskLocale(request, body)
   const isBatch = body?.all === true
 
-  validateFirstLastFrameModel(body?.firstLastFrame)
-
   if (isBatch) {
     if (Object.prototype.hasOwnProperty.call(body, 'durationOverride')) {
       throw new ApiError('INVALID_PARAMS', { code: 'BATCH_DURATION_OVERRIDE_UNSUPPORTED' })
@@ -224,7 +222,7 @@ export const POST = apiHandler(async (
 
     const results = await Promise.all(panels.map(async (panel) => {
       const payload = await resolveAuthoritativePanelPayload({
-        body, panel, projectId, userId: session.user.id,
+        body, panel, projectId, userId: session.user.id, routingMode: 'batch',
       })
       requireVideoModelKeyFromPayload(payload)
       await validateVideoCapabilityCombination({
@@ -251,6 +249,8 @@ export const POST = apiHandler(async (
     return NextResponse.json({ tasks: results, total: panels.length })
   }
 
+  validateFirstLastFrameModel(body.firstLastFrame)
+
   const storyboardId = body?.storyboardId
   const panelIndex = body?.panelIndex
   if (!storyboardId || panelIndex === undefined) {
@@ -271,7 +271,7 @@ export const POST = apiHandler(async (
   }
 
   const payload = await resolveAuthoritativePanelPayload({
-    body, panel, projectId, userId: session.user.id,
+    body, panel, projectId, userId: session.user.id, routingMode: 'single',
   })
   requireVideoModelKeyFromPayload(payload)
   await validateVideoCapabilityCombination({

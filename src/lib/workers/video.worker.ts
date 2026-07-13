@@ -48,13 +48,43 @@ function extractGenerationOptions(payload: AnyObj): VideoOptionMap {
   return next
 }
 
-async function fetchPanelByStoryboardIndex(storyboardId: string, panelIndex: number) {
+async function fetchPanelByStoryboardIndex(
+  storyboardId: string,
+  panelIndex: number,
+  projectId: string,
+  userId: string,
+) {
   return await prisma.novelPromotionPanel.findFirst({
     where: {
       storyboardId,
       panelIndex,
+      storyboard: { episode: { novelPromotionProject: { projectId, project: { userId } } } },
     },
   })
+}
+
+async function fetchLastFramePanel(firstLastFramePayload: AnyObj, projectId: string, userId: string) {
+  if (typeof firstLastFramePayload.sourcePanelId === 'string' && firstLastFramePayload.sourcePanelId) {
+    return await prisma.novelPromotionPanel.findFirst({
+      where: {
+        id: firstLastFramePayload.sourcePanelId,
+        storyboard: { episode: { novelPromotionProject: { projectId, project: { userId } } } },
+      },
+    })
+  }
+  if (
+    typeof firstLastFramePayload.lastFrameStoryboardId === 'string'
+    && firstLastFramePayload.lastFrameStoryboardId
+    && firstLastFramePayload.lastFramePanelIndex !== undefined
+  ) {
+    return await fetchPanelByStoryboardIndex(
+      firstLastFramePayload.lastFrameStoryboardId,
+      Number(firstLastFramePayload.lastFramePanelIndex),
+      projectId,
+      userId,
+    )
+  }
+  return null
 }
 
 async function getPanelForVideoTask(job: Job<TaskJobData>) {
@@ -74,7 +104,12 @@ async function getPanelForVideoTask(job: Job<TaskJobData>) {
     throw new Error('Missing storyboardId/panelIndex for video task')
   }
 
-  const panel = await fetchPanelByStoryboardIndex(storyboardId, Number(panelIndex))
+  const panel = await fetchPanelByStoryboardIndex(
+    storyboardId,
+    Number(panelIndex),
+    job.data.projectId,
+    job.data.userId,
+  )
   if (!panel) throw new Error('Panel not found by storyboardId/panelIndex')
   return panel
 }
@@ -126,15 +161,11 @@ async function generateVideoForPanel(
         throw new Error(`VIDEO_FIRSTLASTFRAME_MODEL_UNSUPPORTED: ${model}`)
       }
     }
-    if (
-      typeof firstLastFramePayload.lastFrameStoryboardId === 'string' &&
-      firstLastFramePayload.lastFrameStoryboardId &&
-      firstLastFramePayload.lastFramePanelIndex !== undefined
-    ) {
-      const lastPanel = await fetchPanelByStoryboardIndex(
-        firstLastFramePayload.lastFrameStoryboardId,
-        Number(firstLastFramePayload.lastFramePanelIndex),
-      )
+    const hasLastFrameReference = typeof firstLastFramePayload.sourcePanelId === 'string'
+      || typeof firstLastFramePayload.lastFrameStoryboardId === 'string'
+    if (hasLastFrameReference) {
+      const lastPanel = await fetchLastFramePanel(firstLastFramePayload, job.data.projectId, job.data.userId)
+      if (!lastPanel) throw new Error('VIDEO_LAST_FRAME_SOURCE_FORBIDDEN')
       if (lastPanel?.imageUrl) {
         lastFrameStorageValue = lastPanel.imageUrl
         const lastFrameUrl = toSignedUrlIfCos(lastPanel.imageUrl, 3600)
@@ -248,7 +279,12 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
     payload.storyboardId &&
     payload.panelIndex !== undefined
   ) {
-    panel = await fetchPanelByStoryboardIndex(payload.storyboardId, Number(payload.panelIndex))
+    panel = await fetchPanelByStoryboardIndex(
+      payload.storyboardId,
+      Number(payload.panelIndex),
+      job.data.projectId,
+      job.data.userId,
+    )
   }
 
   if (!panel) throw new Error('Lip-sync panel not found')

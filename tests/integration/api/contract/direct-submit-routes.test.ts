@@ -433,6 +433,8 @@ const DIRECT_CASES: ReadonlyArray<DirectRouteCase> = [
       },
       firstLastFrame: {
         flModel: 'ark::doubao-seedance-2-0-260128',
+        sourcePanelId: 'forged-client-panel',
+        customPrompt: 'FORGED CLIENT PROMPT',
       },
     },
     params: { projectId: 'project-1' },

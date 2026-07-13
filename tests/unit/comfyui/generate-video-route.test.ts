@@ -10,6 +10,7 @@ type PanelRow = {
   dialogueEmotion: string | null
   includeDialogueInVideoPrompt: boolean
   videoPrompt: string
+  firstLastFramePrompt: string | null
   estimatedDuration: number
   durationOverride: number | null
   duration: number
@@ -34,6 +35,7 @@ const panelUpdateManyMock = vi.hoisted(() => vi.fn(async (args: unknown) => {
 const getProjectModelConfigMock = vi.hoisted(() => vi.fn())
 const comfyVersionFindFirstMock = vi.hoisted(() => vi.fn())
 const userPreferenceFindUniqueMock = vi.hoisted(() => vi.fn())
+const buildBillingInfoMock = vi.hoisted(() => vi.fn(() => null))
 
 vi.mock('@/lib/model-capabilities/lookup', () => ({
   resolveBuiltinCapabilitiesByModelKey: capabilityMock,
@@ -43,6 +45,7 @@ vi.mock('@/lib/api-auth', () => ({
   isErrorResponse: vi.fn(() => false),
 }))
 vi.mock('@/lib/task/submitter', () => ({ submitTask: submitTaskMock }))
+vi.mock('@/lib/billing', () => ({ buildDefaultTaskBillingInfo: buildBillingInfoMock }))
 vi.mock('@/lib/task/has-output', () => ({ hasPanelVideoOutput: vi.fn(async () => false) }))
 vi.mock('@/lib/task/resolve-locale', () => ({ resolveRequiredTaskLocale: vi.fn(() => 'zh') }))
 vi.mock('@/lib/config-service', () => ({
@@ -85,11 +88,13 @@ function request(body: Record<string, unknown>) {
 describe('generate-video ComfyUI first-last-frame routing', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    panelFindFirstMock.mockReset()
+    panelFindManyMock.mockReset()
     capabilityMock.mockReturnValue(undefined)
     panelFindFirstMock.mockResolvedValue({
       id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
       hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
-      includeDialogueInVideoPrompt: true, videoPrompt: 'server visual prompt',
+      includeDialogueInVideoPrompt: true, videoPrompt: 'server visual prompt', firstLastFramePrompt: null,
       estimatedDuration: 5, durationOverride: null, duration: 5,
     })
     panelFindManyMock.mockResolvedValue([])
@@ -114,9 +119,23 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
   })
 
   it('accepts strict ComfyUI first-last-frame selection without consulting cloud capabilities', async () => {
+    panelFindFirstMock
+      .mockResolvedValueOnce({
+        id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: 'normal prompt', firstLastFramePrompt: 'first-last prompt',
+        estimatedDuration: 5, durationOverride: null, duration: 5,
+      })
+      .mockResolvedValueOnce({ id: 'last-panel-1' })
     const response = await POST(request({
       videoModel: 'cloud::normal',
-      firstLastFrame: { flModel: 'comfyui::wf-video' },
+      firstLastFrame: {
+        flModel: 'comfyui::wf-video',
+        lastFrameStoryboardId: 'storyboard-1',
+        lastFramePanelIndex: 1,
+        customPrompt: 'FORGED',
+        sourcePanelId: 'foreign-client-id',
+      },
     }), { params: Promise.resolve({ projectId: 'project-1' }) })
     expect(response.status).toBe(200)
     expect(capabilityMock).not.toHaveBeenCalledWith('video', 'comfyui::wf-video')
@@ -124,10 +143,74 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
       payload: expect.objectContaining({
         videoModel: 'comfyui::wf-video',
+        videoPrompt: 'first-last prompt',
+        firstLastFrame: { flModel: 'comfyui::wf-video', sourcePanelId: 'last-panel-1' },
         comfyWorkflowVersionId: 'video-version-1',
         comfyModelSnapshotVersion: 1,
       }),
     }))
+  })
+
+  it('rejects a last frame outside the authorized project before billing or submission', async () => {
+    panelFindFirstMock
+      .mockResolvedValueOnce({
+        id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: 'normal prompt', firstLastFramePrompt: 'first-last prompt',
+        estimatedDuration: 5, durationOverride: null, duration: 5,
+      })
+      .mockResolvedValueOnce(null)
+
+    const response = await POST(request({
+      firstLastFrame: {
+        flModel: 'comfyui::wf-video',
+        lastFrameStoryboardId: 'foreign-storyboard',
+        lastFramePanelIndex: 0,
+      },
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(400)
+    expect(panelFindFirstMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        storyboardId: 'foreign-storyboard',
+        storyboard: { episode: { novelPromotionProject: {
+          projectId: 'project-1', project: { userId: 'user-1' },
+        } } },
+      }),
+    }))
+    expect(buildBillingInfoMock).not.toHaveBeenCalled()
+    expect(submitTaskMock).not.toHaveBeenCalled()
+  })
+
+  it('uses firstLastFramePrompt for first-last-frame tasks and videoPrompt for normal tasks', async () => {
+    const panel = {
+      id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+      hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+      includeDialogueInVideoPrompt: true, videoPrompt: 'NORMAL VISUAL PROMPT', firstLastFramePrompt: 'FIRST LAST VISUAL PROMPT',
+      estimatedDuration: 5, durationOverride: null, duration: 5,
+    }
+    panelFindFirstMock
+      .mockResolvedValueOnce(panel)
+      .mockResolvedValueOnce({ id: 'last-panel-1' })
+      .mockResolvedValueOnce(panel)
+
+    const firstLastResponse = await POST(request({
+      firstLastFrame: {
+        flModel: 'comfyui::wf-video',
+        lastFrameStoryboardId: 'storyboard-1',
+        lastFramePanelIndex: 1,
+      },
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+    const normalResponse = await POST(request({ useProjectRouting: true }), {
+      params: Promise.resolve({ projectId: 'project-1' }),
+    })
+
+    expect(firstLastResponse.status).toBe(200)
+    expect(normalResponse.status).toBe(200)
+    expect(submitTaskMock.mock.calls.map(([input]) => input.payload.videoPrompt)).toEqual([
+      'FIRST LAST VISUAL PROMPT',
+      'NORMAL VISUAL PROMPT',
+    ])
   })
 
   it('continues rejecting unsupported cloud first-last-frame models', async () => {
@@ -197,13 +280,13 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
       {
         id: 'panel-dialogue', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
         hasDialogue: true, dialogueSpeaker: '阿青', dialogueText: '跟我走。', dialogueEmotion: '急切',
-        includeDialogueInVideoPrompt: true, videoPrompt: '人物推开门',
+        includeDialogueInVideoPrompt: true, videoPrompt: '人物推开门', firstLastFramePrompt: null,
         estimatedDuration: 5, durationOverride: null, duration: 5,
       },
       {
         id: 'panel-normal', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
         hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
-        includeDialogueInVideoPrompt: true, videoPrompt: '空镜扫过街道',
+        includeDialogueInVideoPrompt: true, videoPrompt: '空镜扫过街道', firstLastFramePrompt: null,
         estimatedDuration: 5, durationOverride: null, duration: 5,
       },
     ])
@@ -227,6 +310,54 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
       { targetId: 'panel-dialogue', videoModel: 'cloud::dialogue', reason: 'dialogue_project_model' },
       { targetId: 'panel-normal', videoModel: 'cloud::normal', reason: 'normal_project_model' },
     ])
+  })
+
+  it('ignores an injected explicitVideoModel for batch project routing', async () => {
+    panelFindManyMock.mockResolvedValue([
+      {
+        id: 'panel-dialogue', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: true, dialogueSpeaker: '阿青', dialogueText: '走。', dialogueEmotion: '急切',
+        includeDialogueInVideoPrompt: true, videoPrompt: '人物转身', firstLastFramePrompt: '不应使用',
+        estimatedDuration: 5, durationOverride: null, duration: 5,
+      },
+    ])
+    getProjectModelConfigMock.mockResolvedValue({
+      videoModel: 'cloud::normal', dialogueVideoModel: 'cloud::dialogue', comfyVideoWorkflowVersionId: null,
+    })
+
+    const response = await POST(request({
+      all: true, episodeId: 'episode-1', useProjectRouting: true,
+      videoModel: 'cloud::normal', explicitVideoModel: 'cloud::unsupported',
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    const payload = submitTaskMock.mock.calls[0]?.[0].payload
+    expect(payload).toMatchObject({ videoModel: 'cloud::dialogue', videoModelReason: 'dialogue_project_model' })
+    expect(payload).not.toHaveProperty('explicitVideoModel')
+  })
+
+  it('ignores an injected firstLastFrame model for batch project routing', async () => {
+    panelFindManyMock.mockResolvedValue([
+      {
+        id: 'panel-normal', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: '空镜', firstLastFramePrompt: '不应使用',
+        estimatedDuration: 5, durationOverride: null, duration: 5,
+      },
+    ])
+    getProjectModelConfigMock.mockResolvedValue({
+      videoModel: 'cloud::normal', dialogueVideoModel: 'cloud::dialogue', comfyVideoWorkflowVersionId: null,
+    })
+
+    const response = await POST(request({
+      all: true, episodeId: 'episode-1', useProjectRouting: true, videoModel: 'cloud::normal',
+      firstLastFrame: { flModel: 'comfyui::wf-video', sourcePanelId: 'foreign-client-id' },
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    const payload = submitTaskMock.mock.calls[0]?.[0].payload
+    expect(payload).toMatchObject({ videoModel: 'cloud::normal', videoModelReason: 'normal_project_model' })
+    expect(payload).not.toHaveProperty('firstLastFrame')
   })
 
   it('rejects stale duration override before submission and never mutates the estimate', async () => {

@@ -273,22 +273,46 @@ describe('worker video processor behavior', () => {
       type: TASK_TYPE.VIDEO_PANEL,
       payload: {
         videoModel: 'cloud::normal',
+        videoPrompt: 'SERVER FIRST LAST PROMPT',
         firstLastFrame: {
           flModel: 'comfyui::wf-video',
-          lastFrameStoryboardId: 'storyboard-1',
-          lastFramePanelIndex: 1,
+          sourcePanelId: 'last-panel',
         },
       },
     }))
     expect(capabilityMock).not.toHaveBeenCalled()
+    expect(prismaMock.novelPromotionPanel.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'last-panel',
+        storyboard: { episode: { novelPromotionProject: {
+          projectId: 'project-1', project: { userId: 'user-1' },
+        } } },
+      },
+    })
     expect(utilsMock.resolveVideoSourceFromGeneration).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         modelId: 'comfyui::wf-video',
         comfyFirstFrameSource: 'cos/panel-image.png',
         comfyLastFrameSource: 'cos/last.png',
+        options: expect.objectContaining({ prompt: 'SERVER FIRST LAST PROMPT' }),
       }),
     )
+  })
+
+  it('VIDEO_PANEL: rejects a trusted-looking last-frame id that is outside the task project', async () => {
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(null)
+
+    await expect(workerState.processor!(buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: {
+        videoModel: 'comfyui::wf-video',
+        videoPrompt: 'SERVER FIRST LAST PROMPT',
+        firstLastFrame: { flModel: 'comfyui::wf-video', sourcePanelId: 'foreign-panel' },
+      },
+    }))).rejects.toThrow('VIDEO_LAST_FRAME_SOURCE_FORBIDDEN')
+
+    expect(utilsMock.resolveVideoSourceFromGeneration).not.toHaveBeenCalled()
   })
 
   it('VIDEO_PANEL: unsupported cloud first-last-frame still fails closed', async () => {

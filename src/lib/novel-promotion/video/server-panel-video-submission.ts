@@ -35,6 +35,7 @@ export type VideoPanelRecord = {
   dialogueEmotion: string | null
   includeDialogueInVideoPrompt: boolean
   videoPrompt: string | null
+  firstLastFramePrompt: string | null
   estimatedDuration: number | null
   durationOverride: number | null
   duration: number | null
@@ -42,7 +43,7 @@ export type VideoPanelRecord = {
 
 export const VIDEO_PANEL_SELECT = {
   id: true, updatedAt: true, hasDialogue: true, dialogueSpeaker: true, dialogueText: true,
-  dialogueEmotion: true, includeDialogueInVideoPrompt: true, videoPrompt: true,
+  dialogueEmotion: true, includeDialogueInVideoPrompt: true, videoPrompt: true, firstLastFramePrompt: true,
   estimatedDuration: true, durationOverride: true, duration: true,
 } as const
 
@@ -199,22 +200,60 @@ async function applyDurationOverrideCas(
   return { ...panel, durationOverride: override }
 }
 
+async function resolveTrustedFirstLastFrame(
+  input: Record<string, unknown>,
+  projectId: string,
+  userId: string,
+): Promise<{ flModel: string; sourcePanelId?: string }> {
+  const flModel = typeof input.flModel === 'string' ? input.flModel : ''
+  const hasStoryboard = Object.prototype.hasOwnProperty.call(input, 'lastFrameStoryboardId')
+  const hasPanelIndex = Object.prototype.hasOwnProperty.call(input, 'lastFramePanelIndex')
+  if (!hasStoryboard && !hasPanelIndex) return { flModel }
+
+  const storyboardId = typeof input.lastFrameStoryboardId === 'string'
+    ? input.lastFrameStoryboardId.trim()
+    : ''
+  const panelIndex = input.lastFramePanelIndex
+  if (!storyboardId || typeof panelIndex !== 'number' || !Number.isInteger(panelIndex) || panelIndex < 0) {
+    throw new ApiError('INVALID_PARAMS', { code: 'FIRSTLASTFRAME_SOURCE_INVALID' })
+  }
+  const sourcePanel = await prisma.novelPromotionPanel.findFirst({
+    where: {
+      storyboardId,
+      panelIndex,
+      storyboard: { episode: { novelPromotionProject: { projectId, project: { userId } } } },
+    },
+    select: { id: true },
+  })
+  if (!sourcePanel) {
+    throw new ApiError('INVALID_PARAMS', { code: 'VIDEO_LAST_FRAME_SOURCE_FORBIDDEN' })
+  }
+  return { flModel, sourcePanelId: sourcePanel.id }
+}
+
 export async function resolveAuthoritativePanelPayload(input: {
   body: Record<string, unknown>
   panel: VideoPanelRecord
   projectId: string
   userId: string
+  routingMode?: 'single' | 'batch'
 }) {
   const panel = await applyDurationOverrideCas(input.body, input.panel)
   const projectModels = await getProjectModelConfig(input.projectId, input.userId)
-  const firstLast = isRecord(input.body.firstLastFrame) ? input.body.firstLastFrame : null
-  const explicitModel = typeof firstLast?.flModel === 'string'
-    ? firstLast.flModel
-    : typeof input.body.explicitVideoModel === 'string'
-      ? input.body.explicitVideoModel
-      : input.body.useProjectRouting !== true && typeof input.body.videoModel === 'string'
-        ? input.body.videoModel
-        : null
+  const isBatch = input.routingMode === 'batch'
+  const firstLast = !isBatch && isRecord(input.body.firstLastFrame) ? input.body.firstLastFrame : null
+  const trustedFirstLastFrame = firstLast
+    ? await resolveTrustedFirstLastFrame(firstLast, input.projectId, input.userId)
+    : null
+  const explicitModel = isBatch
+    ? null
+    : typeof trustedFirstLastFrame?.flModel === 'string'
+      ? trustedFirstLastFrame.flModel
+      : typeof input.body.explicitVideoModel === 'string'
+        ? input.body.explicitVideoModel
+        : input.body.useProjectRouting !== true && typeof input.body.videoModel === 'string'
+          ? input.body.videoModel
+          : null
   const automaticDialogueModel = panel.hasDialogue ? projectModels.dialogueVideoModel : null
   const selectedCandidate = explicitModel || automaticDialogueModel || projectModels.videoModel
   if (!selectedCandidate) throw new ApiError('INVALID_PARAMS', { code: VIDEO_MODEL_INVALID })
@@ -232,7 +271,11 @@ export async function resolveAuthoritativePanelPayload(input: {
   let submission
   try {
     submission = resolvePanelVideoSubmission({
-      panel: { ...panel, legacyDuration: panel.duration },
+      panel: {
+        ...panel,
+        videoPrompt: trustedFirstLastFrame ? panel.firstLastFramePrompt || panel.videoPrompt : panel.videoPrompt,
+        legacyDuration: panel.duration,
+      },
       project: { videoModel: projectModels.videoModel, dialogueVideoModel: projectModels.dialogueVideoModel },
       explicitModelSelection: explicitModel,
       models,
@@ -243,14 +286,12 @@ export async function resolveAuthoritativePanelPayload(input: {
   const payload = { ...input.body }
   delete payload.submittedPrompt
   delete payload.customPrompt
+  delete payload.explicitVideoModel
   delete payload.requestedDuration
   delete payload.effectiveDuration
   delete payload.comfyWorkflowVersionId
-  if (isRecord(payload.firstLastFrame)) {
-    const firstLastFrame = { ...payload.firstLastFrame }
-    delete firstLastFrame.customPrompt
-    payload.firstLastFrame = firstLastFrame
-  }
+  delete payload.firstLastFrame
+  if (trustedFirstLastFrame) payload.firstLastFrame = trustedFirstLastFrame
   payload.videoModel = submission.selectedModel
   payload.videoModelReason = submission.modelReason
   payload.videoPrompt = submission.submittedPrompt
