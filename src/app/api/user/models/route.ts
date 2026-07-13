@@ -26,6 +26,11 @@ import type {
   ComfyVariableDefinition,
   ComfyWorkflowPurpose,
 } from '@/lib/comfyui/types'
+import {
+  buildComfyWorkflowModelOption,
+  isExecutableOwnedWorkflow,
+  isTestedOwnedUpscaleWorkflow,
+} from '@/lib/comfyui/workflow-model-option'
 
 type StoredModelType = UnifiedModelType | string
 
@@ -51,6 +56,7 @@ interface UserModelOption {
   capabilities?: ModelCapabilities
   videoPricingTiers?: VideoPricingTier[]
   workflowPurpose?: ComfyWorkflowPurpose
+  workflowVersionId?: string
 }
 
 interface UserModelsPayload {
@@ -191,9 +197,12 @@ export const GET = apiHandler(async () => {
         currentVersion: { is: { publishedAt: { not: null } } },
       },
       select: {
-        id: true, name: true, mediaType: true,
+        id: true, name: true, mediaType: true, currentVersionId: true,
         currentVersion: {
-          select: { id: true, purpose: true, publishedAt: true },
+          select: {
+            id: true, purpose: true, publishedAt: true, contentHash: true, lastSuccessfulTestAt: true,
+            lastTestConnection: { select: { userId: true } },
+          },
         },
       },
       orderBy: [{ mediaType: 'asc' }, { name: 'asc' }, { id: 'asc' }],
@@ -203,7 +212,10 @@ export const GET = apiHandler(async () => {
 
   const modelsRaw: StoredModel[] = parseStoredModels(pref?.customModels)
   const providers: StoredProvider[] = parseStoredProviders(pref?.customProviders)
-  const upscaleVersionIds = comfyWorkflows.flatMap((workflow) => (
+  const executableWorkflows = comfyWorkflows.filter((workflow) => (
+    isExecutableOwnedWorkflow(workflow, userId)
+  ))
+  const upscaleVersionIds = executableWorkflows.flatMap((workflow) => (
     workflow.mediaType === 'image'
     && workflow.currentVersion?.purpose === 'upscale'
     && typeof workflow.currentVersion.id === 'string'
@@ -223,6 +235,8 @@ export const GET = apiHandler(async () => {
   for (const version of upscaleVersions) {
     try {
       if (version.purpose !== 'upscale') continue
+      const workflow = executableWorkflows.find((candidate) => candidate.id === version.workflowId)
+      if (!workflow || !isTestedOwnedUpscaleWorkflow(workflow, userId)) continue
       const issues = validateWorkflowContract({
         purpose: 'upscale',
         graph: version.apiFormatJson,
@@ -293,7 +307,7 @@ export const GET = apiHandler(async () => {
     grouped[modelType].push(option)
   }
 
-  for (const workflow of comfyWorkflows) {
+  for (const workflow of executableWorkflows) {
     if (workflow.mediaType !== 'image' && workflow.mediaType !== 'video') continue
     const purpose: ComfyWorkflowPurpose = workflow.currentVersion?.purpose === 'upscale'
       ? 'upscale'
@@ -302,13 +316,7 @@ export const GET = apiHandler(async () => {
       if (workflow.mediaType !== 'image' || !validUpscaleWorkflowIds.has(workflow.id)) continue
     }
     const target = purpose === 'upscale' ? grouped.upscale : grouped[workflow.mediaType]
-    target.push({
-      value: composeModelKey('comfyui', workflow.id),
-      label: workflow.name,
-      provider: 'comfyui',
-      providerName: 'ComfyUI',
-      workflowPurpose: purpose,
-    })
+    target.push(buildComfyWorkflowModelOption(workflow))
   }
 
   return NextResponse.json({

@@ -7,6 +7,7 @@ import {
   invalidateUserModels,
   userModelsQueryOptions,
 } from '@/lib/query/hooks/useUserModels'
+import { buildComfyWorkflowModelOption, isExecutableOwnedWorkflow, isTestedOwnedUpscaleWorkflow } from '@/lib/comfyui/workflow-model-option'
 
 const apiFetchMock = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/api-fetch', () => ({ apiFetch: apiFetchMock }))
@@ -45,6 +46,48 @@ describe('user model query cache', () => {
 
     expect(selectImageModelOptions(payload)).toEqual([generation])
     expect(selectUpscaleModelOptions(payload)).toEqual([upscale])
+  })
+
+  it('exposes the pinned published workflow version required by upscale task routes', () => {
+    expect(buildComfyWorkflowModelOption({
+      id: 'wf-upscale', name: '4x upscale', mediaType: 'image',
+      currentVersion: { id: 'version-7', purpose: 'upscale' },
+    })).toEqual({
+      value: 'comfyui::wf-upscale', label: '4x upscale', provider: 'comfyui', providerName: 'ComfyUI',
+      workflowPurpose: 'upscale', workflowVersionId: 'version-7',
+    })
+  })
+
+  it('does not advertise another user or untested upscale workflow as executable', () => {
+    const base = {
+      id: 'wf-upscale', name: 'Upscale', mediaType: 'image',
+      currentVersionId: 'version-1',
+      currentVersion: {
+        id: 'version-1', purpose: 'upscale', publishedAt: new Date(),
+        contentHash: 'sha256:canonical',
+        lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-a' },
+      },
+    }
+    expect(isTestedOwnedUpscaleWorkflow(base, 'user-a')).toBe(true)
+    expect(isTestedOwnedUpscaleWorkflow({ ...base, currentVersion: { ...base.currentVersion, lastSuccessfulTestAt: null } }, 'user-a')).toBe(false)
+    expect(isTestedOwnedUpscaleWorkflow({ ...base, currentVersion: { ...base.currentVersion, lastTestConnection: { userId: 'user-b' } } }, 'user-a')).toBe(false)
+  })
+
+  it('discovers generation workflows only when the pinned immutable version is published and tested by its owner', () => {
+    const valid = {
+      id: 'wf-generation', name: 'Generate', mediaType: 'video', currentVersionId: 'version-1',
+      currentVersion: {
+        id: 'version-1', purpose: 'generation', publishedAt: new Date(),
+        contentHash: 'sha256:canonical', lastSuccessfulTestAt: new Date(),
+        lastTestConnection: { userId: 'user-a' },
+      },
+    }
+    expect(isExecutableOwnedWorkflow(valid, 'user-a')).toBe(true)
+    expect(isExecutableOwnedWorkflow({ ...valid, currentVersionId: 'version-2' }, 'user-a')).toBe(false)
+    expect(isExecutableOwnedWorkflow({ ...valid, currentVersion: { ...valid.currentVersion, publishedAt: null } }, 'user-a')).toBe(false)
+    expect(isExecutableOwnedWorkflow({ ...valid, currentVersion: { ...valid.currentVersion, contentHash: '' } }, 'user-a')).toBe(false)
+    expect(isExecutableOwnedWorkflow({ ...valid, currentVersion: { ...valid.currentVersion, lastSuccessfulTestAt: null } }, 'user-a')).toBe(false)
+    expect(isExecutableOwnedWorkflow({ ...valid, currentVersion: { ...valid.currentVersion, lastTestConnection: { userId: 'user-b' } } }, 'user-a')).toBe(false)
   })
 
   it('returns full image options and exposes a newly published workflow after invalidation', async () => {

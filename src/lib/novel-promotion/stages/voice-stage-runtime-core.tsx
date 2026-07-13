@@ -53,9 +53,7 @@ export function useVoiceStageRuntime({
   if (!pathname) {
     throw new Error('VoiceStage requires a non-null pathname')
   }
-  if (!searchParams) {
-    throw new Error('VoiceStage requires searchParams')
-  }
+  const stableSearchParams = useMemo(() => searchParams ?? new URLSearchParams(), [searchParams])
   const { data: assets } = useProjectAssets(projectId)
   const { data: episodeData } = useEpisodeData(projectId, episodeId)
   const analyzeVoiceMutation = useAnalyzeProjectVoice(projectId)
@@ -151,7 +149,7 @@ export function useVoiceStageRuntime({
     episodeId,
     pathname,
     router,
-    searchParams,
+    searchParams: stableSearchParams,
     onOpenAssetLibraryForCharacter,
     matchCharacterBySpeaker,
   })

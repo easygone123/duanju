@@ -1,16 +1,18 @@
 'use client'
 
 import { useMemo } from 'react'
-import { NovelPromotionPanel } from '@/types/project'
+import { NovelPromotionPanel, NovelPromotionStoryboard } from '@/types/project'
 import { StoryboardPanel } from './hooks/useStoryboardState'
 import { PanelEditData } from '../PanelEditForm'
 import { ASPECT_RATIO_CONFIGS } from '@/lib/constants'
 import PanelCard from './PanelCard'
 import type { PanelSaveState } from './hooks/usePanelCrudActions'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
+import type { SixGridUpscaleWorkflow } from './SixGridGroupControls'
+import { isSixGridPanelBusy } from '@/lib/query/hooks/useSixGridStoryboard'
 
 interface StoryboardPanelListProps {
-  storyboardId: string
+  storyboard: NovelPromotionStoryboard
   textPanels: StoryboardPanel[]
   storyboardStartIndex: number
   videoRatio: string
@@ -42,10 +44,16 @@ interface StoryboardPanelListProps {
   onInsertAfter: (panelIndex: number) => void
   onVariant: (panelIndex: number) => void
   isInsertDisabled: (panelId: string) => boolean
+  sixGridUpscaleWorkflow: SixGridUpscaleWorkflow | null
+  sixGridTaskPanelId: string | null
+  isSixGridTaskRunning: boolean
+  onOpenSixGridCrop: (cellIndex: number) => void
+  onUpscaleSixGridPanel: (panelId: string, workflow: SixGridUpscaleWorkflow) => Promise<unknown>
+  onUndoSixGridPanel: (panelId: string, expectedCurrentMediaId: string, expectedPreviousMediaId: string) => Promise<unknown>
 }
 
 export default function StoryboardPanelList({
-  storyboardId,
+  storyboard,
   textPanels,
   storyboardStartIndex,
   videoRatio,
@@ -77,6 +85,12 @@ export default function StoryboardPanelList({
   onInsertAfter,
   onVariant,
   isInsertDisabled,
+  sixGridUpscaleWorkflow,
+  sixGridTaskPanelId,
+  isSixGridTaskRunning,
+  onOpenSixGridCrop,
+  onUpscaleSixGridPanel,
+  onUndoSixGridPanel,
 }: StoryboardPanelListProps) {
   const displayImages = useMemo(() => textPanels.map((panel) => panel.imageUrl || null), [textPanels])
   const isVertical = ASPECT_RATIO_CONFIGS[videoRatio]?.isVertical ?? false
@@ -114,7 +128,7 @@ export default function StoryboardPanelList({
               panelData={panelData}
               imageUrl={imageUrl}
               globalPanelNumber={globalPanelNumber}
-              storyboardId={storyboardId}
+              storyboardId={storyboard.id}
               videoRatio={videoRatio}
               isSaving={isPanelSaving}
               hasUnsavedChanges={hasUnsavedChanges}
@@ -142,6 +156,33 @@ export default function StoryboardPanelList({
               onInsertAfter={() => onInsertAfter(index)}
               onVariant={() => onVariant(index)}
               isInsertDisabled={isInsertDisabled(panel.id)}
+              previousImageUrl={panel.previousImageUrl}
+              sixGridActions={storyboard.layoutMode === 'six_grid' ? {
+                currentUrl: panel.imageUrl,
+                croppedUrl: panel.croppedImageUrl,
+                upscaledUrl: panel.upscaledImageUrl,
+                previousUrl: panel.previousImageUrl,
+                sourceUrl: storyboard.sixGridProcessingOrder === 'sheet_upscale_then_crop'
+                  ? storyboard.upscaledSheetImageUrl : storyboard.sheetImageUrl,
+                isBusy: isSixGridPanelBusy(
+                  sixGridTaskPanelId,
+                  panel.id,
+                  Boolean((panel as StoryboardPanel & { imageTaskRunning?: boolean }).imageTaskRunning),
+                  isSixGridTaskRunning,
+                ),
+                canUpscale: Boolean(
+                  sixGridUpscaleWorkflow
+                  && storyboard.sixGridProcessingOrder === 'crop_then_panel_upscale'
+                  && panel.croppedImageUrl
+                  && panel.imageUrl === panel.croppedImageUrl,
+                ),
+                onRecrop: () => onOpenSixGridCrop(panel.gridCellIndex ?? index),
+                onUpscale: () => { if (sixGridUpscaleWorkflow) void onUpscaleSixGridPanel(panel.id, sixGridUpscaleWorkflow) },
+                onPreview: onPreviewImage,
+                onUndo: panel.previousImageUrl && panel.imageMediaId && panel.previousImageMediaId
+                  ? () => void onUndoSixGridPanel(panel.id, panel.imageMediaId!, panel.previousImageMediaId!)
+                  : undefined,
+              } : undefined}
             />
           </div>
         )

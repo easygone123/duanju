@@ -18,6 +18,7 @@ export interface WorkspaceStageVideoModelOption {
   providerName?: string
   capabilities?: ModelCapabilities
   videoPricingTiers?: VideoPricingTier[]
+  workflowVersionId?: string
 }
 
 export interface WorkspaceStageRuntimeValue {

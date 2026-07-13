@@ -383,6 +383,60 @@
         "deleteShot": "删除镜头",
         "pasteSrtPlaceholder": "粘贴新的SRT内容..."
     },
+    "sixGrid": {
+        "title": "六宫格故事板",
+        "generateSheet": "生成整张 3×2 故事板",
+        "regenerateSheet": "重新生成整张 3×2 故事板",
+        "previewOriginal": "查看原始整图",
+        "upscaleSheet": "放大原始整图",
+        "crop": "裁剪六个分镜",
+        "orderLabel": "处理顺序",
+        "orders": {
+            "sheet_upscale_then_crop": "原图整图放大后裁剪",
+            "crop_then_panel_upscale": "先裁剪后单格放大"
+        },
+        "sourceLabel": "当前来源",
+        "sourceOriginal": "原始整图",
+        "sourceUpscaled": "放大后的整图",
+        "sourceMissing": "尚无整图",
+        "artifactVersion": "素材版本 {version}",
+        "status": "任务状态：{status}",
+        "idle": "空闲",
+        "running": "处理中",
+        "manageComfyui": "管理 ComfyUI 节点池",
+        "comfyuiHint": "前往设置中心添加 ComfyUI IP，并发布、测试私有放大工作流。",
+        "workflowRequired": "需要先发布并测试一个本人可用的放大工作流",
+        "sheetRequired": "请先生成原始整图",
+        "upscaledSheetRequired": "当前顺序要求先放大整图，再执行裁剪",
+        "sourceOrderMismatch": "所选来源与当前处理顺序不一致，请切换为当前顺序要求的来源",
+        "cropModal": {
+            "title": "裁剪六个分镜",
+            "source": "裁剪来源",
+            "original": "原始整图",
+            "upscaled": "放大后的整图",
+            "cell": "宫格 {cell}",
+            "resetCell": "重置当前格",
+            "resetAll": "重置全部",
+            "cancel": "取消",
+            "submit": "提交六格裁剪",
+            "moveHint": "方向键微调，按住 Shift 可加速移动；裁剪框始终锁定宫格比例且不会越格。",
+            "shrink": "缩小裁剪框",
+        "grow": "放大裁剪框",
+        "resize": "调整宫格 {cell} 大小"
+        },
+        "panel": {
+            "actions": "六宫格分镜操作",
+            "dialogue": "含台词",
+            "recrop": "重新裁剪",
+            "upscale": "单格放大",
+            "upscaleUnavailable": "需要裁剪图、先裁剪后放大模式，以及已发布并测试的私有放大工作流",
+            "previewCurrent": "查看当前图",
+            "previewCrop": "查看裁剪图",
+            "previewUpscale": "查看放大图",
+            "previewSource": "查看来源整图",
+            "undo": "撤销到上一版本"
+        }
+    },
     "firstLastFrame": {
         "placeholder": "输入首尾帧视频提示词...",
         "modelTitle": "首尾帧模型"

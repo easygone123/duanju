@@ -6,7 +6,9 @@ const submitTaskMock = vi.hoisted(() => vi.fn(async () => ({ success: true, task
 const authMock = vi.hoisted(() => vi.fn(async () => ({ session: { user: { id: 'user-1' } } })))
 const prismaMock = vi.hoisted(() => ({
   novelPromotionStoryboard: { findFirst: vi.fn() },
+  novelPromotionPanel: { findFirst: vi.fn(), updateMany: vi.fn() },
   comfyWorkflow: { findFirst: vi.fn() },
+  $transaction: vi.fn(),
 }))
 const capabilityMock = vi.hoisted(() => vi.fn(async () => ({ aspectRatio: '8:3' })))
 
@@ -33,6 +35,13 @@ describe('six-grid route/task registration contract', () => {
     authMock.mockResolvedValue({ session: { user: { id: 'user-1' } } })
     prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValue(storyboardFixture())
     prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflowFixture())
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValue({
+      id: 'panel-1', imageMediaId: 'current-1', imageUrl: '/current.webp',
+      previousImageMediaId: 'previous-1', previousImageUrl: '/previous.webp',
+      croppedImageMediaId: 'previous-1', upscaledImageMediaId: 'current-1',
+    })
+    prismaMock.novelPromotionPanel.updateMany.mockResolvedValue({ count: 1 })
+    prismaMock.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => callback(prismaMock))
     capabilityMock.mockResolvedValue({ aspectRatio: '8:3' })
   })
   it('registers all four operations as image tasks with stable intents and labels', () => {
@@ -63,6 +72,26 @@ describe('six-grid route/task registration contract', () => {
     expect(sheet.POST).toBeTypeOf('function')
     expect(crop.POST).toBeTypeOf('function')
     expect(panel.POST).toBeTypeOf('function')
+  })
+
+  it('undoes a panel with a media-id CAS and returns HTTP 409 for a stale snapshot', async () => {
+    const route = await import('@/app/api/novel-promotion/[projectId]/panel/route')
+    const body = {
+      panelId: 'panel-1', restorePreviousImage: true,
+      expectedCurrentMediaId: 'current-1', expectedPreviousMediaId: 'previous-1',
+    }
+    let response = await callRoute(route.PATCH, 'PATCH', body, { params: { projectId: 'project-1' } })
+    expect(response.status).toBe(200)
+    expect(prismaMock.novelPromotionPanel.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'panel-1', imageMediaId: 'current-1', previousImageMediaId: 'previous-1' },
+    }))
+
+    prismaMock.novelPromotionPanel.updateMany.mockResolvedValueOnce({ count: 0 })
+    response = await callRoute(route.PATCH, 'PATCH', body, { params: { projectId: 'project-1' } })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({
+      error: { code: 'CONFLICT', details: { code: 'SIX_GRID_PANEL_IMAGE_STALE' } },
+    })
   })
 
   it('snapshots the correct original source for crop-then-upscale before submission', async () => {

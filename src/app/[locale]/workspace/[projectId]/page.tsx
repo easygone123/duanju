@@ -50,16 +50,14 @@ export default function ProjectDetailPage() {
   if (!params?.projectId) {
     throw new Error('ProjectDetailPage requires projectId route param')
   }
-  if (!searchParams) {
-    throw new Error('ProjectDetailPage requires searchParams')
-  }
+  const stableSearchParams = useMemo(() => searchParams ?? new URLSearchParams(), [searchParams])
   const projectId = params.projectId
   const t = useTranslations('workspaceDetail')
   const tc = useTranslations('common')
 
   // 从URL读取参数
-  const urlStage = searchParams.get('stage') as Stage | null
-  const urlEpisodeId = searchParams.get('episode') ?? null
+  const urlStage = stableSearchParams.get('stage') as Stage | null
+  const urlEpisodeId = stableSearchParams.get('episode') ?? null
   const currentUrlStage = urlStage && VALID_STAGES.includes(urlStage) ? urlStage : null
 
   // 🔥 React Query 数据获取
@@ -80,7 +78,7 @@ export default function ProjectDetailPage() {
 
   // 更新URL参数（stage 和/或 episode）
   const updateUrlParams = useCallback((updates: { stage?: string; episode?: string | null }) => {
-    const params = new URLSearchParams(searchParams.toString())
+    const params = new URLSearchParams(stableSearchParams.toString())
     if (updates.stage !== undefined) {
       params.set('stage', updates.stage)
     }
@@ -99,7 +97,7 @@ export default function ProjectDetailPage() {
       },
       { scroll: false },
     )
-  }, [router, projectId, searchParams])
+  }, [router, projectId, stableSearchParams])
 
   // 更新URL中的stage参数（保持向后兼容）
   const updateUrlStage = useCallback((stage: string) => {

@@ -12,8 +12,8 @@ const prismaMock = vi.hoisted(() => ({
   },
   comfyWorkflow: {
     findMany: vi.fn(async (): Promise<Array<Record<string, unknown>>> => [
-      { id: 'image-workflow', name: 'Portrait workflow', mediaType: 'image', currentVersion: { id: 'image-v1', purpose: 'generation' } },
-      { id: 'video-workflow', name: 'Video workflow', mediaType: 'video', currentVersion: { id: 'video-v1', purpose: 'generation' } },
+      { id: 'image-workflow', name: 'Portrait workflow', mediaType: 'image', currentVersionId: 'image-v1', currentVersion: { id: 'image-v1', purpose: 'generation', publishedAt: new Date(), contentHash: 'image-hash', lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' } } },
+      { id: 'video-workflow', name: 'Video workflow', mediaType: 'video', currentVersionId: 'video-v1', currentVersion: { id: 'video-v1', purpose: 'generation', publishedAt: new Date(), contentHash: 'video-hash', lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' } } },
     ]),
   },
   comfyWorkflowVersion: {
@@ -29,7 +29,7 @@ vi.mock('@/lib/model-pricing/catalog', () => ({ findBuiltinPricingCatalogEntry: 
 describe('api specific - dynamic ComfyUI user models', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('lists owned published workflows in their image and video groups without a provider key', async () => {
+  it('lists only owned, pinned, published, successfully tested workflows without loading generation graphs', async () => {
     const route = await import('@/app/api/user/models/route')
     const response = await route.GET(buildMockRequest({ path: '/api/user/models', method: 'GET' }), {
       params: Promise.resolve({}),
@@ -43,6 +43,7 @@ describe('api specific - dynamic ComfyUI user models', () => {
       provider: 'comfyui',
       providerName: 'ComfyUI',
       workflowPurpose: 'generation',
+      workflowVersionId: 'image-v1',
     })
     expect(payload.video).toContainEqual({
       value: 'comfyui::video-workflow',
@@ -50,6 +51,7 @@ describe('api specific - dynamic ComfyUI user models', () => {
       provider: 'comfyui',
       providerName: 'ComfyUI',
       workflowPurpose: 'generation',
+      workflowVersionId: 'video-v1',
     })
     expect(prismaMock.comfyWorkflow.findMany).toHaveBeenCalledWith({
       where: {
@@ -57,9 +59,12 @@ describe('api specific - dynamic ComfyUI user models', () => {
         currentVersion: { is: { publishedAt: { not: null } } },
       },
       select: {
-        id: true, name: true, mediaType: true,
+        id: true, name: true, mediaType: true, currentVersionId: true,
         currentVersion: {
-          select: { id: true, purpose: true, publishedAt: true },
+          select: {
+            id: true, purpose: true, publishedAt: true, contentHash: true, lastSuccessfulTestAt: true,
+            lastTestConnection: { select: { userId: true } },
+          },
         },
       },
       orderBy: [{ mediaType: 'asc' }, { name: 'asc' }, { id: 'asc' }],
@@ -85,10 +90,10 @@ describe('api specific - dynamic ComfyUI user models', () => {
       }],
     }
     prismaMock.comfyWorkflow.findMany.mockResolvedValueOnce([
-      { id: 'generation', name: 'Generate', mediaType: 'image', currentVersion: { id: 'generation-v1', purpose: 'generation', publishedAt: new Date() } },
-      { id: 'upscale-valid', name: 'Upscale', mediaType: 'image', currentVersion: { id: 'upscale-valid-v1', purpose: 'upscale', publishedAt: new Date() } },
-      { id: 'upscale-invalid', name: 'Broken upscale', mediaType: 'image', currentVersion: { id: 'upscale-invalid-v1', purpose: 'upscale', publishedAt: new Date() } },
-      { id: 'upscale-untransformed', name: 'Unsafe upscale', mediaType: 'image', currentVersion: { id: 'upscale-untransformed-v1', purpose: 'upscale', publishedAt: new Date() } },
+      { id: 'generation', name: 'Generate', mediaType: 'image', currentVersionId: 'generation-v1', currentVersion: { id: 'generation-v1', purpose: 'generation', publishedAt: new Date(), contentHash: 'generation-hash', lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' } } },
+      { id: 'upscale-valid', name: 'Upscale', mediaType: 'image', currentVersionId: 'upscale-valid-v1', currentVersion: { id: 'upscale-valid-v1', purpose: 'upscale', publishedAt: new Date(), contentHash: 'valid-hash', lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' } } },
+      { id: 'upscale-invalid', name: 'Broken upscale', mediaType: 'image', currentVersionId: 'upscale-invalid-v1', currentVersion: { id: 'upscale-invalid-v1', purpose: 'upscale', publishedAt: new Date(), contentHash: 'invalid-hash', lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' } } },
+      { id: 'upscale-untransformed', name: 'Unsafe upscale', mediaType: 'image', currentVersionId: 'upscale-untransformed-v1', currentVersion: { id: 'upscale-untransformed-v1', purpose: 'upscale', publishedAt: new Date(), contentHash: 'unsafe-hash', lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' } } },
     ])
     prismaMock.comfyWorkflowVersion.findMany.mockResolvedValueOnce([
       { id: 'upscale-valid-v1', workflowId: 'upscale-valid', ...validVersion },
@@ -106,7 +111,7 @@ describe('api specific - dynamic ComfyUI user models', () => {
 
     expect(payload.upscale).toEqual([{
       value: 'comfyui::upscale-valid', label: 'Upscale', provider: 'comfyui',
-      providerName: 'ComfyUI', workflowPurpose: 'upscale',
+      providerName: 'ComfyUI', workflowPurpose: 'upscale', workflowVersionId: 'upscale-valid-v1',
     }])
     expect(payload.image.map((model) => model.value)).toContain('comfyui::generation')
     expect(payload.image.map((model) => model.value)).not.toContain('comfyui::upscale-valid')

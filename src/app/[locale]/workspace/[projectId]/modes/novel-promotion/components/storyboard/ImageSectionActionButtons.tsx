@@ -1,4 +1,5 @@
 'use client'
+import React from 'react'
 import { logInfo as _ulogInfo } from '@/lib/logging/core'
 import { useTranslations } from 'next-intl'
 import { AppIcon } from '@/components/ui/icons'
@@ -19,6 +20,40 @@ interface ImageSectionActionButtonsProps {
   onOpenAIDataModal: () => void
   onUndo?: (panelId: string) => void
   triggerPulse: () => void
+}
+
+export interface SixGridPanelActionProps {
+  currentUrl?: string | null
+  croppedUrl?: string | null
+  upscaledUrl?: string | null
+  previousUrl?: string | null
+  sourceUrl?: string | null
+  isBusy: boolean
+  canUpscale: boolean
+  upscaleDisabledReason?: string
+  onRecrop: () => void
+  onUpscale: () => void
+  onPreview: (url: string) => void
+  onUndo?: () => void
+}
+
+export function SixGridPanelActions({
+  currentUrl, croppedUrl, upscaledUrl, previousUrl, sourceUrl, isBusy, canUpscale,
+  upscaleDisabledReason, onRecrop, onUpscale, onPreview, onUndo,
+}: SixGridPanelActionProps) {
+  const t = useTranslations('storyboard.sixGrid.panel')
+  const previewActions = [
+    [t('previewCurrent'), currentUrl], [t('previewCrop'), croppedUrl],
+    [t('previewUpscale'), upscaledUrl], [t('previewSource'), sourceUrl],
+  ] as const
+  return (
+    <div className="flex flex-wrap gap-1 border-t border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-2" aria-label={t('actions')}>
+      <button type="button" className="glass-btn-base glass-btn-secondary rounded px-2 py-1 text-[10px]" disabled={isBusy} onClick={onRecrop}>{t('recrop')}</button>
+      <button type="button" className="glass-btn-base glass-btn-secondary rounded px-2 py-1 text-[10px]" disabled={isBusy || !canUpscale} title={!canUpscale ? (upscaleDisabledReason || t('upscaleUnavailable')) : undefined} onClick={onUpscale}>{t('upscale')}</button>
+      {previewActions.map(([label, url]) => url && <button key={label} type="button" className="glass-btn-base glass-btn-ghost rounded px-2 py-1 text-[10px]" onClick={() => onPreview(url)}>{label}</button>)}
+      {previousUrl && onUndo && <button type="button" className="glass-btn-base glass-btn-secondary rounded px-2 py-1 text-[10px]" disabled={isBusy} onClick={onUndo}>{t('undo')}</button>}
+    </div>
+  )
 }
 
 export default function ImageSectionActionButtons({

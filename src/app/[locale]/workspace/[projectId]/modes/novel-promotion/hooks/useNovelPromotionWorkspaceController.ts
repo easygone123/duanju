@@ -1,7 +1,7 @@
 'use client'
 
 import { logInfo as _ulogInfo } from '@/lib/logging/core'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
@@ -35,6 +35,7 @@ export function useNovelPromotionWorkspaceController({
   const tc = useTranslations('common')
 
   const searchParams = useSearchParams()
+  const stableSearchParams = useMemo(() => searchParams ?? new URLSearchParams(), [searchParams])
   const router = useRouter()
   const { onRefresh } = useWorkspaceProvider()
 
@@ -63,7 +64,7 @@ export function useNovelPromotionWorkspaceController({
 
   const assetLibrary = useWorkspaceAssetLibraryShell({
     currentStage,
-    searchParams,
+    searchParams: stableSearchParams,
     router,
     onRefresh,
   })
@@ -141,7 +142,7 @@ export function useNovelPromotionWorkspaceController({
     isScriptToStoryboardRunning
 
   useWorkspaceAutoRun({
-    searchParams,
+    searchParams: stableSearchParams,
     router,
     episodeId,
     novelText: projectSnapshot.novelText,

@@ -11,6 +11,7 @@ import { useTranslations } from 'next-intl'
 import { useToast } from '@/contexts/ToastContext'
 import { shouldLockStoryboardRunSettings } from '@/lib/novel-promotion/six-grid/run-settings'
 import type { StoryboardConfigKey } from '../hooks/useWorkspaceConfigActions'
+import { Link } from '@/i18n/navigation'
 
 /**
  * 配置阶段 — 整合 NovelInputStage + 长文本智能分集
@@ -166,6 +167,12 @@ export default function ConfigStage() {
                 <option key={model.value} value={model.value}>{model.label}</option>
               ))}
             </select>
+            <span className="mt-1 block text-[11px] text-[var(--glass-text-tertiary)]">
+              {runtime.userUpscaleModels.length === 0 ? t('comfyuiEmptyHint') : t('comfyuiManageHint')}{' '}
+              <Link className="font-medium text-[var(--glass-tone-info-fg)] underline" href={{ pathname: '/profile', query: { section: 'comfyui' } }} title={t('comfyuiManageHint')}>
+                {t('manageComfyui')}
+              </Link>
+            </span>
           </label>
           <label className="text-xs text-[var(--glass-text-secondary)]">
             <span className="mb-1 block">{t('dialogueVideoModelLabel')}</span>

@@ -1,21 +1,29 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useSession, signOut } from 'next-auth/react'
+import { useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import Navbar from '@/components/Navbar'
 import ApiConfigTab from './components/ApiConfigTab'
 import ComfyUiSettings from './components/comfyui/ComfyUiSettings'
 import { AppIcon } from '@/components/ui/icons'
 import { useRouter } from '@/i18n/navigation'
+import { resolveProfileSection, type ProfileSection } from './profile-section'
 
 export default function ProfilePage() {
   const { data: session, status } = useSession()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const t = useTranslations('profile')
   const tc = useTranslations('common')
 
   // 主要分区：扣费记录 / API配置
-  const [activeSection, setActiveSection] = useState<'billing' | 'apiConfig' | 'comfyui'>('apiConfig')
+  const requestedSection = searchParams?.get('section') ?? null
+  const [activeSection, setActiveSection] = useState<ProfileSection>(() => resolveProfileSection(requestedSection))
+
+  useEffect(() => {
+    setActiveSection(resolveProfileSection(requestedSection))
+  }, [requestedSection])
 
   useEffect(() => {
     if (status === 'loading') return
@@ -31,6 +39,9 @@ export default function ProfilePage() {
   }
 
   const noBillingText = t('openSourceNoBilling')
+  const navigateSection = (section: ProfileSection) => {
+    router.replace({ pathname: '/profile', query: { section } })
+  }
 
   return (
     <div className="glass-page min-h-screen">
@@ -60,7 +71,7 @@ export default function ProfilePage() {
               {/* 导航菜单 */}
               <nav className="flex flex-1 gap-2 overflow-x-auto md:overflow-visible md:block md:space-y-2">
                 <button
-                  onClick={() => setActiveSection('apiConfig')}
+                  onClick={() => navigateSection('apiConfig')}
                   className={`w-auto min-w-max md:w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all cursor-pointer ${activeSection === 'apiConfig'
                     ? 'glass-btn-base glass-btn-tone-info'
                     : 'text-[var(--glass-text-secondary)] hover:bg-[var(--glass-bg-muted)]'
@@ -71,7 +82,7 @@ export default function ProfilePage() {
                 </button>
 
                 <button
-                  onClick={() => setActiveSection('comfyui')}
+                  onClick={() => navigateSection('comfyui')}
                   className={`w-auto min-w-max md:w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all cursor-pointer ${activeSection === 'comfyui'
                     ? 'glass-btn-base glass-btn-tone-info'
                     : 'text-[var(--glass-text-secondary)] hover:bg-[var(--glass-bg-muted)]'
@@ -82,7 +93,7 @@ export default function ProfilePage() {
                 </button>
 
                 <button
-                  onClick={() => setActiveSection('billing')}
+                  onClick={() => navigateSection('billing')}
                   className={`w-auto min-w-max md:w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all cursor-pointer ${activeSection === 'billing'
                     ? 'glass-btn-base glass-btn-tone-info'
                     : 'text-[var(--glass-text-secondary)] hover:bg-[var(--glass-bg-muted)]'

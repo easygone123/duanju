@@ -15,6 +15,7 @@ export interface UserModelOption {
   capabilities?: ModelCapabilities
   videoPricingTiers?: VideoPricingTier[]
   workflowPurpose?: ComfyWorkflowPurpose
+  workflowVersionId?: string
 }
 
 export interface UserModelsPayload {

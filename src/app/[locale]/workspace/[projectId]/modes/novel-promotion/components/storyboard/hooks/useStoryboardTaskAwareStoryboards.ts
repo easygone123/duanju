@@ -19,15 +19,23 @@ interface UseStoryboardTaskAwareStoryboardsProps {
   isRunningPhase: (phase: string | null | undefined) => boolean
 }
 
+export function buildSixGridTaskTypeContract() {
+  return {
+    storyboard: ['storyboard_sheet_generate', 'storyboard_sheet_upscale', 'storyboard_sheet_crop'],
+    panel: ['storyboard_panel_upscale'],
+  }
+}
+
 function buildStoryboardTextTargets(storyboards: NovelPromotionStoryboard[]): TaskTarget[] {
   const targets: TaskTarget[] = []
+  const sixGridTypes = buildSixGridTaskTypeContract().storyboard
 
   for (const storyboard of storyboards) {
     targets.push({
       key: `storyboard:${storyboard.id}`,
       targetType: 'NovelPromotionStoryboard',
       targetId: storyboard.id,
-      types: ['regenerate_storyboard_text', 'insert_panel'],
+      types: ['regenerate_storyboard_text', 'insert_panel', ...sixGridTypes],
       resource: 'text',
       hasOutput: !!(storyboard.panels || []).length,
     })
@@ -48,6 +56,7 @@ function buildStoryboardTextTargets(storyboards: NovelPromotionStoryboard[]): Ta
 
 function buildPanelTargets(storyboards: NovelPromotionStoryboard[], type: 'image' | 'video' | 'lip-sync'): TaskTarget[] {
   const targets: TaskTarget[] = []
+  const sixGridPanelTypes = buildSixGridTaskTypeContract().panel
 
   for (const storyboard of storyboards) {
     for (const panel of storyboard.panels || []) {
@@ -56,7 +65,7 @@ function buildPanelTargets(storyboards: NovelPromotionStoryboard[], type: 'image
           key: `panel-image:${panel.id}`,
           targetType: 'NovelPromotionPanel',
           targetId: panel.id,
-          types: ['image_panel', 'panel_variant', 'modify_asset_image'],
+          types: ['image_panel', 'panel_variant', 'modify_asset_image', ...sixGridPanelTypes],
           resource: 'image',
           hasOutput: !!panel.imageUrl,
         })

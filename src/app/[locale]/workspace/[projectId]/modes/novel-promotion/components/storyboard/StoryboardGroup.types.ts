@@ -4,6 +4,8 @@ import type { PanelEditData } from '../PanelEditForm'
 import type { VariantData, VariantOptions } from './hooks/usePanelVariant'
 import type { PanelSaveState } from './hooks/usePanelCrudActions'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
+import type { SixGridUpscaleWorkflow } from './SixGridGroupControls'
+import type { CropEntry } from './SixGridCropModal'
 
 export interface StoryboardGroupProps {
   storyboard: NovelPromotionStoryboard
@@ -65,4 +67,12 @@ export interface StoryboardGroupProps {
     options: VariantOptions,
   ) => Promise<void>
   submittingVariantPanelId: string | null
+  sixGridUpscaleWorkflow: SixGridUpscaleWorkflow | null
+  isSixGridTaskRunning: boolean
+  sixGridTaskPanelId: string | null
+  onGenerateSixGridSheet: () => Promise<unknown>
+  onUpscaleSixGridSheet: (workflow: SixGridUpscaleWorkflow) => Promise<unknown>
+  onCropSixGridSheet: (cropRects: CropEntry[]) => Promise<unknown>
+  onUpscaleSixGridPanel: (panelId: string, workflow: SixGridUpscaleWorkflow) => Promise<unknown>
+  onUndoSixGridPanel: (panelId: string, expectedCurrentMediaId: string, expectedPreviousMediaId: string) => Promise<unknown>
 }

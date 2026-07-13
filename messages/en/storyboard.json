@@ -383,6 +383,60 @@
         "deleteShot": "Delete Shot",
         "pasteSrtPlaceholder": "Paste new SRT content..."
     },
+    "sixGrid": {
+        "title": "Six-grid storyboard",
+        "generateSheet": "Generate full 3×2 sheet",
+        "regenerateSheet": "Regenerate full 3×2 sheet",
+        "previewOriginal": "Preview original sheet",
+        "upscaleSheet": "Upscale original sheet",
+        "crop": "Crop six panels",
+        "orderLabel": "Processing order",
+        "orders": {
+            "sheet_upscale_then_crop": "Upscale the original sheet, then crop",
+            "crop_then_panel_upscale": "Crop first, then upscale each panel"
+        },
+        "sourceLabel": "Current source",
+        "sourceOriginal": "Original sheet",
+        "sourceUpscaled": "Upscaled sheet",
+        "sourceMissing": "No sheet yet",
+        "artifactVersion": "Artifact version {version}",
+        "status": "Task status: {status}",
+        "idle": "Idle",
+        "running": "Running",
+        "manageComfyui": "Manage ComfyUI pool",
+        "comfyuiHint": "Open Settings Center to add a ComfyUI IP and publish and test your private upscale workflow.",
+        "workflowRequired": "Publish and test an upscale workflow available to your account first",
+        "sheetRequired": "Generate the original sheet first",
+        "upscaledSheetRequired": "The current order requires upscaling the sheet before cropping",
+        "sourceOrderMismatch": "The selected source does not match the processing order",
+        "cropModal": {
+            "title": "Crop six panels",
+            "source": "Crop source",
+            "original": "Original sheet",
+            "upscaled": "Upscaled sheet",
+            "cell": "Cell {cell}",
+            "resetCell": "Reset cell",
+            "resetAll": "Reset all",
+            "cancel": "Cancel",
+            "submit": "Submit six crops",
+            "moveHint": "Use arrow keys to nudge; hold Shift for larger steps. The crop stays ratio-locked inside its cell.",
+            "shrink": "Shrink crop",
+        "grow": "Grow crop",
+        "resize": "Resize cell {cell}"
+        },
+        "panel": {
+            "actions": "Six-grid panel actions",
+            "dialogue": "Contains dialogue",
+            "recrop": "Recrop",
+            "upscale": "Upscale panel",
+            "upscaleUnavailable": "Requires a crop, crop-then-upscale mode, and a published tested private upscale workflow",
+            "previewCurrent": "Preview current",
+            "previewCrop": "Preview crop",
+            "previewUpscale": "Preview upscale",
+            "previewSource": "Preview source",
+            "undo": "Undo previous"
+        }
+    },
     "firstLastFrame": {
         "placeholder": "Enter first/last frame video prompt...",
         "modelTitle": "First/Last Frame Model"

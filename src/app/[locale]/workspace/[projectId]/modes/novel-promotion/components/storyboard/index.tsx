@@ -116,6 +116,14 @@ export default function StoryboardStage({
     runningCount,
     pendingPanelCount,
     handleGenerateAllPanels,
+    sixGridUpscaleWorkflow,
+    sixGridTaskStoryboardId,
+    sixGridTaskPanelId,
+    generateSixGridSheet,
+    upscaleSixGridSheet,
+    cropSixGridSheet,
+    upscaleSixGridPanel,
+    undoSixGridPanel,
   } = controller
 
   const modalRuntime = useStoryboardModalRuntime({
@@ -216,6 +224,14 @@ export default function StoryboardStage({
           addStoryboardGroup={addStoryboardGroup}
           addingStoryboardGroup={addingStoryboardGroup}
           setLocalStoryboards={setLocalStoryboards}
+          sixGridUpscaleWorkflow={sixGridUpscaleWorkflow}
+          sixGridTaskStoryboardId={sixGridTaskStoryboardId}
+          sixGridTaskPanelId={sixGridTaskPanelId}
+          onGenerateSixGridSheet={generateSixGridSheet}
+          onUpscaleSixGridSheet={upscaleSixGridSheet}
+          onCropSixGridSheet={cropSixGridSheet}
+          onUpscaleSixGridPanel={upscaleSixGridPanel}
+          onUndoSixGridPanel={undoSixGridPanel}
         />
 
         {modalRuntime.editingPanel && (

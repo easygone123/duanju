@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { serializeStructuredJsonField } from '@/lib/novel-promotion/panel-ai-data-sync'
+import { toPanelUndoApiError, undoSixGridPanelImage, type PanelUndoClient } from '@/lib/novel-promotion/six-grid/panel-undo'
 
 function parseNullableNumberField(value: unknown): number | null {
   if (value === null || value === '') return null
@@ -229,12 +230,32 @@ export const PATCH = apiHandler(async (
   const panelModel = prisma.novelPromotionPanel as unknown as {
     create: (args: { data: Record<string, unknown> }) => Promise<unknown>
   }
-  const { panelId, storyboardId, panelIndex, videoPrompt, firstLastFramePrompt } = body
+  const {
+    panelId, storyboardId, panelIndex, videoPrompt, firstLastFramePrompt, restorePreviousImage,
+    expectedCurrentMediaId, expectedPreviousMediaId,
+  } = body
 
   // 🔥 方式1：通过 panelId 直接更新（优先）
   if (panelId) {
-    const panel = await prisma.novelPromotionPanel.findUnique({
-      where: { id: panelId }
+    if (restorePreviousImage === true) {
+      if (typeof expectedCurrentMediaId !== 'string' || !expectedCurrentMediaId
+        || typeof expectedPreviousMediaId !== 'string' || !expectedPreviousMediaId) {
+        throw new ApiError('INVALID_PARAMS', { code: 'PANEL_UNDO_SNAPSHOT_REQUIRED' })
+      }
+      try {
+        await undoSixGridPanelImage(prisma as unknown as PanelUndoClient, {
+          projectId, panelId, expectedCurrentMediaId, expectedPreviousMediaId,
+        })
+      } catch (error) {
+        throw toPanelUndoApiError(error)
+      }
+      return NextResponse.json({ success: true })
+    }
+    const panel = await prisma.novelPromotionPanel.findFirst({
+      where: {
+        id: panelId,
+        storyboard: { episode: { novelPromotionProject: { projectId } } },
+      }
     })
 
     if (!panel) {

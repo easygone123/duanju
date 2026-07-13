@@ -10,6 +10,8 @@ import type { PanelSaveState } from './hooks/usePanelCrudActions'
 import { AppIcon } from '@/components/ui/icons'
 import { GlassButton } from '@/components/ui/primitives'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
+import type { SixGridUpscaleWorkflow } from './SixGridGroupControls'
+import type { CropEntry } from './SixGridCropModal'
 
 interface StoryboardCanvasProps {
   sortedStoryboards: NovelPromotionStoryboard[]
@@ -71,6 +73,14 @@ interface StoryboardCanvasProps {
   addStoryboardGroup: (insertIndex: number) => Promise<void>
   addingStoryboardGroup: boolean
   setLocalStoryboards: React.Dispatch<React.SetStateAction<NovelPromotionStoryboard[]>>
+  sixGridUpscaleWorkflow: SixGridUpscaleWorkflow | null
+  sixGridTaskStoryboardId: string | null
+  sixGridTaskPanelId: string | null
+  onGenerateSixGridSheet: (storyboardId: string) => Promise<unknown>
+  onUpscaleSixGridSheet: (storyboardId: string, workflow: SixGridUpscaleWorkflow) => Promise<unknown>
+  onCropSixGridSheet: (storyboardId: string, cropRects: CropEntry[]) => Promise<unknown>
+  onUpscaleSixGridPanel: (storyboardId: string, panelId: string, workflow: SixGridUpscaleWorkflow) => Promise<unknown>
+  onUndoSixGridPanel: (storyboardId: string, panelId: string, expectedCurrentMediaId: string, expectedPreviousMediaId: string) => Promise<unknown>
 }
 
 export default function StoryboardCanvas({
@@ -123,6 +133,14 @@ export default function StoryboardCanvas({
   addStoryboardGroup,
   addingStoryboardGroup,
   setLocalStoryboards,
+  sixGridUpscaleWorkflow,
+  sixGridTaskStoryboardId,
+  sixGridTaskPanelId,
+  onGenerateSixGridSheet,
+  onUpscaleSixGridSheet,
+  onCropSixGridSheet,
+  onUpscaleSixGridPanel,
+  onUndoSixGridPanel,
 }: StoryboardCanvasProps) {
   const t = useTranslations('storyboard')
   if (sortedStoryboards.length === 0) {
@@ -199,6 +217,14 @@ export default function StoryboardCanvas({
               episodeId={episodeId}
               onPanelVariant={onPanelVariant}
               submittingVariantPanelId={submittingVariantPanelId}
+              sixGridUpscaleWorkflow={sixGridUpscaleWorkflow}
+              isSixGridTaskRunning={sixGridTaskStoryboardId === storyboard.id}
+              sixGridTaskPanelId={sixGridTaskPanelId}
+              onGenerateSixGridSheet={() => onGenerateSixGridSheet(storyboard.id)}
+              onUpscaleSixGridSheet={(workflow) => onUpscaleSixGridSheet(storyboard.id, workflow)}
+              onCropSixGridSheet={(cropRects) => onCropSixGridSheet(storyboard.id, cropRects)}
+              onUpscaleSixGridPanel={(panelId, workflow) => onUpscaleSixGridPanel(storyboard.id, panelId, workflow)}
+              onUndoSixGridPanel={(panelId, currentMediaId, previousMediaId) => onUndoSixGridPanel(storyboard.id, panelId, currentMediaId, previousMediaId)}
             />
 
             <div className="flex justify-center py-2">

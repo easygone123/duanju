@@ -1,7 +1,7 @@
 'use client'
 import { useTranslations } from 'next-intl'
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import ScreenplayDisplay from './ScreenplayDisplay'
 import { StoryboardPanel } from './hooks/useStoryboardState'
 import StoryboardGroupHeader from './StoryboardGroupHeader'
@@ -16,6 +16,9 @@ import StoryboardGroupDialogs from './StoryboardGroupDialogs'
 import type { StoryboardGroupProps } from './StoryboardGroup.types'
 import { AppIcon } from '@/components/ui/icons'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
+import SixGridGroupControls from './SixGridGroupControls'
+import SixGridCropModal from './SixGridCropModal'
+import { isSixGridGroupBusy } from '@/lib/query/hooks/useSixGridStoryboard'
 
 export default function StoryboardGroup({
   storyboard,
@@ -69,8 +72,18 @@ export default function StoryboardGroup({
   episodeId,
   onPanelVariant,
   submittingVariantPanelId,
+  sixGridUpscaleWorkflow,
+  isSixGridTaskRunning,
+  sixGridTaskPanelId,
+  onGenerateSixGridSheet,
+  onUpscaleSixGridSheet,
+  onCropSixGridSheet,
+  onUpscaleSixGridPanel,
+  onUndoSixGridPanel,
 }: StoryboardGroupProps) {
   const t = useTranslations('storyboard')
+  const [cropCellIndex, setCropCellIndex] = useState<number | null>(null)
+  const isSixGridGroupTaskRunning = isSixGridGroupBusy(isSixGridTaskRunning, isSubmittingStoryboardTask)
 
   const {
     insertModalOpen,
@@ -178,6 +191,16 @@ export default function StoryboardGroup({
         />
       </div>
 
+      <SixGridGroupControls
+        storyboard={storyboard}
+        isTaskRunning={isSixGridGroupTaskRunning}
+        upscaleWorkflow={sixGridUpscaleWorkflow}
+        onGenerateSheet={() => void onGenerateSixGridSheet()}
+        onPreviewSheet={onPreviewImage}
+        onUpscaleSheet={(workflow) => void onUpscaleSixGridSheet(workflow)}
+        onOpenCrop={() => setCropCellIndex(0)}
+      />
+
       {clip && (
         <div className="mb-4">
           <button
@@ -202,7 +225,7 @@ export default function StoryboardGroup({
       )}
 
       <StoryboardPanelList
-        storyboardId={storyboard.id}
+        storyboard={storyboard}
         textPanels={textPanels}
         storyboardStartIndex={storyboardStartIndex}
         videoRatio={videoRatio}
@@ -238,6 +261,12 @@ export default function StoryboardGroup({
           insertingAfterPanelId === panelId ||
           submittingVariantPanelId === panelId
         }
+        sixGridUpscaleWorkflow={sixGridUpscaleWorkflow}
+        sixGridTaskPanelId={sixGridTaskPanelId}
+        isSixGridTaskRunning={isSixGridGroupTaskRunning}
+        onOpenSixGridCrop={setCropCellIndex}
+        onUpscaleSixGridPanel={onUpscaleSixGridPanel}
+        onUndoSixGridPanel={onUndoSixGridPanel}
       />
 
       <StoryboardGroupDialogs
@@ -252,6 +281,13 @@ export default function StoryboardGroup({
         submittingVariantPanelId={submittingVariantPanelId}
         onCloseVariantModal={handleCloseVariantModal}
         onVariant={handleVariant}
+      />
+      <SixGridCropModal
+        isOpen={cropCellIndex !== null}
+        storyboard={storyboard}
+        initialCellIndex={cropCellIndex || 0}
+        onClose={() => setCropCellIndex(null)}
+        onSubmit={async (cropRects) => { await onCropSixGridSheet(cropRects) }}
       />
     </div>
   )

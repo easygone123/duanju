@@ -1,5 +1,6 @@
 'use client'
 
+import React from 'react'
 import { useTranslations } from 'next-intl'
 import PanelEditForm, { PanelEditData } from '../PanelEditForm'
 import ImageSection from './ImageSection'
@@ -8,6 +9,22 @@ import { StoryboardPanel } from './hooks/useStoryboardState'
 import { GlassSurface } from '@/components/ui/primitives'
 import { AppIcon } from '@/components/ui/icons'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
+import { SixGridPanelActions, type SixGridPanelActionProps } from './ImageSectionActionButtons'
+
+export function DialoguePanelBadge({ hasDialogue }: { hasDialogue: boolean }) {
+  const t = useTranslations('storyboard.sixGrid.panel')
+  if (!hasDialogue) return null
+  return (
+    <div
+      data-dialogue-panel="true"
+      aria-label={t('dialogue')}
+      className="mb-2 inline-flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/15 px-2 py-1 text-xs font-medium text-amber-800 dark:text-amber-200"
+    >
+      <AppIcon name="audioWave" className="h-3.5 w-3.5" />
+      <span>{t('dialogue')}</span>
+    </div>
+  )
+}
 
 interface PanelCandidateData {
   candidates: string[]
@@ -49,6 +66,7 @@ interface PanelCardProps {
   onInsertAfter?: () => void  // 在此镜头后插入
   onVariant?: () => void  // 生成镜头变体
   isInsertDisabled?: boolean  // 插入按钮是否禁用
+  sixGridActions?: SixGridPanelActionProps
 }
 
 export default function PanelCard({
@@ -85,14 +103,15 @@ export default function PanelCard({
   onPreviewImage,
   onInsertAfter,
   onVariant,
-  isInsertDisabled
+  isInsertDisabled,
+  sixGridActions,
 }: PanelCardProps) {
   const t = useTranslations('storyboard')
   return (
     <GlassSurface
       variant="elevated"
       padded={false}
-      className="relative h-full overflow-visible transition-all hover:shadow-[var(--glass-shadow-md)] group/card"
+      className={`relative h-full overflow-visible transition-all hover:shadow-[var(--glass-shadow-md)] group/card ${panel.hasDialogue ? 'ring-2 ring-amber-400/40' : ''}`}
       data-storyboard-id={storyboardId}
     >
       {/* 删除按钮 - 右上角外部 */}
@@ -131,6 +150,7 @@ export default function PanelCard({
           onUndo={onUndo}
           onPreviewImage={onPreviewImage}
         />
+        {sixGridActions && <SixGridPanelActions {...sixGridActions} />}
         {/* 插入分镜/镜头变体按钮 - 在图片区域右侧垂直居中 */}
         {(onInsertAfter || onVariant) && (
           <div className="absolute -right-[22px] top-1/2 -translate-y-1/2 z-50">
@@ -146,6 +166,7 @@ export default function PanelCard({
 
       {/* 分镜信息编辑区 */}
       <div className="p-3">
+        <DialoguePanelBadge hasDialogue={Boolean(panel.hasDialogue)} />
         <PanelEditForm
           panelData={panelData}
           isSaving={isSaving}
