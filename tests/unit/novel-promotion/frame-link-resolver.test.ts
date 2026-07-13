@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildFrameLinkResolutionIndex,
   resolveFrameLinkChoices,
   resolveFrameLinkSubmission,
   serializeFrameSourceMeta,
@@ -171,5 +172,32 @@ describe('continuous first/last-frame resolver', () => {
       submission: null,
       diagnostic: 'FIRST_LAST_FRAME_MODEL_UNSUPPORTED',
     })
+  })
+
+  it('builds all frame-link choices with one linear panel visit', () => {
+    const makeGroups = (groupCount: number) => Array.from({ length: groupCount }, (_, groupIndex) => (
+      sixGridStoryboard({
+        id: `group-${groupIndex}`,
+        groupSequence: groupIndex,
+        sceneKey: 'office',
+        panelIds: Array.from({ length: 6 }, (__, panelIndex) => `g${groupIndex}-${panelIndex}`),
+      })
+    ))
+    const visits: number[] = []
+
+    for (const groupCount of [8, 16]) {
+      let panelVisits = 0
+      const groups = makeGroups(groupCount)
+      const index = buildFrameLinkResolutionIndex({
+        storyboards: [...groups].reverse(),
+        onPanelVisit: () => { panelVisits += 1 },
+      })
+      visits.push(panelVisits)
+      expect(index.choicesByPanelId.size).toBe(groupCount * 6)
+      expect(index.automaticChoicesByPanelId.size).toBe(groupCount * 6)
+      expect(panelVisits).toBe(groupCount * 6)
+    }
+
+    expect(visits[1]).toBe(visits[0] * 2)
   })
 })

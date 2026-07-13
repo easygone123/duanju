@@ -15,7 +15,11 @@ import {
   resolvePanelVideoSubmission,
   type AvailablePanelVideoModel,
 } from './panel-video-submission'
-import { parseFrameSourceMeta } from './frame-link-resolver'
+import {
+  buildFrameLinkResolutionIndex,
+  parseFrameSourceMeta,
+  type FrameLinkStoryboard,
+} from './frame-link-resolver'
 
 const LEGACY_REMOTE_VIDEO_DEFAULT_DURATION_SECONDS = 5
 
@@ -38,6 +42,8 @@ export type VideoPanelRecord = {
   videoPrompt: string | null
   firstLastFramePrompt: string | null
   firstFrameSourceMeta: string | null
+  lastFrameSourceMeta: string | null
+  storyboard: { episodeId: string }
   estimatedDuration: number | null
   durationOverride: number | null
   duration: number | null
@@ -47,6 +53,8 @@ export const VIDEO_PANEL_SELECT = {
   id: true, updatedAt: true, hasDialogue: true, dialogueSpeaker: true, dialogueText: true,
   dialogueEmotion: true, includeDialogueInVideoPrompt: true, videoPrompt: true, firstLastFramePrompt: true,
   firstFrameSourceMeta: true,
+  lastFrameSourceMeta: true,
+  storyboard: { select: { episodeId: true } },
   estimatedDuration: true, durationOverride: true, duration: true,
 } as const
 
@@ -211,6 +219,7 @@ async function resolveTrustedFirstLastFrame(
 ): Promise<{ flModel: string; firstFrameSourcePanelId: string; sourcePanelId?: string }> {
   const flModel = typeof input.flModel === 'string' ? input.flModel : ''
   const storedFirstFrame = parseFrameSourceMeta(panel.firstFrameSourceMeta)
+  const storedLastFrame = parseFrameSourceMeta(panel.lastFrameSourceMeta)
   if (storedFirstFrame === null) {
     throw new ApiError('INVALID_PARAMS', { code: 'FIRSTLASTFRAME_SOURCE_INVALID' })
   }
@@ -228,34 +237,69 @@ async function resolveTrustedFirstLastFrame(
     }
     return sourcePanel.id
   }
-  const hasStoryboard = Object.prototype.hasOwnProperty.call(input, 'lastFrameStoryboardId')
-  const hasPanelIndex = Object.prototype.hasOwnProperty.call(input, 'lastFramePanelIndex')
-  if (!hasStoryboard && !hasPanelIndex) {
-    return { flModel, firstFrameSourcePanelId: await resolveFirstFrameSourcePanelId() }
+  const resolvePersistedLastFrameSourcePanelId = async (): Promise<string | undefined> => {
+    if (storedLastFrame === null) return undefined
+    if (storedLastFrame) {
+      const sourcePanel = await prisma.novelPromotionPanel.findFirst({
+        where: {
+          id: storedLastFrame.sourcePanelId,
+          storyboard: { episode: { novelPromotionProject: { projectId, project: { userId } } } },
+        },
+        select: { id: true },
+      })
+      if (!sourcePanel) {
+        throw new ApiError('INVALID_PARAMS', { code: 'VIDEO_LAST_FRAME_SOURCE_FORBIDDEN' })
+      }
+      return sourcePanel.id
+    }
+
+    const episodeId = panel.storyboard?.episodeId
+    if (!episodeId) return undefined
+    const storyboardRows = await prisma.novelPromotionStoryboard.findMany({
+      where: {
+        episodeId,
+        episode: { novelPromotionProject: { projectId, project: { userId } } },
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        clip: { select: { createdAt: true } },
+        layoutMode: true,
+        groupSequence: true,
+        continuityAnchor: true,
+        panels: {
+          orderBy: { panelIndex: 'asc' },
+          select: {
+            id: true,
+            storyboardId: true,
+            panelIndex: true,
+            gridCellIndex: true,
+            firstFrameSourceMeta: true,
+            lastFrameSourceMeta: true,
+            linkedToNextPanel: true,
+          },
+        },
+      },
+    })
+    const storyboards: FrameLinkStoryboard[] = storyboardRows.map((storyboard) => ({
+      id: storyboard.id,
+      layoutMode: storyboard.layoutMode,
+      groupSequence: storyboard.groupSequence,
+      continuityAnchor: storyboard.continuityAnchor,
+      createdAt: storyboard.createdAt,
+      clipCreatedAt: storyboard.clip?.createdAt,
+      panels: storyboard.panels,
+    }))
+    return buildFrameLinkResolutionIndex({ storyboards })
+      .automaticChoicesByPanelId.get(panel.id)?.lastFrame?.sourcePanelId
   }
 
-  const storyboardId = typeof input.lastFrameStoryboardId === 'string'
-    ? input.lastFrameStoryboardId.trim()
-    : ''
-  const panelIndex = input.lastFramePanelIndex
-  if (!storyboardId || typeof panelIndex !== 'number' || !Number.isInteger(panelIndex) || panelIndex < 0) {
-    throw new ApiError('INVALID_PARAMS', { code: 'FIRSTLASTFRAME_SOURCE_INVALID' })
-  }
-  const sourcePanel = await prisma.novelPromotionPanel.findFirst({
-    where: {
-      storyboardId,
-      panelIndex,
-      storyboard: { episode: { novelPromotionProject: { projectId, project: { userId } } } },
-    },
-    select: { id: true },
-  })
-  if (!sourcePanel) {
-    throw new ApiError('INVALID_PARAMS', { code: 'VIDEO_LAST_FRAME_SOURCE_FORBIDDEN' })
-  }
+  const firstFrameSourcePanelId = await resolveFirstFrameSourcePanelId()
+  const sourcePanelId = await resolvePersistedLastFrameSourcePanelId()
   return {
     flModel,
-    firstFrameSourcePanelId: await resolveFirstFrameSourcePanelId(),
-    sourcePanelId: sourcePanel.id,
+    firstFrameSourcePanelId,
+    ...(sourcePanelId ? { sourcePanelId } : {}),
   }
 }
 

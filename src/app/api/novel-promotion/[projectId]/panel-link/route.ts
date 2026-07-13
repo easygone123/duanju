@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import {
-  resolveFrameLinkChoices,
+  buildFrameLinkResolutionIndex,
   serializeFrameSourceMeta,
   type FrameLinkChoices,
   type FrameLinkStoryboard,
@@ -86,7 +86,7 @@ export const POST = apiHandler(async (
   })
   if (!target) throw new ApiError('NOT_FOUND')
 
-  const storyboards = await prisma.novelPromotionStoryboard.findMany({
+  const storyboardRows = await prisma.novelPromotionStoryboard.findMany({
     where: {
       episodeId: target.storyboard.episodeId,
       episode: {
@@ -98,10 +98,13 @@ export const POST = apiHandler(async (
     },
     select: {
       id: true,
+      createdAt: true,
+      clip: { select: { createdAt: true } },
       layoutMode: true,
       groupSequence: true,
       continuityAnchor: true,
       panels: {
+        orderBy: { panelIndex: 'asc' },
         select: {
           id: true,
           storyboardId: true,
@@ -113,9 +116,19 @@ export const POST = apiHandler(async (
         },
       },
     },
-  }) as FrameLinkStoryboard[]
+  })
+  const storyboards: FrameLinkStoryboard[] = storyboardRows.map((storyboard) => ({
+    id: storyboard.id,
+    layoutMode: storyboard.layoutMode,
+    groupSequence: storyboard.groupSequence,
+    continuityAnchor: storyboard.continuityAnchor,
+    createdAt: storyboard.createdAt,
+    clipCreatedAt: storyboard.clip?.createdAt,
+    panels: storyboard.panels,
+  }))
 
-  let choices = resolveFrameLinkChoices({ panelId: target.id, storyboards })
+  let choices = buildFrameLinkResolutionIndex({ storyboards })
+    .choicesByPanelId.get(target.id) || { firstFrame: null, lastFrame: null }
   if (action === 'restore-auto') {
     const withoutOverrides = storyboards.map((storyboard) => ({
       ...storyboard,
@@ -123,11 +136,10 @@ export const POST = apiHandler(async (
         ? { ...panel, firstFrameSourceMeta: null, lastFrameSourceMeta: null }
         : panel),
     }))
-    choices = resolveFrameLinkChoices({
-      panelId: target.id,
+    choices = buildFrameLinkResolutionIndex({
       storyboards: withoutOverrides,
       restoreLegacyAuto: true,
-    })
+    }).choicesByPanelId.get(target.id) || { firstFrame: null, lastFrame: null }
   } else if (action === 'unlink') {
     choices = { firstFrame: null, lastFrame: null }
   } else {

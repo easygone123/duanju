@@ -139,10 +139,24 @@ describe('panel-link route contract', () => {
     const legacyPanels = [
       { ...panel('legacy-panel-1', 'legacy-storyboard-1', 0), linkedToNextPanel: true },
       { ...panel('legacy-panel-2', 'legacy-storyboard-2', 0), linkedToNextPanel: false },
+      { ...panel('legacy-panel-2-later', 'legacy-storyboard-2', 1), linkedToNextPanel: false },
+      { ...panel('legacy-panel-3', 'legacy-storyboard-3', 0), linkedToNextPanel: false },
     ]
     const legacyStoryboards = [
-      { id: 'legacy-storyboard-1', layoutMode: 'individual', panels: [legacyPanels[0]] },
-      { id: 'legacy-storyboard-2', layoutMode: 'individual', panels: [legacyPanels[1]] },
+      {
+        id: 'legacy-storyboard-3', layoutMode: 'individual', createdAt: new Date('2026-07-13T03:00:00Z'),
+        clip: { createdAt: new Date('2026-07-13T02:00:00Z') }, panels: [legacyPanels[3]],
+      },
+      {
+        id: 'legacy-storyboard-1', layoutMode: 'individual', createdAt: new Date('2026-07-13T01:00:00Z'),
+        clip: { createdAt: new Date('2026-07-13T01:00:00Z') }, panels: [legacyPanels[0]],
+      },
+      {
+        id: 'legacy-storyboard-2', layoutMode: 'individual', createdAt: new Date('2026-07-13T02:00:00Z'),
+        clip: { createdAt: new Date('2026-07-13T01:00:00Z') },
+        // Deliberately reverse panel order; panelIndex remains authoritative.
+        panels: [legacyPanels[2], legacyPanels[1]],
+      },
     ]
     prismaMock.novelPromotionStoryboard.findMany.mockImplementation(async () => legacyStoryboards)
     prismaMock.novelPromotionPanel.findFirst.mockImplementation(async ({ where }: {
@@ -180,7 +194,12 @@ describe('panel-link route contract', () => {
         episode: { novelPromotionProject: { projectId: 'project-1', project: { userId: 'user-1' } } },
       }),
       select: expect.objectContaining({
-        panels: { select: expect.objectContaining({ linkedToNextPanel: true }) },
+        createdAt: true,
+        clip: { select: { createdAt: true } },
+        panels: expect.objectContaining({
+          orderBy: { panelIndex: 'asc' },
+          select: expect.objectContaining({ linkedToNextPanel: true }),
+        }),
       }),
     }))
   })

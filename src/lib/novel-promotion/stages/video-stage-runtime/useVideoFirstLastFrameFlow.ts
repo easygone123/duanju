@@ -14,8 +14,6 @@ import {
 import { supportsFirstLastFrame } from '@/lib/model-capabilities/video-model-options'
 import { projectVideoPricingTiersByFixedSelections } from '@/lib/model-pricing/video-tier'
 import {
-  groupFrameLinkPanels,
-  resolveAutomaticFrameLinkChoices,
   resolveFrameLinkSubmission,
   type FrameLinkChoices,
 } from '@/lib/novel-promotion/video/frame-link-resolver'
@@ -47,6 +45,10 @@ interface UseVideoFirstLastFrameFlowParams {
   allPanels: VideoPanel[]
   linkedPanels: Map<string, boolean>
   frameLinkChoices: Map<string, FrameLinkChoices>
+  automaticFrameLinkChoices: Map<string, FrameLinkChoices>
+  videoPanelById: Map<string, VideoPanel>
+  panelKeyById: Map<string, string>
+  incomingSourcePanelIdsByPanelId: Map<string, string[]>
   videoModelOptions: VideoModelOption[]
   onGenerateVideo: (
     storyboardId: string,
@@ -70,6 +72,10 @@ export function useVideoFirstLastFrameFlow({
   allPanels,
   linkedPanels,
   frameLinkChoices,
+  automaticFrameLinkChoices,
+  videoPanelById,
+  panelKeyById,
+  incomingSourcePanelIdsByPanelId,
   videoModelOptions,
   onGenerateVideo,
   t,
@@ -256,22 +262,6 @@ export function useVideoFirstLastFrameFlow({
     return first
   }, [t])
 
-  const automaticFrameLinkChoices = useMemo(() => {
-    const map = new Map<string, FrameLinkChoices>()
-    const storyboards = groupFrameLinkPanels(allPanels.map((panel) => ({
-      ...panel,
-      id: panel.panelId || `${panel.storyboardId}-${panel.panelIndex}`,
-    })))
-    for (const panel of allPanels) {
-      const key = `${panel.storyboardId}-${panel.panelIndex}`
-      map.set(key, resolveAutomaticFrameLinkChoices({
-        panelId: panel.panelId || key,
-        storyboards,
-      }))
-    }
-    return map
-  }, [allPanels])
-
   const getNextPanel = useCallback((currentIndex: number): VideoPanel | null => {
     const current = allPanels[currentIndex]
     if (!current) return null
@@ -279,18 +269,24 @@ export function useVideoFirstLastFrameFlow({
     const sourcePanelId = frameLinkChoices.get(key)?.lastFrame?.sourcePanelId
       || automaticFrameLinkChoices.get(key)?.lastFrame?.sourcePanelId
     if (!sourcePanelId) return null
-    return allPanels.find((panel) => panel.panelId === sourcePanelId) || null
-  }, [allPanels, automaticFrameLinkChoices, frameLinkChoices])
+    return videoPanelById.get(sourcePanelId) || null
+  }, [allPanels, automaticFrameLinkChoices, frameLinkChoices, videoPanelById])
+
+  const getPreviousPanel = useCallback((currentIndex: number): VideoPanel | null => {
+    const current = allPanels[currentIndex]
+    if (!current?.panelId) return null
+    const sourcePanelId = incomingSourcePanelIdsByPanelId.get(current.panelId)?.[0]
+    return sourcePanelId ? videoPanelById.get(sourcePanelId) || null : null
+  }, [allPanels, incomingSourcePanelIdsByPanelId, videoPanelById])
 
   const isLinkedAsLastFrame = useCallback((currentIndex: number): boolean => {
     const current = allPanels[currentIndex]
     if (!current?.panelId) return false
-    return allPanels.some((panel) => {
-      const key = `${panel.storyboardId}-${panel.panelIndex}`
-      return linkedPanels.get(key) === true
-        && frameLinkChoices.get(key)?.lastFrame?.sourcePanelId === current.panelId
+    return (incomingSourcePanelIdsByPanelId.get(current.panelId) || []).some((sourcePanelId) => {
+      const sourcePanelKey = panelKeyById.get(sourcePanelId)
+      return !!sourcePanelKey && linkedPanels.get(sourcePanelKey) === true
     })
-  }, [allPanels, frameLinkChoices, linkedPanels])
+  }, [allPanels, incomingSourcePanelIdsByPanelId, linkedPanels, panelKeyById])
 
   const getFrameLinkChoices = useCallback((currentIndex: number): FrameLinkChoices => {
     const panel = allPanels[currentIndex]
@@ -314,6 +310,7 @@ export function useVideoFirstLastFrameFlow({
     handleGenerateFirstLastFrame,
     getDefaultFlPrompt,
     getNextPanel,
+    getPreviousPanel,
     getFrameLinkChoices,
     isLinkedAsLastFrame,
   }

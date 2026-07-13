@@ -19,6 +19,8 @@ export interface FlatFrameLinkPanel extends FrameLinkPanel {
   layoutMode?: string | null
   groupSequence?: number | null
   continuityAnchor?: string | null
+  storyboardCreatedAt?: Date | string | null
+  clipCreatedAt?: Date | string | null
 }
 
 export interface FrameLinkStoryboard {
@@ -26,6 +28,8 @@ export interface FrameLinkStoryboard {
   layoutMode?: string | null
   groupSequence?: number | null
   continuityAnchor?: string | null
+  createdAt?: Date | string | null
+  clipCreatedAt?: Date | string | null
   panels: FrameLinkPanel[]
 }
 
@@ -47,6 +51,8 @@ export function groupFrameLinkPanels(panels: FlatFrameLinkPanel[]): FrameLinkSto
       layoutMode: panel.layoutMode,
       groupSequence: panel.groupSequence,
       continuityAnchor: panel.continuityAnchor,
+      createdAt: panel.storyboardCreatedAt,
+      clipCreatedAt: panel.clipCreatedAt,
       panels: [panel],
     })
   }
@@ -104,41 +110,37 @@ function sortedPanels(storyboard: FrameLinkStoryboard): FrameLinkPanel[] {
   })
 }
 
-function resolveAutomaticLastFrame(
-  panel: FrameLinkPanel,
-  storyboard: FrameLinkStoryboard,
-  storyboards: FrameLinkStoryboard[],
-  restoreLegacyAuto: boolean,
-): FrameSourceMeta | null {
-  const panels = sortedPanels(storyboard)
-  const currentIndex = panels.findIndex((candidate) => candidate.id === panel.id)
-  if (currentIndex < 0) return null
-  const withinGroup = panels[currentIndex + 1]
-  if (withinGroup) return { mode: 'automatic', sourcePanelId: withinGroup.id }
-  if (storyboard.layoutMode !== 'six_grid') {
-    const hasFrameSourceMetadata = panel.firstFrameSourceMeta != null
-      || panel.lastFrameSourceMeta != null
-    const canExplicitlyRestoreLegacy = restoreLegacyAuto
-      && (storyboard.layoutMode == null || storyboard.layoutMode === 'individual')
-    if ((panel.linkedToNextPanel !== true && !canExplicitlyRestoreLegacy) || hasFrameSourceMetadata) return null
-    const storyboardIndex = storyboards.findIndex((candidate) => candidate.id === storyboard.id)
-    const nextStoryboard = storyboardIndex >= 0 ? storyboards[storyboardIndex + 1] : undefined
-    if (!nextStoryboard || nextStoryboard.layoutMode === 'six_grid') return null
-    const nextPanel = sortedPanels(nextStoryboard)[0]
-    return nextPanel ? { mode: 'automatic', sourcePanelId: nextPanel.id } : null
-  }
+function timestamp(value: Date | string | null | undefined): number | null {
+  if (value instanceof Date) return value.getTime()
+  if (typeof value !== 'string' || !value) return null
+  const parsed = new Date(value).getTime()
+  return Number.isFinite(parsed) ? parsed : null
+}
 
-  const orderedGroups = storyboards
-    .filter((candidate) => candidate.layoutMode === 'six_grid')
-    .filter((candidate) => typeof candidate.groupSequence === 'number')
-    .sort((left, right) => (left.groupSequence ?? 0) - (right.groupSequence ?? 0))
-  const groupIndex = orderedGroups.findIndex((candidate) => candidate.id === storyboard.id)
-  const nextGroup = groupIndex >= 0 ? orderedGroups[groupIndex + 1] : undefined
-  const currentSceneKey = readSceneKey(storyboard)
-  const nextSceneKey = nextGroup ? readSceneKey(nextGroup) : null
-  if (!nextGroup || !currentSceneKey || !nextSceneKey || currentSceneKey !== nextSceneKey) return null
-  const nextPanel = sortedPanels(nextGroup)[0]
-  return nextPanel ? { mode: 'automatic', sourcePanelId: nextPanel.id } : null
+function canonicalStoryboards(storyboards: FrameLinkStoryboard[]): FrameLinkStoryboard[] {
+  return storyboards
+    .map((storyboard, index) => ({ storyboard, index }))
+    .sort((left, right) => {
+      const leftClip = timestamp(left.storyboard.clipCreatedAt)
+      const rightClip = timestamp(right.storyboard.clipCreatedAt)
+      if (leftClip != null || rightClip != null) {
+        if (leftClip == null) return 1
+        if (rightClip == null) return -1
+        if (leftClip !== rightClip) return leftClip - rightClip
+      }
+      const leftCreated = timestamp(left.storyboard.createdAt)
+      const rightCreated = timestamp(right.storyboard.createdAt)
+      if (leftCreated != null || rightCreated != null) {
+        if (leftCreated == null) return 1
+        if (rightCreated == null) return -1
+        if (leftCreated !== rightCreated) return leftCreated - rightCreated
+      }
+      if (leftClip != null || rightClip != null || leftCreated != null || rightCreated != null) {
+        return left.storyboard.id.localeCompare(right.storyboard.id)
+      }
+      return left.index - right.index
+    })
+    .map(({ storyboard }) => storyboard)
 }
 
 function resolveStoredChoice(
@@ -154,49 +156,133 @@ function resolveStoredChoice(
   return automatic
 }
 
+export interface FrameLinkResolutionIndex {
+  choicesByPanelId: Map<string, FrameLinkChoices>
+  automaticChoicesByPanelId: Map<string, FrameLinkChoices>
+  panelById: Map<string, FrameLinkPanel>
+  incomingSourcePanelIdsByPanelId: Map<string, string[]>
+}
+
+export function buildFrameLinkResolutionIndex(input: {
+  storyboards: FrameLinkStoryboard[]
+  restoreLegacyAuto?: boolean
+  onPanelVisit?: (panel: FrameLinkPanel) => void
+}): FrameLinkResolutionIndex {
+  const storyboards = canonicalStoryboards(input.storyboards)
+  const panelsByStoryboard = new Map<string, FrameLinkPanel[]>()
+  const panelById = new Map<string, FrameLinkPanel>()
+  const ownedPanelIds = new Set<string>()
+
+  for (const storyboard of storyboards) {
+    const panels = sortedPanels(storyboard)
+    panelsByStoryboard.set(storyboard.id, panels)
+    for (const panel of panels) {
+      panelById.set(panel.id, panel)
+      ownedPanelIds.add(panel.id)
+    }
+  }
+
+  const orderedSixGridGroups = storyboards
+    .filter((storyboard) => storyboard.layoutMode === 'six_grid')
+    .filter((storyboard) => typeof storyboard.groupSequence === 'number')
+    .sort((left, right) => (
+      (left.groupSequence ?? 0) - (right.groupSequence ?? 0)
+      || left.id.localeCompare(right.id)
+    ))
+  const nextSixGridGroupById = new Map<string, FrameLinkStoryboard>()
+  orderedSixGridGroups.forEach((storyboard, index) => {
+    const next = orderedSixGridGroups[index + 1]
+    if (next) nextSixGridGroupById.set(storyboard.id, next)
+  })
+  const storyboardIndexById = new Map(storyboards.map((storyboard, index) => [storyboard.id, index]))
+
+  const automaticLastByPanelId = new Map<string, FrameSourceMeta | null>()
+  for (const storyboard of storyboards) {
+    const panels = panelsByStoryboard.get(storyboard.id) || []
+    for (let panelIndex = 0; panelIndex < panels.length; panelIndex += 1) {
+      const panel = panels[panelIndex]
+      input.onPanelVisit?.(panel)
+      const withinStoryboard = panels[panelIndex + 1]
+      if (withinStoryboard) {
+        automaticLastByPanelId.set(panel.id, { mode: 'automatic', sourcePanelId: withinStoryboard.id })
+        continue
+      }
+      if (storyboard.layoutMode === 'six_grid') {
+        const nextGroup = nextSixGridGroupById.get(storyboard.id)
+        const currentSceneKey = readSceneKey(storyboard)
+        const nextSceneKey = nextGroup ? readSceneKey(nextGroup) : null
+        const nextPanel = nextGroup ? panelsByStoryboard.get(nextGroup.id)?.[0] : undefined
+        automaticLastByPanelId.set(
+          panel.id,
+          nextPanel && currentSceneKey && nextSceneKey && currentSceneKey === nextSceneKey
+            ? { mode: 'automatic', sourcePanelId: nextPanel.id }
+            : null,
+        )
+        continue
+      }
+      const hasFrameSourceMetadata = panel.firstFrameSourceMeta != null
+        || panel.lastFrameSourceMeta != null
+      const canExplicitlyRestoreLegacy = input.restoreLegacyAuto === true
+        && (storyboard.layoutMode == null || storyboard.layoutMode === 'individual')
+      const storyboardIndex = storyboardIndexById.get(storyboard.id) ?? -1
+      const nextStoryboard = storyboardIndex >= 0 ? storyboards[storyboardIndex + 1] : undefined
+      const nextPanel = nextStoryboard && nextStoryboard.layoutMode !== 'six_grid'
+        ? panelsByStoryboard.get(nextStoryboard.id)?.[0]
+        : undefined
+      automaticLastByPanelId.set(
+        panel.id,
+        (panel.linkedToNextPanel === true || canExplicitlyRestoreLegacy) && !hasFrameSourceMetadata && nextPanel
+          ? { mode: 'automatic', sourcePanelId: nextPanel.id }
+          : null,
+      )
+    }
+  }
+
+  const choicesByPanelId = new Map<string, FrameLinkChoices>()
+  const automaticChoicesByPanelId = new Map<string, FrameLinkChoices>()
+  const incomingSourcePanelIdsByPanelId = new Map<string, string[]>()
+  for (const [panelId, panel] of panelById) {
+    const automaticFirst: FrameSourceMeta = { mode: 'automatic', sourcePanelId: panelId }
+    const automaticLast = automaticLastByPanelId.get(panelId) ?? null
+    const automaticChoices = { firstFrame: automaticFirst, lastFrame: automaticLast }
+    const choices = {
+      firstFrame: resolveStoredChoice(panel.firstFrameSourceMeta, automaticFirst, ownedPanelIds),
+      lastFrame: resolveStoredChoice(panel.lastFrameSourceMeta, automaticLast, ownedPanelIds),
+    }
+    automaticChoicesByPanelId.set(panelId, automaticChoices)
+    choicesByPanelId.set(panelId, choices)
+    if (choices.lastFrame) {
+      const incoming = incomingSourcePanelIdsByPanelId.get(choices.lastFrame.sourcePanelId) || []
+      incoming.push(panelId)
+      incomingSourcePanelIdsByPanelId.set(choices.lastFrame.sourcePanelId, incoming)
+    }
+  }
+
+  return {
+    choicesByPanelId,
+    automaticChoicesByPanelId,
+    panelById,
+    incomingSourcePanelIdsByPanelId,
+  }
+}
+
 export function resolveFrameLinkChoices(input: {
   panelId: string
   storyboards: FrameLinkStoryboard[]
   restoreLegacyAuto?: boolean
 }): FrameLinkChoices {
-  const storyboard = input.storyboards.find((candidate) => (
-    candidate.panels.some((panel) => panel.id === input.panelId)
-  ))
-  const panel = storyboard?.panels.find((candidate) => candidate.id === input.panelId)
-  if (!storyboard || !panel) return { firstFrame: null, lastFrame: null }
-
-  const ownedPanelIds = new Set(input.storyboards.flatMap((candidate) => (
-    candidate.panels.map((item) => item.id)
-  )))
-  const automaticFirst: FrameSourceMeta = {
-    mode: 'automatic',
-    sourcePanelId: panel.id,
-  }
-  const automaticLast = resolveAutomaticLastFrame(
-    panel,
-    storyboard,
-    input.storyboards,
-    input.restoreLegacyAuto === true,
-  )
-  return {
-    firstFrame: resolveStoredChoice(panel.firstFrameSourceMeta, automaticFirst, ownedPanelIds),
-    lastFrame: resolveStoredChoice(panel.lastFrameSourceMeta, automaticLast, ownedPanelIds),
-  }
+  return buildFrameLinkResolutionIndex({
+    storyboards: input.storyboards,
+    restoreLegacyAuto: input.restoreLegacyAuto,
+  }).choicesByPanelId.get(input.panelId) || { firstFrame: null, lastFrame: null }
 }
 
 export function resolveAutomaticFrameLinkChoices(input: {
   panelId: string
   storyboards: FrameLinkStoryboard[]
 }): FrameLinkChoices {
-  return resolveFrameLinkChoices({
-    panelId: input.panelId,
-    storyboards: input.storyboards.map((storyboard) => ({
-      ...storyboard,
-      panels: storyboard.panels.map((panel) => panel.id === input.panelId
-        ? { ...panel, firstFrameSourceMeta: null, lastFrameSourceMeta: null }
-        : panel),
-    })),
-  })
+  return buildFrameLinkResolutionIndex({ storyboards: input.storyboards })
+    .automaticChoicesByPanelId.get(input.panelId) || { firstFrame: null, lastFrame: null }
 }
 
 export function resolveFrameLinkSubmission(input: {

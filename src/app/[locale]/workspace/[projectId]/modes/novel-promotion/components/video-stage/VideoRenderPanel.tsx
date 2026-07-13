@@ -72,6 +72,7 @@ interface VideoRenderPanelProps {
   onPreviewImage: (imageUrl: string | null) => void
   onToggleLipSyncVideo: (key: string, value: boolean) => void
   getNextPanel: (currentIndex: number) => VideoPanel | null
+  getPreviousPanel: (currentIndex: number) => VideoPanel | null
   getFrameLinkChoices: (currentIndex: number) => FrameLinkChoices
   isLinkedAsLastFrame: (currentIndex: number) => boolean
   getDefaultFlPrompt: (firstPrompt?: string, lastPrompt?: string) => string
@@ -122,6 +123,7 @@ export default function VideoRenderPanel({
   onPreviewImage,
   onToggleLipSyncVideo,
   getNextPanel,
+  getPreviousPanel,
   getFrameLinkChoices,
   isLinkedAsLastFrame,
   getDefaultFlPrompt,
@@ -141,10 +143,7 @@ export default function VideoRenderPanel({
           const isLastFrame = isLinkedAsLastFrame(idx)
           const nextPanel = getNextPanel(idx)
           const frameLinkChoices = getFrameLinkChoices(idx)
-          const prevPanel = allPanels.find((candidate, candidateIndex) => (
-            candidateIndex !== idx
-            && getFrameLinkChoices(candidateIndex).lastFrame?.sourcePanelId === panel.panelId
-          )) || null
+          const prevPanel = getPreviousPanel(idx)
           const hasNext = !!nextPanel
           const promptField: PromptField = isLinked ? 'firstLastFramePrompt' : 'videoPrompt'
           const defaultFlPrompt = getDefaultFlPrompt(panel.textPanel?.video_prompt, nextPanel?.textPanel?.video_prompt)

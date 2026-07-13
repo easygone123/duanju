@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { logError as _ulogError } from '@/lib/logging/core'
 import type { VideoPanel } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video'
 import {
+  buildFrameLinkResolutionIndex,
   groupFrameLinkPanels,
-  resolveFrameLinkChoices,
   type FrameLinkChoices,
 } from '@/lib/novel-promotion/video/frame-link-resolver'
 
@@ -31,41 +31,53 @@ export function useVideoPanelLinking({
 }: UseVideoPanelLinkingParams) {
   const [linkedOverrides, setLinkedOverrides] = useState<Map<string, boolean>>(new Map())
 
-  const baseLinkedPanels = useMemo(() => {
-    const map = new Map<string, boolean>()
+  const frameLinkResolution = useMemo(() => {
+    const baseLinkedPanels = new Map<string, boolean>()
+    const frameLinkChoices = new Map<string, FrameLinkChoices>()
+    const automaticFrameLinkChoices = new Map<string, FrameLinkChoices>()
+    const videoPanelById = new Map<string, VideoPanel>()
+    const panelKeyById = new Map<string, string>()
     const storyboards = groupFrameLinkPanels(allPanels.map((panel) => ({
       ...panel,
       id: panel.panelId || `${panel.storyboardId}-${panel.panelIndex}`,
     })))
+    const index = buildFrameLinkResolutionIndex({ storyboards })
     allPanels.forEach((panel) => {
+      const panelKey = `${panel.storyboardId}-${panel.panelIndex}`
+      const panelId = panel.panelId || panelKey
       const hasFrameMetadata = panel.firstFrameSourceMeta != null || panel.lastFrameSourceMeta != null
-      const choices = resolveFrameLinkChoices({
-        panelId: panel.panelId || `${panel.storyboardId}-${panel.panelIndex}`,
-        storyboards,
-      })
+      const choices = index.choicesByPanelId.get(panelId) || { firstFrame: null, lastFrame: null }
+      frameLinkChoices.set(panelKey, choices)
+      automaticFrameLinkChoices.set(
+        panelKey,
+        index.automaticChoicesByPanelId.get(panelId) || { firstFrame: null, lastFrame: null },
+      )
+      videoPanelById.set(panelId, panel)
+      panelKeyById.set(panelId, panelKey)
       if ((panel.layoutMode === 'six_grid' || hasFrameMetadata)
         ? !!choices.firstFrame && !!choices.lastFrame
         : panel.linkedToNextPanel) {
-        map.set(`${panel.storyboardId}-${panel.panelIndex}`, true)
+        baseLinkedPanels.set(panelKey, true)
       }
     })
-    return map
+    return {
+      baseLinkedPanels,
+      frameLinkChoices,
+      automaticFrameLinkChoices,
+      videoPanelById,
+      panelKeyById,
+      incomingSourcePanelIdsByPanelId: index.incomingSourcePanelIdsByPanelId,
+    }
   }, [allPanels])
 
-  const frameLinkChoices = useMemo(() => {
-    const map = new Map<string, FrameLinkChoices>()
-    const storyboards = groupFrameLinkPanels(allPanels.map((panel) => ({
-      ...panel,
-      id: panel.panelId || `${panel.storyboardId}-${panel.panelIndex}`,
-    })))
-    for (const panel of allPanels) {
-      map.set(`${panel.storyboardId}-${panel.panelIndex}`, resolveFrameLinkChoices({
-        panelId: panel.panelId || `${panel.storyboardId}-${panel.panelIndex}`,
-        storyboards,
-      }))
-    }
-    return map
-  }, [allPanels])
+  const {
+    baseLinkedPanels,
+    frameLinkChoices,
+    automaticFrameLinkChoices,
+    videoPanelById,
+    panelKeyById,
+    incomingSourcePanelIdsByPanelId,
+  } = frameLinkResolution
 
   const panelKeys = useMemo(() => {
     const keys = new Set<string>()
@@ -157,6 +169,10 @@ export function useVideoPanelLinking({
   return {
     linkedPanels,
     frameLinkChoices,
+    automaticFrameLinkChoices,
+    videoPanelById,
+    panelKeyById,
+    incomingSourcePanelIdsByPanelId,
     handleToggleLink,
     handleUpdateFrameLink,
   }

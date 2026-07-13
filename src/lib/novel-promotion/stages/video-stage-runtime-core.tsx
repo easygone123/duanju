@@ -126,7 +126,16 @@ export function useVideoStageRuntime({
     onUpdateVideoPrompt,
   })
 
-  const { linkedPanels, frameLinkChoices, handleToggleLink, handleUpdateFrameLink } = useVideoPanelLinking({
+  const {
+    linkedPanels,
+    frameLinkChoices,
+    automaticFrameLinkChoices,
+    videoPanelById,
+    panelKeyById,
+    incomingSourcePanelIdsByPanelId,
+    handleToggleLink,
+    handleUpdateFrameLink,
+  } = useVideoPanelLinking({
     allPanels,
     updatePanelLinkMutation,
   })
@@ -405,12 +414,17 @@ export function useVideoStageRuntime({
     handleGenerateFirstLastFrame,
     getDefaultFlPrompt,
     getNextPanel,
+    getPreviousPanel,
     getFrameLinkChoices,
     isLinkedAsLastFrame,
   } = useVideoFirstLastFrameFlow({
     allPanels,
     linkedPanels,
     frameLinkChoices,
+    automaticFrameLinkChoices,
+    videoPanelById,
+    panelKeyById,
+    incomingSourcePanelIdsByPanelId,
     videoModelOptions: allVideoModelOptions,
     onGenerateVideo: handleGenerateVideoWithImmediateLock,
     t: (key) => t(key as never),
@@ -580,6 +594,7 @@ export function useVideoStageRuntime({
         onPreviewImage={setPreviewImage}
         onToggleLipSyncVideo={toggleLipSyncVideo}
         getNextPanel={getNextPanel}
+        getPreviousPanel={getPreviousPanel}
         getFrameLinkChoices={getFrameLinkChoices}
         isLinkedAsLastFrame={isLinkedAsLastFrame}
         getDefaultFlPrompt={getDefaultFlPrompt}

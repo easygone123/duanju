@@ -14,6 +14,9 @@ type PanelRow = {
   estimatedDuration: number
   durationOverride: number | null
   duration: number
+  firstFrameSourceMeta?: string | null
+  lastFrameSourceMeta?: string | null
+  storyboard?: { episodeId: string }
 }
 
 type SubmittedTaskInput = {
@@ -28,6 +31,9 @@ const submitTaskMock = vi.hoisted(() => vi.fn<(input: SubmittedTaskInput) => Pro
 }))
 const panelFindFirstMock = vi.hoisted(() => vi.fn())
 const panelFindManyMock = vi.hoisted(() => vi.fn<() => Promise<PanelRow[]>>(async () => []))
+const storyboardFindManyMock = vi.hoisted(() => (
+  vi.fn<() => Promise<Array<Record<string, unknown>>>>(async () => [])
+))
 const panelUpdateManyMock = vi.hoisted(() => vi.fn(async (args: unknown) => {
   void args
   return { count: 1 }
@@ -70,6 +76,7 @@ vi.mock('@/lib/prisma', () => ({
       findFirst: panelFindFirstMock,
       updateMany: panelUpdateManyMock,
     },
+    novelPromotionStoryboard: { findMany: storyboardFindManyMock },
     comfyWorkflowVersion: { findFirst: comfyVersionFindFirstMock },
     userPreference: { findUnique: userPreferenceFindUniqueMock },
   },
@@ -90,14 +97,18 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     vi.clearAllMocks()
     panelFindFirstMock.mockReset()
     panelFindManyMock.mockReset()
+    storyboardFindManyMock.mockReset()
     capabilityMock.mockReturnValue(undefined)
     panelFindFirstMock.mockResolvedValue({
       id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
       hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
       includeDialogueInVideoPrompt: true, videoPrompt: 'server visual prompt', firstLastFramePrompt: null,
       estimatedDuration: 5, durationOverride: null, duration: 5,
+      firstFrameSourceMeta: null, lastFrameSourceMeta: null,
+      storyboard: { episodeId: 'episode-1' },
     })
     panelFindManyMock.mockResolvedValue([])
+    storyboardFindManyMock.mockResolvedValue([])
     panelUpdateManyMock.mockResolvedValue({ count: 1 })
     comfyVersionFindFirstMock.mockResolvedValue({
       id: 'video-version-1',
@@ -118,21 +129,24 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     }))
   })
 
-  it('accepts strict ComfyUI first-last-frame selection without consulting cloud capabilities', async () => {
+  it('uses the persisted manual last frame instead of forged client coordinates', async () => {
     panelFindFirstMock
       .mockResolvedValueOnce({
         id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
         hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
         includeDialogueInVideoPrompt: true, videoPrompt: 'normal prompt', firstLastFramePrompt: 'first-last prompt',
         estimatedDuration: 5, durationOverride: null, duration: 5,
+        firstFrameSourceMeta: null,
+        lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'persisted-last-panel' }),
+        storyboard: { episodeId: 'episode-1' },
       })
-      .mockResolvedValueOnce({ id: 'last-panel-1' })
+      .mockResolvedValueOnce({ id: 'persisted-last-panel' })
     const response = await POST(request({
       videoModel: 'cloud::normal',
       firstLastFrame: {
         flModel: 'comfyui::wf-video',
-        lastFrameStoryboardId: 'storyboard-1',
-        lastFramePanelIndex: 1,
+        lastFrameStoryboardId: 'forged-storyboard',
+        lastFramePanelIndex: 999,
         customPrompt: 'FORGED',
         sourcePanelId: 'foreign-client-id',
       },
@@ -147,7 +161,7 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
         firstLastFrame: {
           flModel: 'comfyui::wf-video',
           firstFrameSourcePanelId: 'panel-1',
-          sourcePanelId: 'last-panel-1',
+          sourcePanelId: 'persisted-last-panel',
         },
         comfyWorkflowVersionId: 'video-version-1',
         comfyModelSnapshotVersion: 1,
@@ -163,9 +177,10 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
         includeDialogueInVideoPrompt: true, videoPrompt: 'normal prompt', firstLastFramePrompt: 'first-last prompt',
         estimatedDuration: 5, durationOverride: null, duration: 5,
         firstFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'manual-first-panel' }),
+        lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'last-panel' }),
       })
-      .mockResolvedValueOnce({ id: 'last-panel' })
       .mockResolvedValueOnce({ id: 'manual-first-panel' })
+      .mockResolvedValueOnce({ id: 'last-panel' })
 
     const response = await POST(request({
       firstLastFrame: {
@@ -177,7 +192,7 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     }), { params: Promise.resolve({ projectId: 'project-1' }) })
 
     expect(response.status).toBe(200)
-    expect(panelFindFirstMock).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(panelFindFirstMock).toHaveBeenCalledWith(expect.objectContaining({
       where: {
         id: 'manual-first-panel',
         storyboard: { episode: { novelPromotionProject: {
@@ -196,20 +211,23 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     }))
   })
 
-  it('rejects a last frame outside the authorized project before billing or submission', async () => {
+  it('rejects a persisted last frame outside the authorized project before billing or submission', async () => {
     panelFindFirstMock
       .mockResolvedValueOnce({
         id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
         hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
         includeDialogueInVideoPrompt: true, videoPrompt: 'normal prompt', firstLastFramePrompt: 'first-last prompt',
         estimatedDuration: 5, durationOverride: null, duration: 5,
+        firstFrameSourceMeta: null,
+        lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'foreign-panel' }),
+        storyboard: { episodeId: 'episode-1' },
       })
       .mockResolvedValueOnce(null)
 
     const response = await POST(request({
       firstLastFrame: {
         flModel: 'comfyui::wf-video',
-        lastFrameStoryboardId: 'foreign-storyboard',
+        lastFrameStoryboardId: 'forged-but-owned-storyboard',
         lastFramePanelIndex: 0,
       },
     }), { params: Promise.resolve({ projectId: 'project-1' }) })
@@ -217,7 +235,7 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     expect(response.status).toBe(400)
     expect(panelFindFirstMock).toHaveBeenLastCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        storyboardId: 'foreign-storyboard',
+        id: 'foreign-panel',
         storyboard: { episode: { novelPromotionProject: {
           projectId: 'project-1', project: { userId: 'user-1' },
         } } },
@@ -227,12 +245,98 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     expect(submitTaskMock).not.toHaveBeenCalled()
   })
 
+  it('keeps a persisted explicit last-frame clear despite forged client coordinates', async () => {
+    panelFindFirstMock.mockResolvedValueOnce({
+      id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+      hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+      includeDialogueInVideoPrompt: true, videoPrompt: 'normal prompt', firstLastFramePrompt: 'first-last prompt',
+      estimatedDuration: 5, durationOverride: null, duration: 5,
+      firstFrameSourceMeta: null, lastFrameSourceMeta: 'null',
+      storyboard: { episodeId: 'episode-1' },
+    })
+
+    const response = await POST(request({
+      firstLastFrame: {
+        flModel: 'comfyui::wf-video',
+        lastFrameStoryboardId: 'forged-storyboard',
+        lastFramePanelIndex: 1,
+      },
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(panelFindFirstMock).toHaveBeenCalledTimes(1)
+    expect(storyboardFindManyMock).not.toHaveBeenCalled()
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        firstLastFrame: {
+          flModel: 'comfyui::wf-video',
+          firstFrameSourcePanelId: 'panel-1',
+        },
+      }),
+    }))
+  })
+
+  it.each([null, '', '{invalid'])('resolves legacy last-frame metadata %j from the owner-scoped episode snapshot', async (lastFrameSourceMeta) => {
+    panelFindFirstMock.mockResolvedValueOnce({
+      id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+      hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+      includeDialogueInVideoPrompt: true, videoPrompt: 'normal prompt', firstLastFramePrompt: 'first-last prompt',
+      estimatedDuration: 5, durationOverride: null, duration: 5,
+      firstFrameSourceMeta: null, lastFrameSourceMeta,
+      storyboard: { episodeId: 'episode-1' },
+    })
+    storyboardFindManyMock.mockResolvedValueOnce([{
+      id: 'storyboard-1', createdAt: new Date('2026-07-13T01:00:00Z'),
+      clip: { createdAt: new Date('2026-07-13T01:00:00Z') },
+      layoutMode: 'six_grid', groupSequence: 1,
+      continuityAnchor: JSON.stringify({ sceneKey: 'office' }),
+      panels: [
+        {
+          id: 'panel-1', storyboardId: 'storyboard-1', panelIndex: 0, gridCellIndex: 0,
+          firstFrameSourceMeta: null, lastFrameSourceMeta, linkedToNextPanel: false,
+        },
+        {
+          id: 'server-next-panel', storyboardId: 'storyboard-1', panelIndex: 1, gridCellIndex: 1,
+          firstFrameSourceMeta: null, lastFrameSourceMeta: null, linkedToNextPanel: false,
+        },
+      ],
+    }])
+
+    const response = await POST(request({
+      firstLastFrame: {
+        flModel: 'comfyui::wf-video',
+        lastFrameStoryboardId: 'forged-storyboard',
+        lastFramePanelIndex: 99,
+      },
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(storyboardFindManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        episodeId: 'episode-1',
+        episode: { novelPromotionProject: {
+          projectId: 'project-1', project: { userId: 'user-1' },
+        } },
+      }),
+    }))
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        firstLastFrame: {
+          flModel: 'comfyui::wf-video',
+          firstFrameSourcePanelId: 'panel-1',
+          sourcePanelId: 'server-next-panel',
+        },
+      }),
+    }))
+  })
+
   it('uses firstLastFramePrompt for first-last-frame tasks and videoPrompt for normal tasks', async () => {
     const panel = {
       id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
       hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
       includeDialogueInVideoPrompt: true, videoPrompt: 'NORMAL VISUAL PROMPT', firstLastFramePrompt: 'FIRST LAST VISUAL PROMPT',
       estimatedDuration: 5, durationOverride: null, duration: 5,
+      lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'last-panel-1' }),
     }
     panelFindFirstMock
       .mockResolvedValueOnce(panel)
