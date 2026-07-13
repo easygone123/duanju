@@ -50,6 +50,11 @@ export function useWorkspaceVideoActions({
     },
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
+    submissionMeta?: {
+      explicitVideoModel?: string
+      durationOverride?: number | null
+      expectedPanelUpdatedAt?: string
+    },
   ) => {
     const normalizedVideoModel = typeof videoModel === 'string' ? videoModel.trim() : ''
     if (!normalizedVideoModel) {
@@ -64,6 +69,7 @@ export function useWorkspaceVideoActions({
         videoModel: normalizedVideoModel,
         firstLastFrame,
         generationOptions,
+        ...submissionMeta,
       })
     } catch (err: unknown) {
       if (isAbortError(err)) {

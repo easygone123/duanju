@@ -5,6 +5,7 @@ export interface VideoPanelCardShellProps {
   panel: VideoPanel
   panelIndex: number
   defaultVideoModel: string
+  dialogueVideoModel?: string | null
   capabilityOverrides: CapabilitySelections
   videoRatio?: string
   userVideoModels?: VideoModelOption[]
@@ -44,6 +45,11 @@ export interface VideoPanelCardShellProps {
     firstLastFrame?: FirstLastFrameParams,
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
+    submissionMeta?: {
+      explicitVideoModel?: string
+      durationOverride?: number | null
+      expectedPanelUpdatedAt?: string
+    },
   ) => void
   onUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => void
   onToggleLink: (panelKey: string, storyboardId: string, panelIndex: number) => void

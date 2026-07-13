@@ -3,6 +3,14 @@ import { NextRequest } from 'next/server'
 
 const capabilityMock = vi.hoisted(() => vi.fn())
 const submitTaskMock = vi.hoisted(() => vi.fn(async () => ({ id: 'task-1' })))
+const panelFindFirstMock = vi.hoisted(() => vi.fn())
+const panelUpdateManyMock = vi.hoisted(() => vi.fn(async (args: unknown) => {
+  void args
+  return { count: 1 }
+}))
+const getProjectModelConfigMock = vi.hoisted(() => vi.fn())
+const comfyVersionFindFirstMock = vi.hoisted(() => vi.fn())
+const userPreferenceFindUniqueMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/model-capabilities/lookup', () => ({
   resolveBuiltinCapabilitiesByModelKey: capabilityMock,
@@ -20,10 +28,10 @@ vi.mock('@/lib/config-service', () => ({
     if (versionId) payload.comfyWorkflowVersionId = versionId
     return payload
   }),
-  getProjectModelConfig: vi.fn(async (_projectId: string, _userId: string, overrides: { videoModel?: string }) => ({
-    videoModel: overrides.videoModel ?? null,
-    comfyVideoWorkflowVersionId: overrides.videoModel?.startsWith('comfyui::') ? 'video-version-1' : null,
-  })),
+  getProjectModelConfig: getProjectModelConfigMock,
+  resolveTrustedComfyWorkflowVersion: vi.fn(async (_userId: string, model: string | null) => (
+    model?.startsWith('comfyui::') ? 'video-version-1' : null
+  )),
   resolveProjectModelCapabilityGenerationOptions: vi.fn(async () => ({})),
 }))
 vi.mock('@/lib/model-pricing/lookup', () => ({
@@ -33,8 +41,11 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     novelPromotionPanel: {
       findMany: vi.fn(async () => []),
-      findFirst: vi.fn(async () => ({ id: 'panel-1' })),
+      findFirst: panelFindFirstMock,
+      updateMany: panelUpdateManyMock,
     },
+    comfyWorkflowVersion: { findFirst: comfyVersionFindFirstMock },
+    userPreference: { findUnique: userPreferenceFindUniqueMock },
   },
 }))
 
@@ -52,6 +63,30 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     capabilityMock.mockReturnValue(undefined)
+    panelFindFirstMock.mockResolvedValue({
+      id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+      hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+      includeDialogueInVideoPrompt: true, videoPrompt: 'server visual prompt',
+      estimatedDuration: 5, durationOverride: null, duration: 5,
+    })
+    panelUpdateManyMock.mockResolvedValue({ count: 1 })
+    comfyVersionFindFirstMock.mockResolvedValue({
+      id: 'video-version-1',
+      variableDefinitions: [{ name: 'duration', type: 'number', options: [5, 10] }],
+    })
+    userPreferenceFindUniqueMock.mockResolvedValue({
+      customModels: JSON.stringify([
+        { provider: 'cloud', modelId: 'normal', type: 'video' },
+        { provider: 'cloud', modelId: 'dialogue', type: 'video' },
+        { provider: 'cloud', modelId: 'unsupported', type: 'video' },
+      ]),
+      customProviders: JSON.stringify([{ id: 'cloud', apiKey: 'secret' }]),
+    })
+    getProjectModelConfigMock.mockImplementation(async (_projectId: string, _userId: string, overrides?: { videoModel?: string }) => ({
+      videoModel: overrides?.videoModel ?? 'cloud::normal',
+      dialogueVideoModel: null,
+      comfyVideoWorkflowVersionId: overrides?.videoModel?.startsWith('comfyui::') ? 'video-version-1' : null,
+    }))
   })
 
   it('accepts strict ComfyUI first-last-frame selection without consulting cloud capabilities', async () => {
@@ -87,5 +122,104 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     }), { params: Promise.resolve({ projectId: 'project-1' }) })
     expect(response.status).toBe(400)
     expect(capabilityMock).not.toHaveBeenCalledWith('video', 'comfyui:wf-video')
+  })
+
+  it('ignores forged client prompt and effective duration and snapshots server resolution', async () => {
+    capabilityMock.mockReturnValue({ video: { durationOptions: [5, 10] } })
+    panelFindFirstMock.mockResolvedValue({
+      id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+      hasDialogue: true, dialogueSpeaker: '阿青', dialogueText: '跟我走。', dialogueEmotion: '急切',
+      includeDialogueInVideoPrompt: true, videoPrompt: '人物推开门',
+      estimatedDuration: 7.2, durationOverride: null, duration: 7.2,
+    })
+    getProjectModelConfigMock.mockResolvedValue({
+      videoModel: 'cloud::normal', dialogueVideoModel: 'cloud::dialogue', comfyVideoWorkflowVersionId: null,
+    })
+
+    const response = await POST(request({
+      submittedPrompt: 'FORGED', effectiveDuration: 1, requestedDuration: 1,
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        videoModel: 'cloud::dialogue',
+        videoPrompt: expect.stringContaining('跟我走。'),
+        requestedDuration: 7.2,
+        effectiveDuration: 10,
+        videoModelReason: 'dialogue_project_model',
+      }),
+    }))
+  })
+
+  it('rejects stale duration override before submission and never mutates the estimate', async () => {
+    panelUpdateManyMock.mockResolvedValue({ count: 0 })
+    const response = await POST(request({
+      durationOverride: 8,
+      expectedPanelUpdatedAt: '2026-07-13T01:02:03.000Z',
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(409)
+    expect(panelUpdateManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      data: { durationOverride: 8 },
+    }))
+    expect((panelUpdateManyMock.mock.calls[0]?.[0] as { data: object }).data).not.toHaveProperty('estimatedDuration')
+    expect(submitTaskMock).not.toHaveBeenCalled()
+  })
+
+  it('clears an override with null while preserving estimated duration', async () => {
+    const response = await POST(request({
+      durationOverride: null,
+      expectedPanelUpdatedAt: '2026-07-13T01:02:03.000Z',
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(panelUpdateManyMock).toHaveBeenCalledWith(expect.objectContaining({
+      data: { durationOverride: null },
+    }))
+    expect((panelUpdateManyMock.mock.calls[0]?.[0] as { data: object }).data).not.toHaveProperty('estimatedDuration')
+  })
+
+  it('does not let forged Comfy generationOptions define the duration contract', async () => {
+    panelFindFirstMock.mockResolvedValue({
+      id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+      hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+      includeDialogueInVideoPrompt: true, videoPrompt: 'server prompt',
+      estimatedDuration: 7.2, durationOverride: null, duration: 7.2,
+    })
+    const response = await POST(request({
+      videoModel: 'comfyui::wf-video',
+      generationOptions: { duration: 999 },
+      effectiveDuration: 999,
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        requestedDuration: 7.2,
+        effectiveDuration: 10,
+        generationOptions: expect.objectContaining({ duration: 10 }),
+        comfyWorkflowVersionId: 'video-version-1',
+      }),
+    }))
+  })
+
+  it('blocks an unavailable configured dialogue model before billing submission', async () => {
+    panelFindFirstMock.mockResolvedValue({
+      id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+      hasDialogue: true, dialogueSpeaker: '阿青', dialogueText: '走。', dialogueEmotion: '急切',
+      includeDialogueInVideoPrompt: true, videoPrompt: '人物转身',
+      estimatedDuration: 5, durationOverride: null, duration: 5,
+    })
+    getProjectModelConfigMock.mockResolvedValue({
+      videoModel: 'cloud::normal', dialogueVideoModel: 'cloud::forbidden', comfyVideoWorkflowVersionId: null,
+    })
+
+    const response = await POST(request({ useProjectRouting: true, videoModel: 'cloud::normal' }), {
+      params: Promise.resolve({ projectId: 'project-1' }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(submitTaskMock).not.toHaveBeenCalled()
   })
 })

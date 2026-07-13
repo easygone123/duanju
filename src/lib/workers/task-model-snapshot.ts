@@ -3,6 +3,9 @@ import { parseModelKeyStrict } from '@/lib/model-config-contract'
 export interface TaskModelSnapshot {
   model: string
   comfyWorkflowVersionId: string | undefined
+  modelReason?: string
+  requestedDuration?: number
+  effectiveDuration?: number
 }
 
 type MediaKind = 'image' | 'video'
@@ -79,5 +82,24 @@ export function resolveVideoTaskSnapshot(
   payload: unknown,
   legacyConfig: { model: string | null | undefined; comfyWorkflowVersionId?: string | null },
 ): TaskModelSnapshot {
-  return resolveTaskModelSnapshot('video', payload, legacyConfig)
+  const snapshot = resolveTaskModelSnapshot('video', payload, legacyConfig)
+  if (!isRecord(payload)) return snapshot
+  const modelReason = payload.videoModelReason
+  const requestedDuration = payload.requestedDuration
+  const effectiveDuration = payload.effectiveDuration
+  if (modelReason === undefined && requestedDuration === undefined && effectiveDuration === undefined) {
+    return snapshot
+  }
+  if (
+    typeof modelReason !== 'string'
+    || typeof requestedDuration !== 'number'
+    || !Number.isFinite(requestedDuration)
+    || requestedDuration <= 0
+    || typeof effectiveDuration !== 'number'
+    || !Number.isFinite(effectiveDuration)
+    || effectiveDuration < requestedDuration
+  ) {
+    throw new Error('TASK_MODEL_SNAPSHOT_INVALID: video routing')
+  }
+  return { ...snapshot, modelReason, requestedDuration, effectiveDuration }
 }

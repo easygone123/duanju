@@ -10,15 +10,10 @@ import { BillingOperationError } from '@/lib/billing/errors'
 import { hasPanelVideoOutput } from '@/lib/task/has-output'
 import { withTaskUiPayload } from '@/lib/task/ui-payload'
 import { parseModelKeyStrict, type CapabilityValue } from '@/lib/model-config-contract'
-import {
-  resolveBuiltinCapabilitiesByModelKey,
-} from '@/lib/model-capabilities/lookup'
+import { resolveBuiltinCapabilitiesByModelKey } from '@/lib/model-capabilities/lookup'
 import { resolveBuiltinPricing } from '@/lib/model-pricing/lookup'
-import {
-  applyTrustedComfyVersionSnapshot,
-  getProjectModelConfig,
-  resolveProjectModelCapabilityGenerationOptions,
-} from '@/lib/config-service'
+import { resolveProjectModelCapabilityGenerationOptions } from '@/lib/config-service'
+import { resolveAuthoritativePanelPayload, VIDEO_PANEL_SELECT } from '@/lib/novel-promotion/video/server-panel-video-submission'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -43,22 +38,15 @@ function resolveVideoGenerationMode(payload: unknown): 'normal' | 'firstlastfram
 
 function isSeedance2Model(modelKey: string): boolean {
   const parsed = parseModelKeyStrict(modelKey)
-  if (!parsed) return false
-  return parsed.provider === 'ark'
-    && (
-      parsed.modelId === 'doubao-seedance-2-0-260128'
-      || parsed.modelId === 'doubao-seedance-2-0-fast-260128'
-    )
+  return parsed?.provider === 'ark' && [
+    'doubao-seedance-2-0-260128', 'doubao-seedance-2-0-fast-260128',
+  ].includes(parsed.modelId)
 }
 
 function resolveVideoModelKeyFromPayload(payload: Record<string, unknown>): string | null {
   const firstLast = isRecord(payload.firstLastFrame) ? payload.firstLastFrame : null
-  if (firstLast && typeof firstLast.flModel === 'string' && parseModelKeyStrict(firstLast.flModel)) {
-    return firstLast.flModel
-  }
-  if (typeof payload.videoModel === 'string' && parseModelKeyStrict(payload.videoModel)) {
-    return payload.videoModel
-  }
+  if (firstLast && typeof firstLast.flModel === 'string' && parseModelKeyStrict(firstLast.flModel)) return firstLast.flModel
+  if (typeof payload.videoModel === 'string' && parseModelKeyStrict(payload.videoModel)) return payload.videoModel
   return null
 }
 
@@ -199,32 +187,17 @@ export const POST = apiHandler(async (
   if (isErrorResponse(authResult)) return authResult
   const { session } = authResult
 
-  const body = await request.json()
-  const requestedVideoModel = isRecord(body) ? resolveVideoModelKeyFromPayload(body) : null
-  const projectModels = await getProjectModelConfig(projectId, session.user.id, {
-    videoModel: requestedVideoModel,
-  })
-  if (!isRecord(body) || !projectModels.videoModel) {
-    throw new ApiError('INVALID_PARAMS', { code: 'VIDEO_MODEL_REQUIRED', field: 'videoModel' })
-  }
-  body.videoModel = projectModels.videoModel
-  applyTrustedComfyVersionSnapshot(
-    body,
-    projectModels.comfyVideoWorkflowVersionId,
-  )
-  body.comfyModelSnapshotVersion = 1
-  requireVideoModelKeyFromPayload(body)
+  const body: unknown = await request.json()
+  if (!isRecord(body)) throw new ApiError('INVALID_PARAMS')
   const locale = resolveRequiredTaskLocale(request, body)
   const isBatch = body?.all === true
 
   validateFirstLastFrameModel(body?.firstLastFrame)
-  await validateVideoCapabilityCombination({
-    payload: body,
-    projectId,
-    userId: session.user.id,
-  })
 
   if (isBatch) {
+    if (Object.prototype.hasOwnProperty.call(body, 'durationOverride')) {
+      throw new ApiError('INVALID_PARAMS', { code: 'BATCH_DURATION_OVERRIDE_UNSUPPORTED' })
+    }
     const episodeId = typeof body.episodeId === 'string' ? body.episodeId : ''
     if (!episodeId) {
       throw new ApiError('INVALID_PARAMS')
@@ -232,23 +205,33 @@ export const POST = apiHandler(async (
 
     const panels = await prisma.novelPromotionPanel.findMany({
       where: {
-        storyboard: { episodeId },
+        storyboard: {
+          episodeId,
+          episode: { novelPromotionProject: { projectId } },
+        },
         imageUrl: { not: null },
         OR: [
           { videoUrl: null },
           { videoUrl: '' },
         ],
       },
-      select: { id: true },
+      select: VIDEO_PANEL_SELECT,
     })
 
     if (panels.length === 0) {
       return NextResponse.json({ tasks: [], total: 0 })
     }
 
-    const results = await Promise.all(
-      panels.map(async (panel) =>
-        submitTask({
+    const results = await Promise.all(panels.map(async (panel) => {
+      const payload = await resolveAuthoritativePanelPayload({
+        body, panel, projectId, userId: session.user.id,
+      })
+      requireVideoModelKeyFromPayload(payload)
+      await validateVideoCapabilityCombination({
+        payload, projectId, userId: session.user.id,
+      })
+      const billingInfo = buildVideoPanelBillingInfoOrThrow(payload)
+      return submitTask({
           userId: session.user.id,
           locale,
           requestId: getRequestId(request),
@@ -257,14 +240,13 @@ export const POST = apiHandler(async (
           type: TASK_TYPE.VIDEO_PANEL,
           targetType: 'NovelPromotionPanel',
           targetId: panel.id,
-          payload: withTaskUiPayload(body, {
+          payload: withTaskUiPayload(payload, {
             hasOutputAtStart: await hasPanelVideoOutput(panel.id),
           }),
           dedupeKey: `video_panel:${panel.id}`,
-          billingInfo: buildVideoPanelBillingInfoOrThrow(body),
-        }),
-      ),
-    )
+          billingInfo,
+        })
+    }))
 
     return NextResponse.json({ tasks: results, total: panels.length })
   }
@@ -276,13 +258,26 @@ export const POST = apiHandler(async (
   }
 
   const panel = await prisma.novelPromotionPanel.findFirst({
-    where: { storyboardId, panelIndex: Number(panelIndex) },
-    select: { id: true },
+    where: {
+      storyboardId,
+      panelIndex: Number(panelIndex),
+      storyboard: { episode: { novelPromotionProject: { projectId } } },
+    },
+    select: VIDEO_PANEL_SELECT,
   })
 
   if (!panel) {
     throw new ApiError('NOT_FOUND')
   }
+
+  const payload = await resolveAuthoritativePanelPayload({
+    body, panel, projectId, userId: session.user.id,
+  })
+  requireVideoModelKeyFromPayload(payload)
+  await validateVideoCapabilityCombination({
+    payload, projectId, userId: session.user.id,
+  })
+  const billingInfo = buildVideoPanelBillingInfoOrThrow(payload)
 
   const result = await submitTask({
     userId: session.user.id,
@@ -292,11 +287,11 @@ export const POST = apiHandler(async (
     type: TASK_TYPE.VIDEO_PANEL,
     targetType: 'NovelPromotionPanel',
     targetId: panel.id,
-    payload: withTaskUiPayload(body, {
+    payload: withTaskUiPayload(payload, {
       hasOutputAtStart: await hasPanelVideoOutput(panel.id),
     }),
     dedupeKey: `video_panel:${panel.id}`,
-    billingInfo: buildVideoPanelBillingInfoOrThrow(body),
+    billingInfo,
   })
 
   return NextResponse.json(result)

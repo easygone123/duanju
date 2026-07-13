@@ -165,6 +165,9 @@ export function useGenerateVideo(projectId: string | null, episodeId: string | n
                 flModel: string
                 customPrompt?: string
             }
+            explicitVideoModel?: string
+            durationOverride?: number | null
+            expectedPanelUpdatedAt?: string
         }) => {
             if (!projectId) throw new Error('Project ID is required')
 
@@ -180,10 +183,15 @@ export function useGenerateVideo(projectId: string | null, episodeId: string | n
                 }
                 videoModel: string
                 generationOptions?: VideoGenerationOptions
+                explicitVideoModel?: string
+                durationOverride?: number | null
+                expectedPanelUpdatedAt?: string
+                useProjectRouting: true
             } = {
                 storyboardId: params.storyboardId,
                 panelIndex: params.panelIndex,
                 videoModel: params.videoModel,
+                useProjectRouting: true,
             }
 
             // 如果是首尾帧模式
@@ -193,6 +201,11 @@ export function useGenerateVideo(projectId: string | null, episodeId: string | n
 
             if (params.generationOptions && typeof params.generationOptions === 'object') {
                 requestBody.generationOptions = params.generationOptions
+            }
+            if (params.explicitVideoModel) requestBody.explicitVideoModel = params.explicitVideoModel
+            if (Object.prototype.hasOwnProperty.call(params, 'durationOverride')) {
+                requestBody.durationOverride = params.durationOverride ?? null
+                requestBody.expectedPanelUpdatedAt = params.expectedPanelUpdatedAt
             }
 
             const res = await apiFetch(`/api/novel-promotion/${projectId}/generate-video`, {

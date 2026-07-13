@@ -99,6 +99,14 @@ export function useVideoPanelsProjection({
             panelLipState?.phase === 'failed'
               ? panelLipState.lastError?.message || panel.lipSyncErrorMessage || undefined
               : panel.lipSyncErrorMessage || undefined,
+          updatedAt: panel.updatedAt instanceof Date ? panel.updatedAt.toISOString() : panel.updatedAt,
+          hasDialogue: panel.hasDialogue ?? false,
+          dialogueSpeaker: panel.dialogueSpeaker ?? undefined,
+          dialogueText: panel.dialogueText ?? undefined,
+          dialogueEmotion: panel.dialogueEmotion ?? undefined,
+          includeDialogueInVideoPrompt: panel.includeDialogueInVideoPrompt ?? true,
+          estimatedDuration: panel.estimatedDuration ?? undefined,
+          durationOverride: panel.durationOverride ?? null,
         })
       })
     })

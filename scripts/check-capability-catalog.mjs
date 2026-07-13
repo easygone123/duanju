@@ -5,11 +5,12 @@ import path from 'node:path'
 const CAPABILITY_NAMESPACES = new Set(['llm', 'image', 'video', 'audio', 'lipsync'])
 const CAPABILITY_NAMESPACE_ALLOWED_FIELDS = {
   llm: new Set(['reasoningEffortOptions', 'fieldI18n']),
-  image: new Set(['resolutionOptions', 'fieldI18n']),
+  image: new Set(['resolutionOptions', 'aspectRatioOptions', 'fieldI18n']),
   video: new Set([
     'generationModeOptions',
     'generateAudioOptions',
     'durationOptions',
+    'durationRange',
     'fpsOptions',
     'resolutionOptions',
     'firstlastframe',
@@ -21,7 +22,7 @@ const CAPABILITY_NAMESPACE_ALLOWED_FIELDS = {
 }
 const CAPABILITY_NAMESPACE_I18N_FIELDS = {
   llm: { reasoningEffort: 'reasoningEffortOptions' },
-  image: { resolution: 'resolutionOptions' },
+  image: { resolution: 'resolutionOptions', aspectRatio: 'aspectRatioOptions' },
   video: {
     generationMode: 'generationModeOptions',
     generateAudio: 'generateAudioOptions',
@@ -195,6 +196,9 @@ function validateCapabilitiesForModelType(issues, file, index, modelType, capabi
       if (image.resolutionOptions !== undefined && !isStringArray(image.resolutionOptions)) {
         pushIssue(issues, file, index, 'capabilities.image.resolutionOptions', 'must be string array')
       }
+      if (image.aspectRatioOptions !== undefined && !isStringArray(image.aspectRatioOptions)) {
+        pushIssue(issues, file, index, 'capabilities.image.aspectRatioOptions', 'must be string array')
+      }
       validateFieldI18nMap(issues, file, index, 'image', image)
     }
   }
@@ -213,6 +217,17 @@ function validateCapabilitiesForModelType(issues, file, index, modelType, capabi
       }
       if (video.durationOptions !== undefined && !isNumberArray(video.durationOptions)) {
         pushIssue(issues, file, index, 'capabilities.video.durationOptions', 'must be number array')
+      }
+      if (video.durationRange !== undefined && (
+        !isRecord(video.durationRange)
+        || typeof video.durationRange.min !== 'number'
+        || typeof video.durationRange.max !== 'number'
+        || typeof video.durationRange.step !== 'number'
+        || video.durationRange.min <= 0
+        || video.durationRange.max < video.durationRange.min
+        || video.durationRange.step <= 0
+      )) {
+        pushIssue(issues, file, index, 'capabilities.video.durationRange', 'must contain positive min, max, and step')
       }
       if (video.fpsOptions !== undefined && !isNumberArray(video.fpsOptions)) {
         pushIssue(issues, file, index, 'capabilities.video.fpsOptions', 'must be number array')

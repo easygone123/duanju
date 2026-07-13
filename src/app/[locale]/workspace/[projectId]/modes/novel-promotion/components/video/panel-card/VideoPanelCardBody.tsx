@@ -54,6 +54,23 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
   const cloudModelOptions = videoModel.videoModelOptions.filter((option) => option.provider !== 'comfyui')
   const taskModelOptions = [...cloudModelOptions, ...comfyWorkflowOptions]
   const isComfyTaskOverride = videoModel.selectedModel.startsWith('comfyui::')
+  const dialogueRuntime = videoModel as typeof videoModel & {
+    modelReason?: string
+    effectiveDuration?: number | null
+    durationOverride?: number | null
+    durationInput?: { min: number; max: number; step: number }
+    setDurationOverride?: (value: number | null) => void
+    resetDurationOverride?: () => void
+    validationError?: string | null
+    includeDialogueInVideoPrompt?: boolean
+    setIncludeDialogueInVideoPrompt?: (value: boolean) => void
+    hasSettingsChanges?: boolean
+    isSavingSettings?: boolean
+    saveVideoSettings?: () => Promise<void>
+  }
+  const estimatedDuration = panel.estimatedDuration ?? panel.textPanel?.duration ?? null
+  const durationOverride = dialogueRuntime.durationOverride ?? panel.durationOverride ?? null
+  const durationInput = dialogueRuntime.durationInput ?? { min: 0.1, max: 360, step: 0.1 }
 
   return (
     <div className="p-4 space-y-2">
@@ -63,6 +80,92 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
       </div>
 
       <p className="text-sm text-[var(--glass-text-secondary)] line-clamp-2">{panel.textPanel?.description}</p>
+
+      <div className="space-y-2 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          {panel.hasDialogue && (
+            <span
+              aria-label={t('dialogue.badge')}
+              className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-300"
+            >
+              <AppIcon name="audioWave" className="h-3 w-3" />
+              {t('dialogue.badge')}
+            </span>
+          )}
+          {estimatedDuration != null && (
+            <span>{t('dialogue.duration.estimated', { seconds: estimatedDuration })}</span>
+          )}
+          {durationOverride != null && (
+            <span>{t('dialogue.duration.override', { seconds: durationOverride })}</span>
+          )}
+          {dialogueRuntime.effectiveDuration != null && (
+            <span>{t('dialogue.duration.effective', { seconds: dialogueRuntime.effectiveDuration })}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            aria-label={t('dialogue.duration.input')}
+            type="number"
+            min={durationInput.min}
+            max={durationInput.max}
+            step={durationInput.step}
+            value={durationOverride ?? ''}
+            disabled={taskStatus.isVideoTaskRunning}
+            placeholder={estimatedDuration == null ? '' : String(estimatedDuration)}
+            onChange={(event) => {
+              const value = event.target.value === '' ? null : Number(event.target.value)
+              dialogueRuntime.setDurationOverride?.(value)
+            }}
+            className="w-28 rounded border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-2 py-1 disabled:opacity-50"
+          />
+          <button
+            type="button"
+            disabled={taskStatus.isVideoTaskRunning || durationOverride == null}
+            onClick={() => dialogueRuntime.resetDurationOverride?.()}
+            className="underline disabled:opacity-50"
+          >
+            {t('dialogue.duration.reset')}
+          </button>
+        </div>
+        {panel.hasDialogue && (
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={dialogueRuntime.includeDialogueInVideoPrompt ?? true}
+              disabled={taskStatus.isVideoTaskRunning || dialogueRuntime.isSavingSettings}
+              onChange={(event) => dialogueRuntime.setIncludeDialogueInVideoPrompt?.(event.target.checked)}
+            />
+            <span>{t('dialogue.includeInVideoPrompt')}</span>
+          </label>
+        )}
+        <button
+          type="button"
+          disabled={
+            taskStatus.isVideoTaskRunning
+            || dialogueRuntime.isSavingSettings
+            || !dialogueRuntime.hasSettingsChanges
+            || !!dialogueRuntime.validationError
+          }
+          onClick={() => { void dialogueRuntime.saveVideoSettings?.() }}
+          className="rounded bg-[var(--glass-accent-from)] px-2 py-1 text-white disabled:opacity-50"
+        >
+          {dialogueRuntime.isSavingSettings ? t('dialogue.savingSettings') : t('dialogue.saveSettings')}
+        </button>
+        {dialogueRuntime.modelReason === 'dialogue_model_not_configured_fallback' && (
+          <p role="status" className="text-[var(--glass-tone-warning-fg)]">{t('dialogue.model.fallback')}</p>
+        )}
+        {videoModel.selectedModel && (
+          <p>
+            {t('dialogue.model.current', { model: videoModel.selectedModel })}
+            {dialogueRuntime.modelReason
+              ? ` · ${t(`dialogue.model.reason.${dialogueRuntime.modelReason}` as never)}`
+              : ''}
+          </p>
+        )}
+        {dialogueRuntime.validationError && (
+          <p role="alert" className="text-[var(--glass-tone-danger-fg)]">{dialogueRuntime.validationError}</p>
+        )}
+      </div>
 
       <div className="mt-3 pt-3 border-t border-[var(--glass-stroke-base)]">
         {(showsIncomingLinkBadge || showsOutgoingLinkBadge) && (
@@ -175,12 +278,21 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                         undefined,
                         videoModel.generationOptions,
                         panel.panelId,
+                        {
+                          ...(videoModel.hasExplicitSelection ? { explicitVideoModel: videoModel.selectedModel } : {}),
+                          ...(videoModel.durationOverrideDirty ? {
+                            durationOverride: videoModel.durationOverride,
+                            expectedPanelUpdatedAt: panel.updatedAt,
+                          } : {}),
+                        },
                       )}
                     disabled={
                       taskStatus.isVideoTaskRunning
                       || !panel.imageUrl
                       || !videoModel.selectedModel
                       || videoModel.missingCapabilityFields.length > 0
+                      || !!videoModel.validationError
+                      || videoModel.hasSettingsChanges
                     }
                     className="flex-shrink-0 min-w-[90px] py-2 px-3 text-sm font-medium rounded-lg shadow-sm transition-all disabled:opacity-50 bg-[var(--glass-accent-from)] text-white"
                   >

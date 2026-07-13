@@ -232,7 +232,8 @@ export const PATCH = apiHandler(async (
   }
   const {
     panelId, storyboardId, panelIndex, videoPrompt, firstLastFramePrompt, restorePreviousImage,
-    expectedCurrentMediaId, expectedPreviousMediaId,
+    expectedCurrentMediaId, expectedPreviousMediaId, durationOverride,
+    includeDialogueInVideoPrompt, expectedPanelUpdatedAt,
   } = body
 
   // 🔥 方式1：通过 panelId 直接更新（优先）
@@ -266,9 +267,35 @@ export const PATCH = apiHandler(async (
     const updateData: {
       videoPrompt?: string | null
       firstLastFramePrompt?: string | null
+      durationOverride?: number | null
+      includeDialogueInVideoPrompt?: boolean
     } = {}
     if (videoPrompt !== undefined) updateData.videoPrompt = videoPrompt
     if (firstLastFramePrompt !== undefined) updateData.firstLastFramePrompt = firstLastFramePrompt
+
+    const updatesVideoSettings = durationOverride !== undefined || includeDialogueInVideoPrompt !== undefined
+    if (updatesVideoSettings) {
+      if (durationOverride !== undefined && durationOverride !== null
+        && (typeof durationOverride !== 'number' || !Number.isFinite(durationOverride) || durationOverride <= 0)) {
+        throw new ApiError('INVALID_PARAMS', { code: 'VIDEO_DURATION_INVALID', field: 'durationOverride' })
+      }
+      if (includeDialogueInVideoPrompt !== undefined && typeof includeDialogueInVideoPrompt !== 'boolean') {
+        throw new ApiError('INVALID_PARAMS', { field: 'includeDialogueInVideoPrompt' })
+      }
+      if (typeof expectedPanelUpdatedAt !== 'string' || !Number.isFinite(new Date(expectedPanelUpdatedAt).getTime())) {
+        throw new ApiError('INVALID_PARAMS', { code: 'PANEL_VERSION_REQUIRED', field: 'expectedPanelUpdatedAt' })
+      }
+      if (durationOverride !== undefined) updateData.durationOverride = durationOverride
+      if (includeDialogueInVideoPrompt !== undefined) {
+        updateData.includeDialogueInVideoPrompt = includeDialogueInVideoPrompt
+      }
+      const result = await prisma.novelPromotionPanel.updateMany({
+        where: { id: panelId, updatedAt: new Date(expectedPanelUpdatedAt) },
+        data: updateData,
+      })
+      if (result.count !== 1) throw new ApiError('CONFLICT', { code: 'PANEL_VIDEO_SETTINGS_STALE' })
+      return NextResponse.json({ success: true })
+    }
 
     await prisma.novelPromotionPanel.update({
       where: { id: panelId },

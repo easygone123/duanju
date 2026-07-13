@@ -27,6 +27,7 @@ export interface VideoModelOption {
   providerName?: string
   capabilities?: ModelCapabilities
   videoPricingTiers?: VideoPricingTier[]
+  workflowVersionId?: string
 }
 
 export interface EpisodeVideoUrlsResponse {
@@ -40,6 +41,7 @@ export interface VideoStageShellProps {
   storyboards: Storyboard[]
   clips: Clip[]
   defaultVideoModel: string
+  dialogueVideoModel?: string | null
   capabilityOverrides: CapabilitySelections
   videoRatio?: string
   userVideoModels?: VideoModelOption[]
@@ -50,6 +52,11 @@ export interface VideoStageShellProps {
     firstLastFrame?: FirstLastFrameParams,
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
+    submissionMeta?: {
+      explicitVideoModel?: string
+      durationOverride?: number | null
+      expectedPanelUpdatedAt?: string
+    },
   ) => Promise<void>
   onGenerateAllVideos: (options?: BatchVideoGenerationParams) => Promise<void>
   onBack: () => void

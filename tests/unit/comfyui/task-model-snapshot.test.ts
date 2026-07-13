@@ -72,4 +72,20 @@ describe('queued task model snapshots', () => {
     })).toEqual({ model: 'cloud::image-model', comfyWorkflowVersionId: undefined })
   })
 
+  it('pins authoritative dialogue routing and requested/effective duration for video workers', () => {
+    expect(resolveVideoTaskSnapshot({
+      videoModel: 'cloud::video-model',
+      comfyModelSnapshotVersion: 1,
+      videoModelReason: 'dialogue_project_model',
+      requestedDuration: 7.2,
+      effectiveDuration: 10,
+    }, { model: 'cloud::changed' })).toEqual({
+      model: 'cloud::video-model',
+      comfyWorkflowVersionId: undefined,
+      modelReason: 'dialogue_project_model',
+      requestedDuration: 7.2,
+      effectiveDuration: 10,
+    })
+  })
+
 })

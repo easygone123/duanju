@@ -11,6 +11,8 @@ interface VideoPromptModalProps {
   onEditValueChange: (value: string) => void
   onSave: () => void
   onCancel: () => void
+  includeDialogueInVideoPrompt?: boolean
+  onIncludeDialogueInVideoPromptChange?: (value: boolean) => void
 }
 
 export default function VideoPromptModal({
@@ -19,7 +21,9 @@ export default function VideoPromptModal({
   editValue,
   onEditValueChange,
   onSave,
-  onCancel
+  onCancel,
+  includeDialogueInVideoPrompt,
+  onIncludeDialogueInVideoPromptChange,
 }: VideoPromptModalProps) {
   const t = useTranslations('video')
   if (!panel) return null
@@ -62,6 +66,35 @@ export default function VideoPromptModal({
               </div>
             )}
           </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-sm" aria-live="polite">
+            {panel.hasDialogue && (
+              <span
+                aria-label={t('dialogue.badge')}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-2 py-1 font-medium text-amber-700 dark:text-amber-300"
+              >
+                <AppIcon name="audioWave" className="h-3.5 w-3.5" />
+                {t('dialogue.badge')}
+              </span>
+            )}
+            {panel.estimatedDuration != null && (
+              <span>{t('dialogue.duration.estimated', { seconds: panel.estimatedDuration })}</span>
+            )}
+            {panel.durationOverride != null && (
+              <span>{t('dialogue.duration.override', { seconds: panel.durationOverride })}</span>
+            )}
+          </div>
+          {panel.hasDialogue && (
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={includeDialogueInVideoPrompt ?? panel.includeDialogueInVideoPrompt ?? true}
+                disabled={!onIncludeDialogueInVideoPromptChange}
+                onChange={(event) => onIncludeDialogueInVideoPromptChange?.(event.target.checked)}
+              />
+              <span>{t('dialogue.includeInVideoPrompt')}</span>
+            </label>
+          )}
 
           {/* 视频提示词编辑 */}
           <div>

@@ -142,11 +142,20 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
               undefined,
               videoModel.generationOptions,
               panel.panelId,
+              {
+                ...(videoModel.hasExplicitSelection ? { explicitVideoModel: videoModel.selectedModel } : {}),
+                ...(videoModel.durationOverrideDirty ? {
+                  durationOverride: videoModel.durationOverride,
+                  expectedPanelUpdatedAt: panel.updatedAt,
+                } : {}),
+              },
             )}
           disabled={
             taskStatus.isVideoTaskRunning
             || !videoModel.selectedModel
             || videoModel.missingCapabilityFields.length > 0
+            || !!videoModel.validationError
+            || videoModel.hasSettingsChanges
           }
           className="absolute bottom-2 right-2 bg-[var(--glass-overlay)] hover:bg-[var(--glass-overlay-strong)] text-white p-2 rounded-full transition-all z-20 disabled:cursor-not-allowed disabled:opacity-50"
         >

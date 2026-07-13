@@ -83,3 +83,26 @@ export function useUpdateProjectPanelVideoPrompt(projectId: string) {
     },
   })
 }
+
+export function useUpdateProjectPanelVideoSettings(projectId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: {
+      panelId: string
+      expectedPanelUpdatedAt: string
+      durationOverride?: number | null
+      includeDialogueInVideoPrompt?: boolean
+    }) => await requestJsonWithError(
+      `/api/novel-promotion/${projectId}/panel`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+      'update failed',
+    ),
+    onSettled: () => {
+      invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+    },
+  })
+}

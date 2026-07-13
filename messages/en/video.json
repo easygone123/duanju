@@ -53,6 +53,30 @@
     "batchModeEnabled": "Batch mode enabled",
     "batchModeDisabled": "Batch mode disabled"
   },
+  "dialogue": {
+    "badge": "Contains dialogue",
+    "duration": {
+      "estimated": "Automatic estimate: {seconds}s",
+      "override": "Manual override: {seconds}s",
+      "effective": "Submitted duration: {seconds}s",
+      "input": "Video duration override",
+      "reset": "Use automatic"
+    },
+    "model": {
+      "fallback": "No dialogue model configured; using the normal video model",
+      "invalid": "The dialogue video model is unavailable; select another model in project settings",
+      "current": "Current model: {model}",
+      "reason": {
+        "explicit_panel_model": "Selected on this card",
+        "dialogue_project_model": "Project dialogue model",
+        "dialogue_model_not_configured_fallback": "Normal model fallback",
+        "normal_project_model": "Project normal video model"
+      }
+    },
+    "includeInVideoPrompt": "Include dialogue in the video prompt",
+    "saveSettings": "Save settings",
+    "savingSettings": "Saving…"
+  },
   "promptModal": {
     "title": "Edit Shot #{number} Video Prompt",
     "shotType": "Shot Type:",

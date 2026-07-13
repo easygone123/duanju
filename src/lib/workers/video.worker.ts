@@ -19,6 +19,7 @@ import { resolveBuiltinCapabilitiesByModelKey } from '@/lib/model-capabilities/l
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { getProviderConfig } from '@/lib/api-config'
 import { resolveVideoGenerationModel } from '@/lib/video/model-selection'
+import { resolvePinnedVideoPrompt } from '@/lib/novel-promotion/video/panel-video-submission'
 
 type AnyObj = Record<string, unknown>
 type VideoOptionValue = string | number | boolean
@@ -97,7 +98,12 @@ async function generateVideoForPanel(
   const firstLastCustomPrompt = typeof firstLastFramePayload?.customPrompt === 'string' ? firstLastFramePayload.customPrompt : null
   const persistedFirstLastPrompt = firstLastFramePayload ? panel.firstLastFramePrompt : null
   const customPrompt = typeof payload.customPrompt === 'string' ? payload.customPrompt : null
-  const prompt = firstLastCustomPrompt || persistedFirstLastPrompt || customPrompt || panel.videoPrompt || panel.description
+  const queuedPrompt = typeof payload.videoPrompt === 'string' ? payload.videoPrompt : null
+  const prompt = firstLastCustomPrompt || persistedFirstLastPrompt || customPrompt || resolvePinnedVideoPrompt({
+    queuedPrompt,
+    persistedPrompt: panel.videoPrompt,
+    persistedDescription: panel.description,
+  })
   if (!prompt) {
     throw new Error(`Panel ${panel.id} has no video prompt`)
   }

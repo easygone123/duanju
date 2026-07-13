@@ -53,6 +53,30 @@
     "batchModeEnabled": "已开启批量模式",
     "batchModeDisabled": "批量模式已关闭"
   },
+  "dialogue": {
+    "badge": "含台词",
+    "duration": {
+      "estimated": "自动估算 {seconds} 秒",
+      "override": "手动覆盖 {seconds} 秒",
+      "effective": "实际提交 {seconds} 秒",
+      "input": "视频时长覆盖",
+      "reset": "恢复自动"
+    },
+    "model": {
+      "fallback": "未配置台词专用模型，使用普通模型",
+      "invalid": "台词专用模型不可用，请在项目设置中重新选择",
+      "current": "当前模型：{model}",
+      "reason": {
+        "explicit_panel_model": "卡片手动选择",
+        "dialogue_project_model": "项目台词专用模型",
+        "dialogue_model_not_configured_fallback": "普通模型回退",
+        "normal_project_model": "项目普通视频模型"
+      }
+    },
+    "includeInVideoPrompt": "将台词加入视频提示词",
+    "saveSettings": "保存设置",
+    "savingSettings": "保存中…"
+  },
   "promptModal": {
     "title": "编辑镜头 #{number} 视频提示词",
     "shotType": "景别：",

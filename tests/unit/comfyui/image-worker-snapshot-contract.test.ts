@@ -45,7 +45,7 @@ describe('image worker snapshot integration contract', () => {
 
   it.each([
     ['src/lib/config-service.ts', 'comfyModelSnapshotVersion: 1'],
-    ['src/app/api/novel-promotion/[projectId]/generate-video/route.ts', 'body.comfyModelSnapshotVersion = 1'],
+    ['src/lib/novel-promotion/video/server-panel-video-submission.ts', 'payload.comfyModelSnapshotVersion = 1'],
     ['src/app/api/novel-promotion/[projectId]/reference-to-character/route.ts', 'body.comfyModelSnapshotVersion = 1'],
   ])('%s writes the trusted snapshot marker after sanitizing input', (path, marker) => {
     expect(readFileSync(path, 'utf8')).toContain(marker)

@@ -11,6 +11,7 @@ interface VideoRenderPanelProps {
   panelRefs: MutableRefObject<Map<string, HTMLDivElement>>
   videoRatio: string
   defaultVideoModel: string
+  dialogueVideoModel?: string | null
   capabilityOverrides: CapabilitySelections
   userVideoModels?: VideoModelOption[]
   projectId: string
@@ -38,6 +39,11 @@ interface VideoRenderPanelProps {
     firstLastFrame?: FirstLastFrameParams,
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
+    submissionMeta?: {
+      explicitVideoModel?: string
+      durationOverride?: number | null
+      expectedPanelUpdatedAt?: string
+    },
   ) => Promise<void>
   onUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => Promise<void>
   onLipSync: (storyboardId: string, panelIndex: number, voiceLineId: string, panelId?: string) => Promise<void>
@@ -78,6 +84,7 @@ export default function VideoRenderPanel({
   panelRefs,
   videoRatio,
   defaultVideoModel,
+  dialogueVideoModel,
   capabilityOverrides,
   userVideoModels,
   projectId,
@@ -150,6 +157,7 @@ export default function VideoRenderPanel({
                 }}
                 panelIndex={idx}
                 defaultVideoModel={defaultVideoModel}
+                dialogueVideoModel={dialogueVideoModel}
                 capabilityOverrides={capabilityOverrides}
                 videoRatio={videoRatio}
                 userVideoModels={userVideoModels}

@@ -69,6 +69,7 @@ export function useVideoStageRuntime({
   storyboards,
   clips,
   defaultVideoModel,
+  dialogueVideoModel,
   capabilityOverrides,
   videoRatio = '16:9',
   userVideoModels,
@@ -338,6 +339,11 @@ export function useVideoStageRuntime({
     },
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
+    submissionMeta?: {
+      explicitVideoModel?: string
+      durationOverride?: number | null
+      expectedPanelUpdatedAt?: string
+    },
   ) => {
     if (isSubmittingVideoBatch) return
 
@@ -360,7 +366,7 @@ export function useVideoStageRuntime({
     }
 
     try {
-      await onGenerateVideo(storyboardId, panelIndex, videoModel, firstLastFrame, generationOptions, panelId)
+      await onGenerateVideo(storyboardId, panelIndex, videoModel, firstLastFrame, generationOptions, panelId, submissionMeta)
     } catch (error) {
       setSubmittingVideoPanelKeys((previous) => {
         if (!previous.has(panelKey)) return previous
@@ -541,6 +547,7 @@ export function useVideoStageRuntime({
         panelRefs={panelRefs}
         videoRatio={videoRatio}
         defaultVideoModel={defaultVideoModel}
+        dialogueVideoModel={dialogueVideoModel}
         capabilityOverrides={capabilityOverrides}
         userVideoModels={normalVideoModelOptions}
         projectId={projectId}

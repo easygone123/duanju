@@ -9,11 +9,13 @@ import { usePanelPlayer } from './hooks/usePanelPlayer'
 import { usePanelPromptEditor } from './hooks/usePanelPromptEditor'
 import { usePanelVoiceManager } from './hooks/usePanelVoiceManager'
 import { usePanelLipSync } from './hooks/usePanelLipSync'
+import { useUpdateProjectPanelVideoSettings } from '@/lib/query/mutations/useVideoMutations'
 
 export function useVideoPanelActions({
   panel,
   panelIndex,
   defaultVideoModel,
+  dialogueVideoModel,
   capabilityOverrides,
   videoRatio = '16:9',
   userVideoModels,
@@ -67,10 +69,22 @@ export function useVideoPanelActions({
     tCommon: (key: string) => tCommon(key as never),
   })
 
+  const updateVideoSettings = useUpdateProjectPanelVideoSettings(projectId)
+
   const videoModel = usePanelVideoModel({
     defaultVideoModel,
     capabilityOverrides,
     userVideoModels,
+    dialogueVideoModel,
+    panel,
+    onSaveSettings: async (settings) => {
+      if (!panel.panelId || !panel.updatedAt) throw new Error('PANEL_VERSION_REQUIRED')
+      await updateVideoSettings.mutateAsync({
+        panelId: panel.panelId,
+        expectedPanelUpdatedAt: panel.updatedAt,
+        ...settings,
+      })
+    },
   })
 
   const player = usePanelPlayer({

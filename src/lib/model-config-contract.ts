@@ -45,6 +45,7 @@ export interface VideoCapabilities {
   generationModeOptions?: string[]
   generateAudioOptions?: boolean[]
   durationOptions?: number[]
+  durationRange?: { min: number; max: number; step: number }
   fpsOptions?: number[]
   resolutionOptions?: string[]
   firstlastframe?: boolean
@@ -100,6 +101,7 @@ const VIDEO_ALLOWED_FIELDS = new Set<keyof VideoCapabilities>([
   'generationModeOptions',
   'generateAudioOptions',
   'durationOptions',
+  'durationRange',
   'fpsOptions',
   'resolutionOptions',
   'firstlastframe',
@@ -338,6 +340,26 @@ function validateVideoCapabilities(issues: CapabilityValidationIssue[], raw: unk
       code: 'CAPABILITY_FIELD_INVALID',
       field: 'capabilities.video.durationOptions',
       message: 'durationOptions must be a finite number array',
+    })
+  }
+
+  const durationRange = raw.durationRange
+  if (durationRange !== undefined && (
+    !isRecord(durationRange)
+    || typeof durationRange.min !== 'number'
+    || typeof durationRange.max !== 'number'
+    || typeof durationRange.step !== 'number'
+    || !Number.isFinite(durationRange.min)
+    || !Number.isFinite(durationRange.max)
+    || !Number.isFinite(durationRange.step)
+    || durationRange.min <= 0
+    || durationRange.max < durationRange.min
+    || durationRange.step <= 0
+  )) {
+    issues.push({
+      code: 'CAPABILITY_FIELD_INVALID',
+      field: 'capabilities.video.durationRange',
+      message: 'durationRange must contain positive finite min, max, and step values',
     })
   }
 

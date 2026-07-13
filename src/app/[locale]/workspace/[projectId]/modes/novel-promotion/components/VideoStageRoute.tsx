@@ -26,6 +26,7 @@ export default function VideoStageRoute() {
       storyboards={storyboards}
       clips={normalizedClips}
       defaultVideoModel={runtime.videoModel || ''}
+      dialogueVideoModel={runtime.dialogueVideoModel}
       capabilityOverrides={runtime.capabilityOverrides}
       videoRatio={runtime.videoRatio ?? undefined}
       userVideoModels={runtime.userVideoModels}

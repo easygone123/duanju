@@ -11,6 +11,7 @@ export interface VideoModelOption {
   disabled?: boolean
   capabilities?: ModelCapabilities
   videoPricingTiers?: VideoPricingTier[]
+  workflowVersionId?: string
 }
 
 export type VideoGenerationMode = 'normal' | 'firstlastframe'
@@ -58,6 +59,14 @@ export interface Panel {
   lipSyncTaskRunning?: boolean | null
   lipSyncErrorMessage?: string | null  // 口型同步错误消息
   lipSyncErrorCode?: string | null
+  updatedAt?: string | Date
+  hasDialogue?: boolean | null
+  dialogueSpeaker?: string | null
+  dialogueText?: string | null
+  dialogueEmotion?: string | null
+  includeDialogueInVideoPrompt?: boolean | null
+  estimatedDuration?: number | null
+  durationOverride?: number | null
 }
 
 export interface Storyboard {
@@ -98,6 +107,14 @@ export interface VideoPanel {
   lipSyncTaskId?: string
   lipSyncErrorMessage?: string  // 口型同步错误消息
   lipSyncErrorCode?: string
+  updatedAt?: string
+  hasDialogue?: boolean
+  dialogueSpeaker?: string
+  dialogueText?: string
+  dialogueEmotion?: string
+  includeDialogueInVideoPrompt?: boolean
+  estimatedDuration?: number
+  durationOverride?: number | null
 }
 
 // 匹配的配音信息

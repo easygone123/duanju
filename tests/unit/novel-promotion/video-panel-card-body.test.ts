@@ -34,6 +34,15 @@ function createRuntime(overrides: Partial<VideoPanelRuntime> = {}): VideoPanelRu
     if (key === 'panelCard.unknownShotType') return '未知镜头'
     if (key === 'stage.hasSynced') return '已生成'
     if (key === 'promptModal.duration') return '秒'
+    if (key === 'dialogue.badge') return '含台词'
+    if (key === 'dialogue.duration.estimated') return `自动估算 ${String(values?.seconds ?? '')} 秒`
+    if (key === 'dialogue.duration.override') return `手动覆盖 ${String(values?.seconds ?? '')} 秒`
+    if (key === 'dialogue.duration.effective') return `实际提交 ${String(values?.seconds ?? '')} 秒`
+    if (key === 'dialogue.duration.input') return '视频时长覆盖'
+    if (key === 'dialogue.duration.reset') return '恢复自动'
+    if (key === 'dialogue.model.fallback') return '未配置台词专用模型，使用普通模型'
+    if (key === 'dialogue.includeInVideoPrompt') return '将台词加入视频提示词'
+    if (key === 'dialogue.saveSettings') return '保存设置'
     return key
   }
 
@@ -163,5 +172,70 @@ describe('VideoPanelCardBody', () => {
     expect(markup).toContain('作为镜头 4 的首帧')
     expect(markup).toContain('视频提示词')
     expect(markup).toContain('生成首尾帧视频')
+  })
+
+  it('shows accessible dialogue routing and duration controls without relying on color', () => {
+    const base = createRuntime()
+    const markup = renderToStaticMarkup(
+      React.createElement(VideoPanelCardBody, {
+        runtime: createRuntime({
+          panel: {
+            ...base.panel,
+            hasDialogue: true,
+            estimatedDuration: 7.2,
+            durationOverride: null,
+          },
+          videoModel: {
+            ...base.videoModel,
+            modelReason: 'dialogue_model_not_configured_fallback',
+            effectiveDuration: 10,
+            durationOverride: null,
+            setDurationOverride: () => undefined,
+            resetDurationOverride: () => undefined,
+            validationError: null,
+            includeDialogueInVideoPrompt: true,
+            setIncludeDialogueInVideoPrompt: () => undefined,
+            hasSettingsChanges: true,
+            isSavingSettings: false,
+            saveVideoSettings: async () => undefined,
+          },
+        }),
+      }),
+    )
+
+    expect(markup).toContain('aria-label="含台词"')
+    expect(markup).toContain('含台词')
+    expect(markup).toContain('自动估算 7.2 秒')
+    expect(markup).toContain('实际提交 10 秒')
+    expect(markup).toContain('未配置台词专用模型，使用普通模型')
+    expect(markup).toContain('aria-label="视频时长覆盖"')
+    expect(markup).toContain('恢复自动')
+    expect(markup).toContain('将台词加入视频提示词')
+    expect(markup).toContain('type="checkbox"')
+    expect(markup).toContain('保存设置')
+  })
+
+  it('disables duration editing while video generation is running', () => {
+    const base = createRuntime()
+    const markup = renderToStaticMarkup(
+      React.createElement(VideoPanelCardBody, {
+        runtime: createRuntime({
+          panel: { ...base.panel, estimatedDuration: 5, durationOverride: 8 },
+          taskStatus: { ...base.taskStatus, isVideoTaskRunning: true },
+          videoModel: {
+            ...base.videoModel,
+            modelReason: 'normal_project_model',
+            effectiveDuration: 10,
+            durationOverride: 8,
+            setDurationOverride: () => undefined,
+            resetDurationOverride: () => undefined,
+            validationError: null,
+          },
+        }),
+      }),
+    )
+
+    expect(markup).toContain('手动覆盖 8 秒')
+    expect(markup).toMatch(/aria-label="视频时长覆盖"[^>]*disabled=""/)
   })
 })

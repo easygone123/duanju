@@ -53,6 +53,7 @@ const configServiceMock = vi.hoisted(() => ({
     storyboardModel: 'img::storyboard',
     analysisModel: 'llm::analysis',
     videoModel: overrides?.videoModel ?? 'video::model',
+    dialogueVideoModel: null,
     comfyImageWorkflowVersionId: null,
     comfyVideoWorkflowVersionId: null,
   })),
@@ -83,7 +84,13 @@ const hasOutputMock = vi.hoisted(() => ({
 
 const prismaMock = vi.hoisted(() => ({
   userPreference: {
-    findUnique: vi.fn(async () => ({ lipSyncModel: 'fal::lipsync-model' })),
+    findUnique: vi.fn(async () => ({
+      lipSyncModel: 'fal::lipsync-model',
+      customModels: JSON.stringify([
+        { provider: 'ark', modelId: 'doubao-seedance-2-0-260128', type: 'video' },
+      ]),
+      customProviders: JSON.stringify([{ id: 'ark', apiKey: 'test-key' }]),
+    })),
   },
   novelPromotionStoryboard: {
     findUnique: vi.fn(async () => ({
@@ -97,7 +104,12 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(async () => ({})),
   },
   novelPromotionPanel: {
-    findFirst: vi.fn(async () => ({ id: 'panel-1' })),
+    findFirst: vi.fn(async () => ({
+      id: 'panel-1', updatedAt: new Date('2026-07-13T00:00:00.000Z'),
+      hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+      includeDialogueInVideoPrompt: true, videoPrompt: 'panel prompt',
+      estimatedDuration: null, durationOverride: null, duration: 3,
+    })),
     findMany: vi.fn(async () => []),
     findUnique: vi.fn(async ({ where }: { where?: { id?: string } }) => {
       const id = where?.id || 'panel-1'
@@ -270,7 +282,9 @@ vi.mock('@/lib/media/outbound-image', () => ({
   })),
 }))
 vi.mock('@/lib/model-capabilities/lookup', () => ({
-  resolveBuiltinCapabilitiesByModelKey: vi.fn(() => ({ video: { firstlastframe: true } })),
+  resolveBuiltinCapabilitiesByModelKey: vi.fn(() => ({
+    video: { firstlastframe: true, durationOptions: [5, 10] },
+  })),
 }))
 vi.mock('@/lib/model-pricing/lookup', () => ({
   resolveBuiltinPricing: vi.fn(() => ({ status: 'ok' })),
