@@ -7,6 +7,7 @@ import { resolveTaskErrorMessage } from '@/lib/task/error-message'
 import { clearTaskTargetOverlay, upsertTaskTargetOverlay } from '../task-target-overlay'
 import type { MediaRef } from '@/types/project'
 import { apiFetch } from '@/lib/api-fetch'
+import { invalidateEpisodeStageQueries } from '../episode-stage-cache'
 
 // ============ 类型定义 ============
 export interface PanelCandidate {
@@ -105,6 +106,7 @@ export function useRegeneratePanelImage(projectId: string | null, episodeId: str
         onSettled: () => {
             if (episodeId) {
                 queryClient.invalidateQueries({ queryKey: queryKeys.storyboards.all(episodeId) })
+                if (projectId) void invalidateEpisodeStageQueries(queryClient, projectId, episodeId)
             }
         },
     })
@@ -141,6 +143,7 @@ export function useModifyPanelImage(projectId: string | null, episodeId: string 
         onSettled: () => {
             if (episodeId) {
                 queryClient.invalidateQueries({ queryKey: queryKeys.storyboards.all(episodeId) })
+                if (projectId) void invalidateEpisodeStageQueries(queryClient, projectId, episodeId)
             }
         },
     })
@@ -241,7 +244,7 @@ export function useGenerateVideo(projectId: string | null, episodeId: string | n
         onSettled: () => {
             // 🔥 刷新缓存获取最新状态
             if (episodeId && projectId) {
-                queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) })
+                void invalidateEpisodeStageQueries(queryClient, projectId, episodeId)
             }
         },
     })
@@ -293,7 +296,7 @@ export function useBatchGenerateVideos(projectId: string | null, episodeId: stri
         onSettled: () => {
             // 🔥 刷新缓存获取最新状态
             if (episodeId && projectId) {
-                queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) })
+                void invalidateEpisodeStageQueries(queryClient, projectId, episodeId)
             }
         },
     })
@@ -391,7 +394,7 @@ export function useLipSync(projectId: string | null, episodeId: string | null) {
         onSettled: () => {
             // 请求完成后刷新数据
             if (projectId && episodeId) {
-                queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) })
+                void invalidateEpisodeStageQueries(queryClient, projectId, episodeId)
             }
         }
     })

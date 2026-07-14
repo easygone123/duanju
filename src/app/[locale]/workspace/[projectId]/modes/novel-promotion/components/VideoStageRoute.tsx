@@ -9,7 +9,7 @@ import { useWorkspaceProvider } from '../WorkspaceProvider'
 export default function VideoStageRoute() {
   const runtime = useWorkspaceStageRuntime()
   const { projectId, episodeId } = useWorkspaceProvider()
-  const { clips, storyboards } = useWorkspaceEpisodeStageData()
+  const { clips, storyboards } = useWorkspaceEpisodeStageData('videos')
   const normalizedClips: VideoClip[] = clips.map((clip) => ({
     id: clip.id,
     start: clip.start ?? 0,

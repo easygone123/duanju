@@ -8,14 +8,13 @@ import { useWorkspaceProvider } from '../WorkspaceProvider'
 export default function ScriptStage() {
   const runtime = useWorkspaceStageRuntime()
   const { projectId, episodeId } = useWorkspaceProvider()
-  const { clips, storyboards } = useWorkspaceEpisodeStageData()
+  const { clips } = useWorkspaceEpisodeStageData('script')
 
   return (
     <ScriptView
       projectId={projectId}
       episodeId={episodeId}
       clips={clips}
-      storyboards={storyboards}
       assetsLoading={runtime.assetsLoading}
       onClipUpdate={runtime.onClipUpdate}
       onOpenAssetLibrary={runtime.onOpenAssetLibrary}

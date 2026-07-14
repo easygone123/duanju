@@ -4,6 +4,7 @@ import { logError as _ulogError } from '@/lib/logging/core'
 import { useEffect, useMemo, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../keys'
+import { invalidateEpisodeStageQueries } from '../episode-stage-cache'
 import { TASK_EVENT_TYPE, TASK_SSE_EVENT_TYPE, type SSEEvent } from '@/lib/task/types'
 import { applyTaskLifecycleToOverlay } from '../task-target-overlay'
 import { isTaskIntent, resolveTaskIntent } from '@/lib/task/intent'
@@ -36,7 +37,7 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
 
     const invalidateEpisodeScoped = (resolvedEpisodeId: string | null) => {
       if (!resolvedEpisodeId) return
-      queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, resolvedEpisodeId) })
+      void invalidateEpisodeStageQueries(queryClient, projectId, resolvedEpisodeId)
       queryClient.invalidateQueries({ queryKey: queryKeys.storyboards.all(resolvedEpisodeId) })
       queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.all(resolvedEpisodeId) })
       queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.matched(projectId, resolvedEpisodeId) })

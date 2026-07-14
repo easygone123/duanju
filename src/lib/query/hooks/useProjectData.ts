@@ -119,6 +119,9 @@ export function useRefreshEpisodeData(projectId: string | null, episodeId: strin
             queryClient.invalidateQueries({
                 queryKey: queryKeys.episodeData(projectId, episodeId)
             })
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.episodeStages(projectId, episodeId)
+            })
         }
     }
 }
@@ -137,6 +140,9 @@ export function useRefreshAll(projectId: string | null, episodeId: string | null
         if (projectId && episodeId) {
             queryClient.invalidateQueries({
                 queryKey: queryKeys.episodeData(projectId, episodeId)
+            })
+            queryClient.invalidateQueries({
+                queryKey: queryKeys.episodeStages(projectId, episodeId)
             })
             queryClient.invalidateQueries({
                 queryKey: queryKeys.storyboards.all(episodeId)

@@ -7,6 +7,7 @@ import {
   requestJsonWithError,
   requestTaskResponseWithError,
 } from './mutation-shared'
+import { invalidateEpisodeStageQueries } from '../episode-stage-cache'
 
 type AsyncTaskSubmission = {
     async: true
@@ -145,9 +146,9 @@ export function useAnalyzeProjectAssets(projectId: string) {
         },
         onSettled: (_, __, variables) => {
             invalidateQueryTemplates(queryClient, [
-                queryKeys.episodeData(projectId, variables.episodeId),
                 queryKeys.projectAssets.all(projectId),
             ])
+            void invalidateEpisodeStageQueries(queryClient, projectId, variables.episodeId)
         },
     })
 }

@@ -8,7 +8,7 @@ import { useWorkspaceProvider } from '../WorkspaceProvider'
 export default function StoryboardStage() {
   const runtime = useWorkspaceStageRuntime()
   const { projectId, episodeId } = useWorkspaceProvider()
-  const { clips, storyboards } = useWorkspaceEpisodeStageData()
+  const { clips, storyboards } = useWorkspaceEpisodeStageData('storyboard')
 
   if (!episodeId) return null
 

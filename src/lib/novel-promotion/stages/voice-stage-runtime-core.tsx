@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { useProjectAssets } from '@/lib/query/hooks/useProjectAssets'
-import { useEpisodeData } from '@/lib/query/hooks/useProjectData'
+import { useEpisodeStageData } from '@/lib/query/hooks/useEpisodeStageData'
 import {
   useAnalyzeProjectVoice,
   useCreateProjectVoiceLine,
@@ -55,7 +55,8 @@ export function useVoiceStageRuntime({
   }
   const stableSearchParams = useMemo(() => searchParams ?? new URLSearchParams(), [searchParams])
   const { data: assets } = useProjectAssets(projectId)
-  const { data: episodeData } = useEpisodeData(projectId, episodeId)
+  const { data: episodeStageData } = useEpisodeStageData(projectId, episodeId, 'voice')
+  const episodeData = episodeStageData?.episode
   const analyzeVoiceMutation = useAnalyzeProjectVoice(projectId)
   const generateVoiceMutation = useGenerateProjectVoice(projectId)
   const createVoiceLineMutation = useCreateProjectVoiceLine(projectId)

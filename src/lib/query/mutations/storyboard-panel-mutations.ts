@@ -13,6 +13,14 @@ import {
     requestJsonWithError,
     requestTaskResponseWithError,
 } from './mutation-shared'
+import { invalidateEpisodeStageQueries } from '../episode-stage-cache'
+
+function invalidatePanelMutationCaches(queryClient: ReturnType<typeof useQueryClient>, projectId: string) {
+    return Promise.all([
+        invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)]),
+        invalidateEpisodeStageQueries(queryClient, projectId),
+    ])
+}
 
 export function useRegenerateProjectPanelImage(projectId: string) {
     const queryClient = useQueryClient()
@@ -53,7 +61,7 @@ export function useRegenerateProjectPanelImage(projectId: string) {
             })
         },
         onSettled: () => {
-            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            return invalidatePanelMutationCaches(queryClient, projectId)
         },
     })
 }
@@ -95,7 +103,7 @@ export function useModifyProjectStoryboardImage(projectId: string) {
             }, '修改失败')
         },
         onSettled: () => {
-            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            return invalidatePanelMutationCaches(queryClient, projectId)
         },
     })
 }
@@ -136,7 +144,7 @@ export function useUpdateProjectPanel(projectId: string) {
                 '保存失败',
             ),
         onSettled: () => {
-            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            return invalidatePanelMutationCaches(queryClient, projectId)
         },
     })
 }
@@ -156,7 +164,7 @@ export function useCreateProjectPanel(projectId: string) {
             }, '添加失败')
         },
         onSettled: () => {
-            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            return invalidatePanelMutationCaches(queryClient, projectId)
         },
     })
 }
@@ -174,7 +182,7 @@ export function useDeleteProjectPanel(projectId: string) {
             }, '删除失败')
         },
         onSettled: () => {
-            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            return invalidatePanelMutationCaches(queryClient, projectId)
         },
     })
 }
@@ -194,7 +202,7 @@ export function useDeleteProjectStoryboardGroup(projectId: string) {
             )
         },
         onSettled: () => {
-            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            return invalidatePanelMutationCaches(queryClient, projectId)
         },
     })
 }
@@ -235,7 +243,7 @@ export function useCreateProjectStoryboardGroup(projectId: string) {
             }, '添加失败')
         },
         onSettled: () => {
-            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            return invalidatePanelMutationCaches(queryClient, projectId)
         },
     })
 }
@@ -255,7 +263,7 @@ export function useMoveProjectStoryboardGroup(projectId: string) {
             }, '移动失败')
         },
         onSettled: () => {
-            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            return invalidatePanelMutationCaches(queryClient, projectId)
         },
     })
 }
@@ -275,7 +283,7 @@ export function useInsertProjectPanel(projectId: string) {
             }, '插入分镜失败')
         },
         onSettled: () => {
-            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            return invalidatePanelMutationCaches(queryClient, projectId)
         },
     })
 }
@@ -308,7 +316,7 @@ export function useCreateProjectPanelVariant(projectId: string) {
             }, '生成变体失败')
         },
         onSettled: () => {
-            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            return invalidatePanelMutationCaches(queryClient, projectId)
         },
     })
 }
@@ -330,7 +338,7 @@ export function useClearProjectStoryboardError(projectId: string) {
                 '清除分镜错误失败',
             ),
         onSettled: () => {
-            invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+            return invalidatePanelMutationCaches(queryClient, projectId)
         },
     })
 }

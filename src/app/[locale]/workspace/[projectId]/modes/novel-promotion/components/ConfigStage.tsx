@@ -24,7 +24,7 @@ export default function ConfigStage() {
   const t = useTranslations('novelPromotion.storyboardRunSettings')
   const { showToast } = useToast()
   const runtime = useWorkspaceStageRuntime()
-  const { episodeName, novelText } = useWorkspaceEpisodeStageData()
+  const { episodeName, novelText } = useWorkspaceEpisodeStageData('config')
   const params = useParams<{ projectId: string }>()
   const projectId = params?.projectId ?? ''
   const settingsLocked = shouldLockStoryboardRunSettings({

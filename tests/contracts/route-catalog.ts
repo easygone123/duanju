@@ -105,6 +105,7 @@ const ROUTE_FILES = [
   'src/app/api/novel-promotion/[projectId]/download-voices/route.ts',
   'src/app/api/novel-promotion/[projectId]/editor/route.ts',
   'src/app/api/novel-promotion/[projectId]/episodes/[episodeId]/route.ts',
+  'src/app/api/novel-promotion/[projectId]/episodes/[episodeId]/stage/[stage]/route.ts',
   'src/app/api/novel-promotion/[projectId]/episodes/batch/route.ts',
   'src/app/api/novel-promotion/[projectId]/episodes/route.ts',
   'src/app/api/novel-promotion/[projectId]/episodes/split-by-markers/route.ts',

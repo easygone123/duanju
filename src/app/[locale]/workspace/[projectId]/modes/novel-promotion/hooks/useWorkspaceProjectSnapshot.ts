@@ -4,6 +4,11 @@ import { useMemo } from 'react'
 import type { NovelPromotionWorkspaceProps } from '../types'
 import type { CapabilitySelections } from '@/lib/model-config-contract'
 
+interface WorkspaceEpisodeSnapshot {
+  novelText?: string | null
+  storyboards?: unknown[]
+}
+
 function parseCapabilitySelections(raw: unknown): CapabilitySelections {
   if (!raw) return {}
   if (typeof raw === 'object' && !Array.isArray(raw)) {
@@ -23,7 +28,7 @@ export function useWorkspaceProjectSnapshot({
   project,
   episode,
   urlStage,
-}: Pick<NovelPromotionWorkspaceProps, 'project' | 'episode' | 'urlStage'>) {
+}: Pick<NovelPromotionWorkspaceProps, 'project' | 'urlStage'> & { episode?: WorkspaceEpisodeSnapshot | null }) {
   return useMemo(() => {
     const projectData = project.novelPromotionData
     const capabilityOverrides = parseCapabilitySelections(projectData?.capabilityOverrides)

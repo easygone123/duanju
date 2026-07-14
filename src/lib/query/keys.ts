@@ -111,6 +111,23 @@ export const queryKeys = {
      */
     episodeData: (projectId: string, episodeId: string) =>
         ['episode-data', projectId, episodeId] as const,
+
+    /**
+     * Workspace stage payloads. The prefix intentionally omits the stage so a
+     * mutation can invalidate every cached projection for one episode.
+     */
+    episodeStages: (projectId: string, episodeId?: string) => episodeId
+        ? ['episode-stages', projectId, episodeId] as const
+        : ['episode-stages', projectId] as const,
+
+    episodeStage: (
+        projectId: string,
+        episodeId: string,
+        stage: string,
+        cursor?: string,
+    ) => cursor
+        ? ['episode-stages', projectId, episodeId, stage, cursor] as const
+        : ['episode-stages', projectId, episodeId, stage] as const,
 } as const
 
 /**

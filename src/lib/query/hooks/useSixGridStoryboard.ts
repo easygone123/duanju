@@ -5,6 +5,7 @@ import { apiFetch } from '@/lib/api-fetch'
 import { resolveTaskErrorMessage } from '@/lib/task/error-message'
 import { queryKeys } from '@/lib/query/keys'
 import { clearTaskTargetOverlay, upsertTaskTargetOverlay } from '@/lib/query/task-target-overlay'
+import { invalidateEpisodeStageQueries } from '@/lib/query/episode-stage-cache'
 import type { NormalizedCropRect } from '@/types/project'
 
 type CropEntry = { cellIndex: number; normalizedCropRect: NormalizedCropRect }
@@ -108,7 +109,7 @@ export function createPanelUndoMutationOptions(
     },
     onSuccess: (_data: unknown, input: PanelUndoInput) => Promise.all([
       queryClient.invalidateQueries({ queryKey: sixGridStoryboardQueryKeys.panel(projectId, episodeId, input.storyboardId, input.panelId), exact: true }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId), exact: true }),
+      invalidateEpisodeStageQueries(queryClient, projectId, episodeId),
     ]),
   }
 }
@@ -154,7 +155,7 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
   const queryClient = useQueryClient()
   const refreshGroup = (storyboardId: string) => Promise.all([
     queryClient.invalidateQueries({ queryKey: sixGridStoryboardQueryKeys.group(projectId, episodeId, storyboardId), exact: true }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId), exact: true }),
+    invalidateEpisodeStageQueries(queryClient, projectId, episodeId),
   ])
   const clearOverlay = (targetType: string, targetId: string) =>
     clearTaskTargetOverlay(queryClient, { projectId, targetType, targetId })
@@ -184,7 +185,7 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
     onError: (_error, input) => clearOverlay('NovelPromotionPanel', input.panelId),
     onSuccess: (_data, input) => Promise.all([
       queryClient.invalidateQueries({ queryKey: sixGridStoryboardQueryKeys.panel(projectId, episodeId, input.storyboardId, input.panelId), exact: true }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId), exact: true }),
+      invalidateEpisodeStageQueries(queryClient, projectId, episodeId),
     ]),
   })
   const undo = useMutation(createPanelUndoMutationOptions(queryClient, projectId, episodeId))

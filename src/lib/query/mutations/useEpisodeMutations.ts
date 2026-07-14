@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Project } from '@/types/project'
 import { resolveTaskResponse } from '@/lib/task/client'
 import { queryKeys } from '../keys'
+import { invalidateEpisodeStageQueries } from '../episode-stage-cache'
 import {
   invalidateQueryTemplates,
   requestBlobWithError,
@@ -178,9 +179,9 @@ export function useUpdateProjectEpisodeField(projectId: string) {
     },
     onSettled: (_, __, variables) => {
       invalidateQueryTemplates(queryClient, [
-        queryKeys.episodeData(projectId, variables.episodeId),
         queryKeys.projectData(projectId),
       ])
+      void invalidateEpisodeStageQueries(queryClient, projectId, variables.episodeId)
     },
   })
 }
@@ -236,8 +237,10 @@ export function useUpdateProjectClip(projectId: string) {
     },
     onSettled: (_data, _error, variables) => {
       const queryTemplates: Array<readonly unknown[]> = [queryKeys.projectData(projectId)]
-      if (variables.episodeId) queryTemplates.push(queryKeys.episodeData(projectId, variables.episodeId))
       invalidateQueryTemplates(queryClient, queryTemplates)
+      if (variables.episodeId) {
+        void invalidateEpisodeStageQueries(queryClient, projectId, variables.episodeId)
+      }
     },
   })
 }

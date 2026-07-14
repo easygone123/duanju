@@ -8,7 +8,7 @@ import { useTranslations } from 'next-intl'
 import { useQueryClient } from '@tanstack/react-query'
 import Navbar from '@/components/Navbar'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
-import { useProjectData, useEpisodeData, useUserModels } from '@/lib/query/hooks'
+import { useProjectData, useUserModels } from '@/lib/query/hooks'
 import { queryKeys } from '@/lib/query/keys'
 import NovelPromotionWorkspace from './modes/novel-promotion/NovelPromotionWorkspace'
 import SmartImportWizard, { SplitEpisode } from './modes/novel-promotion/components/SmartImportWizard'
@@ -123,12 +123,6 @@ export default function ProjectDetailPage() {
   const selectedEpisodeId = useMemo(
     () => resolveSelectedEpisodeId(episodes, urlEpisodeId),
     [episodes, urlEpisodeId],
-  )
-
-  // 🔥 使用 React Query 获取剧集数据
-  const { data: currentEpisode } = useEpisodeData(
-    projectId,
-    !isGlobalAssetsView ? selectedEpisodeId : null
   )
 
   // 获取导入状态
@@ -275,6 +269,7 @@ export default function ProjectDetailPage() {
     // 剧集详情也刷新
     if (selectedEpisodeId) {
       queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, selectedEpisodeId) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.episodeStages(projectId, selectedEpisodeId) })
     }
   }
 
@@ -288,6 +283,7 @@ export default function ProjectDetailPage() {
     }
     // 刷新项目数据
     queryClient.invalidateQueries({ queryKey: queryKeys.projectData(projectId) })
+    queryClient.invalidateQueries({ queryKey: queryKeys.episodeStages(projectId, episodeId) })
     // 如果删除的是当前正在查看的剧集，切换到其他剧集
     if (episodeId === selectedEpisodeId) {
       const remaining = episodes.filter(ep => ep.id !== episodeId)
@@ -335,11 +331,9 @@ export default function ProjectDetailPage() {
     }
   }
 
-  // Loading状态：等待项目数据和剧集数据都准备好
-  // 条件：正在加载 或 (有剧集但episode数据未准备好)
-  // 排除：如果要显示导入向导，则不需要等待剧集数据
+  // Loading状态只等待项目壳数据。活动 workspace stage 自己加载精确投影。
   const isInitializing = loading ||
-    (!shouldShowImportWizard && !isGlobalAssetsView && episodes.length > 0 && (!selectedEpisodeId || !currentEpisode)) ||
+    (!shouldShowImportWizard && !isGlobalAssetsView && episodes.length > 0 && !selectedEpisodeId) ||
     (project && !project.novelPromotionData)
   const initLoadingState = resolveTaskPresentationState({
     phase: 'processing',
@@ -504,13 +498,12 @@ export default function ProjectDetailPage() {
                 importStatus={importStatus}
               />
             )
-          ) : selectedEpisodeId && currentEpisode ? (
-            // 剧集工作区（确保所有数据都准备好）
+          ) : selectedEpisodeId ? (
+            // 剧集工作区（各 stage 独立加载所需数据）
             <NovelPromotionWorkspace
               project={project}
               projectId={projectId}
               episodeId={selectedEpisodeId}
-              episode={currentEpisode}
               viewMode="episode"
               urlStage={effectiveStage}
               onStageChange={updateUrlStage}

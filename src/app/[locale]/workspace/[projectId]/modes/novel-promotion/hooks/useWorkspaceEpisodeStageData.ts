@@ -1,25 +1,26 @@
 'use client'
 
-import { useEpisodeData } from '@/lib/query/hooks'
+import { useEpisodeStageData } from '@/lib/query/hooks/useEpisodeStageData'
+import type { EpisodeStage } from '@/lib/novel-promotion/episode-stage-data'
 import type { NovelPromotionClip, NovelPromotionStoryboard } from '@/types/project'
 import { useWorkspaceProvider } from '../WorkspaceProvider'
 
-interface EpisodeStagePayload {
-  name?: string
-  novelText?: string | null
-  clips?: NovelPromotionClip[]
-  storyboards?: NovelPromotionStoryboard[]
-}
-
-export function useWorkspaceEpisodeStageData() {
+export function useWorkspaceEpisodeStageData(stage: EpisodeStage) {
   const { projectId, episodeId } = useWorkspaceProvider()
-  const { data: episodeData } = useEpisodeData(projectId, episodeId || null)
-  const payload = episodeData as EpisodeStagePayload | null
+  const query = useEpisodeStageData(projectId, episodeId || null, stage)
+  const episode = query.data?.episode
+  const clips = episode && 'clips' in episode
+    ? episode.clips as NovelPromotionClip[]
+    : []
+  const storyboards = episode && 'storyboards' in episode
+    ? episode.storyboards as unknown as NovelPromotionStoryboard[]
+    : []
 
   return {
-    episodeName: payload?.name,
-    novelText: payload?.novelText || '',
-    clips: payload?.clips || [],
-    storyboards: payload?.storyboards || [],
+    ...query,
+    episodeName: episode?.name,
+    novelText: episode && 'novelText' in episode ? episode.novelText || '' : '',
+    clips,
+    storyboards,
   }
 }

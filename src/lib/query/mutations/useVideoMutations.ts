@@ -1,6 +1,14 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../keys'
 import { invalidateQueryTemplates, requestJsonWithError } from './mutation-shared'
+import { invalidateEpisodeStageQueries } from '../episode-stage-cache'
+
+function invalidateVideoMutationCaches(queryClient: ReturnType<typeof useQueryClient>, projectId: string) {
+  return Promise.all([
+    invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)]),
+    invalidateEpisodeStageQueries(queryClient, projectId),
+  ])
+}
 
 /**
  * 获取剧集可下载视频列表（项目）
@@ -47,7 +55,7 @@ export function useUpdateProjectPanelLink(projectId: string) {
         '保存链接状态失败',
       ),
     onSettled: () => {
-      invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+      return invalidateVideoMutationCaches(queryClient, projectId)
     },
   })
 }
@@ -86,7 +94,7 @@ export function useUpdateProjectPanelVideoPrompt(projectId: string) {
         'update failed',
       ),
     onSettled: () => {
-      invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+      return invalidateVideoMutationCaches(queryClient, projectId)
     },
   })
 }
@@ -109,7 +117,7 @@ export function useUpdateProjectPanelVideoSettings(projectId: string) {
       'update failed',
     ),
     onSettled: () => {
-      invalidateQueryTemplates(queryClient, [queryKeys.projectData(projectId)])
+      return invalidateVideoMutationCaches(queryClient, projectId)
     },
   })
 }
