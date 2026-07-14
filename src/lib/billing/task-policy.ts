@@ -61,6 +61,11 @@ const BILLABLE_TASK_TYPES = new Set<TaskType>([
   TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
 ])
 
+const VIRAL_TEXT_TASK_TYPES = new Set<TaskType>([
+  TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
+  TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
+])
+
 function toNumber(value: unknown, fallback: number) {
   const n = Number(value)
   if (!Number.isFinite(n)) return fallback
@@ -94,11 +99,9 @@ function pickFirstString(values: unknown[]): string | null {
 function buildTextTaskInfo(taskType: TaskType, payload: AnyPayload): TaskBillingInfo | null {
   const inputTokens = Math.max(0, Math.floor(toNumber(payload?.maxInputTokens, 3000)))
   const outputTokens = Math.max(0, Math.floor(toNumber(payload?.maxOutputTokens, 1200)))
-  const model = pickFirstString([
-    payload?.analysisModelSnapshot,
-    payload?.analysisModel,
-    payload?.model,
-  ])
+  const model = pickFirstString(VIRAL_TEXT_TASK_TYPES.has(taskType)
+    ? [payload?.analysisModelSnapshot, payload?.analysisModel, payload?.model]
+    : [payload?.analysisModel, payload?.model])
   if (!model) return null
 
   // calcText may throw if model has no built-in pricing (user custom pricing resolved later)

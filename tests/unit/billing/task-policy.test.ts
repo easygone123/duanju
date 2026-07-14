@@ -43,6 +43,34 @@ describe('billing/task-policy', () => {
     expect(info.quantity).toBe(4200)
   })
 
+  it.each([
+    TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
+    TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
+  ])('prefers the analysis model snapshot for %s', (taskType) => {
+    const info = expectBillableInfo(buildDefaultTaskBillingInfo(taskType, {
+      analysisModelSnapshot: 'snapshot::analysis-model',
+      analysisModel: 'configured::analysis-model',
+      model: 'fallback::model',
+    }))
+    expect(info.model).toBe('snapshot::analysis-model')
+  })
+
+  it('ignores the viral analysis model snapshot for existing text tasks', () => {
+    const info = expectBillableInfo(buildDefaultTaskBillingInfo(TASK_TYPE.ANALYZE_NOVEL, {
+      analysisModelSnapshot: 'snapshot::analysis-model',
+      analysisModel: 'configured::analysis-model',
+      model: 'fallback::model',
+    }))
+    expect(info.model).toBe('configured::analysis-model')
+  })
+
+  it('keeps the generic model fallback for existing text tasks', () => {
+    const info = expectBillableInfo(buildDefaultTaskBillingInfo(TASK_TYPE.ANALYZE_NOVEL, {
+      model: 'fallback::model',
+    }))
+    expect(info.model).toBe('fallback::model')
+  })
+
   it('returns null for missing required models in text/image/video tasks', () => {
     expect(buildDefaultTaskBillingInfo(TASK_TYPE.ANALYZE_NOVEL, {})).toBeNull()
     expect(buildDefaultTaskBillingInfo(TASK_TYPE.IMAGE_PANEL, {})).toBeNull()
