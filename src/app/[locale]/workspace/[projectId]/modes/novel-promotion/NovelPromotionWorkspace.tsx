@@ -119,7 +119,10 @@ function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
 
       <div className="pt-24">
         <WorkspaceStageRuntimeProvider value={vm.runtime.stageRuntime}>
-          <WorkspaceStageContent currentStage={vm.stageNav.currentStage} />
+          <WorkspaceStageContent
+            currentStage={vm.stageNav.currentStage}
+            episodeId={episodeId}
+          />
         </WorkspaceStageRuntimeProvider>
 
         <WorkspaceAssetLibraryModal
