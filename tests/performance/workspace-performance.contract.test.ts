@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   buildWorkspacePerformanceBaseline,
+  buildWorkspacePerformanceComparison,
+  evaluateWorkspacePerformanceBudgets,
   parseWorkspacePerformanceArgs,
   runWorkspacePerformanceCli,
 } from '../../scripts/measure-workspace-performance'
 
-const CLI_USAGE = 'Usage: npm run perf:workspace -- --baseline'
+const CLI_USAGE = 'Usage: npm run perf:workspace -- --baseline|--compare'
 
 function runRealCli(
   args: readonly string[],
@@ -75,19 +77,35 @@ describe('workspace performance baseline contract', () => {
     })
   })
 
-  it('records observations without enforcing the final budgets yet', () => {
-    const report = buildWorkspacePerformanceBaseline()
-    const cachedSwitch = report.observations.find(
-      (observation) => observation.scenario === 'cached-switch',
-    )
+  it('enforces the final deterministic workspace budgets', () => {
+    const report = buildWorkspacePerformanceComparison()
 
-    expect(cachedSwitch?.stageVisibleMs).toBe(460)
-    expect(cachedSwitch?.refetchCount).toBe(1)
-    expect(cachedSwitch?.mountedCardBodies).toBe(96)
+    expect(report.acceptance.cachedStageVisibleMs).toBeLessThanOrEqual(300)
+    expect(report.acceptance.wholeProjectRefetchesOnStageSwitch).toBe(0)
+    expect(report.acceptance.initialStageRequestNames).toEqual([
+      'project-shell',
+      'storyboard-stage',
+    ])
+    expect(report.acceptance.initialMountedCardBodies).toBeLessThanOrEqual(20)
+    expect(report.acceptance.taskCompletionUnrelatedRefetches).toBe(0)
+    expect(report.acceptance.passed).toBe(true)
   })
 
-  it('parses baseline as the only supported CLI mode', () => {
+  it('rejects the old eager-mount and broad-refetch baseline', () => {
+    const baseline = buildWorkspacePerformanceBaseline()
+
+    expect(evaluateWorkspacePerformanceBudgets(baseline.observations, 1)).toMatchObject({
+      cachedStageVisibleMs: 460,
+      wholeProjectRefetchesOnStageSwitch: 1,
+      initialMountedCardBodies: 96,
+      taskCompletionUnrelatedRefetches: 1,
+      passed: false,
+    })
+  })
+
+  it('parses baseline and comparison CLI modes', () => {
     expect(parseWorkspacePerformanceArgs(['--baseline'])).toEqual({ mode: 'baseline' })
+    expect(parseWorkspacePerformanceArgs(['--compare'])).toEqual({ mode: 'compare' })
   })
 
   it('rejects a missing CLI mode with concise usage', () => {
@@ -95,7 +113,7 @@ describe('workspace performance baseline contract', () => {
   })
 
   it('rejects unknown CLI arguments with concise usage', () => {
-    expect(() => parseWorkspacePerformanceArgs(['--compare'])).toThrowError(CLI_USAGE)
+    expect(() => parseWorkspacePerformanceArgs(['--wat'])).toThrowError(CLI_USAGE)
     expect(() => parseWorkspacePerformanceArgs(['--baseline', '--wat'])).toThrowError(
       CLI_USAGE,
     )
@@ -123,6 +141,20 @@ describe('workspace performance baseline contract', () => {
     expect(setExitCode).toHaveBeenCalledWith(0)
   })
 
+  it('runs comparison through injected stdout and exits successfully when budgets pass', () => {
+    const stdout = vi.fn()
+    const stderr = vi.fn()
+    const setExitCode = vi.fn()
+
+    runWorkspacePerformanceCli(['--compare'], { stdout, stderr, setExitCode })
+
+    expect(JSON.parse(stdout.mock.calls[0][0])).toEqual(
+      buildWorkspacePerformanceComparison(),
+    )
+    expect(stderr).not.toHaveBeenCalled()
+    expect(setExitCode).toHaveBeenCalledWith(0)
+  })
+
   it('routes invalid arguments through injected stderr and a non-zero exit code', () => {
     const stdout = vi.fn()
     const stderr = vi.fn()
@@ -141,6 +173,13 @@ describe('workspace performance baseline contract', () => {
 
     expect(result.status).toBe(0)
     expect(JSON.parse(result.stdout)).toEqual(buildWorkspacePerformanceBaseline())
+  })
+
+  it('runs the real tsx comparison entry point and emits the accepted report', () => {
+    const result = runRealCli(['--compare'], 'production')
+
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual(buildWorkspacePerformanceComparison())
   })
 
   it('runs the real tsx entry point with missing mode and exits with usage', () => {

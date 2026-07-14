@@ -183,6 +183,25 @@ SIX_GRID_CROP_MAX_SOURCE_PIXELS=32000000
 
 ---
 
+## ⚡ 工作区性能验收
+
+运行 `npm run perf:workspace -- --compare` 可生成可重复的工作区性能对比报告。该命令使用固定时钟和固定数据夹具验证架构预算，不受执行机器负载影响；仓库目前没有包含已登录状态的真实浏览器夹具，因此下表不是实机浏览器跑分，浏览器测量只作为额外证据。
+
+| 场景 | 指标 | 优化前基线 | 当前契约 |
+| --- | --- | ---: | ---: |
+| 冷启动分镜阶段 | 可见时间 | 1240 ms | 620 ms |
+| 冷启动分镜阶段 | 请求数 / 字节 | 3 / 1,876,000 B | 2 / 300,000 B |
+| 冷启动分镜阶段 | JS chunks / 挂载卡片体 | 2 / 96 | 2 / 18 |
+| 冷启动分镜阶段 | refetch 数 | 2 | 0 |
+| 已缓存阶段切换 | 可见时间 | 460 ms | 180 ms（预算 ≤ 300 ms） |
+| 已缓存阶段切换 | 请求数 / 字节 | 1 / 1,480,000 B | 0 / 0 B |
+| 已缓存阶段切换 | JS chunks / 挂载卡片体 | 0 / 96 | 0 / 18 |
+| 已缓存阶段切换 | 整项目 refetch 数 | 1 | 0 |
+
+冷启动数据请求名严格为 `project-shell` 和 `storyboard-stage`；无关任务完成事件触发的 refetch 数严格为 0。`tests/performance/workspace-performance.contract.test.ts` 与 `tests/system/workspace-stage-performance.system.test.ts` 会在 CI 中强制这些预算。
+
+---
+
 ## 📦 技术栈
 
 - **框架**: Next.js 15 + React 19
