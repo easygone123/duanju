@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { resolveTaskResponse } from '@/lib/task/client'
 import type { SpeakerVoiceEntry, SpeakerVoicePatch } from '@/lib/voice/provider-voice-binding'
 import {
@@ -7,6 +7,7 @@ import {
     requestTaskResponseWithError,
     requestVoidWithError,
 } from './mutation-shared'
+import { invalidateEpisodeStageQueries } from '../episode-stage-cache'
 
 type ProjectVoiceLine = {
     id: string
@@ -152,6 +153,7 @@ export function useGenerateProjectVoice(projectId: string) {
  */
 
 export function useCreateProjectVoiceLine(projectId: string) {
+    const queryClient = useQueryClient()
     return useMutation({
         mutationFn: async (payload: {
             episodeId: string
@@ -168,6 +170,11 @@ export function useCreateProjectVoiceLine(projectId: string) {
                 },
                 'add failed',
             ),
+        onSuccess: (_data, payload) => invalidateEpisodeStageQueries(
+            queryClient,
+            projectId,
+            payload.episodeId,
+        ),
     })
 }
 
@@ -176,6 +183,7 @@ export function useCreateProjectVoiceLine(projectId: string) {
  */
 
 export function useUpdateProjectVoiceLine(projectId: string) {
+    const queryClient = useQueryClient()
     return useMutation({
         mutationFn: async (payload: Record<string, unknown>) =>
             await requestJsonWithError<{ voiceLine: ProjectVoiceLine }>(
@@ -187,6 +195,7 @@ export function useUpdateProjectVoiceLine(projectId: string) {
                 },
                 'update failed',
             ),
+        onSuccess: () => invalidateEpisodeStageQueries(queryClient, projectId),
     })
 }
 
@@ -195,6 +204,7 @@ export function useUpdateProjectVoiceLine(projectId: string) {
  */
 
 export function useDeleteProjectVoiceLine(projectId: string) {
+    const queryClient = useQueryClient()
     return useMutation({
         mutationFn: async ({ lineId }: { lineId: string }) => {
             await requestVoidWithError(
@@ -204,6 +214,7 @@ export function useDeleteProjectVoiceLine(projectId: string) {
             )
             return null
         },
+        onSuccess: () => invalidateEpisodeStageQueries(queryClient, projectId),
     })
 }
 

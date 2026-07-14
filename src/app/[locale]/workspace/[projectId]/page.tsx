@@ -10,6 +10,7 @@ import Navbar from '@/components/Navbar'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { useProjectData, useUserModels } from '@/lib/query/hooks'
 import { queryKeys } from '@/lib/query/keys'
+import { invalidateEpisodeStageQueries } from '@/lib/query/episode-stage-cache'
 import NovelPromotionWorkspace from './modes/novel-promotion/NovelPromotionWorkspace'
 import SmartImportWizard, { SplitEpisode } from './modes/novel-promotion/components/SmartImportWizard'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
@@ -266,11 +267,8 @@ export default function ProjectDetailPage() {
 
     // 🔥 刷新项目数据
     queryClient.invalidateQueries({ queryKey: queryKeys.projectData(projectId) })
-    // 剧集详情也刷新
-    if (selectedEpisodeId) {
-      queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, selectedEpisodeId) })
-      queryClient.invalidateQueries({ queryKey: queryKeys.episodeStages(projectId, selectedEpisodeId) })
-    }
+    // 按实际被重命名的剧集刷新，而不是按当前 URL 选中的剧集刷新。
+    await invalidateEpisodeStageQueries(queryClient, projectId, episodeId)
   }
 
   // 删除剧集
@@ -283,7 +281,7 @@ export default function ProjectDetailPage() {
     }
     // 刷新项目数据
     queryClient.invalidateQueries({ queryKey: queryKeys.projectData(projectId) })
-    queryClient.invalidateQueries({ queryKey: queryKeys.episodeStages(projectId, episodeId) })
+    await invalidateEpisodeStageQueries(queryClient, projectId, episodeId)
     // 如果删除的是当前正在查看的剧集，切换到其他剧集
     if (episodeId === selectedEpisodeId) {
       const remaining = episodes.filter(ep => ep.id !== episodeId)

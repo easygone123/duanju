@@ -200,6 +200,7 @@ describe('episode stage data route', () => {
       if (stage === 'storyboard') {
         expect(body.episode.storyboards[0].panels[0]).toMatchObject({
           imageUrl: 'legacy-image-1.jpg', imageMediaId: 'image-media-1', candidateImages: '["candidate.jpg"]',
+          videoPrompt: 'first video', hasDialogue: true,
         })
         expect(JSON.stringify(body)).not.toContain(hugeHistory)
         expect(new TextEncoder().encode(JSON.stringify(body)).byteLength).toBeLessThan(250_000)

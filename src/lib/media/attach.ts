@@ -96,6 +96,8 @@ async function attachMediaFieldsToPanel<T extends Record<string, unknown>>(panel
   const lipSyncVideoMedia = await resolveMediaRef(panel.lipSyncVideoMediaId, panel.lipSyncVideoUrl)
   const sketchImageMedia = await resolveMediaRef(panel.sketchImageMediaId, panel.sketchImageUrl)
   const previousImageMedia = await resolveMediaRef(panel.previousImageMediaId, panel.previousImageUrl)
+  const croppedImageMedia = await resolveMediaRef(panel.croppedImageMediaId, panel.croppedImageUrl)
+  const upscaledImageMedia = await resolveMediaRef(panel.upscaledImageMediaId, panel.upscaledImageUrl)
 
   const candidateRaw = parseStringArray(panel.candidateImages)
   const candidateMediaUrls: string[] = []
@@ -116,17 +118,26 @@ async function attachMediaFieldsToPanel<T extends Record<string, unknown>>(panel
     lipSyncVideoMedia,
     sketchImageMedia,
     previousImageMedia,
+    croppedImageMedia,
+    upscaledImageMedia,
     imageUrl: imageMedia?.url || panel.imageUrl || null,
     videoUrl: videoMedia?.url || panel.videoUrl || null,
     lipSyncVideoUrl: lipSyncVideoMedia?.url || panel.lipSyncVideoUrl || null,
     sketchImageUrl: sketchImageMedia?.url || panel.sketchImageUrl || null,
     previousImageUrl: previousImageMedia?.url || panel.previousImageUrl || null,
+    croppedImageUrl: croppedImageMedia?.url || panel.croppedImageUrl || null,
+    upscaledImageUrl: upscaledImageMedia?.url || panel.upscaledImageUrl || null,
     candidateImages: candidateRaw.length > 0 ? JSON.stringify(candidateMediaUrls) : panel.candidateImages,
   }
 }
 
 async function attachMediaFieldsToStoryboard<T extends Record<string, unknown>>(storyboard: T) {
   const storyboardImageMedia = await resolveMediaRefFromLegacyValue(storyboard.storyboardImageUrl)
+  const sheetImageMedia = await resolveMediaRef(storyboard.sheetImageMediaId, storyboard.sheetImageUrl)
+  const upscaledSheetImageMedia = await resolveMediaRef(
+    storyboard.upscaledSheetImageMediaId,
+    storyboard.upscaledSheetImageUrl,
+  )
   const panels = await Promise.all(
     ((storyboard.panels as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToPanel),
   )
@@ -135,7 +146,11 @@ async function attachMediaFieldsToStoryboard<T extends Record<string, unknown>>(
     ...storyboard,
     media: storyboardImageMedia,
     storyboardImageMedia,
+    sheetImageMedia,
+    upscaledSheetImageMedia,
     storyboardImageUrl: storyboardImageMedia?.url || storyboard.storyboardImageUrl || null,
+    sheetImageUrl: sheetImageMedia?.url || storyboard.sheetImageUrl || null,
+    upscaledSheetImageUrl: upscaledSheetImageMedia?.url || storyboard.upscaledSheetImageUrl || null,
     panels,
   }
 }

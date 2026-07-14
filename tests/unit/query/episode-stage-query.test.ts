@@ -3,7 +3,7 @@
 import React from 'react'
 import { readFileSync } from 'node:fs'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, renderHook, waitFor } from '@testing-library/react'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { queryKeys } from '@/lib/query/keys'
 import {
@@ -14,6 +14,18 @@ import {
 } from '@/lib/query/hooks/useEpisodeStageData'
 import { useWorkspaceEpisodeStageData } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/hooks/useWorkspaceEpisodeStageData'
 import { invalidateEpisodeStageQueries } from '@/lib/query/episode-stage-cache'
+import { useStoryboardState } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/hooks/useStoryboardState'
+import { usePanelEpisodeCachePatch } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/hooks/usePanelEpisodeCachePatch'
+import type { NovelPromotionStoryboard } from '@/types/project'
+import {
+  useUpdateProjectPanelActingNotes,
+  useUpdateProjectPhotographyPlan,
+} from '@/lib/query/mutations/storyboard-prompt-mutations'
+import {
+  useCreateProjectVoiceLine,
+  useDeleteProjectVoiceLine,
+  useUpdateProjectVoiceLine,
+} from '@/lib/query/mutations/useVoiceMutations'
 
 const apiFetchMock = vi.hoisted(() => vi.fn())
 const workspaceContext = vi.hoisted(() => ({ projectId: 'project/one', episodeId: 'episode two' }))
@@ -72,6 +84,20 @@ describe('episode stage query', () => {
     })
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: queryKeys.episodeData('project-1', 'episode-1'),
+    })
+  })
+
+  it('invalidates project-wide stage and legacy episode prefixes when the episode id is unknown', async () => {
+    const queryClient = client()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    await invalidateEpisodeStageQueries(queryClient, 'project-1')
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.episodeStages('project-1'),
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['episode-data', 'project-1'],
     })
   })
 
@@ -167,6 +193,63 @@ describe('episode stage query', () => {
     }
   })
 
+  it('invalidates the renamed episode id instead of the currently selected episode id', () => {
+    const pageSource = readFileSync('src/app/[locale]/workspace/[projectId]/page.tsx', 'utf8')
+    const renameHandler = pageSource.slice(
+      pageSource.indexOf('const handleRenameEpisode'),
+      pageSource.indexOf('// 删除剧集'),
+    )
+
+    expect(renameHandler).toContain('invalidateEpisodeStageQueries(queryClient, projectId, episodeId)')
+    expect(renameHandler).not.toContain('episodeData(projectId, selectedEpisodeId)')
+    expect(renameHandler).not.toContain('episodeStages(projectId, selectedEpisodeId)')
+  })
+
+  it('invalidates both cache families after late storyboard and voice writes', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ voiceLine: { id: 'line-1' } }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }))
+    const queryClient = client()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    const mutations = renderHook(() => ({
+      photography: useUpdateProjectPhotographyPlan('project-1'),
+      acting: useUpdateProjectPanelActingNotes('project-1'),
+      createVoice: useCreateProjectVoiceLine('project-1'),
+      updateVoice: useUpdateProjectVoiceLine('project-1'),
+      deleteVoice: useDeleteProjectVoiceLine('project-1'),
+    }), { wrapper: wrapper(queryClient) })
+
+    await act(async () => {
+      await mutations.result.current.photography.mutateAsync({ storyboardId: 'sb-1', photographyPlan: '{}' })
+      await mutations.result.current.acting.mutateAsync({ storyboardId: 'sb-1', panelIndex: 0, actingNotes: '{}' })
+      await mutations.result.current.createVoice.mutateAsync({
+        episodeId: 'episode-1', content: 'line', speaker: 'Alice',
+      })
+      await mutations.result.current.updateVoice.mutateAsync({ lineId: 'line-1', content: 'updated' })
+      await mutations.result.current.deleteVoice.mutateAsync({ lineId: 'line-1' })
+    })
+
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.episodeStages('project-1') })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.episodeData('project-1') })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.episodeStages('project-1', 'episode-1'),
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.episodeData('project-1', 'episode-1'),
+    })
+  })
+
+  it('invalidates deleted episode stage and legacy caches through the shared helper', () => {
+    const pageSource = readFileSync('src/app/[locale]/workspace/[projectId]/page.tsx', 'utf8')
+    const deleteHandler = pageSource.slice(
+      pageSource.indexOf('const handleDeleteEpisode'),
+      pageSource.indexOf('// 选择剧集'),
+    )
+
+    expect(deleteHandler).toContain('invalidateEpisodeStageQueries(queryClient, projectId, episodeId)')
+    expect(deleteHandler).not.toContain('queryKeys.episodeStages(projectId, episodeId)')
+  })
+
   it('wires stage-prefix invalidation into refresh, SSE, and episode/clip/storyboard/panel mutations', () => {
     const invalidationConsumers = [
       'src/app/[locale]/workspace/[projectId]/modes/novel-promotion/WorkspaceProvider.tsx',
@@ -180,5 +263,37 @@ describe('episode stage query', () => {
     for (const path of invalidationConsumers) {
       expect(readFileSync(path, 'utf8'), path).toMatch(/episodeStages|invalidateEpisodeStageQueries/)
     }
+  })
+
+  it('patches the canonical storyboard-stage cache used by the visible cold-path stage', () => {
+    const queryClient = client()
+    const storyboard = {
+      id: 'storyboard-1', episodeId: 'episode-1', clipId: 'clip-1', panelCount: 1,
+      storyboardTextJson: null, storyboardImageUrl: null,
+      panels: [{ id: 'panel-1', storyboardId: 'storyboard-1', panelIndex: 0, imageUrl: 'before.jpg' }],
+    } as unknown as NovelPromotionStoryboard
+    const key = queryKeys.episodeStage('project-1', 'episode-1', 'storyboard')
+    queryClient.setQueryData(key, {
+      stage: 'storyboard',
+      episode: { id: 'episode-1', name: 'Episode', episodeNumber: 1, clips: [], storyboards: [storyboard] },
+    })
+
+    const state = renderHook(() => useStoryboardState({
+      projectId: 'project-1', episodeId: 'episode-1', initialStoryboards: [storyboard], clips: [],
+    }), { wrapper: wrapper(queryClient) })
+    act(() => state.result.current.setLocalStoryboards((previous) => previous.map((item) => ({
+      ...item, panelCount: 2,
+    }))))
+
+    const patch = renderHook(() => usePanelEpisodeCachePatch({
+      projectId: 'project-1', episodeId: 'episode-1',
+    }), { wrapper: wrapper(queryClient) })
+    act(() => patch.result.current('panel-1', { imageUrl: 'after.jpg' }))
+
+    const cached = queryClient.getQueryData(key) as {
+      episode: { storyboards: NovelPromotionStoryboard[] }
+    }
+    expect(cached.episode.storyboards[0].panelCount).toBe(2)
+    expect(cached.episode.storyboards[0].panels?.[0].imageUrl).toBe('after.jpg')
   })
 })

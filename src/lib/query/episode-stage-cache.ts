@@ -11,13 +11,8 @@ export async function invalidateEpisodeStageQueries(
   projectId: string,
   episodeId?: string,
 ) {
-  const invalidations = [
+  await Promise.all([
     queryClient.invalidateQueries({ queryKey: queryKeys.episodeStages(projectId, episodeId) }),
-  ]
-  if (episodeId) {
-    invalidations.push(
-      queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) }),
-    )
-  }
-  await Promise.all(invalidations)
+    queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) }),
+  ])
 }

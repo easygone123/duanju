@@ -49,6 +49,8 @@ const storyboardPanelSelect = {
   duration: true,
   imagePrompt: true,
   imageUrl: true,
+  videoPrompt: true,
+  hasDialogue: true,
   imageMediaId: true,
   candidateImages: true,
   sketchImageUrl: true,

@@ -69,6 +69,24 @@ export function useStoryboardState({
           : nextStoryboardsOrUpdater
       )
 
+      queryClient.setQueryData(
+        queryKeys.episodeStage(projectId, episodeId, 'storyboard'),
+        (previous: unknown) => {
+          if (!previous || typeof previous !== 'object') return previous
+          const payload = previous as {
+            episode?: Record<string, unknown> & { storyboards?: NovelPromotionStoryboard[] }
+          }
+          if (!payload.episode || !Array.isArray(payload.episode.storyboards)) return previous
+          const previousStoryboards = payload.episode.storyboards
+          const nextStoryboards = resolveNextStoryboards(previousStoryboards)
+          if (nextStoryboards === previousStoryboards) return previous
+          return {
+            ...payload,
+            episode: { ...payload.episode, storyboards: nextStoryboards },
+          }
+        },
+      )
+
       queryClient.setQueryData(queryKeys.episodeData(projectId, episodeId), (previous: unknown) => {
         if (!previous || typeof previous !== 'object') return previous
         const episode = previous as { storyboards?: NovelPromotionStoryboard[] }

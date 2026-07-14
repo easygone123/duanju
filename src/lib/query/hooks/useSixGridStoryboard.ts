@@ -91,7 +91,7 @@ export function createPanelUndoMutationOptions(
   return {
     mutationFn: (input: PanelUndoInput) => submitTask(buildPanelUndoRequest(projectId, input)),
     onMutate: async (input: PanelUndoInput) => {
-      const key = queryKeys.episodeData(projectId, episodeId)
+      const key = queryKeys.episodeStage(projectId, episodeId, 'storyboard')
       await queryClient.cancelQueries({ queryKey: key, exact: true })
       const previous = findPanelRecord(queryClient.getQueryData(key), input.panelId)
       queryClient.setQueryData(key, (value: unknown) => swapPanelImageWithPrevious(value, input.panelId))
@@ -102,7 +102,7 @@ export function createPanelUndoMutationOptions(
       previous: PanelRecord | undefined; optimistic: PanelRecord | undefined
     } | undefined) => {
       if (context?.previous && context.optimistic) {
-        queryClient.setQueryData(queryKeys.episodeData(projectId, episodeId), (current: unknown) => (
+        queryClient.setQueryData(queryKeys.episodeStage(projectId, episodeId, 'storyboard'), (current: unknown) => (
           rollbackPanelImageIfStillOptimistic(current, input.panelId, context.previous!, context.optimistic!)
         ))
       }
@@ -116,7 +116,11 @@ export function createPanelUndoMutationOptions(
 
 function findPanelRecord(value: unknown, panelId: string): PanelRecord | undefined {
   if (!value || typeof value !== 'object') return undefined
-  const storyboards = (value as { storyboards?: Array<{ panels?: PanelRecord[] }> }).storyboards
+  const root = value as {
+    episode?: { storyboards?: Array<{ panels?: PanelRecord[] }> }
+    storyboards?: Array<{ panels?: PanelRecord[] }>
+  }
+  const storyboards = root.episode?.storyboards ?? root.storyboards
   if (!Array.isArray(storyboards)) return undefined
   for (const storyboard of storyboards) {
     const panel = storyboard.panels?.find((candidate) => candidate.id === panelId)
@@ -132,10 +136,14 @@ function rollbackPanelImageIfStillOptimistic(
   optimistic: PanelRecord,
 ) {
   if (!value || typeof value !== 'object') return value
-  const root = value as { storyboards?: Array<{ panels?: PanelRecord[] }> }
-  if (!Array.isArray(root.storyboards)) return value
+  const root = value as {
+    episode?: Record<string, unknown> & { storyboards?: Array<{ panels?: PanelRecord[] }> }
+    storyboards?: Array<{ panels?: PanelRecord[] }>
+  }
+  const storyboardsRoot = root.episode ?? root
+  if (!Array.isArray(storyboardsRoot.storyboards)) return value
   let changed = false
-  const storyboards = root.storyboards.map((storyboard) => {
+  const storyboards = storyboardsRoot.storyboards.map((storyboard) => {
     if (!Array.isArray(storyboard.panels)) return storyboard
     const panels = storyboard.panels.map((panel) => {
       if (panel.id !== panelId) return panel
@@ -148,7 +156,10 @@ function rollbackPanelImageIfStillOptimistic(
     })
     return { ...storyboard, panels }
   })
-  return changed ? { ...root, storyboards } : value
+  if (!changed) return value
+  return root.episode
+    ? { ...root, episode: { ...root.episode, storyboards } }
+    : { ...root, storyboards }
 }
 
 export function useSixGridStoryboard(projectId: string, episodeId: string) {
@@ -195,10 +206,14 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
 
 export function swapPanelImageWithPrevious(value: unknown, panelId: string): unknown {
   if (!value || typeof value !== 'object') return value
-  const root = value as { storyboards?: Array<{ panels?: Array<Record<string, unknown>> }> }
-  if (!Array.isArray(root.storyboards)) return value
+  const root = value as {
+    episode?: Record<string, unknown> & { storyboards?: Array<{ panels?: Array<Record<string, unknown>> }> }
+    storyboards?: Array<{ panels?: Array<Record<string, unknown>> }>
+  }
+  const storyboardsRoot = root.episode ?? root
+  if (!Array.isArray(storyboardsRoot.storyboards)) return value
   let changed = false
-  const storyboards = root.storyboards.map((storyboard) => {
+  const storyboards = storyboardsRoot.storyboards.map((storyboard) => {
     if (!Array.isArray(storyboard.panels)) return storyboard
     const panels = storyboard.panels.map((panel) => {
       if (panel.id !== panelId || !panel.previousImageUrl) return panel
@@ -215,5 +230,8 @@ export function swapPanelImageWithPrevious(value: unknown, panelId: string): unk
     })
     return panels === storyboard.panels ? storyboard : { ...storyboard, panels }
   })
-  return changed ? { ...root, storyboards } : value
+  if (!changed) return value
+  return root.episode
+    ? { ...root, episode: { ...root.episode, storyboards } }
+    : { ...root, storyboards }
 }

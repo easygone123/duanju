@@ -109,8 +109,9 @@ export const queryKeys = {
     /**
      * 剧集详情数据
      */
-    episodeData: (projectId: string, episodeId: string) =>
-        ['episode-data', projectId, episodeId] as const,
+    episodeData: (projectId: string, episodeId?: string) => episodeId
+        ? ['episode-data', projectId, episodeId] as const
+        : ['episode-data', projectId] as const,
 
     /**
      * Workspace stage payloads. The prefix intentionally omits the stage so a

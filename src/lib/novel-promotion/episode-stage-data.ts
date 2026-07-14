@@ -32,6 +32,8 @@ type StoryboardPanelFields =
   | 'duration'
   | 'imagePrompt'
   | 'imageUrl'
+  | 'videoPrompt'
+  | 'hasDialogue'
   | 'candidateImages'
   | 'sketchImageUrl'
   | 'previousImageUrl'
