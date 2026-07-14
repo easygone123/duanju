@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 
 import {
   parseViralAnalysisReport,
@@ -7,6 +8,8 @@ import {
 import {
   VIRAL_ANALYSIS_BATCH_SIZE,
   VIRAL_MAX_ANALYSIS_FRAMES,
+  VIRAL_MAX_GENERATED_PANELS,
+  VIRAL_REPLICATION_STATUS,
   VIRAL_REPLICATION_STATUSES,
   VIRAL_UPLOAD_MAX_BYTES,
   VIRAL_VIDEO_MAX_DURATION_MS,
@@ -89,8 +92,53 @@ const validGeneration = () => ({
   ],
 })
 
+const SHORT_TEXT_MAX = 200
+const MEDIUM_TEXT_MAX = 2_000
+const LONG_TEXT_MAX = 100_000
+const MAX_CHARACTERS = 100
+const MAX_STORYBOARDS = 24
+const MAX_PANELS_PER_STORYBOARD = 24
+
+function storyboardWithPanels(sequence: number, panelCount: number) {
+  const base = validGeneration().storyboards[0]
+  const basePanel = base.panels[0]
+  return {
+    ...base,
+    sequence,
+    panels: Array.from({ length: panelCount }, (_, panelIndex) => ({
+      ...basePanel,
+      panelIndex,
+    })),
+  }
+}
+
+function generationWithPanelCounts(panelCounts: number[]) {
+  return {
+    ...validGeneration(),
+    storyboards: panelCounts.map((panelCount, sequence) =>
+      storyboardWithPanels(sequence, panelCount),
+    ),
+  }
+}
+
+function captureZodError(action: () => unknown): z.ZodError {
+  try {
+    action()
+  } catch (error) {
+    expect(error).toBeInstanceOf(z.ZodError)
+    return error as z.ZodError
+  }
+  throw new Error('Expected action to throw a ZodError')
+}
+
 describe('viral replication constants', () => {
   it('defines the bounded workflow contract', () => {
+    expect(VIRAL_REPLICATION_STATUS.UPLOADING).toBe('uploading')
+    expect(VIRAL_REPLICATION_STATUS.ANALYZING).toBe('analyzing')
+    expect(VIRAL_REPLICATION_STATUS.REVIEW_READY).toBe('review_ready')
+    expect(VIRAL_REPLICATION_STATUS.GENERATING).toBe('generating')
+    expect(VIRAL_REPLICATION_STATUS.COMPLETED).toBe('completed')
+    expect(VIRAL_REPLICATION_STATUS.FAILED).toBe('failed')
     expect(VIRAL_REPLICATION_STATUSES).toEqual([
       'uploading',
       'analyzing',
@@ -103,11 +151,19 @@ describe('viral replication constants', () => {
     expect(VIRAL_VIDEO_MIN_DURATION_MS).toBe(15_000)
     expect(VIRAL_VIDEO_MAX_DURATION_MS).toBe(180_000)
     expect(VIRAL_MAX_ANALYSIS_FRAMES).toBe(72)
+    expect(VIRAL_MAX_GENERATED_PANELS).toBe(72)
     expect(VIRAL_ANALYSIS_BATCH_SIZE).toBe(10)
   })
 })
 
 describe('parseViralAnalysisReport', () => {
+  it('keeps structural schemas private so callers cannot bypass semantic parsing', async () => {
+    const contracts = await import('@/lib/viral-replication/contracts')
+
+    expect(contracts).not.toHaveProperty('ViralAnalysisReportV1Schema')
+    expect(contracts).not.toHaveProperty('ViralStoryboardGenerationV1Schema')
+  })
+
   it('accepts a valid versioned report', () => {
     expect(parseViralAnalysisReport(validReport(), 4_000)).toEqual(validReport())
   })
@@ -120,14 +176,22 @@ describe('parseViralAnalysisReport', () => {
     const report = validReport()
     report.shots[1].shotIndex = 2
 
-    expect(() => parseViralAnalysisReport(report, 4_000)).toThrow(/shotIndex/)
+    const error = captureZodError(() => parseViralAnalysisReport(report, 4_000))
+    expect(error.issues[0]).toMatchObject({
+      code: z.ZodIssueCode.custom,
+      path: ['shots', 1, 'shotIndex'],
+    })
   })
 
   it('rejects shot end times beyond the source duration', () => {
     const report = validReport()
     report.shots[1].endMs = 4_001
 
-    expect(() => parseViralAnalysisReport(report, 4_000)).toThrow(/duration/i)
+    const error = captureZodError(() => parseViralAnalysisReport(report, 4_000))
+    expect(error.issues[0]).toMatchObject({
+      code: z.ZodIssueCode.custom,
+      path: ['shots', 1, 'endMs'],
+    })
   })
 
   it.each([
@@ -139,14 +203,22 @@ describe('parseViralAnalysisReport', () => {
     report.shots[0].startMs = startMs
     report.shots[0].endMs = endMs
 
-    expect(() => parseViralAnalysisReport(report, 4_000)).toThrow()
+    expect(() => parseViralAnalysisReport(report, 4_000)).toThrowError(z.ZodError)
   })
 
   it('rejects a timeline that moves backward', () => {
     const report = validReport()
     report.shots[1].startMs = 1_000
 
-    expect(() => parseViralAnalysisReport(report, 4_000)).toThrow(/timeline/i)
+    const error = captureZodError(() => parseViralAnalysisReport(report, 4_000))
+    expect(error.issues[0]).toMatchObject({
+      code: z.ZodIssueCode.custom,
+      path: ['shots', 1, 'startMs'],
+    })
+  })
+
+  it('rejects an invalid source duration with a ZodError', () => {
+    expect(() => parseViralAnalysisReport(validReport(), 0)).toThrowError(z.ZodError)
   })
 
   it('rejects unsupported schema versions and unknown fields', () => {
@@ -209,26 +281,123 @@ describe('parseViralStoryboardGeneration', () => {
     const generation = validGeneration()
     generation.storyboards[0].sequence = 1
 
-    expect(() => parseViralStoryboardGeneration(generation)).toThrow(/sequence/)
+    const error = captureZodError(() => parseViralStoryboardGeneration(generation))
+    expect(error.issues[0]).toMatchObject({
+      code: z.ZodIssueCode.custom,
+      path: ['storyboards', 0, 'sequence'],
+    })
   })
 
   it('rejects non-continuous zero-based panel indexes within a storyboard', () => {
     const generation = validGeneration()
     generation.storyboards[0].panels[0].panelIndex = 1
 
-    expect(() => parseViralStoryboardGeneration(generation)).toThrow(/panelIndex/)
+    const error = captureZodError(() => parseViralStoryboardGeneration(generation))
+    expect(error.issues[0]).toMatchObject({
+      code: z.ZodIssueCode.custom,
+      path: ['storyboards', 0, 'panels', 0, 'panelIndex'],
+    })
   })
 
-  it('rejects excessive text and arrays', () => {
-    const excessiveText = validGeneration()
-    excessiveText.novelText = 'x'.repeat(100_001)
-    expect(() => parseViralStoryboardGeneration(excessiveText)).toThrow()
+  it('accepts exactly 72 generated panels across storyboards', () => {
+    expect(() =>
+      parseViralStoryboardGeneration(generationWithPanelCounts([24, 24, 24])),
+    ).not.toThrow()
+  })
 
-    const excessiveCharacters = validGeneration()
-    excessiveCharacters.characters = Array.from({ length: 1_001 }, () => ({
+  it('rejects 73 generated panels across storyboards with a ZodError', () => {
+    const error = captureZodError(() =>
+      parseViralStoryboardGeneration(generationWithPanelCounts([24, 24, 24, 1])),
+    )
+    expect(error.issues[0]).toMatchObject({
+      code: z.ZodIssueCode.custom,
+      path: ['storyboards'],
+    })
+  })
+
+  it('enforces exact character array bounds', () => {
+    const characters = Array.from({ length: MAX_CHARACTERS }, () => ({
       name: 'Character',
       description: 'Description',
     }))
-    expect(() => parseViralStoryboardGeneration(excessiveCharacters)).toThrow()
+    expect(() =>
+      parseViralStoryboardGeneration({ ...validGeneration(), characters }),
+    ).not.toThrow()
+    expect(() =>
+      parseViralStoryboardGeneration({
+        ...validGeneration(),
+        characters: [...characters, characters[0]],
+      }),
+    ).toThrowError(z.ZodError)
+  })
+
+  it('enforces exact storyboard array bounds', () => {
+    const generation = generationWithPanelCounts(Array(MAX_STORYBOARDS).fill(1))
+    expect(() => parseViralStoryboardGeneration(generation)).not.toThrow()
+    expect(() =>
+      parseViralStoryboardGeneration({
+        ...generation,
+        storyboards: [
+          ...generation.storyboards,
+          storyboardWithPanels(MAX_STORYBOARDS, 1),
+        ],
+      }),
+    ).toThrowError(z.ZodError)
+  })
+
+  it('enforces exact per-storyboard panel array bounds', () => {
+    expect(() =>
+      parseViralStoryboardGeneration(generationWithPanelCounts([MAX_PANELS_PER_STORYBOARD])),
+    ).not.toThrow()
+    expect(() =>
+      parseViralStoryboardGeneration(
+        generationWithPanelCounts([MAX_PANELS_PER_STORYBOARD + 1]),
+      ),
+    ).toThrowError(z.ZodError)
+  })
+
+  it('enforces exact short text bounds', () => {
+    expect(() =>
+      parseViralStoryboardGeneration({
+        ...validGeneration(),
+        title: 'x'.repeat(SHORT_TEXT_MAX),
+      }),
+    ).not.toThrow()
+    expect(() =>
+      parseViralStoryboardGeneration({
+        ...validGeneration(),
+        title: 'x'.repeat(SHORT_TEXT_MAX + 1),
+      }),
+    ).toThrowError(z.ZodError)
+  })
+
+  it('enforces exact medium text bounds', () => {
+    expect(() =>
+      parseViralStoryboardGeneration({
+        ...validGeneration(),
+        synopsis: 'x'.repeat(MEDIUM_TEXT_MAX),
+      }),
+    ).not.toThrow()
+    expect(() =>
+      parseViralStoryboardGeneration({
+        ...validGeneration(),
+        synopsis: 'x'.repeat(MEDIUM_TEXT_MAX + 1),
+      }),
+    ).toThrowError(z.ZodError)
+  })
+
+  it('enforces exact long text bounds', () => {
+    expect(() =>
+      parseViralStoryboardGeneration({
+        ...validGeneration(),
+        novelText: 'x'.repeat(LONG_TEXT_MAX),
+      }),
+    ).not.toThrow()
+    expect(() =>
+      parseViralStoryboardGeneration({
+        ...validGeneration(),
+        novelText: 'x'.repeat(LONG_TEXT_MAX + 1),
+      }),
+    ).toThrowError(z.ZodError)
   })
 })

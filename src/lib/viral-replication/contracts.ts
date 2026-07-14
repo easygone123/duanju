@@ -1,11 +1,14 @@
 import { z } from 'zod'
 
-import { VIRAL_MAX_ANALYSIS_FRAMES } from './constants'
+import { VIRAL_MAX_ANALYSIS_FRAMES, VIRAL_MAX_GENERATED_PANELS } from './constants'
 
 const shortText = z.string().min(1).max(200)
 const mediumText = z.string().min(1).max(2_000)
 const longText = z.string().min(1).max(100_000)
 const fingerprintValues = z.array(shortText).max(24)
+const maxCharacters = 100
+const maxStoryboards = 24
+const maxPanelsPerStoryboard = 24
 
 const viralAnalysisShotV1Schema = z
   .object({
@@ -23,7 +26,7 @@ const viralAnalysisShotV1Schema = z
   })
   .strict()
 
-export const ViralAnalysisReportV1Schema = z
+const viralAnalysisReportV1Schema = z
   .object({
     schemaVersion: z.literal(1),
     overview: z
@@ -47,7 +50,7 @@ export const ViralAnalysisReportV1Schema = z
   })
   .strict()
 
-export type ViralAnalysisReportV1 = z.infer<typeof ViralAnalysisReportV1Schema>
+export type ViralAnalysisReportV1 = z.infer<typeof viralAnalysisReportV1Schema>
 
 const viralStoryboardPanelV1Schema = z
   .object({
@@ -66,11 +69,11 @@ const viralStoryboardV1Schema = z
   .object({
     sequence: z.number().int().nonnegative(),
     summary: mediumText,
-    panels: z.array(viralStoryboardPanelV1Schema).min(1).max(100),
+    panels: z.array(viralStoryboardPanelV1Schema).min(1).max(maxPanelsPerStoryboard),
   })
   .strict()
 
-export const ViralStoryboardGenerationV1Schema = z
+const viralStoryboardGenerationV1Schema = z
   .object({
     schemaVersion: z.literal(1),
     title: shortText,
@@ -85,32 +88,54 @@ export const ViralStoryboardGenerationV1Schema = z
           })
           .strict(),
       )
-      .max(100),
-    storyboards: z.array(viralStoryboardV1Schema).min(1).max(100),
+      .max(maxCharacters),
+    storyboards: z.array(viralStoryboardV1Schema).min(1).max(maxStoryboards),
   })
   .strict()
 
-export type ViralStoryboardGenerationV1 = z.infer<typeof ViralStoryboardGenerationV1Schema>
+export type ViralStoryboardGenerationV1 = z.infer<typeof viralStoryboardGenerationV1Schema>
+
+function throwValidationIssue(path: Array<string | number>, message: string): never {
+  throw new z.ZodError([
+    {
+      code: z.ZodIssueCode.custom,
+      path,
+      message,
+    },
+  ])
+}
 
 export function parseViralAnalysisReport(
   value: unknown,
   durationMs: number,
 ): ViralAnalysisReportV1 {
-  const report = ViralAnalysisReportV1Schema.parse(value)
+  const report = viralAnalysisReportV1Schema.parse(value)
   const parsedDurationMs = z.number().int().positive().parse(durationMs)
 
   report.shots.forEach((shot, index) => {
     if (shot.shotIndex !== index) {
-      throw new Error(`shots[${index}].shotIndex must be ${index}`)
+      throwValidationIssue(
+        ['shots', index, 'shotIndex'],
+        `shots[${index}].shotIndex must be ${index}`,
+      )
     }
     if (shot.startMs >= shot.endMs) {
-      throw new Error(`shots[${index}] must satisfy startMs < endMs`)
+      throwValidationIssue(
+        ['shots', index, 'endMs'],
+        `shots[${index}] must satisfy startMs < endMs`,
+      )
     }
     if (shot.endMs > parsedDurationMs) {
-      throw new Error(`shots[${index}].endMs must not exceed source duration`)
+      throwValidationIssue(
+        ['shots', index, 'endMs'],
+        `shots[${index}].endMs must not exceed source duration`,
+      )
     }
     if (index > 0 && shot.startMs < report.shots[index - 1].endMs) {
-      throw new Error(`shots[${index}] must follow nondecreasing timeline order`)
+      throwValidationIssue(
+        ['shots', index, 'startMs'],
+        `shots[${index}] must follow nondecreasing timeline order`,
+      )
     }
   })
 
@@ -118,20 +143,35 @@ export function parseViralAnalysisReport(
 }
 
 export function parseViralStoryboardGeneration(value: unknown): ViralStoryboardGenerationV1 {
-  const generation = ViralStoryboardGenerationV1Schema.parse(value)
+  const generation = viralStoryboardGenerationV1Schema.parse(value)
 
   generation.storyboards.forEach((storyboard, storyboardIndex) => {
     if (storyboard.sequence !== storyboardIndex) {
-      throw new Error(`storyboards[${storyboardIndex}].sequence must be ${storyboardIndex}`)
+      throwValidationIssue(
+        ['storyboards', storyboardIndex, 'sequence'],
+        `storyboards[${storyboardIndex}].sequence must be ${storyboardIndex}`,
+      )
     }
     storyboard.panels.forEach((panel, panelIndex) => {
       if (panel.panelIndex !== panelIndex) {
-        throw new Error(
+        throwValidationIssue(
+          ['storyboards', storyboardIndex, 'panels', panelIndex, 'panelIndex'],
           `storyboards[${storyboardIndex}].panels[${panelIndex}].panelIndex must be ${panelIndex}`,
         )
       }
     })
   })
+
+  const panelCount = generation.storyboards.reduce(
+    (total, storyboard) => total + storyboard.panels.length,
+    0,
+  )
+  if (panelCount > VIRAL_MAX_GENERATED_PANELS) {
+    throwValidationIssue(
+      ['storyboards'],
+      `generated panel count must not exceed ${VIRAL_MAX_GENERATED_PANELS}`,
+    )
+  }
 
   return generation
 }
