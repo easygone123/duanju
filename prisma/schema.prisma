@@ -138,6 +138,7 @@ model NovelPromotionEpisode {
   storyboards             NovelPromotionStoryboard[]
   voiceLines              NovelPromotionVoiceLine[]
   editorProject           VideoEditorProject?
+  viralReplication        ViralReplication?
 
   @@unique([novelPromotionProjectId, episodeNumber])
   @@index([novelPromotionProjectId])
@@ -407,6 +408,7 @@ model Project {
   usageCosts         UsageCost[]
   comfyBinding       ProjectComfyBinding?
   comfyRequests      ComfyGenerationRequest[]
+  viralReplication   ViralReplication?
 
   @@index([userId])
   @@unique([id, userId])
@@ -475,6 +477,7 @@ model User {
   comfyWorkflows     ComfyWorkflow[]
   projectComfyBindings ProjectComfyBinding[]
   comfyRequests      ComfyGenerationRequest[]
+  viralReplications  ViralReplication[]
 
   @@map("user")
 }
@@ -1037,9 +1040,59 @@ model MediaObject {
   globalLocationImageImages             GlobalLocationImage[]       @relation("GlobalLocationImageMedia")
   globalLocationImagePreviousImages     GlobalLocationImage[]       @relation("GlobalLocationImagePreviousImageMedia")
   globalVoiceCustomVoices               GlobalVoice[]               @relation("GlobalVoiceCustomVoiceMedia")
+  viralReplicationSourceVideo           ViralReplication?           @relation("ViralReplicationSourceVideo")
+  viralReplicationFrames                ViralReplicationFrame[]      @relation("ViralReplicationFrameMedia")
 
   @@index([createdAt])
   @@map("media_objects")
+}
+
+model ViralReplication {
+  id                    String                    @id @default(uuid())
+  userId                String
+  projectId             String?                   @unique
+  episodeId             String?                   @unique
+  sourceVideoMediaId    String?                   @unique
+  brief                 String                    @db.Text
+  videoRatio            String
+  artStyle              String
+  status                String                    @default("uploading")
+  analysisModelSnapshot String?
+  durationMs            Int?
+  transcriptText        String?                   @db.LongText
+  reportJson            Json?
+  reportVersion         Int                       @default(1)
+  errorMessage          String?                   @db.Text
+  confirmedAt           DateTime?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @default(now()) @updatedAt
+  user                  User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project               Project?                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  episode               NovelPromotionEpisode?    @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  sourceVideoMedia      MediaObject?               @relation("ViralReplicationSourceVideo", fields: [sourceVideoMediaId], references: [id], onDelete: SetNull)
+  frames                ViralReplicationFrame[]
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("viral_replications")
+}
+
+model ViralReplicationFrame {
+  id            String           @id @default(uuid())
+  replicationId String
+  mediaId       String
+  shotIndex     Int
+  timestampMs   Int
+  startMs       Int
+  endMs         Int
+  createdAt     DateTime         @default(now())
+  replication   ViralReplication @relation(fields: [replicationId], references: [id], onDelete: Cascade)
+  media         MediaObject      @relation("ViralReplicationFrameMedia", fields: [mediaId], references: [id], onDelete: Restrict)
+
+  @@unique([replicationId, shotIndex])
+  @@index([replicationId])
+  @@index([mediaId])
+  @@map("viral_replication_frames")
 }
 
 model SixGridCropClaim {
