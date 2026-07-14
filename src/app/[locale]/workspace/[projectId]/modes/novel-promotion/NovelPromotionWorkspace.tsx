@@ -121,6 +121,7 @@ function NovelPromotionWorkspaceContent(props: NovelPromotionWorkspaceProps) {
         <WorkspaceStageRuntimeProvider value={vm.runtime.stageRuntime}>
           <WorkspaceStageContent
             currentStage={vm.stageNav.currentStage}
+            projectId={projectId}
             episodeId={episodeId}
           />
         </WorkspaceStageRuntimeProvider>

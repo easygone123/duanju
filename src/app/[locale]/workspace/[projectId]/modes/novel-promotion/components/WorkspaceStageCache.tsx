@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState, type ComponentType } from 'react'
+import { WorkspaceStageActivityProvider } from './WorkspaceStageActivityContext'
 
 export const CANONICAL_WORKSPACE_STAGES = [
   'config',
@@ -18,7 +19,7 @@ export type WorkspaceStageLoader = () => unknown
 export type WorkspaceStageLoaderMap = Record<CanonicalWorkspaceStage, WorkspaceStageLoader>
 
 export interface WorkspaceStageCacheState {
-  episodeId: string | undefined
+  scopeKey: string
   stages: CanonicalWorkspaceStage[]
 }
 
@@ -31,6 +32,7 @@ export interface WorkspaceStagePrefetchScheduler {
 
 interface WorkspaceStageCacheProps {
   currentStage: string
+  projectId?: string
   episodeId?: string
   stageComponents: WorkspaceStageComponentMap
 }
@@ -50,24 +52,24 @@ export function normalizeWorkspaceStage(stage: string): CanonicalWorkspaceStage 
 }
 
 export function createWorkspaceStageCacheState(
-  episodeId: string | undefined,
+  scopeKey: string,
   currentStage: string,
 ): WorkspaceStageCacheState {
   return {
-    episodeId,
+    scopeKey,
     stages: [normalizeWorkspaceStage(currentStage)],
   }
 }
 
 export function updateWorkspaceStageCache(
   state: WorkspaceStageCacheState,
-  episodeId: string | undefined,
+  scopeKey: string,
   currentStage: string,
 ): WorkspaceStageCacheState {
   const normalizedStage = normalizeWorkspaceStage(currentStage)
 
-  if (state.episodeId !== episodeId) {
-    return createWorkspaceStageCacheState(episodeId, normalizedStage)
+  if (state.scopeKey !== scopeKey) {
+    return createWorkspaceStageCacheState(scopeKey, normalizedStage)
   }
 
   if (state.stages.at(-1) === normalizedStage) {
@@ -79,7 +81,7 @@ export function updateWorkspaceStageCache(
     normalizedStage,
   ].slice(-MAX_WORKSPACE_STAGE_SHELLS)
 
-  return { episodeId, stages }
+  return { scopeKey, stages }
 }
 
 function getBrowserPrefetchScheduler(): WorkspaceStagePrefetchScheduler {
@@ -134,14 +136,16 @@ export function scheduleNextWorkspaceStagePrefetch(
 
 export function WorkspaceStageCache({
   currentStage,
+  projectId,
   episodeId,
   stageComponents,
 }: WorkspaceStageCacheProps) {
   const activeStage = normalizeWorkspaceStage(currentStage)
+  const scopeKey = `${projectId ?? ''}:${episodeId ?? ''}`
   const [cachedState, setCachedState] = useState(() => (
-    createWorkspaceStageCacheState(episodeId, activeStage)
+    createWorkspaceStageCacheState(scopeKey, activeStage)
   ))
-  const renderedState = updateWorkspaceStageCache(cachedState, episodeId, activeStage)
+  const renderedState = updateWorkspaceStageCache(cachedState, scopeKey, activeStage)
 
   useEffect(() => {
     if (renderedState !== cachedState) setCachedState(renderedState)
@@ -153,13 +157,15 @@ export function WorkspaceStageCache({
 
     return (
       <div
-        key={`${renderedState.episodeId}:${stage}`}
+        key={`${renderedState.scopeKey}:${stage}`}
         data-workspace-stage-shell={stage}
         className="animate-page-enter"
         hidden={!isActive}
         aria-hidden={!isActive}
       >
-        <Stage />
+        <WorkspaceStageActivityProvider isActive={isActive}>
+          <Stage />
+        </WorkspaceStageActivityProvider>
       </div>
     )
   })

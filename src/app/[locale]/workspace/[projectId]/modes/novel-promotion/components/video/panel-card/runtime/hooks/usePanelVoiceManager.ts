@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MatchedVoiceLine } from '../../../types'
 import { EMPTY_RUNNING_VOICE_LINE_IDS, getErrorMessage } from '../shared'
+import { useWorkspaceStageActivity } from '../../../../WorkspaceStageActivityContext'
 
 interface UsePanelVoiceManagerParams {
   projectId: string
@@ -23,6 +24,7 @@ export function usePanelVoiceManager({
   runningVoiceLineIds = EMPTY_RUNNING_VOICE_LINE_IDS,
   audioFailedMessage,
 }: UsePanelVoiceManagerParams) {
+  const isStageActive = useWorkspaceStageActivity()
   const generateProjectVoiceMutation = useGenerateProjectVoice(projectId)
   const queryClient = useQueryClient()
   const [submittingAudioIds, setSubmittingAudioIds] = useState<Set<string>>(new Set())
@@ -60,12 +62,22 @@ export function usePanelVoiceManager({
     }
   }, [])
 
+  useEffect(() => {
+    if (isStageActive || !audioRef.current) return
+    audioRef.current.pause()
+    audioRef.current.currentTime = 0
+    audioRef.current.onended = null
+    audioRef.current.onerror = null
+    audioRef.current = null
+    setPlayingVoiceLineId(null)
+  }, [isStageActive])
+
   const isVoiceLineTaskRunning = useCallback((lineId: string) => {
     return submittingAudioIds.has(lineId) || submittingVoiceAudioIds.has(lineId) || activeVoiceAudioIds.has(lineId)
   }, [activeVoiceAudioIds, submittingAudioIds, submittingVoiceAudioIds])
 
   const handlePlayVoiceLine = useCallback((voiceLine: MatchedVoiceLine) => {
-    if (!voiceLine.audioUrl) return
+    if (!isStageActive || !voiceLine.audioUrl) return
     if (playingVoiceLineId === voiceLine.id) {
       if (audioRef.current) {
         audioRef.current.pause()
@@ -91,7 +103,7 @@ export function usePanelVoiceManager({
       setPlayingVoiceLineId(null)
       audioRef.current = null
     })
-  }, [playingVoiceLineId])
+  }, [isStageActive, playingVoiceLineId])
 
   const handleGenerateAudio = useCallback(async (voiceLine: MatchedVoiceLine) => {
     if (!episodeId) return

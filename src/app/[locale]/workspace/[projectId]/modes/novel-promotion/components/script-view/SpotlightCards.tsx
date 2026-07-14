@@ -1,13 +1,14 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { MouseEvent } from 'react'
 import type { Character, CharacterAppearance, Location } from '@/types/project'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import { AppIcon } from '@/components/ui/icons'
 import ImagePreviewModal from '@/components/ui/ImagePreviewModal'
+import { useWorkspaceStageActivity } from '../WorkspaceStageActivityContext'
 
 
 type SpotlightCharCardProps = {
@@ -28,8 +29,9 @@ export function SpotlightCharCard({
   onRemove,
 }: SpotlightCharCardProps) {
   const tScript = useTranslations('scriptView')
+  const isStageActive = useWorkspaceStageActivity()
   const [isPlaying, setIsPlaying] = useState(false)
-  const [audioRef, setAudioRef] = useState<HTMLAudioElement | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
 
   const selectedIdx = appearance?.selectedIndex ?? null
@@ -43,24 +45,25 @@ export function SpotlightCharCard({
     e.stopPropagation()
     if (!char.customVoiceUrl) return
 
-    if (isPlaying && audioRef) {
-      audioRef.pause()
-      audioRef.currentTime = 0
+    if (isPlaying && audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      audioRef.current = null
       setIsPlaying(false)
       return
     }
 
     const audio = new Audio(char.customVoiceUrl)
-    setAudioRef(audio)
+    audioRef.current = audio
 
     audio.onended = () => {
       setIsPlaying(false)
-      setAudioRef(null)
+      audioRef.current = null
     }
 
     audio.onerror = () => {
       setIsPlaying(false)
-      setAudioRef(null)
+      audioRef.current = null
     }
 
     audio.play()
@@ -69,12 +72,26 @@ export function SpotlightCharCard({
 
   useEffect(() => {
     return () => {
-      if (audioRef) {
-        audioRef.pause()
-        audioRef.currentTime = 0
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.currentTime = 0
+        audioRef.current = null
       }
     }
-  }, [audioRef])
+  }, [])
+
+  useEffect(() => {
+    if (isStageActive) return
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      audioRef.current.onended = null
+      audioRef.current.onerror = null
+      audioRef.current = null
+    }
+    setIsPlaying(false)
+    setPreviewImage(null)
+  }, [isStageActive])
 
   return (
     <div
@@ -168,7 +185,7 @@ export function SpotlightCharCard({
           )}
         </button>
       </div>
-      {previewImage && typeof document !== 'undefined' && createPortal(
+      {isStageActive && previewImage && typeof document !== 'undefined' && createPortal(
         <ImagePreviewModal imageUrl={previewImage} onClose={() => setPreviewImage(null)} />,
         document.body
       )}
@@ -201,9 +218,14 @@ export function SpotlightLocationCard({
   onRemove,
 }: SpotlightLocationCardProps) {
   const tScript = useTranslations('scriptView')
+  const isStageActive = useWorkspaceStageActivity()
   const [previewImage, setPreviewImage] = useState<string | null>(null)
   const image = getSelectedLocationImage(location)
   const imageUrl = image?.imageUrl
+
+  useEffect(() => {
+    if (!isStageActive) setPreviewImage(null)
+  }, [isStageActive])
 
   return (
     <div
@@ -263,7 +285,7 @@ export function SpotlightLocationCard({
           {location.name}
         </div>
       </div>
-      {previewImage && typeof document !== 'undefined' && createPortal(
+      {isStageActive && previewImage && typeof document !== 'undefined' && createPortal(
         <ImagePreviewModal imageUrl={previewImage} onClose={() => setPreviewImage(null)} />,
         document.body
       )}

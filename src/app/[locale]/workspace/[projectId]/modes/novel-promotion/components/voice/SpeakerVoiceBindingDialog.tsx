@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslations } from 'next-intl'
 import VoicePickerDialog from '@/app/[locale]/workspace/asset-hub/components/VoicePickerDialog'
@@ -8,6 +8,7 @@ import VoiceCreationModal from '@/app/[locale]/workspace/asset-hub/components/Vo
 import { AppIcon } from '@/components/ui/icons'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import type { InlineSpeakerVoiceBinding } from '@/lib/novel-promotion/stages/voice-stage-runtime/types'
+import { useWorkspaceStageActivity } from '../WorkspaceStageActivityContext'
 
 type BindingTab = 'select' | 'upload' | 'design'
 
@@ -31,6 +32,7 @@ export default function SpeakerVoiceBindingDialog({
     onClose,
     onBound,
 }: SpeakerVoiceBindingDialogProps) {
+    const isStageActive = useWorkspaceStageActivity()
     const t = useTranslations('voice.inlineBinding')
     const [activeTab, setActiveTab] = useState<BindingTab>('select')
     // 子弹窗打开标记
@@ -41,6 +43,10 @@ export default function SpeakerVoiceBindingDialog({
         setSubDialogOpen(false)
         onClose()
     }, [onClose])
+
+    useEffect(() => {
+        if (!isStageActive && isOpen) handleClose()
+    }, [handleClose, isOpen, isStageActive])
 
     const confirmUploadVoice = useCallback(() => {
         return window.confirm(t('uploadQwenHint'))
@@ -87,7 +93,7 @@ export default function SpeakerVoiceBindingDialog({
         setSubDialogOpen(true)
     }, [confirmUploadVoice])
 
-    if (!isOpen) return null
+    if (!isStageActive || !isOpen) return null
     if (typeof document === 'undefined') return null
 
     // 音色库选择 — 直接渲染 VoicePickerDialog

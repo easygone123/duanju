@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import WorkspaceStageContent from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/WorkspaceStageContent'
 import {
@@ -46,6 +46,12 @@ vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/S
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/VideoStageRoute', () => stageModule('videos'))
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/VoiceStageRoute', () => stageModule('voice'))
 
+beforeEach(() => {
+  for (const stage of Object.keys(stageModules.loads) as Array<keyof typeof stageModules.loads>) {
+    stageModules.loads[stage] = 0
+  }
+})
+
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
@@ -55,6 +61,7 @@ describe('WorkspaceStageContent dynamic boundaries', () => {
   it('loads only the active stage module on a cold render', async () => {
     render(React.createElement(WorkspaceStageContent, {
       currentStage: 'config',
+      projectId: 'project-1',
       episodeId: 'episode-1',
     }))
 
@@ -71,6 +78,7 @@ describe('WorkspaceStageContent dynamic boundaries', () => {
   it('keeps a recently visited stage mounted when switching away and back', async () => {
     const view = render(React.createElement(WorkspaceStageContent, {
       currentStage: 'config',
+      projectId: 'project-1',
       episodeId: 'episode-1',
     }))
     const configInput = await view.findByRole('textbox', { name: 'config state' }) as HTMLInputElement
@@ -78,12 +86,14 @@ describe('WorkspaceStageContent dynamic boundaries', () => {
 
     view.rerender(React.createElement(WorkspaceStageContent, {
       currentStage: 'script',
+      projectId: 'project-1',
       episodeId: 'episode-1',
     }))
     await view.findByRole('textbox', { name: 'script state' })
 
     view.rerender(React.createElement(WorkspaceStageContent, {
       currentStage: 'config',
+      projectId: 'project-1',
       episodeId: 'episode-1',
     }))
 
@@ -94,6 +104,7 @@ describe('WorkspaceStageContent dynamic boundaries', () => {
   it('remounts the current stage when the episode changes', async () => {
     const view = render(React.createElement(WorkspaceStageContent, {
       currentStage: 'config',
+      projectId: 'project-1',
       episodeId: 'episode-1',
     }))
     const configInput = await view.findByRole('textbox', { name: 'config state' }) as HTMLInputElement
@@ -101,7 +112,30 @@ describe('WorkspaceStageContent dynamic boundaries', () => {
 
     view.rerender(React.createElement(WorkspaceStageContent, {
       currentStage: 'config',
+      projectId: 'project-1',
       episodeId: 'episode-2',
+    }))
+
+    expect((await view.findByRole('textbox', { name: 'config state' }) as HTMLInputElement).value)
+      .toBe('')
+  })
+
+  it('remounts the current stage when the project changes', async () => {
+    const ProjectScopedStageContent = WorkspaceStageContent as React.ComponentType<{
+      currentStage: string
+      projectId: string
+      episodeId?: string
+    }>
+    const view = render(React.createElement(ProjectScopedStageContent, {
+      currentStage: 'config',
+      projectId: 'project-1',
+    }))
+    const configInput = await view.findByRole('textbox', { name: 'config state' }) as HTMLInputElement
+    fireEvent.change(configInput, { target: { value: 'project one draft' } })
+
+    view.rerender(React.createElement(ProjectScopedStageContent, {
+      currentStage: 'config',
+      projectId: 'project-2',
     }))
 
     expect((await view.findByRole('textbox', { name: 'config state' }) as HTMLInputElement).value)
@@ -182,7 +216,7 @@ describe('WorkspaceStageCache', () => {
     )
 
     expect(updateWorkspaceStageCache(populated, 'episode-2', 'storyboard')).toEqual({
-      episodeId: 'episode-2',
+      scopeKey: 'episode-2',
       stages: ['storyboard'],
     })
   })
@@ -244,5 +278,78 @@ describe('WorkspaceStageCache', () => {
 
     cleanupPrefetch()
     expect(clearTimeout).toHaveBeenCalledWith(11)
+  })
+
+  it('does not run a stale idle callback after cleanup', () => {
+    const loaders = {
+      config: vi.fn(),
+      script: vi.fn(),
+      storyboard: vi.fn(),
+      videos: vi.fn(),
+      voice: vi.fn(),
+    }
+    let idleCallback: (() => void) | undefined
+    const cleanupPrefetch = scheduleNextWorkspaceStagePrefetch('config', loaders, {
+      requestIdleCallback: (callback) => {
+        idleCallback = callback
+        return 19
+      },
+      cancelIdleCallback: vi.fn(),
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+    })
+
+    cleanupPrefetch()
+    idleCallback?.()
+
+    expect(loaders.script).not.toHaveBeenCalled()
+  })
+
+  it('contains a rejected prefetch loader', async () => {
+    const loaders = {
+      config: vi.fn(),
+      script: vi.fn().mockRejectedValue(new Error('prefetch unavailable')),
+      storyboard: vi.fn(),
+      videos: vi.fn(),
+      voice: vi.fn(),
+    }
+    let idleCallback: (() => void) | undefined
+    scheduleNextWorkspaceStagePrefetch('config', loaders, {
+      requestIdleCallback: (callback) => {
+        idleCallback = callback
+        return 23
+      },
+      cancelIdleCallback: vi.fn(),
+      setTimeout: vi.fn(),
+      clearTimeout: vi.fn(),
+    })
+
+    idleCallback?.()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(loaders.script).toHaveBeenCalledOnce()
+  })
+
+  it('does not schedule prefetch after the final voice stage', () => {
+    const loaders = {
+      config: vi.fn(),
+      script: vi.fn(),
+      storyboard: vi.fn(),
+      videos: vi.fn(),
+      voice: vi.fn(),
+    }
+    const requestIdleCallback = vi.fn()
+    const setTimeout = vi.fn()
+
+    scheduleNextWorkspaceStagePrefetch('voice', loaders, {
+      requestIdleCallback,
+      cancelIdleCallback: vi.fn(),
+      setTimeout,
+      clearTimeout: vi.fn(),
+    })
+
+    expect(requestIdleCallback).not.toHaveBeenCalled()
+    expect(setTimeout).not.toHaveBeenCalled()
   })
 })

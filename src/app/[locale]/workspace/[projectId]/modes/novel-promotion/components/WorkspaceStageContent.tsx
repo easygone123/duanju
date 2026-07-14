@@ -1,16 +1,18 @@
 'use client'
 
-import dynamic from 'next/dynamic'
+import dynamic, { type DynamicOptionsLoadingProps, type Loader } from 'next/dynamic'
 import { useEffect } from 'react'
 import {
   WorkspaceStageCache,
   normalizeWorkspaceStage,
   scheduleNextWorkspaceStagePrefetch,
   type WorkspaceStageComponentMap,
+  type WorkspaceStageLoaderMap,
 } from './WorkspaceStageCache'
 
 interface WorkspaceStageContentProps {
   currentStage: string
+  projectId: string
   episodeId?: string
 }
 
@@ -22,20 +24,54 @@ export const workspaceStageLoaders = {
   voice: () => import('./VoiceStageRoute'),
 }
 
-function WorkspaceStageLoadingFallback() {
-  return <div className="min-h-[50vh]" aria-busy="true" />
+export function WorkspaceStageLoadingFallback({
+  error,
+  retry,
+}: DynamicOptionsLoadingProps) {
+  if (error) {
+    return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center gap-3" role="alert">
+        <p>Workspace stage failed to load.</p>
+        <button
+          type="button"
+          className="glass-btn-base glass-btn-secondary px-4 py-2"
+          onClick={retry}
+          disabled={!retry}
+          aria-label="Retry loading workspace stage"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="min-h-[50vh]"
+      role="status"
+      aria-label="Loading workspace stage"
+      aria-busy="true"
+    />
+  )
 }
 
-const workspaceStageComponents: WorkspaceStageComponentMap = {
-  config: dynamic(workspaceStageLoaders.config, { loading: WorkspaceStageLoadingFallback }),
-  script: dynamic(workspaceStageLoaders.script, { loading: WorkspaceStageLoadingFallback }),
-  storyboard: dynamic(workspaceStageLoaders.storyboard, { loading: WorkspaceStageLoadingFallback }),
-  videos: dynamic(workspaceStageLoaders.videos, { loading: WorkspaceStageLoadingFallback }),
-  voice: dynamic(workspaceStageLoaders.voice, { loading: WorkspaceStageLoadingFallback }),
+export function createWorkspaceStageComponents(
+  loaders: WorkspaceStageLoaderMap,
+): WorkspaceStageComponentMap {
+  return {
+    config: dynamic(loaders.config as Loader, { loading: WorkspaceStageLoadingFallback }),
+    script: dynamic(loaders.script as Loader, { loading: WorkspaceStageLoadingFallback }),
+    storyboard: dynamic(loaders.storyboard as Loader, { loading: WorkspaceStageLoadingFallback }),
+    videos: dynamic(loaders.videos as Loader, { loading: WorkspaceStageLoadingFallback }),
+    voice: dynamic(loaders.voice as Loader, { loading: WorkspaceStageLoadingFallback }),
+  }
 }
+
+const workspaceStageComponents = createWorkspaceStageComponents(workspaceStageLoaders)
 
 export default function WorkspaceStageContent({
   currentStage,
+  projectId,
   episodeId,
 }: WorkspaceStageContentProps) {
   const activeStage = normalizeWorkspaceStage(currentStage)
@@ -47,6 +83,7 @@ export default function WorkspaceStageContent({
   return (
     <WorkspaceStageCache
       currentStage={activeStage}
+      projectId={projectId}
       episodeId={episodeId}
       stageComponents={workspaceStageComponents}
     />

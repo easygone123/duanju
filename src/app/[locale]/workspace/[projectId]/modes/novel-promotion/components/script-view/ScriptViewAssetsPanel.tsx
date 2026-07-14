@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useWorkspaceStageActivity } from '../WorkspaceStageActivityContext'
 import type { Character, Location, Prop, CharacterAppearance } from '@/types/project'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
@@ -146,6 +147,7 @@ export default function ScriptViewAssetsPanel({
   tNP,
   tCommon,
 }: ScriptViewAssetsPanelProps) {
+  const isStageActive = useWorkspaceStageActivity()
   const [showAddChar, setShowAddChar] = useState(false)
   const [showAddLoc, setShowAddLoc] = useState(false)
   const [showAddProp, setShowAddProp] = useState(false)
@@ -173,6 +175,13 @@ export default function ScriptViewAssetsPanel({
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  useEffect(() => {
+    if (isStageActive) return
+    setShowAddChar(false)
+    setShowAddLoc(false)
+    setShowAddProp(false)
+  }, [isStageActive])
 
   useEffect(() => {
     if (!showAddChar) {
@@ -255,7 +264,7 @@ export default function ScriptViewAssetsPanel({
   }, [activePropIds, showAddProp])
 
   useEffect(() => {
-    if (!showAddChar && !showAddLoc && !showAddProp) return
+    if (!isStageActive || (!showAddChar && !showAddLoc && !showAddProp)) return
 
     const handlePointerDownOutside = (event: MouseEvent) => {
       const target = event.target as Node
@@ -299,7 +308,7 @@ export default function ScriptViewAssetsPanel({
       document.removeEventListener('mousedown', handlePointerDownOutside, true)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [showAddChar, showAddLoc, showAddProp])
+  }, [isStageActive, showAddChar, showAddLoc, showAddProp])
 
   const isAllClipsMode = assetViewMode === 'all'
 
@@ -487,7 +496,7 @@ export default function ScriptViewAssetsPanel({
               </button>
             </div>
 
-          {showAddChar && mounted && createPortal(
+          {isStageActive && showAddChar && mounted && createPortal(
             <div ref={charEditorPopoverRef} className="fixed right-4 bottom-4 z-[80] glass-surface-modal w-[min(24rem,calc(100vw-2rem))] h-[min(560px,calc(100vh-2rem))] p-3 animate-fadeIn flex flex-col shadow-2xl">
               <div className="shrink-0 text-xs text-[var(--glass-text-tertiary)]">{tCommon('edit')} · {tScript('asset.activeCharacters')}</div>
               <div className="mt-3 flex-1 min-h-0 space-y-4 overflow-y-auto pr-1 app-scrollbar">
@@ -643,7 +652,7 @@ export default function ScriptViewAssetsPanel({
               </button>
             </div>
 
-          {showAddLoc && mounted && createPortal(
+          {isStageActive && showAddLoc && mounted && createPortal(
             <div ref={locEditorPopoverRef} className="fixed right-4 bottom-4 z-[80] glass-surface-modal w-[min(24rem,calc(100vw-2rem))] h-[min(560px,calc(100vh-2rem))] p-3 animate-fadeIn flex flex-col shadow-2xl">
               <div className="shrink-0 text-xs text-[var(--glass-text-tertiary)]">{tCommon('edit')} · {tScript('asset.activeLocations')}</div>
               <div className="mt-3 flex-1 min-h-0 overflow-y-auto pr-1 app-scrollbar">
@@ -772,7 +781,7 @@ export default function ScriptViewAssetsPanel({
               </button>
             </div>
 
-          {showAddProp && mounted && createPortal(
+          {isStageActive && showAddProp && mounted && createPortal(
             <div ref={propEditorPopoverRef} className="fixed right-4 bottom-4 z-[80] glass-surface-modal w-[min(24rem,calc(100vw-2rem))] h-[min(560px,calc(100vh-2rem))] p-3 animate-fadeIn flex flex-col shadow-2xl">
               <div className="shrink-0 text-xs text-[var(--glass-text-tertiary)]">{tCommon('edit')} · 道具</div>
               <div className="mt-3 flex-1 min-h-0 overflow-y-auto pr-1 app-scrollbar">
