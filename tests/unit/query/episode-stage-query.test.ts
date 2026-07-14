@@ -385,6 +385,114 @@ describe('episode stage query', () => {
     expect(queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText).toBe('abc')
   })
 
+  it('keeps a coalesced novelText caller pending and resolves it with the dispatched tail result', async () => {
+    const firstResponse = deferred<Response>()
+    const tailResponse = deferred<Response>()
+    apiFetchMock
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockImplementationOnce(() => tailResponse.promise)
+    const queryClient = client()
+    queryClient.setQueryData(queryKeys.episodeStage('project-1', 'episode-1', 'config'), {
+      stage: 'config',
+      episode: { id: 'episode-1', name: 'Episode', novelText: '' },
+    })
+    const mutation = renderHook(
+      () => useUpdateProjectEpisodeField('project-1'),
+      { wrapper: wrapper(queryClient) },
+    )
+
+    let firstWrite!: Promise<unknown>
+    let middleWrite!: Promise<unknown>
+    let tailWrite!: Promise<unknown>
+    act(() => {
+      firstWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'a',
+      })
+    })
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
+    act(() => {
+      middleWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'ab',
+      })
+      tailWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'abc',
+      })
+    })
+    let middleState = 'pending'
+    void middleWrite.then(() => { middleState = 'fulfilled' }, () => { middleState = 'rejected' })
+
+    firstResponse.resolve(response('ignored', { saved: 'a' }))
+    const firstResult = await firstWrite
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(2))
+    await Promise.resolve()
+    expect(middleState).toBe('pending')
+
+    tailResponse.resolve(response('ignored', { saved: 'abc' }))
+    const [middleResult, tailResult] = await Promise.all([middleWrite, tailWrite])
+
+    expect(firstResult).toEqual({ stage: 'ignored', episode: { saved: 'a' } })
+    expect(middleResult).toBe(tailResult)
+    expect(tailResult).toEqual({ stage: 'ignored', episode: { saved: 'abc' } })
+  })
+
+  it('rejects every coalesced novelText caller with the dispatched tail failure', async () => {
+    const firstResponse = deferred<Response>()
+    const tailResponse = deferred<Response>()
+    apiFetchMock
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockImplementationOnce(() => tailResponse.promise)
+    const queryClient = client()
+    queryClient.setQueryData(queryKeys.episodeStage('project-1', 'episode-1', 'config'), {
+      stage: 'config',
+      episode: { id: 'episode-1', name: 'Episode', novelText: '' },
+    })
+    const mutation = renderHook(
+      () => useUpdateProjectEpisodeField('project-1'),
+      { wrapper: wrapper(queryClient) },
+    )
+
+    let firstWrite!: Promise<unknown>
+    let middleWrite!: Promise<unknown>
+    let tailWrite!: Promise<unknown>
+    act(() => {
+      firstWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'a',
+      })
+    })
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
+    act(() => {
+      middleWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'ab',
+      })
+      tailWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'abc',
+      })
+    })
+    const middleOutcome = middleWrite.then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (error: unknown) => ({ status: 'rejected' as const, error }),
+    )
+    const tailOutcome = tailWrite.then(
+      (value) => ({ status: 'fulfilled' as const, value }),
+      (error: unknown) => ({ status: 'rejected' as const, error }),
+    )
+
+    firstResponse.resolve(response('ignored', { saved: 'a' }))
+    await expect(firstWrite).resolves.toEqual({ stage: 'ignored', episode: { saved: 'a' } })
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(2))
+    tailResponse.resolve(new Response(JSON.stringify({ error: 'tail failed' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    }))
+    const [middle, tail] = await Promise.all([middleOutcome, tailOutcome])
+
+    expect(middle.status).toBe('rejected')
+    expect(tail.status).toBe('rejected')
+    if (middle.status === 'rejected' && tail.status === 'rejected') {
+      expect(middle.error).toBe(tail.error)
+      expect(middle.error).toMatchObject({ message: 'tail failed', status: 500 })
+    }
+  })
+
   it('dispatches the newest unsent novelText draft after the mutation consumer unmounts', async () => {
     const firstResponse = deferred<Response>()
     apiFetchMock
