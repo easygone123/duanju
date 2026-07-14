@@ -1,5 +1,7 @@
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import fs from 'node:fs/promises'
 
 export type CommandBinary = 'ffmpeg' | 'ffprobe'
 
@@ -10,13 +12,16 @@ export type CommandRunner = (
 
 export type FfmpegBoundaryErrorCode =
   | 'BINARY_NOT_FOUND'
+  | 'COMMAND_ABORTED'
   | 'COMMAND_FAILED'
   | 'COMMAND_OUTPUT_LIMIT'
+  | 'COMMAND_TIMEOUT'
   | 'INVALID_COMMAND_INPUT'
   | 'FFPROBE_MALFORMED_JSON'
   | 'FFPROBE_NO_VIDEO'
   | 'FFPROBE_INVALID_VIDEO'
   | 'FFPROBE_INVALID_DURATION'
+  | 'FRAME_ARTIFACT_INVALID'
   | 'UNSUPPORTED_CONTAINER'
   | 'UNSUPPORTED_CONTAINER_BRAND'
 
@@ -33,8 +38,11 @@ export class FfmpegBoundaryError extends Error {
 export interface VideoStreamMetadata {
   index: number
   codecName: string | null
+  durationMs: number | null
   width: number
   height: number
+  isDefault: boolean
+  isAttachedPic: boolean
 }
 
 export interface AudioStreamMetadata {
@@ -49,11 +57,13 @@ export interface SubtitleStreamMetadata {
   codecName: string | null
   language: string | null
   isText: boolean
+  isDefault: boolean
 }
 
 export interface VideoMetadata {
   formatName: string
   majorBrand: string
+  videoStreamIndex: number
   durationMs: number
   width: number
   height: number
@@ -66,6 +76,37 @@ export interface VideoMetadata {
 }
 
 const DEFAULT_CAPTURE_LIMIT_BYTES = 1024 * 1024
+export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000
+export const MAX_SCENE_TIMESTAMPS = 288
+const MAX_SCENE_TIMESTAMP_MS = 180_000
+
+interface CommandChildProcess {
+  stdout: NodeJS.ReadableStream
+  stderr: NodeJS.ReadableStream
+  kill(signal?: NodeJS.Signals | number): boolean
+  once(event: 'error', listener: (error: NodeJS.ErrnoException) => void): this
+  once(
+    event: 'close',
+    listener: (exitCode: number | null, signal: NodeJS.Signals | null) => void,
+  ): this
+}
+
+export type CommandSpawn = (
+  binary: CommandBinary,
+  args: string[],
+  options: {
+    shell: false
+    stdio: ['ignore', 'pipe', 'pipe']
+    windowsHide: true
+  },
+) => CommandChildProcess
+
+export interface CommandRunnerOptions {
+  captureLimitBytes?: number
+  timeoutMs?: number
+  signal?: AbortSignal
+  spawnImpl?: CommandSpawn
+}
 export const ALLOWED_VIRAL_VIDEO_MAJOR_BRANDS: ReadonlySet<string> = new Set([
   'isom',
   'iso2',
@@ -95,14 +136,31 @@ function stringifyChunk(chunk: Buffer): string {
 }
 
 export function createCommandRunner(
-  captureLimitBytes = DEFAULT_CAPTURE_LIMIT_BYTES,
+  options: number | CommandRunnerOptions = {},
 ): CommandRunner {
+  const {
+    captureLimitBytes = DEFAULT_CAPTURE_LIMIT_BYTES,
+    timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
+    signal,
+    spawnImpl = spawn as CommandSpawn,
+  } = typeof options === 'number' ? { captureLimitBytes: options } : options
   if (!Number.isSafeInteger(captureLimitBytes) || captureLimitBytes <= 0) {
     throw new TypeError('captureLimitBytes must be a positive safe integer')
   }
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new TypeError('timeoutMs must be a positive safe integer')
+  }
 
   return async (binary, args) => await new Promise((resolve, reject) => {
-    const child = spawn(binary, args, {
+    if (signal?.aborted) {
+      reject(new FfmpegBoundaryError(
+        'COMMAND_ABORTED',
+        `${binary} command was aborted before it started`,
+      ))
+      return
+    }
+
+    const child = spawnImpl(binary, args, {
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
@@ -112,18 +170,33 @@ export function createCommandRunner(
     let stdoutBytes = 0
     let stderrBytes = 0
     let settled = false
+    let killRequested = false
+    let terminalError: FfmpegBoundaryError | null = null
 
-    const rejectOnce = (error: Error) => {
-      if (settled) return
-      settled = true
-      reject(error)
+    const recordTerminalError = (error: FfmpegBoundaryError) => {
+      if (!terminalError) terminalError = error
+    }
+
+    const killOnce = () => {
+      if (killRequested) return
+      killRequested = true
+      try {
+        child.kill('SIGKILL')
+      } catch {
+        // The child may already have exited; close remains the settlement boundary.
+      }
+    }
+
+    const failAndKill = (error: FfmpegBoundaryError) => {
+      recordTerminalError(error)
+      killOnce()
     }
 
     const capture = (target: 'stdout' | 'stderr', chunk: Buffer) => {
+      if (terminalError) return
       const nextBytes = (target === 'stdout' ? stdoutBytes : stderrBytes) + chunk.length
       if (nextBytes > captureLimitBytes) {
-        child.kill('SIGKILL')
-        rejectOnce(new FfmpegBoundaryError(
+        failAndKill(new FfmpegBoundaryError(
           'COMMAND_OUTPUT_LIMIT',
           `${binary} ${target} exceeded the ${captureLimitBytes}-byte capture limit`,
         ))
@@ -141,34 +214,53 @@ export function createCommandRunner(
 
     child.stdout.on('data', (chunk: Buffer) => capture('stdout', chunk))
     child.stderr.on('data', (chunk: Buffer) => capture('stderr', chunk))
+    const onAbort = () => failAndKill(new FfmpegBoundaryError(
+      'COMMAND_ABORTED',
+      `${binary} command was aborted`,
+    ))
+    signal?.addEventListener('abort', onAbort, { once: true })
+    const timeout = setTimeout(() => failAndKill(new FfmpegBoundaryError(
+      'COMMAND_TIMEOUT',
+      `${binary} command exceeded the ${timeoutMs}-ms timeout`,
+    )), timeoutMs)
+
     child.once('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') {
-        rejectOnce(new FfmpegBoundaryError(
+        recordTerminalError(new FfmpegBoundaryError(
           'BINARY_NOT_FOUND',
           `Required binary "${binary}" is not available on PATH`,
         ))
         return
       }
-      rejectOnce(new FfmpegBoundaryError(
+      recordTerminalError(new FfmpegBoundaryError(
         'COMMAND_FAILED',
         `Unable to start ${binary}: ${error.message}`,
       ))
     })
-    child.once('close', (exitCode, signal) => {
+    child.once('close', (exitCode, exitSignal) => {
       if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      signal?.removeEventListener('abort', onAbort)
+
+      if (terminalError) {
+        reject(terminalError)
+        return
+      }
       const stdout = stdoutChunks.map(stringifyChunk).join('')
       const stderr = stderrChunks.map(stringifyChunk).join('')
       if (exitCode !== 0) {
-        const reason = exitCode === null ? `signal ${signal ?? 'unknown'}` : `exit code ${exitCode}`
+        const reason = exitCode === null
+          ? `signal ${exitSignal ?? 'unknown'}`
+          : `exit code ${exitCode}`
         const detail = stderr.trim() || 'no stderr output'
-        rejectOnce(new FfmpegBoundaryError(
+        reject(new FfmpegBoundaryError(
           'COMMAND_FAILED',
           `${binary} failed with ${reason}: ${detail}`,
         ))
         return
       }
 
-      settled = true
       resolve({ stdout, stderr })
     })
   })
@@ -206,6 +298,32 @@ function optionalPositiveInteger(value: unknown): number | null {
   return Number.isSafeInteger(numeric) && Number(numeric) > 0 ? Number(numeric) : null
 }
 
+function optionalPositiveDurationMs(value: unknown): number | null {
+  const durationSeconds = typeof value === 'string' || typeof value === 'number'
+    ? Number(value)
+    : Number.NaN
+  const durationMs = Math.round(durationSeconds * 1_000)
+  return Number.isFinite(durationSeconds)
+    && durationSeconds > 0
+    && Number.isSafeInteger(durationMs)
+    && durationMs > 0
+    ? durationMs
+    : null
+}
+
+function dispositionFlag(disposition: Record<string, unknown> | null, key: string): boolean {
+  return Number(disposition?.[key]) === 1
+}
+
+function assertStreamIndexValue(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new FfmpegBoundaryError(
+      'INVALID_COMMAND_INPUT',
+      `${label} must be a non-negative safe integer`,
+    )
+  }
+}
+
 export function isSupportedMp4FormatName(formatName: string): boolean {
   const formatTokens = formatName
     .split(',')
@@ -233,7 +351,7 @@ export async function probeVideo(
   const { stdout } = await runner('ffprobe', [
     '-v', 'error',
     '-show_entries',
-    'format=format_name,duration:format_tags=major_brand:stream=index,codec_type,codec_name,width,height,channels,sample_rate:stream_tags=language',
+    'format=format_name,duration:format_tags=major_brand:stream=index,codec_type,codec_name,duration,width,height,channels,sample_rate:stream_disposition=attached_pic,default:stream_tags=language',
     '-of', 'json',
     sourcePath,
   ])
@@ -290,14 +408,43 @@ export async function probeVideo(
     const index = streamIndex(stream)
     const width = optionalPositiveInteger(stream.width)
     const height = optionalPositiveInteger(stream.height)
+    const disposition = asRecord(stream.disposition)
     if (index === null || width === null || height === null) {
       throw new FfmpegBoundaryError(
         'FFPROBE_INVALID_VIDEO',
         'FFprobe returned invalid video stream metadata',
       )
     }
-    return { index, codecName: optionalString(stream.codec_name), width, height }
+    return {
+      index,
+      codecName: optionalString(stream.codec_name),
+      durationMs: optionalPositiveDurationMs(stream.duration),
+      width,
+      height,
+      isDefault: dispositionFlag(disposition, 'default'),
+      isAttachedPic: dispositionFlag(disposition, 'attached_pic'),
+    }
   })
+
+  const analyzableVideoStreams = videoStreams
+    .filter((stream) => !stream.isAttachedPic)
+    .sort((left, right) => {
+      if (left.isDefault !== right.isDefault) return left.isDefault ? -1 : 1
+      return left.index - right.index
+    })
+  if (analyzableVideoStreams.length === 0) {
+    throw new FfmpegBoundaryError(
+      'FFPROBE_NO_VIDEO',
+      'Media does not contain an analyzable non-attached video stream',
+    )
+  }
+  const primaryVideo = analyzableVideoStreams[0]
+  if (primaryVideo.durationMs === null) {
+    throw new FfmpegBoundaryError(
+      'FFPROBE_INVALID_DURATION',
+      'FFprobe returned an invalid duration for the selected video stream',
+    )
+  }
 
   const audioStreams = streamRecords
     .filter((stream) => stream.codec_type === 'audio')
@@ -319,20 +466,23 @@ export async function probeVideo(
       if (index === null) return []
       const codecName = optionalString(stream.codec_name)
       const tags = asRecord(stream.tags)
+      const disposition = asRecord(stream.disposition)
       return [{
         index,
         codecName,
         language: optionalString(tags?.language),
         isText: codecName !== null && TEXT_SUBTITLE_CODECS.has(codecName.toLowerCase()),
+        isDefault: dispositionFlag(disposition, 'default'),
       }]
     })
 
   return {
     formatName,
     majorBrand,
-    durationMs,
-    width: videoStreams[0].width,
-    height: videoStreams[0].height,
+    videoStreamIndex: primaryVideo.index,
+    durationMs: primaryVideo.durationMs,
+    width: primaryVideo.width,
+    height: primaryVideo.height,
     hasVideo: true,
     hasAudio: audioStreams.length > 0,
     hasSubtitles: subtitleStreams.length > 0,
@@ -344,12 +494,15 @@ export async function probeVideo(
 
 export async function detectSceneTimestamps(
   sourcePath: string,
+  videoStreamIndex: number,
   runner: CommandRunner = defaultCommandRunner,
 ): Promise<number[]> {
   assertAbsolutePath(sourcePath, 'sourcePath')
+  assertStreamIndexValue(videoStreamIndex, 'video stream index')
   const { stderr } = await runner('ffmpeg', [
     '-hide_banner', '-nostdin', '-loglevel', 'info',
     '-i', sourcePath,
+    '-map', `0:${videoStreamIndex}`,
     '-an', '-sn',
     '-vf', 'select=gt(scene\\,0.3),showinfo',
     '-f', 'null',
@@ -360,7 +513,14 @@ export async function detectSceneTimestamps(
 
   for (const match of stderr.matchAll(timestampPattern)) {
     const timestampMs = Math.round(Number(match[1]) * 1_000)
-    if (Number.isSafeInteger(timestampMs) && timestampMs >= 0) timestamps.add(timestampMs)
+    if (
+      Number.isSafeInteger(timestampMs)
+      && timestampMs >= 0
+      && timestampMs <= MAX_SCENE_TIMESTAMP_MS
+    ) {
+      timestamps.add(timestampMs)
+      if (timestamps.size >= MAX_SCENE_TIMESTAMPS) break
+    }
   }
 
   return [...timestamps].sort((left, right) => left - right)
@@ -370,6 +530,7 @@ export async function extractFrame(
   sourcePath: string,
   outputPath: string,
   timestampMs: number,
+  videoStreamIndex: number,
   runner: CommandRunner = defaultCommandRunner,
 ): Promise<void> {
   assertAbsolutePath(sourcePath, 'sourcePath')
@@ -380,14 +541,45 @@ export async function extractFrame(
       'timestampMs must be a non-negative safe integer',
     )
   }
-  await runner('ffmpeg', [
-    '-hide_banner', '-nostdin', '-loglevel', 'error', '-y',
-    '-ss', (timestampMs / 1_000).toFixed(3),
-    '-i', sourcePath,
-    '-frames:v', '1',
-    '-q:v', '2',
-    outputPath,
-  ])
+  assertStreamIndexValue(videoStreamIndex, 'video stream index')
+
+  const temporaryPath = path.join(
+    path.dirname(outputPath),
+    `.${path.basename(outputPath)}.${randomUUID()}.tmp.jpg`,
+  )
+  let published = false
+  try {
+    await runner('ffmpeg', [
+      '-hide_banner', '-nostdin', '-loglevel', 'error', '-y',
+      '-ss', (timestampMs / 1_000).toFixed(3),
+      '-i', sourcePath,
+      '-map', `0:${videoStreamIndex}`,
+      '-frames:v', '1',
+      '-q:v', '2',
+      temporaryPath,
+    ])
+
+    let artifact: Awaited<ReturnType<typeof fs.lstat>>
+    try {
+      artifact = await fs.lstat(temporaryPath)
+    } catch {
+      throw new FfmpegBoundaryError(
+        'FRAME_ARTIFACT_INVALID',
+        'FFmpeg did not produce a frame artifact',
+      )
+    }
+    if (!artifact.isFile() || artifact.size <= 0) {
+      throw new FfmpegBoundaryError(
+        'FRAME_ARTIFACT_INVALID',
+        'FFmpeg produced an empty or non-regular frame artifact',
+      )
+    }
+
+    await fs.rename(temporaryPath, outputPath)
+    published = true
+  } finally {
+    if (!published) await fs.rm(temporaryPath, { force: true })
+  }
 }
 
 export async function extractEmbeddedSubtitles(

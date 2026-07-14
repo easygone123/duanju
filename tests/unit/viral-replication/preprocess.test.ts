@@ -35,18 +35,46 @@ function ftypPrefix(boxSize = 24, majorBrand = 'isom'): Buffer {
   return prefix
 }
 
-function fakeProbePayload(subtitleCodec?: string): string {
+interface FakeSubtitleStream {
+  index: number
+  codecName: string
+  language?: string
+  isDefault?: boolean
+}
+
+interface FakeProbeOptions {
+  containerDuration?: string
+  videoDuration?: string
+  subtitleStreams?: FakeSubtitleStream[]
+}
+
+function fakeProbePayload(input?: string | FakeProbeOptions): string {
+  const options: FakeProbeOptions = typeof input === 'string'
+    ? { subtitleStreams: [{ index: 2, codecName: input, language: 'eng', isDefault: true }] }
+    : input ?? {}
   return JSON.stringify({
     format: {
       format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
-      duration: '15',
+      duration: options.containerDuration ?? '15',
       tags: { major_brand: 'isom' },
     },
     streams: [
-      { index: 0, codec_type: 'video', codec_name: 'h264', width: 320, height: 180 },
-      ...(subtitleCodec
-        ? [{ index: 2, codec_type: 'subtitle', codec_name: subtitleCodec, tags: { language: 'eng' } }]
-        : []),
+      {
+        index: 0,
+        codec_type: 'video',
+        codec_name: 'h264',
+        duration: options.videoDuration ?? '15',
+        width: 320,
+        height: 180,
+        disposition: { attached_pic: 0, default: 1 },
+      },
+      ...(options.subtitleStreams ?? []).map((subtitle) => ({
+        index: subtitle.index,
+        codec_type: 'subtitle',
+        codec_name: subtitle.codecName,
+        disposition: { attached_pic: 0, default: subtitle.isDefault ? 1 : 0 },
+        ...(subtitle.language ? { tags: { language: subtitle.language } } : {}),
+      })),
     ],
   })
 }
@@ -207,7 +235,11 @@ describe('preprocessViralVideo', () => {
           stderr: 'pts_time:5.000\npts_time:10.000',
         }
       }
-      if (args.includes('-map')) {
+      if (args.includes('-frames:v')) {
+        await fs.writeFile(args.at(-1)!, 'valid jpeg placeholder')
+        return { stdout: '', stderr: '' }
+      }
+      if (args.includes('srt')) {
         return { stdout: '1\n00:00:00,000 --> 00:00:01,000\nOpening line\n', stderr: '' }
       }
       return { stdout: '', stderr: '' }
@@ -244,8 +276,19 @@ describe('preprocessViralVideo', () => {
     expect(calls.map((call) => call.binary)).toEqual([
       'ffprobe', 'ffmpeg', 'ffmpeg', 'ffmpeg', 'ffmpeg', 'ffmpeg',
     ])
-    expect(calls.filter((call) => call.args.includes('-frames:v')).map((call) => call.args.at(-1)))
-      .toEqual(result.shots.map((shot) => shot.framePath))
+    for (const shot of result.shots) {
+      await expect(fs.stat(shot.framePath)).resolves.toMatchObject({ size: expect.any(Number) })
+      expect((await fs.stat(shot.framePath)).size).toBeGreaterThan(0)
+    }
+    const mappedCalls = calls.filter((call) => call.args.includes('-map'))
+    expect(mappedCalls.slice(0, -1).map((call) => call.args[call.args.indexOf('-map') + 1]))
+      .toEqual(['0:0', '0:0', '0:0', '0:0'])
+    expect(mappedCalls.at(-1)?.args).toEqual(expect.arrayContaining(['-map', '0:2', '-f', 'srt']))
+    await expect(fs.readdir(outputDirectory)).resolves.toEqual([
+      'shot-000.jpg',
+      'shot-001.jpg',
+      'shot-002.jpg',
+    ])
   })
 
   it.each([
@@ -259,32 +302,106 @@ describe('preprocessViralVideo', () => {
       if (args.some((arg) => arg.includes('showinfo'))) {
         return { stdout: '', stderr: 'pts_time:5\npts_time:10' }
       }
+      if (args.includes('-frames:v')) await fs.writeFile(args.at(-1)!, 'frame')
       return { stdout: '', stderr: '' }
     }
 
     const result = await preprocessViralVideo({ sourcePath, outputDirectory, runner })
 
     expect(result.transcriptText).toBeNull()
-    expect(calls.some((call) => call.args.includes('-map'))).toBe(false)
+    expect(calls.some((call) => call.args.includes('srt'))).toBe(false)
   })
 
-  it('propagates extraction failure for a declared text subtitle instead of hiding it', async () => {
-    const subtitleFailure = new FfmpegBoundaryError(
-      'COMMAND_FAILED',
-      'ffmpeg failed while extracting declared subtitle stream',
-    )
+  it.each(['failure', 'empty'])(
+    'continues after a %s first text subtitle and returns the next usable track',
+    async (firstBehavior) => {
+      const subtitleMaps: string[] = []
+      const runner: CommandRunner = async (binary, args) => {
+        if (binary === 'ffprobe') {
+          return {
+            stdout: fakeProbePayload({
+              subtitleStreams: [
+                { index: 2, codecName: 'mov_text', isDefault: true },
+                { index: 3, codecName: 'subrip', language: 'eng' },
+              ],
+            }),
+            stderr: '',
+          }
+        }
+        if (args.some((arg) => arg.includes('showinfo'))) {
+          return { stdout: '', stderr: 'pts_time:5\npts_time:10' }
+        }
+        if (args.includes('-frames:v')) {
+          await fs.writeFile(args.at(-1)!, 'frame')
+          return { stdout: '', stderr: '' }
+        }
+        const map = args[args.indexOf('-map') + 1]
+        subtitleMaps.push(map)
+        if (map === '0:2') {
+          if (firstBehavior === 'failure') {
+            throw new FfmpegBoundaryError('COMMAND_FAILED', 'corrupt subtitle')
+          }
+          return { stdout: '   \n', stderr: '' }
+        }
+        return { stdout: '  second track transcript  \n', stderr: '' }
+      }
+
+      const result = await preprocessViralVideo({ sourcePath, outputDirectory, runner })
+
+      expect(result.transcriptText).toBe('second track transcript')
+      expect(subtitleMaps).toEqual(['0:2', '0:3'])
+    },
+  )
+
+  it('returns null when all text subtitles fail while preserving verified frames', async () => {
+    const subtitleMaps: string[] = []
     const runner: CommandRunner = async (binary, args) => {
-      if (binary === 'ffprobe') return { stdout: fakeProbePayload('mov_text'), stderr: '' }
+      if (binary === 'ffprobe') {
+        return {
+          stdout: fakeProbePayload({
+            subtitleStreams: [
+              { index: 2, codecName: 'mov_text', isDefault: true },
+              { index: 3, codecName: 'subrip', language: 'eng' },
+            ],
+          }),
+          stderr: '',
+        }
+      }
       if (args.some((arg) => arg.includes('showinfo'))) {
         return { stdout: '', stderr: 'pts_time:5\npts_time:10' }
       }
-      if (args.includes('-map')) throw subtitleFailure
-      return { stdout: '', stderr: '' }
+      if (args.includes('-frames:v')) {
+        await fs.writeFile(args.at(-1)!, 'frame')
+        return { stdout: '', stderr: '' }
+      }
+      subtitleMaps.push(args[args.indexOf('-map') + 1])
+      throw new FfmpegBoundaryError('COMMAND_FAILED', 'corrupt subtitle')
     }
 
-    await expect(preprocessViralVideo({ sourcePath, outputDirectory, runner })).rejects.toBe(
-      subtitleFailure,
-    )
+    const result = await preprocessViralVideo({ sourcePath, outputDirectory, runner })
+
+    expect(result.transcriptText).toBeNull()
+    expect(subtitleMaps).toEqual(['0:2', '0:3'])
+    expect(result.shots).toHaveLength(3)
+    for (const shot of result.shots) {
+      expect((await fs.stat(shot.framePath)).size).toBeGreaterThan(0)
+    }
+  })
+
+  it('rejects a short selected video even when the container tail is long', async () => {
+    const calls: Array<{ binary: string; args: string[] }> = []
+    const runner: CommandRunner = async (binary, args) => {
+      calls.push({ binary, args })
+      return {
+        stdout: fakeProbePayload({ containerDuration: '30', videoDuration: '10' }),
+        stderr: '',
+      }
+    }
+
+    await expect(preprocessViralVideo({ sourcePath, outputDirectory, runner })).rejects.toMatchObject({
+      code: 'INVALID_VIDEO_DURATION',
+    })
+    expect(calls).toHaveLength(1)
   })
 
   it('rejects an invalid output boundary before creating directories or running commands', async () => {
@@ -323,7 +440,7 @@ describe('preprocessViralVideo', () => {
     expect(result.shots.length).toBeGreaterThanOrEqual(3)
     expect(result.shots[0].representativeMs).toBe(0)
     for (const shot of result.shots) {
-      await expect(fs.stat(shot.framePath)).resolves.toMatchObject({ size: expect.any(Number) })
+      expect((await fs.stat(shot.framePath)).size).toBeGreaterThan(0)
     }
   })
 })

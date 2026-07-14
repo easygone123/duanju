@@ -125,21 +125,45 @@ export async function preprocessViralVideo({
 
   const metadata = await probeVideo(sourcePath, runner)
   validateViralVideoMetadata(metadata)
-  const sceneTimestamps = await detectSceneTimestamps(sourcePath, runner)
+  const sceneTimestamps = await detectSceneTimestamps(
+    sourcePath,
+    metadata.videoStreamIndex,
+    runner,
+  )
   const shotRanges = buildShotRanges(metadata.durationMs, sceneTimestamps)
 
   await fs.mkdir(outputDirectory, { recursive: true })
   const shots: PreprocessedViralShot[] = []
   for (const [shotIndex, range] of shotRanges.entries()) {
     const framePath = path.join(outputDirectory, frameFilename(shotIndex))
-    await extractFrame(sourcePath, framePath, range.representativeMs, runner)
+    await extractFrame(
+      sourcePath,
+      framePath,
+      range.representativeMs,
+      metadata.videoStreamIndex,
+      runner,
+    )
     shots.push({ shotIndex, ...range, framePath })
   }
 
-  const textSubtitle = metadata.subtitleStreams.find((stream) => stream.isText)
-  const transcriptText = textSubtitle
-    ? await extractEmbeddedSubtitles(sourcePath, textSubtitle.index, runner)
-    : null
+  const textSubtitles = metadata.subtitleStreams
+    .filter((stream) => stream.isText)
+    .sort((left, right) => {
+      if (left.isDefault !== right.isDefault) return left.isDefault ? -1 : 1
+      const leftHasLanguage = left.language !== null
+      const rightHasLanguage = right.language !== null
+      if (leftHasLanguage !== rightHasLanguage) return leftHasLanguage ? -1 : 1
+      return left.index - right.index
+    })
+  let transcriptText: string | null = null
+  for (const subtitle of textSubtitles) {
+    try {
+      transcriptText = await extractEmbeddedSubtitles(sourcePath, subtitle.index, runner)
+    } catch {
+      continue
+    }
+    if (transcriptText !== null) break
+  }
 
   return { metadata, shots, transcriptText }
 }

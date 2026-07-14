@@ -1,8 +1,13 @@
+import { EventEmitter } from 'node:events'
+import fs from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { PassThrough } from 'node:stream'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   FfmpegBoundaryError,
+  MAX_SCENE_TIMESTAMPS,
   assertFfmpegAvailable,
   createCommandRunner,
   defaultCommandRunner,
@@ -14,6 +19,14 @@ import {
 } from '@/lib/viral-replication/ffmpeg'
 
 const sourcePath = path.resolve('/tmp/viral source;$(touch nope).mp4')
+
+function fakeChildProcess() {
+  return Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill: vi.fn(() => true),
+  })
+}
 
 function probePayload(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -27,8 +40,10 @@ function probePayload(overrides: Record<string, unknown> = {}): string {
         index: 0,
         codec_type: 'video',
         codec_name: 'h264',
+        duration: '15.000000',
         width: 640,
         height: 360,
+        disposition: { attached_pic: 0, default: 1 },
       },
       {
         index: 1,
@@ -41,6 +56,7 @@ function probePayload(overrides: Record<string, unknown> = {}): string {
         index: 2,
         codec_type: 'subtitle',
         codec_name: 'mov_text',
+        disposition: { attached_pic: 0, default: 1 },
         tags: { language: 'eng' },
       },
       {
@@ -54,6 +70,106 @@ function probePayload(overrides: Record<string, unknown> = {}): string {
 }
 
 describe('FFmpeg command boundary', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('times out, kills once, and rejects only after the child closes', async () => {
+    vi.useFakeTimers()
+    const child = fakeChildProcess()
+    const runner = createCommandRunner({
+      timeoutMs: 50,
+      spawnImpl: () => child,
+    })
+    let settled = false
+    const observed = runner('ffmpeg', ['-version']).then(
+      (value) => ({ value, error: null }),
+      (error: unknown) => ({ value: null, error }),
+    ).finally(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(50)
+
+    expect(child.kill).toHaveBeenCalledTimes(1)
+    expect(settled).toBe(false)
+    child.emit('close', null, 'SIGKILL')
+    await expect(observed).resolves.toMatchObject({
+      error: expect.objectContaining({ code: 'COMMAND_TIMEOUT' }),
+    })
+  })
+
+  it('bounds output, kills once, and waits for close before rejecting', async () => {
+    const child = fakeChildProcess()
+    const runner = createCommandRunner({
+      captureLimitBytes: 8,
+      timeoutMs: 1_000,
+      spawnImpl: () => child,
+    })
+    let settled = false
+    const observed = runner('ffmpeg', ['-version']).then(
+      (value) => ({ value, error: null }),
+      (error: unknown) => ({ value: null, error }),
+    ).finally(() => {
+      settled = true
+    })
+
+    child.stderr.write('123456789')
+    child.stdout.write('also-overflowing')
+    await Promise.resolve()
+
+    expect(child.kill).toHaveBeenCalledTimes(1)
+    expect(settled).toBe(false)
+    child.emit('close', null, 'SIGKILL')
+    await expect(observed).resolves.toMatchObject({
+      error: expect.objectContaining({ code: 'COMMAND_OUTPUT_LIMIT' }),
+    })
+  })
+
+  it('keeps abort as the stable cause across abort, error, close, and repeated kill races', async () => {
+    const controller = new AbortController()
+    const child = fakeChildProcess()
+    const runner = createCommandRunner({
+      signal: controller.signal,
+      timeoutMs: 1_000,
+      spawnImpl: () => child,
+    })
+    const promise = runner('ffmpeg', ['-version'])
+
+    controller.abort()
+    controller.abort()
+    child.emit('error', Object.assign(new Error('late spawn error'), { code: 'ENOENT' }))
+    expect(child.kill).toHaveBeenCalledTimes(1)
+    child.emit('close', null, 'SIGKILL')
+
+    await expect(promise).rejects.toMatchObject({ code: 'COMMAND_ABORTED' })
+  })
+
+  it('records a spawn error but rejects only after close without killing', async () => {
+    const child = fakeChildProcess()
+    const runner = createCommandRunner({
+      timeoutMs: 1_000,
+      spawnImpl: () => child,
+    })
+    let settled = false
+    const observed = runner('ffprobe', ['-version']).then(
+      (value) => ({ value, error: null }),
+      (error: unknown) => ({ value: null, error }),
+    ).finally(() => {
+      settled = true
+    })
+
+    child.emit('error', Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    await Promise.resolve()
+
+    expect(child.kill).not.toHaveBeenCalled()
+    expect(settled).toBe(false)
+    child.emit('close', -2, null)
+    await expect(observed).resolves.toMatchObject({
+      error: expect.objectContaining({ code: 'BINARY_NOT_FOUND' }),
+    })
+  })
+
   it('checks both binaries with argv-only version commands', async () => {
     const calls: Array<{ binary: string; args: string[] }> = []
     const runner: CommandRunner = async (binary, args) => {
@@ -83,7 +199,7 @@ describe('FFmpeg command boundary', () => {
       args: [
         '-v', 'error',
         '-show_entries',
-        'format=format_name,duration:format_tags=major_brand:stream=index,codec_type,codec_name,width,height,channels,sample_rate:stream_tags=language',
+        'format=format_name,duration:format_tags=major_brand:stream=index,codec_type,codec_name,duration,width,height,channels,sample_rate:stream_disposition=attached_pic,default:stream_tags=language',
         '-of', 'json',
         sourcePath,
       ],
@@ -91,18 +207,141 @@ describe('FFmpeg command boundary', () => {
     expect(metadata).toEqual({
       formatName: 'mov,mp4,m4a,3gp,3g2,mj2',
       majorBrand: 'isom',
+      videoStreamIndex: 0,
       durationMs: 15_000,
       width: 640,
       height: 360,
       hasVideo: true,
       hasAudio: true,
       hasSubtitles: true,
-      videoStreams: [{ index: 0, codecName: 'h264', width: 640, height: 360 }],
+      videoStreams: [{
+        index: 0,
+        codecName: 'h264',
+        durationMs: 15_000,
+        width: 640,
+        height: 360,
+        isDefault: true,
+        isAttachedPic: false,
+      }],
       audioStreams: [{ index: 1, codecName: 'aac', channels: 2, sampleRate: 48_000 }],
       subtitleStreams: [
-        { index: 2, codecName: 'mov_text', language: 'eng', isText: true },
-        { index: 3, codecName: 'hdmv_pgs_subtitle', language: null, isText: false },
+        {
+          index: 2,
+          codecName: 'mov_text',
+          language: 'eng',
+          isText: true,
+          isDefault: true,
+        },
+        {
+          index: 3,
+          codecName: 'hdmv_pgs_subtitle',
+          language: null,
+          isText: false,
+          isDefault: false,
+        },
       ],
+    })
+  })
+
+  it('ignores cover art and prefers the default analyzable video stream', async () => {
+    const runner: CommandRunner = async () => ({
+      stdout: probePayload({
+        streams: [
+          {
+            index: 0,
+            codec_type: 'video',
+            codec_name: 'mjpeg',
+            duration: '30',
+            width: 100,
+            height: 100,
+            disposition: { attached_pic: 1, default: 0 },
+          },
+          {
+            index: 1,
+            codec_type: 'video',
+            codec_name: 'h264',
+            duration: '16',
+            width: 640,
+            height: 360,
+            disposition: { attached_pic: 0, default: 0 },
+          },
+          {
+            index: 4,
+            codec_type: 'video',
+            codec_name: 'hevc',
+            duration: '15.5',
+            width: 1280,
+            height: 720,
+            disposition: { attached_pic: 0, default: 1 },
+          },
+        ],
+      }),
+      stderr: '',
+    })
+
+    await expect(probeVideo(sourcePath, runner)).resolves.toMatchObject({
+      videoStreamIndex: 4,
+      durationMs: 15_500,
+      width: 1280,
+      height: 720,
+    })
+  })
+
+  it('uses selected video duration instead of a longer container or audio tail', async () => {
+    const runner: CommandRunner = async () => ({
+      stdout: probePayload({
+        format: {
+          format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+          duration: '30',
+          tags: { major_brand: 'isom' },
+        },
+        streams: [
+          {
+            index: 2,
+            codec_type: 'video',
+            codec_name: 'h264',
+            duration: '10',
+            width: 640,
+            height: 360,
+            disposition: { attached_pic: 0, default: 1 },
+          },
+          {
+            index: 3,
+            codec_type: 'audio',
+            codec_name: 'aac',
+            duration: '30',
+            channels: 2,
+            sample_rate: '48000',
+          },
+        ],
+      }),
+      stderr: '',
+    })
+
+    await expect(probeVideo(sourcePath, runner)).resolves.toMatchObject({
+      videoStreamIndex: 2,
+      durationMs: 10_000,
+    })
+  })
+
+  it('rejects media whose only video stream is attached cover art', async () => {
+    const runner: CommandRunner = async () => ({
+      stdout: probePayload({
+        streams: [{
+          index: 0,
+          codec_type: 'video',
+          codec_name: 'mjpeg',
+          duration: '15',
+          width: 100,
+          height: 100,
+          disposition: { attached_pic: 1, default: 1 },
+        }],
+      }),
+      stderr: '',
+    })
+
+    await expect(probeVideo(sourcePath, runner)).rejects.toMatchObject({
+      code: 'FFPROBE_NO_VIDEO',
     })
   })
 
@@ -206,12 +445,13 @@ describe('FFmpeg command boundary', () => {
       }
     }
 
-    await expect(detectSceneTimestamps(sourcePath, runner)).resolves.toEqual([5_000, 10_000])
+    await expect(detectSceneTimestamps(sourcePath, 4, runner)).resolves.toEqual([5_000, 10_000])
     expect(calls).toEqual([{
       binary: 'ffmpeg',
       args: [
         '-hide_banner', '-nostdin', '-loglevel', 'info',
         '-i', sourcePath,
+        '-map', '0:4',
         '-an', '-sn',
         '-vf', 'select=gt(scene\\,0.3),showinfo',
         '-f', 'null',
@@ -220,27 +460,94 @@ describe('FFmpeg command boundary', () => {
     }])
   })
 
-  it('extracts an exact JPEG frame with a stable decimal timestamp and output argv', async () => {
-    const outputPath = path.resolve('/tmp/output frames/shot-000.jpg')
+  it('caps excessive scene events before shot-range construction', async () => {
+    const runner: CommandRunner = async () => ({
+      stdout: '',
+      stderr: Array.from(
+        { length: MAX_SCENE_TIMESTAMPS + 100 },
+        (_, index) => `pts_time:${(index + 1) / 1000}`,
+      ).join('\n'),
+    })
+
+    const timestamps = await detectSceneTimestamps(sourcePath, 0, runner)
+
+    expect(timestamps).toHaveLength(MAX_SCENE_TIMESTAMPS)
+    expect(timestamps.at(-1)).toBe(MAX_SCENE_TIMESTAMPS)
+  })
+
+  it('extracts a mapped JPEG through a nonempty sibling temp file and atomically replaces final', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'viral-frame-test-'))
+    const outputPath = path.join(tempRoot, 'shot-000.jpg')
+    await fs.writeFile(outputPath, 'old frame')
     const calls: Array<{ binary: string; args: string[] }> = []
     const runner: CommandRunner = async (binary, args) => {
       calls.push({ binary, args })
+      await fs.writeFile(args.at(-1)!, 'valid jpeg placeholder')
       return { stdout: '', stderr: '' }
     }
 
-    await extractFrame(sourcePath, outputPath, 1_250, runner)
+    try {
+      await extractFrame(sourcePath, outputPath, 1_250, 4, runner)
 
-    expect(calls).toEqual([{
-      binary: 'ffmpeg',
-      args: [
+      const tempOutputPath = calls[0].args.at(-1)!
+      expect(calls[0]).toMatchObject({ binary: 'ffmpeg' })
+      expect(calls[0].args).toEqual([
         '-hide_banner', '-nostdin', '-loglevel', 'error', '-y',
         '-ss', '1.250',
         '-i', sourcePath,
+        '-map', '0:4',
         '-frames:v', '1',
         '-q:v', '2',
-        outputPath,
-      ],
-    }])
+        tempOutputPath,
+      ])
+      expect(path.dirname(tempOutputPath)).toBe(tempRoot)
+      expect(tempOutputPath).not.toBe(outputPath)
+      expect(tempOutputPath.endsWith('.jpg')).toBe(true)
+      await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('valid jpeg placeholder')
+      await expect(fs.readdir(tempRoot)).resolves.toEqual(['shot-000.jpg'])
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    ['missing output', async () => undefined],
+    ['zero-byte output', async (tempPath: string) => fs.writeFile(tempPath, '')],
+  ])('rejects and cleans a %s frame artifact', async (_label, createArtifact) => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'viral-frame-test-'))
+    const outputPath = path.join(tempRoot, 'shot.jpg')
+    await fs.writeFile(outputPath, 'previous valid frame')
+    const runner: CommandRunner = async (_binary, args) => {
+      await createArtifact(args.at(-1)!)
+      return { stdout: '', stderr: '' }
+    }
+
+    try {
+      await expect(extractFrame(sourcePath, outputPath, 0, 0, runner)).rejects.toMatchObject({
+        code: 'FRAME_ARTIFACT_INVALID',
+      })
+      await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('previous valid frame')
+      await expect(fs.readdir(tempRoot)).resolves.toEqual(['shot.jpg'])
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('cleans a partial temp frame when the command runner fails', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'viral-frame-test-'))
+    const outputPath = path.join(tempRoot, 'shot.jpg')
+    const commandFailure = new FfmpegBoundaryError('COMMAND_FAILED', 'synthetic frame failure')
+    const runner: CommandRunner = async (_binary, args) => {
+      await fs.writeFile(args.at(-1)!, 'partial')
+      throw commandFailure
+    }
+
+    try {
+      await expect(extractFrame(sourcePath, outputPath, 0, 0, runner)).rejects.toBe(commandFailure)
+      await expect(fs.readdir(tempRoot)).resolves.toEqual([])
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true })
+    }
   })
 
   it('extracts a selected embedded text subtitle stream to stdout', async () => {
@@ -267,8 +574,9 @@ describe('FFmpeg command boundary', () => {
 
   it.each([
     ['relative source path', () => probeVideo('relative.mp4', async () => ({ stdout: '', stderr: '' }))],
-    ['NUL output path', () => extractFrame(sourcePath, '/tmp/bad\0.jpg', 0, async () => ({ stdout: '', stderr: '' }))],
-    ['negative frame timestamp', () => extractFrame(sourcePath, '/tmp/shot.jpg', -1, async () => ({ stdout: '', stderr: '' }))],
+    ['NUL output path', () => extractFrame(sourcePath, '/tmp/bad\0.jpg', 0, 0, async () => ({ stdout: '', stderr: '' }))],
+    ['negative frame timestamp', () => extractFrame(sourcePath, '/tmp/shot.jpg', -1, 0, async () => ({ stdout: '', stderr: '' }))],
+    ['fractional video index', () => extractFrame(sourcePath, '/tmp/shot.jpg', 0, 1.5, async () => ({ stdout: '', stderr: '' }))],
     ['fractional subtitle index', () => extractEmbeddedSubtitles(sourcePath, 1.5, async () => ({ stdout: '', stderr: '' }))],
   ])('rejects an unsafe %s before invoking a command', async (_label, operation) => {
     await expect(operation()).rejects.toThrow(/invalid|absolute|non-negative/i)
