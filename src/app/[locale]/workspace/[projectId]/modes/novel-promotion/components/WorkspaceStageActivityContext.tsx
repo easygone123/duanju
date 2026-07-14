@@ -24,14 +24,20 @@ export function useWorkspaceStageActivity() {
 
 export function useCloseOnWorkspaceStageInactive(isOpen: boolean, onClose: () => void) {
   const isStageActive = useWorkspaceStageActivity()
-  const wasStageActiveRef = useRef(isStageActive)
+  const didCloseWhileInactiveRef = useRef(false)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
 
   useEffect(() => {
-    const wasStageActive = wasStageActiveRef.current
-    wasStageActiveRef.current = isStageActive
-    if (wasStageActive && !isStageActive && isOpen) onCloseRef.current()
+    if (!isOpen) {
+      didCloseWhileInactiveRef.current = false
+      return
+    }
+
+    if (!isStageActive && !didCloseWhileInactiveRef.current) {
+      didCloseWhileInactiveRef.current = true
+      onCloseRef.current()
+    }
   }, [isOpen, isStageActive])
 
   return isStageActive

@@ -1,11 +1,12 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import type { NovelPromotionStoryboard } from '@/types/project'
 import type { PanelEditData } from '../../PanelEditForm'
 import type { StoryboardPanel } from './useStoryboardState'
 import type { SelectedAsset } from './useImageGeneration'
 import { useStoryboardAiDataRuntime } from './useStoryboardAiDataRuntime'
+import { useCloseOnWorkspaceStageInactive } from '../../WorkspaceStageActivityContext'
 
 interface AssetPickerPanelRef {
   panelId: string
@@ -94,6 +95,19 @@ export function useStoryboardModalRuntime({
   updatePhotographyPlanMutation,
   updatePanelActingNotesMutation,
 }: UseStoryboardModalRuntimeParams) {
+  const closeImageEditModal = useCallback(() => setEditingPanel(null), [setEditingPanel])
+  const closeAIDataModal = useCallback(() => setAIDataPanel(null), [setAIDataPanel])
+  const closePreviewImage = useCallback(() => setPreviewImage(null), [setPreviewImage])
+  const closeAssetPicker = useCallback(() => setAssetPickerPanel(null), [setAssetPickerPanel])
+  const clearTransientUiState = useCallback(() => {
+    closeImageEditModal()
+    closeAIDataModal()
+    closePreviewImage()
+    closeAssetPicker()
+  }, [closeAIDataModal, closeAssetPicker, closeImageEditModal, closePreviewImage])
+  const hasTransientUiState = Boolean(editingPanel || aiDataPanel || previewImage || assetPickerPanel)
+  const isStageActive = useCloseOnWorkspaceStageInactive(hasTransientUiState, clearTransientUiState)
+
   const imageEditDefaults = useMemo(() => {
     if (!editingPanel) return []
     const clipId = localStoryboards.find((storyboard) => storyboard.id === editingPanel.storyboardId)?.clipId || ''
@@ -117,24 +131,26 @@ export function useStoryboardModalRuntime({
   }, [assetPickerPanel, getTextPanels, localStoryboards])
 
   return {
+    isStageActive,
+    clearTransientUiState,
     projectId,
     videoRatio,
     editingPanel,
     imageEditDefaults,
     handleEditSubmit,
-    closeImageEditModal: () => setEditingPanel(null),
+    closeImageEditModal,
 
     aiDataPanel,
     aiDataRuntime,
-    closeAIDataModal: () => setAIDataPanel(null),
+    closeAIDataModal,
     handleSaveAIData,
 
     previewImage,
-    closePreviewImage: () => setPreviewImage(null),
+    closePreviewImage,
 
     assetPickerPanel,
     pickerPanelRuntime,
-    closeAssetPicker: () => setAssetPickerPanel(null),
+    closeAssetPicker,
     handleAddCharacter,
     handleSetLocation,
     hasCharacterPicker: assetPickerPanel?.type === 'character',
