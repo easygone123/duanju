@@ -98,17 +98,37 @@ export function buildWorkspacePerformanceBaseline(): WorkspacePerformanceBaselin
   }
 }
 
+export interface WorkspacePerformanceCliIo {
+  stdout(value: string): void
+  stderr(value: string): void
+  setExitCode(code: number): void
+}
+
+export function runWorkspacePerformanceCli(
+  args: readonly string[],
+  io: WorkspacePerformanceCliIo,
+): void {
+  try {
+    parseWorkspacePerformanceArgs(args)
+    io.stdout(JSON.stringify(buildWorkspacePerformanceBaseline(), null, 2))
+    io.setExitCode(0)
+  } catch (error) {
+    io.stderr(
+      error instanceof Error ? error.message : WORKSPACE_PERFORMANCE_CLI_USAGE,
+    )
+    io.setExitCode(1)
+  }
+}
+
 const entryPath = process.argv[1] ? resolve(process.argv[1]) : undefined
 const isDirectRun = entryPath === fileURLToPath(import.meta.url)
 
 if (isDirectRun) {
-  try {
-    parseWorkspacePerformanceArgs(process.argv.slice(2))
-    console.log(JSON.stringify(buildWorkspacePerformanceBaseline(), null, 2))
-  } catch (error) {
-    console.error(
-      error instanceof Error ? error.message : WORKSPACE_PERFORMANCE_CLI_USAGE,
-    )
-    process.exitCode = 1
-  }
+  runWorkspacePerformanceCli(process.argv.slice(2), {
+    stdout: (value) => console.log(value),
+    stderr: (value) => console.error(value),
+    setExitCode: (code) => {
+      process.exitCode = code
+    },
+  })
 }

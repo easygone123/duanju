@@ -1,11 +1,34 @@
+import { spawnSync } from 'node:child_process'
+import { resolve } from 'node:path'
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   buildWorkspacePerformanceBaseline,
   parseWorkspacePerformanceArgs,
+  runWorkspacePerformanceCli,
 } from '../../scripts/measure-workspace-performance'
 
 const CLI_USAGE = 'Usage: npm run perf:workspace -- --baseline'
+
+function runRealCli(
+  args: readonly string[],
+  nodeEnv: 'development' | 'production' | 'test' = 'test',
+) {
+  return spawnSync(
+    process.execPath,
+    [
+      resolve(process.cwd(), 'node_modules/tsx/dist/cli.mjs'),
+      resolve(process.cwd(), 'scripts/measure-workspace-performance.ts'),
+      ...args,
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      env: { ...process.env, NODE_ENV: nodeEnv },
+    },
+  )
+}
 
 describe('workspace performance baseline contract', () => {
   afterEach(() => {
@@ -83,5 +106,48 @@ describe('workspace performance baseline contract', () => {
     vi.stubEnv('NODE_ENV', 'production')
 
     expect(buildWorkspacePerformanceBaseline()).toEqual(expected)
+  })
+
+  it('runs baseline through injected stdout and exit-code adapters', () => {
+    const stdout = vi.fn()
+    const stderr = vi.fn()
+    const setExitCode = vi.fn()
+
+    runWorkspacePerformanceCli(['--baseline'], { stdout, stderr, setExitCode })
+
+    expect(stdout).toHaveBeenCalledOnce()
+    expect(JSON.parse(stdout.mock.calls[0][0])).toEqual(
+      buildWorkspacePerformanceBaseline(),
+    )
+    expect(stderr).not.toHaveBeenCalled()
+    expect(setExitCode).toHaveBeenCalledWith(0)
+  })
+
+  it('routes invalid arguments through injected stderr and a non-zero exit code', () => {
+    const stdout = vi.fn()
+    const stderr = vi.fn()
+    const setExitCode = vi.fn()
+
+    runWorkspacePerformanceCli(['--unknown'], { stdout, stderr, setExitCode })
+
+    expect(stdout).not.toHaveBeenCalled()
+    expect(stderr).toHaveBeenCalledOnce()
+    expect(stderr).toHaveBeenCalledWith(CLI_USAGE)
+    expect(setExitCode).toHaveBeenCalledWith(1)
+  })
+
+  it('runs the real tsx baseline entry point and emits production-safe JSON', () => {
+    const result = runRealCli(['--baseline'], 'production')
+
+    expect(result.status).toBe(0)
+    expect(JSON.parse(result.stdout)).toEqual(buildWorkspacePerformanceBaseline())
+  })
+
+  it('runs the real tsx entry point with missing mode and exits with usage', () => {
+    const result = runRealCli([])
+
+    expect(result.status).toBe(1)
+    expect(result.stdout).toBe('')
+    expect(result.stderr).toContain(CLI_USAGE)
   })
 })

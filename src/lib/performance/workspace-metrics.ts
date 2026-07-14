@@ -23,6 +23,7 @@ export interface WorkspaceMetrics {
   stageStart(stage: string, timestamp?: number): void
   stageVisible(stage: string, timestamp?: number): void
   recordRequest(name: string, bytes: number, kind?: WorkspaceRequestKind): void
+  /** Task 1 tracks only the aggregate; Tasks 4 and 6 can segment by query key. */
   recordRefetch(queryKey: readonly unknown[]): void
   setMountedCards(stage: string, count: number): void
   snapshot(): WorkspaceMetricsSnapshot
@@ -65,16 +66,16 @@ export function createWorkspaceMetrics(
   }
 
   return {
-    stageStart(stage, timestamp = now()) {
+    stageStart(stage, timestamp) {
       if (!collecting) return
-      stageMetric(stage).startedAt = timestamp
+      stageMetric(stage).startedAt = timestamp ?? now()
     },
 
-    stageVisible(stage, timestamp = now()) {
+    stageVisible(stage, timestamp) {
       if (!collecting) return
       const metric = stageMetric(stage)
       if (metric.startedAt !== undefined) {
-        metric.visibleMs = timestamp - metric.startedAt
+        metric.visibleMs = (timestamp ?? now()) - metric.startedAt
       }
     },
 
