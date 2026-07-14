@@ -30,7 +30,7 @@ const snapshotSchema = z.object({
   imageModel: z.string().min(1).optional(), generationOptions: z.record(z.unknown()).optional(),
   comfyWorkflowVersionId: z.string().min(1).optional(), comfyModelSnapshotVersion: z.literal(1).optional(),
   locale: z.enum(['zh', 'en']),
-}).strict()
+}).strip()
 
 export type SixGridImageTaskSnapshot = {
   operation: 'generate' | 'sheet_upscale' | 'crop' | 'panel_upscale'

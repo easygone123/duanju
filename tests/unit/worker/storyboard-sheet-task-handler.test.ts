@@ -105,6 +105,20 @@ describe('six-grid image task immutable contract', () => {
   it('requires the complete immutable source identity for every derived operation', () => {
     expect(() => parseSixGridImageTaskSnapshot(snapshot({ sourceChecksum: undefined }))).toThrow('SIX_GRID_SOURCE_SNAPSHOT_REQUIRED')
   })
+
+  it('accepts task-run metadata injected by the shared submitter without adding it to the immutable snapshot', () => {
+    const parsed = parseSixGridImageTaskSnapshot({
+      ...snapshot(),
+      flowId: 'novel-promotion',
+      flowStageIndex: 1,
+      flowStageTotal: 1,
+      flowStageTitle: 'Storyboard sheet',
+      runId: 'run-1',
+      meta: { flowId: 'novel-promotion' },
+    })
+    expect(parsed).not.toHaveProperty('flowId')
+    expect(parsed).not.toHaveProperty('meta')
+  })
 })
 
 describe('six-grid sheet and panel execution', () => {
@@ -340,7 +354,7 @@ describe('six-grid crop atomic persistence', () => {
   beforeEach(() => resetExecutionMocks())
   it('switches all six panels in one transaction without changing dialogue or duration', async () => {
     const update = vi.fn(async () => ({}))
-    const findMany = vi.fn(async () => Array.from({ length: 6 }, (_, gridCellIndex) => ({ gridCellIndex, imageMediaId: `old-${gridCellIndex}`, imageUrl: `/m/old-${gridCellIndex}` })))
+    const findMany = vi.fn(async () => Array.from({ length: 6 }, (_, gridCellIndex) => ({ id: `panel-${gridCellIndex}`, gridCellIndex, imageMediaId: `old-${gridCellIndex}`, imageUrl: `/m/old-${gridCellIndex}` })))
     const transaction = vi.fn(async (callback: (tx: { novelPromotionPanel: { update: typeof update; findMany: typeof findMany } }) => Promise<void>) => {
       await callback({ novelPromotionPanel: { update, findMany } })
     })
@@ -364,7 +378,7 @@ describe('six-grid crop atomic persistence', () => {
     expect(transaction).toHaveBeenCalledTimes(1)
     expect(update).toHaveBeenCalledTimes(6)
     expect(update).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      where: { storyboardId_gridCellIndex: { storyboardId: 'storyboard-1', gridCellIndex: 0 } },
+      where: { id: 'panel-0' },
       data: expect.objectContaining({
         croppedImageMediaId: 'crop-0',
         imageMediaId: 'crop-0',

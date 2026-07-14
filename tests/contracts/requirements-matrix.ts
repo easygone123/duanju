@@ -245,4 +245,40 @@ export const REQUIREMENTS_MATRIX: ReadonlyArray<RequirementCoverageEntry> = [
     tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/provider/fal-provider.contract.test.ts'],
     scenarioIds: ['comfy-cloud-provider-coexistence'],
   },
+  {
+    id: 'REQ-NP-SIX-GRID-01', feature: 'Six-grid sheet generation',
+    userValue: '横屏和竖屏项目可生成连续的 3x2 分镜大图',
+    risk: '运行快照、工作流渲染或 ComfyUI 提交偏离', priority: 'P0',
+    tests: ['tests/system/six-grid-storyboard.system.test.ts'],
+  },
+  {
+    id: 'REQ-NP-SIX-GRID-02', feature: 'Six-grid crop and upscale orders',
+    userValue: '自动切图不丢像素，且支持两种放大顺序与手动重切',
+    risk: '奇数尺寸缝隙、比例漂移或处理顺序混淆', priority: 'P0',
+    tests: ['tests/system/six-grid-storyboard.system.test.ts'],
+  },
+  {
+    id: 'REQ-NP-SIX-GRID-03', feature: 'Dialogue-aware video routing',
+    userValue: '对白镜头使用固定版本的对白模型并保留完整时长',
+    risk: '对白丢失、模型路由错误或时长被向下取整', priority: 'P0',
+    tests: ['tests/system/six-grid-storyboard.system.test.ts'],
+  },
+  {
+    id: 'REQ-NP-SIX-GRID-04', feature: 'Continuous frame linking',
+    userValue: '同一场景跨组镜头自动衔接，跨场景时停止',
+    risk: '首尾帧跨场景误链或视觉顺序取代持久化顺序', priority: 'P0',
+    tests: ['tests/system/six-grid-storyboard.system.test.ts'],
+  },
+  {
+    id: 'REQ-NP-SIX-GRID-05', feature: 'Six-grid retry idempotency',
+    userValue: '输出传输失败后可恢复且不重复生成',
+    risk: '重试重复提交 ComfyUI prompt 并产生重复资产', priority: 'P0',
+    tests: ['tests/system/six-grid-storyboard.system.test.ts'],
+  },
+  {
+    id: 'REQ-NP-SIX-GRID-06', feature: 'Legacy individual storyboard compatibility',
+    userValue: '未启用六宫格时继续使用原有单图分镜流程',
+    risk: '新增配置默认开启导致存量项目行为改变', priority: 'P0',
+    tests: ['tests/system/six-grid-storyboard.system.test.ts'],
+  },
 ]

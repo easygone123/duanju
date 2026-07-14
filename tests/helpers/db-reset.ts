@@ -48,6 +48,10 @@ export async function resetSystemState() {
   await resetTaskState()
   await resetAssetHubState()
   await resetNovelPromotionState()
+  await prisma.mediaObject.deleteMany()
+  // Break the workflow -> current version Restrict cycle before deleting users.
+  // User deletion cascades through both workflow records afterwards.
+  await prisma.comfyWorkflow.updateMany({ data: { currentVersionId: null } })
   await prisma.usageCost.deleteMany()
   await prisma.project.deleteMany()
   await prisma.userPreference.deleteMany()

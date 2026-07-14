@@ -10,7 +10,7 @@ type CropArtifact = Pick<SixGridCropArtifact, 'cellIndex' | 'mediaId' | 'url' | 
 
 type CropTransactionClient = {
   novelPromotionPanel: {
-    findMany: (args: unknown) => Promise<Array<{ gridCellIndex: number | null; imageMediaId: string | null; imageUrl: string | null }>>
+    findMany: (args: unknown) => Promise<Array<{ id: string; gridCellIndex: number | null; imageMediaId: string | null; imageUrl: string | null }>>
     update: (args: unknown) => Promise<unknown>
   }
 }
@@ -44,7 +44,7 @@ export async function commitSixGridCropBatch(input: {
   await runTransaction(async (tx) => {
     const currentPanels = await tx.novelPromotionPanel.findMany({
       where: { storyboardId: input.storyboardId },
-      select: { gridCellIndex: true, imageMediaId: true, imageUrl: true },
+      select: { id: true, gridCellIndex: true, imageMediaId: true, imageUrl: true },
     })
     if (currentPanels.length !== 6) throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
     const currentByCell = new Map(currentPanels.map((panel) => [panel.gridCellIndex, panel]))
@@ -52,7 +52,7 @@ export async function commitSixGridCropBatch(input: {
       const previous = currentByCell.get(artifact.cellIndex)
       if (!previous) throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
       await tx.novelPromotionPanel.update({
-        where: { storyboardId_gridCellIndex: { storyboardId: input.storyboardId, gridCellIndex: artifact.cellIndex } },
+        where: { id: previous.id },
         data: {
           previousImageMediaId: previous.imageMediaId,
           previousImageUrl: previous.imageUrl,

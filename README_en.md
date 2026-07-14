@@ -158,6 +158,17 @@ Optional auth variables are `COMFYUI_CONTRACT_AUTH_TYPE=none|bearer|basic` and t
 
 This integration does not change the repository license. The project remains under **CC BY-NC-SA 4.0**, and deployment or redistribution must honor its attribution, non-commercial, and share-alike terms.
 
+### Continuous six-grid storyboards
+
+Novel-promotion projects can opt into `six_grid` mode to generate one 3x2 storyboard sheet and deterministically crop it into six shots. Both `sheet_upscale_then_crop` and `crop_then_panel_upscale` are supported. Upscaling requires a user-owned ComfyUI upscale workflow published in Settings; the project does not bundle workflows.
+
+```env
+SIX_GRID_CROP_MAX_SOURCE_BYTES=52428800
+SIX_GRID_CROP_MAX_SOURCE_PIXELS=32000000
+```
+
+Back up the database and run `npx prisma migrate deploy` before deploying the new version. Local development may continue to use `npx prisma db push` as described above. Existing projects remain in `individual` mode by default.
+
 ---
 
 ## 📦 Tech Stack

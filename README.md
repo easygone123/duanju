@@ -170,6 +170,17 @@ npm run check:comfyui-contract
 
 本集成不改变仓库许可证：项目继续使用 **CC BY-NC-SA 4.0**，部署和再分发必须遵守非商业及署名、相同方式共享条款。
 
+### 六宫格连续分镜
+
+小说推文项目可选择 `six_grid` 模式，一次生成一张 3x2 分镜大图，再按固定几何切分为六个镜头。支持 `sheet_upscale_then_crop` 和 `crop_then_panel_upscale` 两种处理顺序；放大需在设置中发布用户自有的 ComfyUI upscale 工作流，项目不内置工作流。
+
+```env
+SIX_GRID_CROP_MAX_SOURCE_BYTES=52428800
+SIX_GRID_CROP_MAX_SOURCE_PIXELS=32000000
+```
+
+部署新版本前先备份数据库，然后执行 `npx prisma migrate deploy`；本地开发环境仍可按上文使用 `npx prisma db push`。旧项目默认保持 `individual` 模式。
+
 ---
 
 ## 📦 技术栈

@@ -32,9 +32,9 @@ import {
   readCropSourceMetadata,
   type SharpPipelineObserver,
 } from './crop-image'
+import { readSixGridCropLimits } from './limits'
 
 const ARTIFACT_VERSION = 1
-const MAX_SOURCE_BYTES = 50 * 1024 * 1024
 
 export type { SixGridCropStorage } from './crop-artifact-store'
 
@@ -79,6 +79,7 @@ export async function cropSixGridSheet(input: {
   onSharpPipelineActivity?: SharpPipelineObserver
 } = {}): Promise<SixGridCropArtifact[]> {
   assertSixGridCellAspectRatio(input.cellAspectRatio)
+  const limits = readSixGridCropLimits()
   const storage = dependencies.storage ?? defaultStorage
   const source = await findOwnedSheetMedia(input.userId, input.projectId, input.sourceMediaId)
   if (!source || !source.storageKey || !source.mimeType?.startsWith('image/')) {
@@ -88,7 +89,12 @@ export async function cropSixGridSheet(input: {
   const heartbeat = startCropClaimHeartbeat(owner)
   try {
     await heartbeat.fence()
-    const sourceBytes = await readSourceBytes(storage, source.storageKey, source.sizeBytes)
+    const sourceBytes = await readSourceBytes(
+      storage,
+      source.storageKey,
+      source.sizeBytes,
+      limits.maxSourceBytes,
+    )
     await heartbeat.fence()
     const sourceChecksum = sha256(sourceBytes)
     if (source.sha256 && source.sha256 !== sourceChecksum) {
@@ -234,13 +240,18 @@ async function findOwnedSheetMedia(userId: string, projectId: string, sourceMedi
   return null
 }
 
-async function readSourceBytes(storage: SixGridCropStorage, key: string, declaredSize: bigint | null) {
-  if (declaredSize != null && Number(declaredSize) > MAX_SOURCE_BYTES) {
+async function readSourceBytes(
+  storage: SixGridCropStorage,
+  key: string,
+  declaredSize: bigint | null,
+  maxSourceBytes: number,
+) {
+  if (declaredSize != null && Number(declaredSize) > maxSourceBytes) {
     throw new Error('SIX_GRID_SOURCE_TOO_LARGE')
   }
   let bytes: Buffer
   try { bytes = await storage.getObjectBuffer(key) } catch { throw new Error('SIX_GRID_SOURCE_READ_FAILED') }
-  if (bytes.length === 0 || bytes.length > MAX_SOURCE_BYTES) throw new Error('SIX_GRID_SOURCE_TOO_LARGE')
+  if (bytes.length === 0 || bytes.length > maxSourceBytes) throw new Error('SIX_GRID_SOURCE_TOO_LARGE')
   return bytes
 }
 
