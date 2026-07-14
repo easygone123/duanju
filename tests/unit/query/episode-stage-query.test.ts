@@ -411,7 +411,9 @@ describe('episode stage query', () => {
     ]
 
     for (const path of invalidationConsumers) {
-      expect(readFileSync(path, 'utf8'), path).toMatch(/episodeStages|invalidateEpisodeStageQueries/)
+      expect(readFileSync(path, 'utf8'), path).toMatch(
+        /episodeStages|episodeStage|invalidateEpisodeStageQueries|applyWorkspaceTaskCompletion/,
+      )
     }
   })
 

@@ -20,9 +20,8 @@ const imageModels = vi.hoisted(() => ({
 }))
 
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }))
-vi.mock('@/lib/query/hooks/useUserModels', () => ({
-  useUserModels: () => ({ data: imageModels.current, isLoading: false }),
-  selectImageModelOptions: (payload: typeof imageModels.current | undefined) => payload?.image ?? [],
+vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/WorkspaceDataProvider', () => ({
+  useWorkspaceData: () => ({ imageModelOptions: imageModels.current.image }),
 }))
 vi.mock('@/components/ui/config-modals/ModelCapabilityDropdown', () => ({
   ModelCapabilityDropdown: (props: Record<string, unknown>) => {

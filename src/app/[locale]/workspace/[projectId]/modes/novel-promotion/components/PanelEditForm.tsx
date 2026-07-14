@@ -4,8 +4,8 @@ import { useTranslations } from 'next-intl'
 import PanelEditFormV2 from '@/components/ui/patterns/PanelEditFormV2'
 import { GlassButton, GlassModalShell, GlassSurface } from '@/components/ui/primitives'
 import { Character, Location } from '@/types/project'
-import { useProjectAssets } from '@/lib/query/hooks/useProjectAssets'
 import { AppIcon } from '@/components/ui/icons'
+import { useWorkspaceData } from '../WorkspaceDataProvider'
 
 interface CharacterAppearance {
   id?: string
@@ -81,14 +81,13 @@ interface CharacterPickerModalProps {
 }
 
 export function CharacterPickerModal({
-  projectId,
   currentCharacters,
   onSelect,
   onClose
 }: CharacterPickerModalProps) {
   const ts = useTranslations('storyboard')
-  const { data: assets } = useProjectAssets(projectId)
-  const characters: Character[] = assets?.characters ?? []
+  const { projectAssets } = useWorkspaceData()
+  const characters: Character[] = projectAssets.characters
 
   return (
     <GlassModalShell open onClose={onClose} size="md" title={ts('panel.selectCharacter')}>
@@ -142,14 +141,13 @@ interface LocationPickerModalProps {
 }
 
 export function LocationPickerModal({
-  projectId,
   currentLocation,
   onSelect,
   onClose
 }: LocationPickerModalProps) {
   const ts = useTranslations('storyboard')
-  const { data: assets } = useProjectAssets(projectId)
-  const locations: Location[] = assets?.locations ?? []
+  const { projectAssets } = useWorkspaceData()
+  const locations: Location[] = projectAssets.locations
 
   return (
     <GlassModalShell open onClose={onClose} size="md" title={ts('panel.selectLocation')}>

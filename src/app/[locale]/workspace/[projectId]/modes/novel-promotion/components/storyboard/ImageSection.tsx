@@ -11,9 +11,9 @@ import ImageSectionCandidateMode from './ImageSectionCandidateMode'
 import ImageSectionActionButtons from './ImageSectionActionButtons'
 import { AppIcon } from '@/components/ui/icons'
 import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapabilityDropdown'
-import { selectImageModelOptions, useUserModels } from '@/lib/query/hooks/useUserModels'
 import { applyImageTaskCapabilityChange, extractCapabilityFields } from '@/lib/model-capabilities/ui-fields'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
+import { useWorkspaceData } from '../../WorkspaceDataProvider'
 
 interface PanelCandidateData {
   candidates: string[]
@@ -72,8 +72,7 @@ export default function ImageSection({
   const [isTaskPulseAnimating, setIsTaskPulseAnimating] = useState(false)
   const [selectedImageModel, setSelectedImageModel] = useState('')
   const [capabilityOverrides, setCapabilityOverrides] = useState<ImageTaskCapabilityOverrides>({})
-  const userModelsQuery = useUserModels()
-  const taskImageOptions = selectImageModelOptions(userModelsQuery.data)
+  const { imageModelOptions: taskImageOptions } = useWorkspaceData()
   const selectedImageOption = taskImageOptions.find((option) => option.value === selectedImageModel)
   const capabilityFields = useMemo(
     () => extractCapabilityFields(selectedImageOption?.capabilities, 'image'),
