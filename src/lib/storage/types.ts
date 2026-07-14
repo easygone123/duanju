@@ -1,3 +1,5 @@
+import type { Readable } from 'node:stream'
+
 export type StorageType = 'minio' | 'local' | 'cos'
 
 export interface UploadObjectParams {
@@ -8,7 +10,7 @@ export interface UploadObjectParams {
 
 export interface UploadObjectStreamParams {
   key: string
-  body: NodeJS.ReadableStream
+  body: Readable
   contentLength: number
   contentType?: string
 }

@@ -336,6 +336,66 @@ describe('storage facade streaming objects', () => {
     expect(attemptBodies).toEqual([expected, expected])
   })
 
+  it('destroys every unread stream after immediate provider rejection and preserves the provider error', async () => {
+    vi.useFakeTimers()
+    const providerError = new Error('storage client unavailable')
+    const bodies: Readable[] = []
+    const createBody = vi.fn(() => {
+      const body = Readable.from([Buffer.from('unread body')])
+      bodies.push(body)
+      return body
+    })
+    facadeUploadObjectStreamMock.mockRejectedValue(providerError)
+
+    try {
+      const uploadPromise = storageFacade.uploadObjectStream(
+        createBody,
+        'viral/source.mp4',
+        11,
+        'video/mp4',
+        2,
+      )
+      const outcomePromise = uploadPromise.then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      )
+      await vi.runAllTimersAsync()
+      expect(await outcomePromise).toEqual({ error: providerError })
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(bodies).toHaveLength(2)
+    for (const body of bodies) {
+      expect(body.destroyed).toBe(true)
+      expect(body.closed).toBe(true)
+    }
+  })
+
+  it('preserves the provider error when destroying a failed stream throws', async () => {
+    const providerError = new Error('storage client unavailable')
+    const destroyError = new Error('stream disposal failed')
+    class DestroyThrowingReadable extends Readable {
+      override _read(): void {}
+
+      override destroy(error?: Error): this {
+        super.destroy(error)
+        throw destroyError
+      }
+    }
+    const body = new DestroyThrowingReadable()
+    facadeUploadObjectStreamMock.mockRejectedValueOnce(providerError)
+
+    await expect(storageFacade.uploadObjectStream(
+      () => body,
+      'viral/source.mp4',
+      11,
+      'video/mp4',
+      1,
+    )).rejects.toBe(providerError)
+    expect(body.destroyed).toBe(true)
+  })
+
   it('returns the provider download stream unchanged', async () => {
     const body = Readable.from([Buffer.from('video')])
     facadeGetObjectStreamMock.mockResolvedValueOnce(body)

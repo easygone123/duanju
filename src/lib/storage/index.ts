@@ -1,3 +1,4 @@
+import type { Readable } from 'node:stream'
 import { createScopedLogger } from '@/lib/logging/core'
 import { createStorageProvider } from '@/lib/storage/factory'
 import type { DeleteObjectsResult, StorageProvider } from '@/lib/storage/types'
@@ -53,7 +54,7 @@ export async function uploadObject(
 
 /** The factory must return a new stream containing the full object for every retry attempt. */
 export async function uploadObjectStream(
-  createBody: () => NodeJS.ReadableStream,
+  createBody: () => Readable,
   key: string,
   contentLength: number,
   contentType?: string,
@@ -63,12 +64,24 @@ export async function uploadObjectStream(
 
   const result = await withRetry(
     async () => {
-      return await provider.uploadObjectStream({
-        key,
-        body: createBody(),
-        contentLength,
-        contentType,
-      })
+      const body = createBody()
+      try {
+        return await provider.uploadObjectStream({
+          key,
+          body,
+          contentLength,
+          contentType,
+        })
+      } catch (error: unknown) {
+        if (!body.destroyed) {
+          try {
+            body.destroy()
+          } catch {
+            // Preserve the provider failure even if stream disposal fails.
+          }
+        }
+        throw error
+      }
     },
     maxRetries,
     RETRY_DELAY_BASE_MS,
