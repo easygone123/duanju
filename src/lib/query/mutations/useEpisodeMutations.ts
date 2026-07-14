@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { Project } from '@/types/project'
 import { resolveTaskResponse } from '@/lib/task/client'
 import { queryKeys } from '../keys'
@@ -36,6 +36,39 @@ type NovelTextMutationMeta = {
   transaction: NovelTextTransaction
   version: number
   dispatchedVersion?: number
+}
+
+const novelTextTransactionsByClient = new WeakMap<
+  QueryClient,
+  Map<string, Map<string, NovelTextTransaction>>
+>()
+
+function getNovelTextTransactions(queryClient: QueryClient, projectId: string) {
+  let clientTransactions = novelTextTransactionsByClient.get(queryClient)
+  if (!clientTransactions) {
+    clientTransactions = new Map()
+    novelTextTransactionsByClient.set(queryClient, clientTransactions)
+  }
+  let projectTransactions = clientTransactions.get(projectId)
+  if (!projectTransactions) {
+    projectTransactions = new Map()
+    clientTransactions.set(projectId, projectTransactions)
+  }
+  return projectTransactions
+}
+
+function deleteNovelTextTransaction(
+  queryClient: QueryClient,
+  projectId: string,
+  episodeId: string,
+  transaction: NovelTextTransaction,
+) {
+  const clientTransactions = novelTextTransactionsByClient.get(queryClient)
+  const projectTransactions = clientTransactions?.get(projectId)
+  if (projectTransactions?.get(episodeId) !== transaction) return
+  projectTransactions.delete(episodeId)
+  if (projectTransactions.size === 0) clientTransactions?.delete(projectId)
+  if (clientTransactions?.size === 0) novelTextTransactionsByClient.delete(queryClient)
 }
 
 function confirmEpisodeFieldValue(
@@ -177,7 +210,6 @@ export function useSaveProjectEpisodesBatch(projectId: string) {
  */
 export function useUpdateProjectEpisodeField(projectId: string) {
   const queryClient = useQueryClient()
-  const novelTextTransactionsRef = useRef(new Map<string, NovelTextTransaction>())
   const novelTextMutationMetaRef = useRef(new WeakMap<EpisodeFieldVariables, NovelTextMutationMeta>())
 
   return useMutation({
@@ -231,7 +263,8 @@ export function useUpdateProjectEpisodeField(projectId: string) {
       let novelTextMeta: NovelTextMutationMeta | undefined
 
       if (variables.key === 'novelText') {
-        let transaction = novelTextTransactionsRef.current.get(variables.episodeId)
+        const novelTextTransactions = getNovelTextTransactions(queryClient, projectId)
+        let transaction = novelTextTransactions.get(variables.episodeId)
         if (!transaction) {
           transaction = {
             firstVersion: 1,
@@ -241,7 +274,7 @@ export function useUpdateProjectEpisodeField(projectId: string) {
             variablesByVersion: new Map(),
             requestsByVersion: new Map(),
           }
-          novelTextTransactionsRef.current.set(variables.episodeId, transaction)
+          novelTextTransactions.set(variables.episodeId, transaction)
         }
         const version = transaction.latestVersion + 1
         transaction.latestVersion = version
@@ -301,11 +334,8 @@ export function useUpdateProjectEpisodeField(projectId: string) {
         transaction.confirmedVersion = dispatchedVersion
         transaction.confirmed = confirmEpisodeFieldValue(transaction.confirmed, dispatchedVariables)
       }
-      if (
-        dispatchedVersion === transaction.latestVersion
-        && novelTextTransactionsRef.current.get(dispatchedVariables.episodeId) === transaction
-      ) {
-        novelTextTransactionsRef.current.delete(dispatchedVariables.episodeId)
+      if (dispatchedVersion === transaction.latestVersion) {
+        deleteNovelTextTransaction(queryClient, projectId, dispatchedVariables.episodeId, transaction)
       }
     },
     onError: (_error, variables, context) => {
@@ -374,11 +404,13 @@ export function useUpdateProjectEpisodeField(projectId: string) {
           }
         },
       )
-      if (
-        novelTextMeta
-        && novelTextTransactionsRef.current.get(failedVariables.episodeId) === novelTextMeta.transaction
-      ) {
-        novelTextTransactionsRef.current.delete(failedVariables.episodeId)
+      if (novelTextMeta) {
+        deleteNovelTextTransaction(
+          queryClient,
+          projectId,
+          failedVariables.episodeId,
+          novelTextMeta.transaction,
+        )
       }
     },
     onSettled: (_, __, variables) => {

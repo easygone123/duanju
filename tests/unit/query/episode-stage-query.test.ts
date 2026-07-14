@@ -533,6 +533,92 @@ describe('episode stage query', () => {
     expect(apiFetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).novelText)).toEqual(['a', 'abc'])
   })
 
+  it('shares the confirmed novelText transaction across an unmount and remount', async () => {
+    const firstResponse = deferred<Response>()
+    const tailResponse = deferred<Response>()
+    apiFetchMock
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockImplementationOnce(() => tailResponse.promise)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'separate new write failed' }), {
+        status: 500, headers: { 'Content-Type': 'application/json' },
+      }))
+    const queryClient = client()
+    const episodeKey = queryKeys.episodeData('project-1', 'episode-1')
+    const projectKey = queryKeys.projectData('project-1')
+    const configKey = queryKeys.episodeStage('project-1', 'episode-1', 'config')
+    queryClient.setQueryData(episodeKey, {
+      id: 'episode-1', name: 'Episode', novelText: '',
+    })
+    queryClient.setQueryData(projectKey, {
+      novelPromotionData: {
+        episodes: [{ id: 'episode-1', name: 'Episode', novelText: '' }],
+      },
+    })
+    queryClient.setQueryData(configKey, {
+      stage: 'config',
+      episode: { id: 'episode-1', name: 'Episode', novelText: '' },
+    })
+    const oldConsumer = renderHook(
+      () => useUpdateProjectEpisodeField('project-1'),
+      { wrapper: wrapper(queryClient) },
+    )
+
+    let firstWrite!: Promise<unknown>
+    let oldTailWrite!: Promise<unknown>
+    act(() => {
+      firstWrite = oldConsumer.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'a',
+      })
+    })
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
+    act(() => {
+      oldTailWrite = oldConsumer.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'abc',
+      })
+    })
+    await waitFor(() => expect(
+      queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText,
+    ).toBe('abc'))
+    oldConsumer.unmount()
+
+    const newConsumer = renderHook(
+      () => useUpdateProjectEpisodeField('project-1'),
+      { wrapper: wrapper(queryClient) },
+    )
+    let newTailWrite!: Promise<unknown>
+    act(() => {
+      newTailWrite = newConsumer.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'abcd',
+      })
+    })
+    const firstOutcome = firstWrite.catch((error: unknown) => error)
+    const oldTailOutcome = oldTailWrite.catch((error: unknown) => error)
+    const newTailOutcome = newTailWrite.catch((error: unknown) => error)
+    await waitFor(() => expect(
+      queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText,
+    ).toBe('abcd'))
+
+    firstResponse.resolve(new Response(JSON.stringify({ error: 'first failed' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    }))
+    await firstOutcome
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(2))
+    tailResponse.resolve(new Response(JSON.stringify({ error: 'shared tail failed' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    }))
+    const [oldTailError, newTailError] = await Promise.all([oldTailOutcome, newTailOutcome])
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(2)
+    expect(apiFetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).novelText)).toEqual(['a', 'abcd'])
+    expect(oldTailError).toBe(newTailError)
+    expect(oldTailError).toMatchObject({ message: 'shared tail failed', status: 500 })
+    expect(queryClient.getQueryData<{ novelText: string }>(episodeKey)?.novelText).toBe('')
+    expect(queryClient.getQueryData<{
+      novelPromotionData: { episodes: Array<{ id: string; novelText: string }> }
+    }>(projectKey)?.novelPromotionData.episodes[0]?.novelText).toBe('')
+    expect(queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText).toBe('')
+  })
+
   it('rolls back a failed latest novelText write to its config-stage snapshot', async () => {
     const failedResponse = deferred<Response>()
     apiFetchMock.mockImplementationOnce(() => failedResponse.promise)
