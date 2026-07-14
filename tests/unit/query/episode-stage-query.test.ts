@@ -297,6 +297,134 @@ describe('episode stage query', () => {
     expect(queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText).toBe('ab')
   })
 
+  it('restores the confirmed server value after two consecutive novelText writes fail', async () => {
+    const firstResponse = deferred<Response>()
+    const secondResponse = deferred<Response>()
+    apiFetchMock
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockImplementationOnce(() => secondResponse.promise)
+    const queryClient = client()
+    const configKey = queryKeys.episodeStage('project-1', 'episode-1', 'config')
+    queryClient.setQueryData(configKey, {
+      stage: 'config',
+      episode: { id: 'episode-1', name: 'Episode', novelText: '' },
+    })
+    const mutation = renderHook(
+      () => useUpdateProjectEpisodeField('project-1'),
+      { wrapper: wrapper(queryClient) },
+    )
+
+    let firstWrite!: Promise<unknown>
+    let secondWrite!: Promise<unknown>
+    act(() => {
+      firstWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'a',
+      }).catch((error) => error)
+    })
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
+    act(() => {
+      secondWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'ab',
+      }).catch((error) => error)
+    })
+
+    firstResponse.resolve(new Response(JSON.stringify({ error: 'first failed' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    }))
+    await act(async () => { await firstWrite })
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(2))
+    secondResponse.resolve(new Response(JSON.stringify({ error: 'second failed' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    }))
+    await act(async () => { await secondWrite })
+
+    expect(queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText).toBe('')
+  })
+
+  it('coalesces fast novelText drafts to one in-flight request plus the newest unsent value', async () => {
+    const firstResponse = deferred<Response>()
+    apiFetchMock
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockResolvedValue(response('ignored', { ok: true }))
+    const queryClient = client()
+    const configKey = queryKeys.episodeStage('project-1', 'episode-1', 'config')
+    queryClient.setQueryData(configKey, {
+      stage: 'config',
+      episode: { id: 'episode-1', name: 'Episode', novelText: '' },
+    })
+    const mutation = renderHook(
+      () => useUpdateProjectEpisodeField('project-1'),
+      { wrapper: wrapper(queryClient) },
+    )
+
+    const writes: Promise<unknown>[] = []
+    act(() => {
+      writes.push(mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'a',
+      }))
+    })
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
+    act(() => {
+      writes.push(mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'ab',
+      }))
+      writes.push(mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'abc',
+      }))
+    })
+
+    await waitFor(() => expect(
+      queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText,
+    ).toBe('abc'))
+    expect(apiFetchMock).toHaveBeenCalledTimes(1)
+    firstResponse.resolve(response('ignored', { ok: true }))
+    await act(async () => { await Promise.all(writes) })
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(2)
+    expect(apiFetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).novelText)).toEqual(['a', 'abc'])
+    expect(queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText).toBe('abc')
+  })
+
+  it('dispatches the newest unsent novelText draft after the mutation consumer unmounts', async () => {
+    const firstResponse = deferred<Response>()
+    apiFetchMock
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockResolvedValue(response('ignored', { ok: true }))
+    const queryClient = client()
+    const configKey = queryKeys.episodeStage('project-1', 'episode-1', 'config')
+    queryClient.setQueryData(configKey, {
+      stage: 'config',
+      episode: { id: 'episode-1', name: 'Episode', novelText: '' },
+    })
+    const mutation = renderHook(
+      () => useUpdateProjectEpisodeField('project-1'),
+      { wrapper: wrapper(queryClient) },
+    )
+
+    const writes: Promise<unknown>[] = []
+    act(() => {
+      writes.push(mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'a',
+      }))
+    })
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
+    act(() => {
+      writes.push(mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'ab',
+      }))
+      writes.push(mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'abc',
+      }))
+    })
+
+    mutation.unmount()
+    firstResponse.resolve(response('ignored', { ok: true }))
+    await Promise.all(writes)
+
+    expect(apiFetchMock).toHaveBeenCalledTimes(2)
+    expect(apiFetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).novelText)).toEqual(['a', 'abc'])
+  })
+
   it('rolls back a failed latest novelText write to its config-stage snapshot', async () => {
     const failedResponse = deferred<Response>()
     apiFetchMock.mockImplementationOnce(() => failedResponse.promise)

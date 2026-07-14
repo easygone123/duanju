@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Project } from '@/types/project'
 import { resolveTaskResponse } from '@/lib/task/client'
@@ -9,6 +10,68 @@ import {
   requestJsonWithError,
   requestTaskResponseWithError,
 } from './mutation-shared'
+
+type EpisodeFieldVariables = {
+  episodeId: string
+  key: string
+  value: unknown
+}
+
+type EpisodeFieldCacheSnapshot = {
+  previousEpisode: Record<string, unknown> | undefined
+  previousProject: Project | undefined
+  previousConfig: Record<string, unknown> | undefined
+}
+
+type NovelTextTransaction = {
+  firstVersion: number
+  latestVersion: number
+  confirmedVersion: number
+  confirmed: EpisodeFieldCacheSnapshot
+}
+
+type NovelTextMutationMeta = {
+  transaction: NovelTextTransaction
+  version: number
+}
+
+const SKIPPED_NOVEL_TEXT_WRITE = Symbol('skipped-novel-text-write')
+
+function confirmEpisodeFieldValue(
+  snapshot: EpisodeFieldCacheSnapshot,
+  variables: EpisodeFieldVariables,
+): EpisodeFieldCacheSnapshot {
+  const configEpisode = snapshot.previousConfig?.episode
+  const projectEpisodes = snapshot.previousProject?.novelPromotionData?.episodes
+
+  return {
+    previousEpisode: snapshot.previousEpisode
+      ? { ...snapshot.previousEpisode, [variables.key]: variables.value }
+      : undefined,
+    previousProject: snapshot.previousProject?.novelPromotionData && Array.isArray(projectEpisodes)
+      ? {
+          ...snapshot.previousProject,
+          novelPromotionData: {
+            ...snapshot.previousProject.novelPromotionData,
+            episodes: projectEpisodes.map((episode) =>
+              episode.id === variables.episodeId
+                ? { ...episode, [variables.key]: variables.value }
+                : episode,
+            ),
+          },
+        }
+      : snapshot.previousProject,
+    previousConfig: snapshot.previousConfig && configEpisode && typeof configEpisode === 'object'
+      ? {
+          ...snapshot.previousConfig,
+          episode: {
+            ...configEpisode as Record<string, unknown>,
+            [variables.key]: variables.value,
+          },
+        }
+      : snapshot.previousConfig,
+  }
+}
 
 /**
  * 获取项目剧集列表
@@ -113,27 +176,32 @@ export function useSaveProjectEpisodesBatch(projectId: string) {
  */
 export function useUpdateProjectEpisodeField(projectId: string) {
   const queryClient = useQueryClient()
+  const novelTextTransactionsRef = useRef(new Map<string, NovelTextTransaction>())
+  const novelTextMutationMetaRef = useRef(new WeakMap<EpisodeFieldVariables, NovelTextMutationMeta>())
 
   return useMutation({
     scope: { id: `project-episode-field:${projectId}` },
-    mutationFn: async ({
-      episodeId,
-      key,
-      value,
-    }: {
-      episodeId: string
-      key: string
-      value: unknown
-    }) =>
-      await requestJsonWithError(
-        `/api/novel-promotion/${projectId}/episodes/${episodeId}`,
+    mutationFn: async (variables: EpisodeFieldVariables) => {
+      const novelTextMeta = novelTextMutationMetaRef.current.get(variables)
+      if (
+        variables.key === 'novelText'
+        && novelTextMeta
+        && novelTextMeta.version !== novelTextMeta.transaction.firstVersion
+        && novelTextMeta.version < novelTextMeta.transaction.latestVersion
+      ) {
+        return SKIPPED_NOVEL_TEXT_WRITE
+      }
+
+      return await requestJsonWithError(
+        `/api/novel-promotion/${projectId}/episodes/${variables.episodeId}`,
         {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ [key]: value }),
+          body: JSON.stringify({ [variables.key]: variables.value }),
         },
         'Failed to update episode',
-      ),
+      )
+    },
     onMutate: async (variables) => {
       const episodeQueryKey = queryKeys.episodeData(projectId, variables.episodeId)
       const projectQueryKey = queryKeys.projectData(projectId)
@@ -146,6 +214,24 @@ export function useUpdateProjectEpisodeField(projectId: string) {
       const previousEpisode = queryClient.getQueryData<Record<string, unknown>>(episodeQueryKey)
       const previousProject = queryClient.getQueryData<Project>(projectQueryKey)
       const previousConfig = queryClient.getQueryData<Record<string, unknown>>(configQueryKey)
+      let novelTextMeta: NovelTextMutationMeta | undefined
+
+      if (variables.key === 'novelText') {
+        let transaction = novelTextTransactionsRef.current.get(variables.episodeId)
+        if (!transaction) {
+          transaction = {
+            firstVersion: 1,
+            latestVersion: 0,
+            confirmedVersion: 0,
+            confirmed: { previousEpisode, previousProject, previousConfig },
+          }
+          novelTextTransactionsRef.current.set(variables.episodeId, transaction)
+        }
+        const version = transaction.latestVersion + 1
+        transaction.latestVersion = version
+        novelTextMeta = { transaction, version }
+        novelTextMutationMetaRef.current.set(variables, novelTextMeta)
+      }
 
       queryClient.setQueryData<Record<string, unknown> | undefined>(episodeQueryKey, (prev) => {
         if (!prev) return prev
@@ -182,10 +268,33 @@ export function useUpdateProjectEpisodeField(projectId: string) {
         }
       })
 
-      return { previousEpisode, previousProject, previousConfig, episodeId: variables.episodeId }
+      return {
+        previousEpisode,
+        previousProject,
+        previousConfig,
+        episodeId: variables.episodeId,
+        novelTextMeta,
+      }
+    },
+    onSuccess: (data, variables, context) => {
+      if (variables.key !== 'novelText' || data === SKIPPED_NOVEL_TEXT_WRITE || !context?.novelTextMeta) return
+      const { transaction, version } = context.novelTextMeta
+      if (version > transaction.confirmedVersion) {
+        transaction.confirmedVersion = version
+        transaction.confirmed = confirmEpisodeFieldValue(transaction.confirmed, variables)
+      }
+      if (
+        version === transaction.latestVersion
+        && novelTextTransactionsRef.current.get(variables.episodeId) === transaction
+      ) {
+        novelTextTransactionsRef.current.delete(variables.episodeId)
+      }
     },
     onError: (_error, variables, context) => {
       if (!context?.episodeId) return
+      const novelTextMeta = context.novelTextMeta
+      if (variables.key === 'novelText' && novelTextMeta?.version !== novelTextMeta?.transaction.latestVersion) return
+      const snapshot = novelTextMeta?.transaction.confirmed ?? context
       const restoreField = (
         current: Record<string, unknown> | undefined,
         previous: Record<string, unknown> | undefined,
@@ -202,12 +311,12 @@ export function useUpdateProjectEpisodeField(projectId: string) {
 
       queryClient.setQueryData<Record<string, unknown> | undefined>(
         queryKeys.episodeData(projectId, context.episodeId),
-        (current) => restoreField(current, context.previousEpisode),
+        (current) => restoreField(current, snapshot.previousEpisode),
       )
       queryClient.setQueryData<Project | undefined>(queryKeys.projectData(projectId), (current) => {
-        if (!current?.novelPromotionData || !context.previousProject?.novelPromotionData) return current
+        if (!current?.novelPromotionData || !snapshot.previousProject?.novelPromotionData) return current
         const currentEpisodes = current.novelPromotionData.episodes
-        const previousEpisodes = context.previousProject.novelPromotionData.episodes
+        const previousEpisodes = snapshot.previousProject.novelPromotionData.episodes
         if (!Array.isArray(currentEpisodes) || !Array.isArray(previousEpisodes)) return current
         return {
           ...current,
@@ -228,7 +337,7 @@ export function useUpdateProjectEpisodeField(projectId: string) {
         queryKeys.episodeStage(projectId, context.episodeId, 'config'),
         (current) => {
           if (!current?.episode || typeof current.episode !== 'object') return current
-          const previousEpisode = context.previousConfig?.episode
+          const previousEpisode = snapshot.previousConfig?.episode
           return {
             ...current,
             episode: restoreField(
@@ -240,6 +349,12 @@ export function useUpdateProjectEpisodeField(projectId: string) {
           }
         },
       )
+      if (
+        novelTextMeta
+        && novelTextTransactionsRef.current.get(variables.episodeId) === novelTextMeta.transaction
+      ) {
+        novelTextTransactionsRef.current.delete(variables.episodeId)
+      }
     },
     onSettled: (_, __, variables) => {
       if (variables.key === 'novelText') return
