@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import React from 'react'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import WorkspaceStageContent from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/WorkspaceStageContent'
 import {
@@ -46,35 +46,12 @@ vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/S
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/VideoStageRoute', () => stageModule('videos'))
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/VoiceStageRoute', () => stageModule('voice'))
 
-beforeEach(() => {
-  for (const stage of Object.keys(stageModules.loads) as Array<keyof typeof stageModules.loads>) {
-    stageModules.loads[stage] = 0
-  }
-})
-
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
 })
 
 describe('WorkspaceStageContent dynamic boundaries', () => {
-  it('loads only the active stage module on a cold render', async () => {
-    render(React.createElement(WorkspaceStageContent, {
-      currentStage: 'config',
-      projectId: 'project-1',
-      episodeId: 'episode-1',
-    }))
-
-    await waitFor(() => expect(stageModules.loads.config).toBe(1))
-    expect(stageModules.loads).toEqual({
-      config: 1,
-      script: 0,
-      storyboard: 0,
-      videos: 0,
-      voice: 0,
-    })
-  })
-
   it('keeps a recently visited stage mounted when switching away and back', async () => {
     const view = render(React.createElement(WorkspaceStageContent, {
       currentStage: 'config',

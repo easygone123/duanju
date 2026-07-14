@@ -3,6 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { useCloseOnWorkspaceStageInactive } from '../WorkspaceStageActivityContext'
 import type { NormalizedCropRect, NovelPromotionStoryboard } from '@/types/project'
 import { toDisplayImageUrl } from '@/lib/media/image-url'
 
@@ -132,6 +133,8 @@ interface Props {
 
 export default function SixGridCropModal({ isOpen, storyboard, initialCellIndex = 0, onClose, onSubmit }: Props) {
   const t = useTranslations('storyboard.sixGrid')
+  const isStageActive = useCloseOnWorkspaceStageInactive(isOpen, onClose)
+  const effectiveOpen = isStageActive && isOpen
   const sources = useMemo(() => getCropSourceOptions(storyboard), [storyboard])
   const initialRects = useMemo(() => {
     const panels = [...(storyboard.panels || [])].sort((a, b) => (a.gridCellIndex ?? 0) - (b.gridCellIndex ?? 0))
@@ -160,11 +163,13 @@ export default function SixGridCropModal({ isOpen, storyboard, initialCellIndex 
   const draggingRef = useRef<{ x: number; y: number; mode: 'move' | 'resize' } | null>(null)
   const previousOpenRef = useRef(false)
   const restoreFocusRef = useRef<HTMLElement | null>(null)
+  const isStageActiveRef = useRef(isStageActive)
+  isStageActiveRef.current = isStageActive
 
   useEffect(() => {
     const wasOpen = previousOpenRef.current
-    previousOpenRef.current = isOpen
-    if (isOpen && !wasOpen) {
+    previousOpenRef.current = effectiveOpen
+    if (effectiveOpen && !wasOpen) {
       restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
       const cellAspectRatio = storyboard.sixGridCellAspectRatio === '9:16' ? '9:16' : '16:9'
       const buildSourceState = (kind: CropSourceKind): SourceCropState => {
@@ -182,16 +187,18 @@ export default function SixGridCropModal({ isOpen, storyboard, initialCellIndex 
       setCellIndex(Math.min(5, Math.max(0, initialCellIndex)))
       setSourceKind(sources.requiredKind)
       dialogRef.current?.focus()
-    } else if (!isOpen && wasOpen) {
-      restoreFocusRef.current?.focus()
+    } else if (!effectiveOpen && wasOpen) {
+      if (isStageActive) restoreFocusRef.current?.focus()
       restoreFocusRef.current = null
     }
-  }, [canonicalSheetAspect, hasStoredCropRects, initialCellIndex, initialRects, isOpen, sources.requiredKind, storyboard.sheetImageMedia, storyboard.sixGridCellAspectRatio, storyboard.upscaledSheetImageMedia])
+  }, [canonicalSheetAspect, effectiveOpen, hasStoredCropRects, initialCellIndex, initialRects, isStageActive, sources.requiredKind, storyboard.sheetImageMedia, storyboard.sixGridCellAspectRatio, storyboard.upscaledSheetImageMedia])
 
-  useEffect(() => () => restoreFocusRef.current?.focus(), [])
+  useEffect(() => () => {
+    if (isStageActiveRef.current) restoreFocusRef.current?.focus()
+  }, [])
 
   useEffect(() => {
-    if (!isOpen) return
+    if (!effectiveOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -220,7 +227,7 @@ export default function SixGridCropModal({ isOpen, storyboard, initialCellIndex 
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [isOpen, onClose])
+  }, [effectiveOpen, onClose])
 
   const updateCurrent = useCallback((mode: 'move' | 'resize', delta: { dx: number; dy: number }) => {
     setSourceStates((current) => {
@@ -255,7 +262,7 @@ export default function SixGridCropModal({ isOpen, storyboard, initialCellIndex 
   }, [cellIndex, sourceKind, storyboard.sixGridCellAspectRatio])
 
   useEffect(() => {
-    if (!isOpen) return
+    if (!effectiveOpen) return
     const move = (event: PointerEvent) => {
       const previous = draggingRef.current
       if (!previous) return
@@ -272,9 +279,9 @@ export default function SixGridCropModal({ isOpen, storyboard, initialCellIndex 
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', stop)
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop) }
-  }, [isOpen, resizeCurrentFromBottomRight, updateCurrent])
+  }, [effectiveOpen, resizeCurrentFromBottomRight, updateCurrent])
 
-  if (!isOpen) return null
+  if (!effectiveOpen) return null
   const selectedSource = sources.options.find((source) => source.kind === sourceKind)
   const activeSourceState = sourceStates[sourceKind]
   const rects = activeSourceState.rects

@@ -1,5 +1,6 @@
 import { logError as _ulogError } from '@/lib/logging/core'
-import { useCallback, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useWorkspaceStageActivity } from '../../../../WorkspaceStageActivityContext'
 
 interface UsePanelPlayerParams {
   videoRatio: string
@@ -18,8 +19,12 @@ export function usePanelPlayer({
   showLipSyncVideo,
   onPreviewImage,
 }: UsePanelPlayerParams) {
+  const isStageActive = useWorkspaceStageActivity()
   const [isPlaying, setIsPlaying] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const playTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isStageActiveRef = useRef(isStageActive)
+  isStageActiveRef.current = isStageActive
   const cssAspectRatio = videoRatio.replace(':', '/')
   const currentVideoUrl = videoUrl
     ? (showLipSyncVideo && lipSyncVideoUrl ? lipSyncVideoUrl : videoUrl)
@@ -32,9 +37,12 @@ export function usePanelPlayer({
   }, [imageUrl, onPreviewImage])
 
   const handlePlayClick = useCallback(async () => {
+    if (!isStageActive) return
     setIsPlaying(true)
-    setTimeout(async () => {
-      if (!videoRef.current) return
+    if (playTimeoutRef.current) clearTimeout(playTimeoutRef.current)
+    playTimeoutRef.current = setTimeout(async () => {
+      playTimeoutRef.current = null
+      if (!isStageActiveRef.current || !videoRef.current) return
       try {
         await videoRef.current.play()
       } catch (error: unknown) {
@@ -43,6 +51,27 @@ export function usePanelPlayer({
         }
       }
     }, 100)
+  }, [isStageActive])
+
+  useEffect(() => {
+    if (isStageActive) return
+    if (playTimeoutRef.current) {
+      clearTimeout(playTimeoutRef.current)
+      playTimeoutRef.current = null
+    }
+    if (videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.currentTime = 0
+    }
+    setIsPlaying(false)
+  }, [isStageActive])
+
+  useEffect(() => () => {
+    if (playTimeoutRef.current) clearTimeout(playTimeoutRef.current)
+    if (videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.currentTime = 0
+    }
   }, [])
 
   return {
