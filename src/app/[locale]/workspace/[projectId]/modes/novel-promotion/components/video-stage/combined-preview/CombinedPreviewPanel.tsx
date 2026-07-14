@@ -227,8 +227,7 @@ export function CombinedPreviewPanel({
         {timeline.items.map((item, index) => {
           const isActive = index === activeIndex
           const previousGroupSequence = timeline.items[index - 1]?.groupSequence
-          const isGroupStart = item.groupSequence != null
-            && (index === 0 || item.groupSequence !== previousGroupSequence)
+          const isGroupStart = index === 0 || item.groupSequence !== previousGroupSequence
 
           return (
             <button

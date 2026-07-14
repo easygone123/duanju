@@ -88,6 +88,14 @@ function videoPanels(count: number): VideoPanel[] {
   }))
 }
 
+function preview(
+  panels: readonly VideoPanel[],
+  panelVideoPreference: ReadonlyMap<string, boolean> = new Map(),
+  videoRatio = '16:9',
+) {
+  return React.createElement(CombinedPreviewPanel, { panels, panelVideoPreference, videoRatio })
+}
+
 function emit(name: string, detail?: unknown) {
   act(() => {
     for (const listener of playerMock.listeners.get(name) ?? []) listener({ detail })
@@ -131,7 +139,7 @@ describe('finished-film combined preview', () => {
   it('keeps one Player mounted while nodes seek, preserve playback, and follow frame updates', () => {
     const panels = videoPanels(3)
     const timeline = buildCombinedPreviewTimeline(panels, new Map())
-    const view = render(<CombinedPreviewPanel panels={panels} panelVideoPreference={new Map()} videoRatio="16:9" />)
+    const view = render(preview(panels))
     const nodes = panels.map((_, index) => view.getByRole('button', { name: `镜头 ${index + 1}` }))
 
     expect(nodes).toHaveLength(3)
@@ -141,6 +149,9 @@ describe('finished-film combined preview', () => {
     expect(nodes[0].getAttribute('data-group-start')).toBe('true')
     expect(nodes[1].getAttribute('data-group-start')).toBeNull()
     expect(nodes[2].getAttribute('data-group-start')).toBe('true')
+    const scrollIntoView = vi.mocked(HTMLElement.prototype.scrollIntoView)
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest', inline: 'center' })
+    scrollIntoView.mockClear()
 
     emit('play')
     fireEvent.click(nodes[1])
@@ -156,17 +167,38 @@ describe('finished-film combined preview', () => {
     expect(nodes[2].getAttribute('aria-current')).toBe('true')
     expect(nodes[0].getAttribute('aria-current')).toBeNull()
     expect(playerMock.mounts).toBe(1)
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest', inline: 'center' })
 
     for (const eventName of ['frameupdate', 'play', 'pause', 'ended']) {
       expect(playerMock.addEventListener).toHaveBeenCalledWith(eventName, expect.any(Function))
       expect(playerMock.addEventListener.mock.calls.filter(([name]) => name === eventName)).toHaveLength(1)
+    }
+
+    view.unmount()
+    for (const eventName of ['frameupdate', 'play', 'pause', 'ended']) {
+      expect(playerMock.removeEventListener).toHaveBeenCalledWith(eventName, expect.any(Function))
+      expect(playerMock.removeEventListener.mock.calls.filter(([name]) => name === eventName)).toHaveLength(1)
+    }
+  })
+
+  it('marks every groupSequence change, including transitions to null and undefined', () => {
+    const panels = [
+      panel({ panelId: 'group-1', panelIndex: 0, groupSequence: 1 }),
+      panel({ panelId: 'ungrouped-null', panelIndex: 1, groupSequence: null }),
+      panel({ panelId: 'group-2', panelIndex: 2, groupSequence: 2 }),
+      panel({ panelId: 'ungrouped-undefined', panelIndex: 3, groupSequence: undefined }),
+    ]
+    const view = render(preview(panels))
+
+    for (let index = 0; index < panels.length; index += 1) {
+      expect(view.getByRole('button', { name: `镜头 ${index + 1}` }).getAttribute('data-group-start')).toBe('true')
     }
   })
 
   it('makes the last synchronous node click authoritative without remounting Player', () => {
     const panels = videoPanels(3)
     const timeline = buildCombinedPreviewTimeline(panels, new Map())
-    const view = render(<CombinedPreviewPanel panels={panels} panelVideoPreference={new Map()} videoRatio="16:9" />)
+    const view = render(preview(panels))
     const nodes = panels.map((_, index) => view.getByRole('button', { name: `镜头 ${index + 1}` }))
 
     fireEvent.click(nodes[0])
@@ -180,7 +212,7 @@ describe('finished-film combined preview', () => {
 
   it('preloads only the unique previous, current, and next video URLs and frees the bounded window', () => {
     const panels = videoPanels(4)
-    const view = render(<CombinedPreviewPanel panels={panels} panelVideoPreference={new Map()} videoRatio="16:9" />)
+    const view = render(preview(panels))
 
     expect(prefetchMock.prefetch.mock.calls.map(([url]) => url)).toEqual(['/clip-0.mp4', '/clip-1.mp4'])
     fireEvent.click(view.getByRole('button', { name: '镜头 3' }))
@@ -201,7 +233,7 @@ describe('finished-film combined preview', () => {
       ...item,
       videoUrl: index < 2 ? '/shared.mp4' : '/unique.mp4',
     }))
-    const view = render(<CombinedPreviewPanel panels={panels} panelVideoPreference={new Map()} videoRatio="16:9" />)
+    const view = render(preview(panels))
 
     expect(prefetchMock.prefetch).toHaveBeenCalledTimes(1)
     expect(prefetchMock.prefetch).toHaveBeenCalledWith('/shared.mp4', expect.any(Object))
@@ -222,7 +254,7 @@ describe('finished-film combined preview', () => {
       panel({ panelId: 'failed', panelIndex: 3, videoErrorMessage: 'failed', imageUrl: '/failed.jpg' }),
     ]
     const timeline = buildCombinedPreviewTimeline(panels, new Map())
-    const view = render(<CombinedPreviewPanel panels={panels} panelVideoPreference={new Map()} videoRatio="9:16" />)
+    const view = render(preview(panels, new Map(), '9:16'))
 
     expect(view.getAllByRole('button', { name: /^镜头 \d+$/ })).toHaveLength(4)
     expect(view.getByText('静态图')).toBeTruthy()
@@ -239,7 +271,7 @@ describe('finished-film combined preview', () => {
   })
 
   it('does not mount Player for an empty panel list', () => {
-    const view = render(<CombinedPreviewPanel panels={[]} panelVideoPreference={new Map()} videoRatio="16:9" />)
+    const view = render(preview([]))
 
     expect(view.queryByTestId('combined-preview-player')).toBeNull()
     expect(view.getByText('暂无可预览分镜')).toBeTruthy()
@@ -248,18 +280,12 @@ describe('finished-film combined preview', () => {
 
   it('resets the active node when an emptied timeline receives panels again', () => {
     const panelVideoPreference = new Map<string, boolean>()
-    const view = render(
-      <CombinedPreviewPanel panels={videoPanels(4)} panelVideoPreference={panelVideoPreference} videoRatio="16:9" />,
-    )
+    const view = render(preview(videoPanels(4), panelVideoPreference))
     fireEvent.click(view.getByRole('button', { name: '镜头 4' }))
     expect(view.getByRole('button', { name: '镜头 4' }).getAttribute('aria-current')).toBe('true')
 
-    view.rerender(
-      <CombinedPreviewPanel panels={[]} panelVideoPreference={panelVideoPreference} videoRatio="16:9" />,
-    )
-    view.rerender(
-      <CombinedPreviewPanel panels={videoPanels(1)} panelVideoPreference={panelVideoPreference} videoRatio="16:9" />,
-    )
+    view.rerender(preview([], panelVideoPreference))
+    view.rerender(preview(videoPanels(1), panelVideoPreference))
 
     expect(view.getByRole('button', { name: '镜头 1' }).getAttribute('aria-current')).toBe('true')
   })
