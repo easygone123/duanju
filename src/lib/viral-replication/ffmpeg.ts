@@ -2,6 +2,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
+import { StringDecoder } from 'node:string_decoder'
 
 export type CommandBinary = 'ffmpeg' | 'ffprobe'
 
@@ -15,6 +16,7 @@ export type FfmpegBoundaryErrorCode =
   | 'COMMAND_ABORTED'
   | 'COMMAND_FAILED'
   | 'COMMAND_OUTPUT_LIMIT'
+  | 'COMMAND_SPAWN_FAILED'
   | 'COMMAND_TIMEOUT'
   | 'INVALID_COMMAND_INPUT'
   | 'FFPROBE_MALFORMED_JSON'
@@ -79,6 +81,7 @@ const DEFAULT_CAPTURE_LIMIT_BYTES = 1024 * 1024
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000
 export const MAX_SCENE_TIMESTAMPS = 288
 const MAX_SCENE_TIMESTAMP_MS = 180_000
+const MAX_SCENE_LINE_BUFFER_CHARS = 16_384
 
 interface CommandChildProcess {
   stdout: NodeJS.ReadableStream
@@ -106,6 +109,8 @@ export interface CommandRunnerOptions {
   timeoutMs?: number
   signal?: AbortSignal
   spawnImpl?: CommandSpawn
+  onStderrChunk?: (chunk: Buffer) => void
+  captureStderr?: boolean
 }
 export const ALLOWED_VIRAL_VIDEO_MAJOR_BRANDS: ReadonlySet<string> = new Set([
   'isom',
@@ -143,6 +148,8 @@ export function createCommandRunner(
     timeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
     signal,
     spawnImpl = spawn as CommandSpawn,
+    onStderrChunk,
+    captureStderr = true,
   } = typeof options === 'number' ? { captureLimitBytes: options } : options
   if (!Number.isSafeInteger(captureLimitBytes) || captureLimitBytes <= 0) {
     throw new TypeError('captureLimitBytes must be a positive safe integer')
@@ -194,6 +201,19 @@ export function createCommandRunner(
 
     const capture = (target: 'stdout' | 'stderr', chunk: Buffer) => {
       if (terminalError) return
+      if (target === 'stderr' && onStderrChunk) {
+        try {
+          onStderrChunk(chunk)
+        } catch (error: unknown) {
+          const detail = error instanceof Error ? error.message : String(error)
+          failAndKill(new FfmpegBoundaryError(
+            'COMMAND_FAILED',
+            `Unable to process ${binary} stderr: ${detail}`,
+          ))
+          return
+        }
+      }
+      if (target === 'stderr' && !captureStderr) return
       const nextBytes = (target === 'stdout' ? stdoutBytes : stderrBytes) + chunk.length
       if (nextBytes > captureLimitBytes) {
         failAndKill(new FfmpegBoundaryError(
@@ -233,7 +253,7 @@ export function createCommandRunner(
         return
       }
       recordTerminalError(new FfmpegBoundaryError(
-        'COMMAND_FAILED',
+        'COMMAND_SPAWN_FAILED',
         `Unable to start ${binary}: ${error.message}`,
       ))
     })
@@ -321,6 +341,80 @@ function assertStreamIndexValue(value: number, label: string): void {
       'INVALID_COMMAND_INPUT',
       `${label} must be a non-negative safe integer`,
     )
+  }
+}
+
+function sampleSceneTimestamps(timestamps: Set<number>): number[] {
+  const sorted = [...timestamps].sort((left, right) => left - right)
+  if (sorted.length <= MAX_SCENE_TIMESTAMPS) return sorted
+
+  return Array.from({ length: MAX_SCENE_TIMESTAMPS }, (_, sampleIndex) => {
+    const sourceIndex = Math.round(
+      (sampleIndex * (sorted.length - 1)) / (MAX_SCENE_TIMESTAMPS - 1),
+    )
+    return sorted[sourceIndex]
+  })
+}
+
+const SCENE_TIMESTAMP_PATTERN = /\bpts_time:\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)/gi
+
+function addSceneTimestamps(text: string, timestamps: Set<number>): void {
+  for (const match of text.matchAll(SCENE_TIMESTAMP_PATTERN)) {
+    const timestampMs = Math.round(Number(match[1]) * 1_000)
+    if (
+      Number.isSafeInteger(timestampMs)
+      && timestampMs >= 0
+      && timestampMs <= MAX_SCENE_TIMESTAMP_MS
+    ) {
+      timestamps.add(timestampMs)
+    }
+  }
+}
+
+function sceneDetectionArgs(sourcePath: string, videoStreamIndex: number): string[] {
+  return [
+    '-hide_banner', '-nostdin', '-loglevel', 'info',
+    '-i', sourcePath,
+    '-map', `0:${videoStreamIndex}`,
+    '-an', '-sn',
+    '-vf', 'select=gt(scene\\,0.3),showinfo',
+    '-f', 'null',
+    '-',
+  ]
+}
+
+function createSceneTimestampCollector(): {
+  push: (chunk: Buffer) => void
+  finish: () => number[]
+} {
+  const decoder = new StringDecoder('utf8')
+  const timestamps = new Set<number>()
+  let pending = ''
+
+  const consumeCompleteLines = () => {
+    let lineEnd = pending.indexOf('\n')
+    while (lineEnd >= 0) {
+      const line = pending.slice(0, lineEnd)
+      pending = pending.slice(lineEnd + 1)
+      if (/Parsed_showinfo/i.test(line)) addSceneTimestamps(line, timestamps)
+      lineEnd = pending.indexOf('\n')
+    }
+    if (pending.length > MAX_SCENE_LINE_BUFFER_CHARS) {
+      pending = pending.slice(-MAX_SCENE_LINE_BUFFER_CHARS)
+    }
+  }
+
+  return {
+    push(chunk) {
+      pending += decoder.write(chunk)
+      consumeCompleteLines()
+    },
+    finish() {
+      pending += decoder.end()
+      if (/Parsed_showinfo/i.test(pending)) addSceneTimestamps(pending, timestamps)
+      pending = ''
+      return sampleSceneTimestamps(timestamps)
+    },
   }
 }
 
@@ -499,31 +593,31 @@ export async function detectSceneTimestamps(
 ): Promise<number[]> {
   assertAbsolutePath(sourcePath, 'sourcePath')
   assertStreamIndexValue(videoStreamIndex, 'video stream index')
-  const { stderr } = await runner('ffmpeg', [
-    '-hide_banner', '-nostdin', '-loglevel', 'info',
-    '-i', sourcePath,
-    '-map', `0:${videoStreamIndex}`,
-    '-an', '-sn',
-    '-vf', 'select=gt(scene\\,0.3),showinfo',
-    '-f', 'null',
-    '-',
-  ])
-  const timestamps = new Set<number>()
-  const timestampPattern = /\bpts_time:\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)/gi
-
-  for (const match of stderr.matchAll(timestampPattern)) {
-    const timestampMs = Math.round(Number(match[1]) * 1_000)
-    if (
-      Number.isSafeInteger(timestampMs)
-      && timestampMs >= 0
-      && timestampMs <= MAX_SCENE_TIMESTAMP_MS
-    ) {
-      timestamps.add(timestampMs)
-      if (timestamps.size >= MAX_SCENE_TIMESTAMPS) break
-    }
+  if (runner === defaultCommandRunner) {
+    return await detectSceneTimestampsFromProcess(sourcePath, videoStreamIndex)
   }
+  const { stderr } = await runner('ffmpeg', sceneDetectionArgs(sourcePath, videoStreamIndex))
+  const timestamps = new Set<number>()
+  addSceneTimestamps(stderr, timestamps)
 
-  return [...timestamps].sort((left, right) => left - right)
+  return sampleSceneTimestamps(timestamps)
+}
+
+export async function detectSceneTimestampsFromProcess(
+  sourcePath: string,
+  videoStreamIndex: number,
+  options: CommandRunnerOptions = {},
+): Promise<number[]> {
+  assertAbsolutePath(sourcePath, 'sourcePath')
+  assertStreamIndexValue(videoStreamIndex, 'video stream index')
+  const collector = createSceneTimestampCollector()
+  const runner = createCommandRunner({
+    ...options,
+    captureStderr: false,
+    onStderrChunk: collector.push,
+  })
+  await runner('ffmpeg', sceneDetectionArgs(sourcePath, videoStreamIndex))
+  return collector.finish()
 }
 
 export async function extractFrame(

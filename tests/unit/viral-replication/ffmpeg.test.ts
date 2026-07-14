@@ -12,6 +12,7 @@ import {
   createCommandRunner,
   defaultCommandRunner,
   detectSceneTimestamps,
+  detectSceneTimestampsFromProcess,
   extractEmbeddedSubtitles,
   extractFrame,
   probeVideo,
@@ -168,6 +169,17 @@ describe('FFmpeg command boundary', () => {
     await expect(observed).resolves.toMatchObject({
       error: expect.objectContaining({ code: 'BINARY_NOT_FOUND' }),
     })
+  })
+
+  it('keeps non-ENOENT spawn failures distinct from command conversion failures', async () => {
+    const child = fakeChildProcess()
+    const runner = createCommandRunner({ timeoutMs: 1_000, spawnImpl: () => child })
+    const promise = runner('ffmpeg', ['-version'])
+
+    child.emit('error', Object.assign(new Error('spawn permission denied'), { code: 'EACCES' }))
+    child.emit('close', -13, null)
+
+    await expect(promise).rejects.toMatchObject({ code: 'COMMAND_SPAWN_FAILED' })
   })
 
   it('checks both binaries with argv-only version commands', async () => {
@@ -460,7 +472,7 @@ describe('FFmpeg command boundary', () => {
     }])
   })
 
-  it('caps excessive scene events before shot-range construction', async () => {
+  it('evenly samples excessive scene events while preserving earliest and latest cuts', async () => {
     const runner: CommandRunner = async () => ({
       stdout: '',
       stderr: Array.from(
@@ -472,7 +484,36 @@ describe('FFmpeg command boundary', () => {
     const timestamps = await detectSceneTimestamps(sourcePath, 0, runner)
 
     expect(timestamps).toHaveLength(MAX_SCENE_TIMESTAMPS)
-    expect(timestamps.at(-1)).toBe(MAX_SCENE_TIMESTAMPS)
+    expect(timestamps[0]).toBe(1)
+    expect(timestamps.at(-1)).toBe(MAX_SCENE_TIMESTAMPS + 100)
+    expect(timestamps.some((timestamp) => timestamp > MAX_SCENE_TIMESTAMPS)).toBe(true)
+    const gaps = timestamps.slice(1).map((timestamp, index) => timestamp - timestamps[index])
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(1)
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(2)
+  })
+
+  it('stream-parses high-volume real-process scene output without generic stderr overflow', async () => {
+    const child = fakeChildProcess()
+    const detection = detectSceneTimestampsFromProcess(sourcePath, 0, {
+      captureLimitBytes: 64,
+      timeoutMs: 10_000,
+      spawnImpl: () => child,
+    })
+    const noisyOutput = Array.from({ length: 400 }, (_, index) => (
+      `[Parsed_showinfo_1 @ 0x1] n:${index} pts_time:${index / 10} ${'x'.repeat(3_000)}\n`
+    )).join('')
+    expect(Buffer.byteLength(noisyOutput)).toBeGreaterThan(1024 * 1024)
+    for (let offset = 0; offset < noisyOutput.length; offset += 257) {
+      child.stderr.write(noisyOutput.slice(offset, offset + 257))
+    }
+    child.emit('close', 0, null)
+
+    const timestamps = await detection
+    expect(child.kill).not.toHaveBeenCalled()
+    expect(timestamps).toHaveLength(MAX_SCENE_TIMESTAMPS)
+    expect(timestamps[0]).toBe(0)
+    expect(timestamps.at(-1)).toBe(39_900)
+    expect(timestamps.some((timestamp) => timestamp > 30_000)).toBe(true)
   })
 
   it('extracts a mapped JPEG through a nonempty sibling temp file and atomically replaces final', async () => {

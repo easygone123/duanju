@@ -388,6 +388,72 @@ describe('preprocessViralVideo', () => {
     }
   })
 
+  it.each([
+    [
+      'command cancellation',
+      new FfmpegBoundaryError('COMMAND_ABORTED', 'subtitle extraction aborted'),
+    ],
+    [
+      'command timeout',
+      new FfmpegBoundaryError('COMMAND_TIMEOUT', 'subtitle extraction timed out'),
+    ],
+    [
+      'missing FFmpeg binary',
+      new FfmpegBoundaryError('BINARY_NOT_FOUND', 'ffmpeg missing'),
+    ],
+    [
+      'command output overflow',
+      new FfmpegBoundaryError('COMMAND_OUTPUT_LIMIT', 'subtitle output overflow'),
+    ],
+    [
+      'command spawn failure',
+      new FfmpegBoundaryError('COMMAND_SPAWN_FAILED', 'ffmpeg spawn failed'),
+    ],
+    ['unknown runner error', new TypeError('subtitle runner contract bug')],
+  ])('rethrows %s from subtitle extraction', async (_label, subtitleFailure) => {
+    const runner: CommandRunner = async (binary, args) => {
+      if (binary === 'ffprobe') return { stdout: fakeProbePayload('mov_text'), stderr: '' }
+      if (args.some((arg) => arg.includes('showinfo'))) {
+        return { stdout: '', stderr: 'pts_time:5\npts_time:10' }
+      }
+      if (args.includes('-frames:v')) {
+        await fs.writeFile(args.at(-1)!, 'frame')
+        return { stdout: '', stderr: '' }
+      }
+      throw subtitleFailure
+    }
+
+    await expect(preprocessViralVideo({ sourcePath, outputDirectory, runner })).rejects.toBe(
+      subtitleFailure,
+    )
+  })
+
+  it('removes frames created by this invocation when a later frame fails', async () => {
+    await fs.mkdir(outputDirectory, { recursive: true })
+    const unrelatedPath = path.join(outputDirectory, 'caller-owned.keep')
+    await fs.writeFile(unrelatedPath, 'do not remove')
+    let frameAttempt = 0
+    const frameFailure = new FfmpegBoundaryError('COMMAND_FAILED', 'later frame failed')
+    const runner: CommandRunner = async (binary, args) => {
+      if (binary === 'ffprobe') return { stdout: fakeProbePayload(), stderr: '' }
+      if (args.some((arg) => arg.includes('showinfo'))) {
+        return { stdout: '', stderr: 'pts_time:5\npts_time:10' }
+      }
+      if (args.includes('-frames:v')) {
+        frameAttempt += 1
+        await fs.writeFile(args.at(-1)!, frameAttempt === 1 ? 'valid frame' : 'partial frame')
+        if (frameAttempt === 2) throw frameFailure
+      }
+      return { stdout: '', stderr: '' }
+    }
+
+    await expect(preprocessViralVideo({ sourcePath, outputDirectory, runner })).rejects.toBe(
+      frameFailure,
+    )
+    await expect(fs.readdir(outputDirectory)).resolves.toEqual(['caller-owned.keep'])
+    await expect(fs.readFile(unrelatedPath, 'utf8')).resolves.toBe('do not remove')
+  })
+
   it('rejects a short selected video even when the container tail is long', async () => {
     const calls: Array<{ binary: string; args: string[] }> = []
     const runner: CommandRunner = async (binary, args) => {
@@ -437,7 +503,7 @@ describe('preprocessViralVideo', () => {
     expect(result.metadata.formatName.split(',')).toEqual(expect.arrayContaining(['mov', 'mp4']))
     expect(result.metadata.durationMs).toBeGreaterThanOrEqual(14_900)
     expect(result.metadata.durationMs).toBeLessThanOrEqual(15_100)
-    expect(result.shots.length).toBeGreaterThanOrEqual(3)
+    expect(result.shots).toHaveLength(3)
     expect(result.shots[0].representativeMs).toBe(0)
     for (const shot of result.shots) {
       expect((await fs.stat(shot.framePath)).size).toBeGreaterThan(0)

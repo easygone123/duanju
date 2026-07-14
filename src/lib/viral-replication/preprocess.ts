@@ -6,6 +6,7 @@ import {
   VIRAL_MAX_ANALYSIS_FRAMES,
 } from './constants'
 import {
+  FfmpegBoundaryError,
   defaultCommandRunner,
   detectSceneTimestamps,
   extractEmbeddedSubtitles,
@@ -115,6 +116,16 @@ function frameFilename(shotIndex: number): string {
   return `shot-${shotIndex.toString().padStart(3, '0')}.jpg`
 }
 
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.lstat(targetPath)
+    return true
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+}
+
 export async function preprocessViralVideo({
   sourcePath,
   outputDirectory,
@@ -134,16 +145,26 @@ export async function preprocessViralVideo({
 
   await fs.mkdir(outputDirectory, { recursive: true })
   const shots: PreprocessedViralShot[] = []
-  for (const [shotIndex, range] of shotRanges.entries()) {
-    const framePath = path.join(outputDirectory, frameFilename(shotIndex))
-    await extractFrame(
-      sourcePath,
-      framePath,
-      range.representativeMs,
-      metadata.videoStreamIndex,
-      runner,
+  const invocationCreatedFramePaths: string[] = []
+  try {
+    for (const [shotIndex, range] of shotRanges.entries()) {
+      const framePath = path.join(outputDirectory, frameFilename(shotIndex))
+      const existedBeforeInvocation = await pathExists(framePath)
+      await extractFrame(
+        sourcePath,
+        framePath,
+        range.representativeMs,
+        metadata.videoStreamIndex,
+        runner,
+      )
+      if (!existedBeforeInvocation) invocationCreatedFramePaths.push(framePath)
+      shots.push({ shotIndex, ...range, framePath })
+    }
+  } catch (error: unknown) {
+    await Promise.allSettled(
+      invocationCreatedFramePaths.map(async (framePath) => fs.rm(framePath, { force: true })),
     )
-    shots.push({ shotIndex, ...range, framePath })
+    throw error
   }
 
   const textSubtitles = metadata.subtitleStreams
@@ -159,8 +180,9 @@ export async function preprocessViralVideo({
   for (const subtitle of textSubtitles) {
     try {
       transcriptText = await extractEmbeddedSubtitles(sourcePath, subtitle.index, runner)
-    } catch {
-      continue
+    } catch (error: unknown) {
+      if (error instanceof FfmpegBoundaryError && error.code === 'COMMAND_FAILED') continue
+      throw error
     }
     if (transcriptText !== null) break
   }
