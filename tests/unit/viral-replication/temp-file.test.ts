@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { writeRequestBodyToTempFile } from '@/lib/viral-replication/temp-file'
 
 function requestBody(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
@@ -21,6 +21,7 @@ describe('writeRequestBodyToTempFile', () => {
   })
 
   afterEach(async () => {
+    vi.restoreAllMocks()
     await fs.rm(tempRoot, { recursive: true, force: true })
   })
 
@@ -48,6 +49,31 @@ describe('writeRequestBodyToTempFile', () => {
     expect(result.sizeBytes).toBe(0)
     expect(await fs.readFile(result.filePath)).toEqual(Buffer.alloc(0))
     await result.cleanup()
+  })
+
+  it('rejects a non-empty body when the byte limit is zero', async () => {
+    await expect(writeRequestBodyToTempFile(requestBody([Buffer.from([1])]), {
+      maxBytes: 0,
+      prefix: 'zero-overflow',
+      tempRoot,
+    })).rejects.toThrow(/exceeds.*0 bytes/i)
+
+    expect(await fs.readdir(tempRoot)).toEqual([])
+  })
+
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['negative', -1],
+    ['fractional', 1.5],
+  ])('rejects a %s byte limit before creating a directory', async (_label, maxBytes) => {
+    await expect(writeRequestBodyToTempFile(requestBody([]), {
+      maxBytes,
+      prefix: 'invalid-limit',
+      tempRoot,
+    })).rejects.toThrow(/maxBytes.*non-negative safe integer/i)
+
+    expect(await fs.readdir(tempRoot)).toEqual([])
   })
 
   it('rejects the first chunk that would exceed the limit and leaves no residue', async () => {
@@ -85,6 +111,35 @@ describe('writeRequestBodyToTempFile', () => {
     })).rejects.toBe(streamError)
 
     expect(await fs.readdir(tempRoot)).toEqual([])
+  })
+
+  it('preserves both the stream error and a cleanup error', async () => {
+    const streamError = new Error('request disconnected')
+    const cleanupError = new Error('temporary directory cleanup failed')
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(streamError)
+      },
+    })
+    const rmSpy = vi.spyOn(fs, 'rm').mockRejectedValueOnce(cleanupError)
+    let caught: unknown
+
+    try {
+      await writeRequestBodyToTempFile(body, {
+        maxBytes: 100,
+        prefix: 'cleanup-error',
+        tempRoot,
+      })
+    } catch (error: unknown) {
+      caught = error
+    } finally {
+      rmSpy.mockRestore()
+    }
+
+    expect(caught).toBeInstanceOf(AggregateError)
+    if (!(caught instanceof AggregateError)) throw new Error('Expected AggregateError')
+    expect(caught.message).toBe(streamError.message)
+    expect(caught.errors).toEqual([streamError, cleanupError])
   })
 
   it('returns an idempotent cleanup function', async () => {

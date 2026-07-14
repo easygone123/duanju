@@ -7,9 +7,15 @@ import type { DeleteObjectsResult, SignedUrlParams, StorageProvider, UploadObjec
 import { normalizeKey, toFetchableUrl } from '@/lib/storage/utils'
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || './data/uploads'
+const UPLOAD_ROOT = path.resolve(process.cwd(), UPLOAD_DIR)
 
 function resolveUploadPath(key: string): string {
-  return path.join(process.cwd(), UPLOAD_DIR, normalizeKey(key))
+  const candidate = path.resolve(UPLOAD_ROOT, normalizeKey(key))
+  const isContained = candidate === UPLOAD_ROOT || candidate.startsWith(`${UPLOAD_ROOT}${path.sep}`)
+  if (!isContained) {
+    throw new Error(`Storage key resolves outside upload directory: ${key}`)
+  }
+  return candidate
 }
 
 export class LocalStorageProvider implements StorageProvider {
@@ -70,7 +76,9 @@ export class LocalStorageProvider implements StorageProvider {
 
   async getSignedObjectUrl(params: SignedUrlParams): Promise<string> {
     void params.expiresInSeconds
-    return `/api/files/${encodeURIComponent(normalizeKey(params.key))}`
+    const normalizedKey = normalizeKey(params.key)
+    resolveUploadPath(normalizedKey)
+    return `/api/files/${encodeURIComponent(normalizedKey)}`
   }
 
   async getObjectBuffer(key: string): Promise<Buffer> {
@@ -78,7 +86,7 @@ export class LocalStorageProvider implements StorageProvider {
   }
 
   async getObjectStream(key: string): Promise<NodeJS.ReadableStream> {
-    return createReadStream(resolveUploadPath(normalizeKey(key)))
+    return createReadStream(resolveUploadPath(key))
   }
 
   extractStorageKey(input: string | null | undefined): string | null {

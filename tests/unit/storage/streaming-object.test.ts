@@ -156,6 +156,64 @@ describe('LocalStorageProvider streaming objects', () => {
 
     await expect(streamToBuffer(stream)).resolves.toEqual(bytes)
   })
+
+  it('rejects a traversal stream upload without creating an outside file', async () => {
+    const provider = new LocalStorageProvider()
+    const outsideName = `outside-stream-upload-${randomUUID()}.bin`
+    const outsidePath = path.resolve(uploadRoot, '..', outsideName)
+
+    try {
+      await expect(provider.uploadObjectStream({
+        key: `../${outsideName}`,
+        body: Readable.from([Buffer.from('must stay contained')]),
+        contentLength: 19,
+      })).rejects.toThrow(/outside.*upload directory/i)
+
+      expect(await pathExists(outsidePath)).toBe(false)
+    } finally {
+      await fs.rm(outsidePath, { force: true })
+    }
+  })
+
+  it('rejects a traversal stream read instead of reading an outside file', async () => {
+    const provider = new LocalStorageProvider()
+    const outsideName = `outside-stream-read-${randomUUID()}.bin`
+    const outsidePath = path.resolve(uploadRoot, '..', outsideName)
+    await fs.mkdir(path.dirname(outsidePath), { recursive: true })
+    await fs.writeFile(outsidePath, 'outside sentinel')
+
+    try {
+      await expect(provider.getObjectStream(`../${outsideName}`)).rejects.toThrow(/outside.*upload directory/i)
+    } finally {
+      await fs.rm(outsidePath, { force: true })
+    }
+  })
+
+  it('rejects a traversal buffer upload without creating an outside file', async () => {
+    const provider = new LocalStorageProvider()
+    const outsideName = `outside-buffer-upload-${randomUUID()}.bin`
+    const outsidePath = path.resolve(uploadRoot, '..', outsideName)
+
+    try {
+      await expect(provider.uploadObject({
+        key: `../${outsideName}`,
+        body: Buffer.from('must stay contained'),
+      })).rejects.toThrow(/outside.*upload directory/i)
+
+      expect(await pathExists(outsidePath)).toBe(false)
+    } finally {
+      await fs.rm(outsidePath, { force: true })
+    }
+  })
+
+  it('rejects a traversal key when creating a local signed URL', async () => {
+    const provider = new LocalStorageProvider()
+
+    await expect(provider.getSignedObjectUrl({
+      key: '../outside-video.bin',
+      expiresInSeconds: 60,
+    })).rejects.toThrow(/outside.*upload directory/i)
+  })
 })
 
 describe('MinioStorageProvider streaming objects', () => {
@@ -220,11 +278,12 @@ describe('storage facade streaming objects', () => {
     facadeUploadObjectStreamMock.mockResolvedValue({ key: 'viral/source.mp4' })
   })
 
-  it('delegates uploads with the original stream and content length', async () => {
+  it('delegates uploads from a replayable body factory with the content length', async () => {
     const body = Readable.from([Buffer.from('video')])
+    const createBody = vi.fn(() => body)
 
     await expect(storageFacade.uploadObjectStream(
-      body,
+      createBody,
       'viral/source.mp4',
       5,
       'video/mp4',
@@ -237,6 +296,44 @@ describe('storage facade streaming objects', () => {
       contentLength: 5,
       contentType: 'video/mp4',
     })
+    expect(createBody).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates a fresh complete stream for every retry attempt', async () => {
+    vi.useFakeTimers()
+    const expected = Buffer.from('complete original body')
+    const attemptBodies: Buffer[] = []
+    const firstAttemptError = new Error('upload interrupted after consuming the stream')
+    const createBody = vi.fn(() => Readable.from([
+      expected.subarray(0, 8),
+      expected.subarray(8),
+    ]))
+    facadeUploadObjectStreamMock.mockImplementation(async ({ body }) => {
+      attemptBodies.push(await streamToBuffer(body))
+      if (attemptBodies.length === 1) throw firstAttemptError
+      return { key: 'viral/source.mp4' }
+    })
+
+    try {
+      const uploadPromise = storageFacade.uploadObjectStream(
+        createBody,
+        'viral/source.mp4',
+        expected.length,
+        'video/mp4',
+        2,
+      )
+      const outcomePromise = uploadPromise.then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      )
+      await vi.runAllTimersAsync()
+      expect(await outcomePromise).toEqual({ result: 'viral/source.mp4' })
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(createBody).toHaveBeenCalledTimes(2)
+    expect(attemptBodies).toEqual([expected, expected])
   })
 
   it('returns the provider download stream unchanged', async () => {

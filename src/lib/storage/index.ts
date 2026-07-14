@@ -51,8 +51,9 @@ export async function uploadObject(
   return result.key
 }
 
+/** The factory must return a new stream containing the full object for every retry attempt. */
 export async function uploadObjectStream(
-  body: NodeJS.ReadableStream,
+  createBody: () => NodeJS.ReadableStream,
   key: string,
   contentLength: number,
   contentType?: string,
@@ -62,7 +63,12 @@ export async function uploadObjectStream(
 
   const result = await withRetry(
     async () => {
-      return await provider.uploadObjectStream({ key, body, contentLength, contentType })
+      return await provider.uploadObjectStream({
+        key,
+        body: createBody(),
+        contentLength,
+        contentType,
+      })
     },
     maxRetries,
     RETRY_DELAY_BASE_MS,

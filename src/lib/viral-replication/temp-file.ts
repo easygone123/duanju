@@ -31,6 +31,10 @@ export async function writeRequestBodyToTempFile(
   const tempRoot = options.tempRoot ?? os.tmpdir()
   const prefix = options.prefix ?? 'viral-upload'
 
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+    throw new TypeError('maxBytes must be a finite non-negative safe integer')
+  }
+
   await fs.mkdir(tempRoot, { recursive: true })
   const directory = await fs.mkdtemp(path.join(tempRoot, `${prefix}-`))
   const filePath = path.join(directory, 'request-body')
@@ -56,7 +60,12 @@ export async function writeRequestBodyToTempFile(
       createWriteStream(filePath),
     )
   } catch (error: unknown) {
-    await fs.rm(directory, { recursive: true, force: true })
+    try {
+      await fs.rm(directory, { recursive: true, force: true })
+    } catch (cleanupError: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new AggregateError([error, cleanupError], message)
+    }
     throw error
   }
 
