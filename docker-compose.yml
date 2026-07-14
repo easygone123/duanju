@@ -62,6 +62,9 @@ services:
 
   # ==================== App (Next.js + Workers) ====================
   app:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: ghcr.io/saturndec/waoowaoo:latest
     container_name: waoowaoo-app
     restart: unless-stopped

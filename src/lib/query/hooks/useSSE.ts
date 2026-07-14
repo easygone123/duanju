@@ -7,6 +7,8 @@ import { queryKeys } from '../keys'
 import { TASK_EVENT_TYPE, TASK_SSE_EVENT_TYPE, type SSEEvent } from '@/lib/task/types'
 import { applyTaskLifecycleToOverlay } from '../task-target-overlay'
 import { isTaskIntent, resolveTaskIntent } from '@/lib/task/intent'
+import { applyWorkspaceTaskCompletion } from '../cache/task-event-patcher'
+import { isEpisodeStage, type EpisodeStage } from '@/lib/novel-promotion/episode-stage-data'
 
 type UseSSEOptions = {
   projectId?: string | null
@@ -19,6 +21,8 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
   const queryClient = useQueryClient()
   const sourceRef = useRef<EventSource | null>(null)
   const targetStatesInvalidateTimerRef = useRef<number | null>(null)
+  const stageRecoveryTimerRef = useRef<number | null>(null)
+  const pendingStageRecoveriesRef = useRef(new Set<string>())
   const isGlobalAssetProject = projectId === 'global-asset-hub'
 
   const url = useMemo(() => {
@@ -33,16 +37,66 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
 
     const source = new EventSource(url)
     sourceRef.current = source
+    const pendingStageRecoveries = pendingStageRecoveriesRef.current
 
-    const invalidateEpisodeScoped = (resolvedEpisodeId: string | null) => {
+    const scheduleStageRecovery = (
+      resolvedEpisodeId: string | null,
+      stages: EpisodeStage[],
+    ) => {
       if (!resolvedEpisodeId) return
-      queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, resolvedEpisodeId) })
-      queryClient.invalidateQueries({ queryKey: queryKeys.storyboards.all(resolvedEpisodeId) })
-      queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.all(resolvedEpisodeId) })
-      queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.matched(projectId, resolvedEpisodeId) })
+      const recoveryStages = stages.length > 0 ? stages : ['config', 'script', 'storyboard', 'videos', 'voice']
+      for (const stage of recoveryStages) {
+        pendingStageRecoveries.add(`${resolvedEpisodeId}:${stage}`)
+      }
+      if (stageRecoveryTimerRef.current !== null) return
+      stageRecoveryTimerRef.current = window.setTimeout(() => {
+        const episodeIds = new Set<string>()
+        for (const recovery of pendingStageRecoveries) {
+          const separator = recovery.indexOf(':')
+          const recoveryEpisodeId = recovery.slice(0, separator)
+          const stage = recovery.slice(separator + 1)
+          if (!isEpisodeStage(stage)) continue
+          episodeIds.add(recoveryEpisodeId)
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.episodeStage(projectId, recoveryEpisodeId, stage),
+          })
+        }
+        for (const recoveryEpisodeId of episodeIds) {
+          queryClient.invalidateQueries({
+            queryKey: queryKeys.episodeData(projectId, recoveryEpisodeId),
+          })
+        }
+        pendingStageRecoveries.clear()
+        stageRecoveryTimerRef.current = null
+      }, 250)
     }
 
-    const invalidateByTarget = (targetType: string | null, resolvedEpisodeId: string | null) => {
+    const inferStageRecovery = (
+      targetType: string | null,
+      taskType: string | null,
+      eventPayload: Record<string, unknown> | null,
+    ): EpisodeStage[] => {
+      if (isEpisodeStage(eventPayload?.workspaceStage)) return [eventPayload.workspaceStage]
+      if (targetType === 'NovelPromotionVoiceLine') return ['voice']
+      if (targetType === 'NovelPromotionPanel') {
+        if (taskType === 'video_panel' || taskType === 'lip_sync') return ['videos']
+        return ['storyboard', 'videos']
+      }
+      if (targetType === 'NovelPromotionStoryboard' || targetType === 'NovelPromotionShot') {
+        return ['storyboard', 'videos']
+      }
+      if (taskType === 'story_to_script_run' || taskType === 'clips_build') return ['script']
+      if (taskType === 'script_to_storyboard_run') return ['storyboard', 'videos']
+      if (taskType === 'voice_analyze' || taskType === 'voice_line') return ['voice']
+      return []
+    }
+
+    const recoverByTarget = (
+      targetType: string | null,
+      taskType: string | null,
+      resolvedEpisodeId: string | null,
+      eventPayload: Record<string, unknown> | null,
+    ) => {
       if (isGlobalAssetProject) {
         if (targetType?.startsWith('GlobalCharacter')) {
           queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.characters() })
@@ -71,7 +125,11 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
         return
       }
       if (targetType === 'NovelPromotionVoiceLine') {
-        invalidateEpisodeScoped(resolvedEpisodeId)
+        scheduleStageRecovery(resolvedEpisodeId, ['voice'])
+        if (resolvedEpisodeId) {
+          queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.all(resolvedEpisodeId) })
+          queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.matched(projectId, resolvedEpisodeId) })
+        }
         return
       }
       if (
@@ -79,16 +137,25 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
         targetType === 'NovelPromotionStoryboard' ||
         targetType === 'NovelPromotionShot'
       ) {
-        invalidateEpisodeScoped(resolvedEpisodeId)
+        scheduleStageRecovery(
+          resolvedEpisodeId,
+          inferStageRecovery(targetType, taskType, eventPayload),
+        )
         return
       }
       if (targetType === 'NovelPromotionEpisode') {
-        invalidateEpisodeScoped(resolvedEpisodeId)
+        scheduleStageRecovery(
+          resolvedEpisodeId,
+          inferStageRecovery(targetType, taskType, eventPayload),
+        )
         queryClient.invalidateQueries({ queryKey: queryKeys.projectData(projectId) })
         return
       }
 
-      queryClient.invalidateQueries({ queryKey: queryKeys.projectData(projectId) })
+      scheduleStageRecovery(
+        resolvedEpisodeId,
+        inferStageRecovery(targetType, taskType, eventPayload),
+      )
     }
 
     const handleEvent = (event: MessageEvent) => {
@@ -188,7 +255,26 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
           normalizedLifecycleType === TASK_EVENT_TYPE.COMPLETED ||
           normalizedLifecycleType === TASK_EVENT_TYPE.FAILED
         ) {
-          invalidateByTarget(targetType, resolvedEpisodeId)
+          if (
+            normalizedLifecycleType === TASK_EVENT_TYPE.COMPLETED &&
+            resolvedEpisodeId
+          ) {
+            const result = applyWorkspaceTaskCompletion(queryClient, {
+              projectId,
+              episodeId: resolvedEpisodeId,
+              targetType,
+              targetId,
+              taskType: typeof payload.taskType === 'string' ? payload.taskType : null,
+              payload: eventPayload,
+            })
+            if (result.handled) return
+          }
+          recoverByTarget(
+            targetType,
+            typeof payload.taskType === 'string' ? payload.taskType : null,
+            resolvedEpisodeId,
+            eventPayload,
+          )
         }
       } catch (error) {
         _ulogError('[useSSE] failed to parse event', error)
@@ -215,6 +301,11 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
         window.clearTimeout(targetStatesInvalidateTimerRef.current)
         targetStatesInvalidateTimerRef.current = null
       }
+      if (stageRecoveryTimerRef.current !== null) {
+        window.clearTimeout(stageRecoveryTimerRef.current)
+        stageRecoveryTimerRef.current = null
+      }
+      pendingStageRecoveries.clear()
       for (const listener of listeners) {
         source.removeEventListener(listener.type, listener.handler)
       }

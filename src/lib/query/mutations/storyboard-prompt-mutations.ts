@@ -6,6 +6,7 @@ import {
   requestJsonWithError,
   requestTaskResponseWithError,
 } from './mutation-shared'
+import { invalidateEpisodeStageQueries } from '../episode-stage-cache'
 
 export function useAiModifyProjectShotPrompt(projectId: string) {
     return useMutation({
@@ -85,6 +86,7 @@ export function useAnalyzeProjectShotVariants(projectId: string) {
  */
 
 export function useUpdateProjectPhotographyPlan(projectId: string) {
+    const queryClient = useQueryClient()
     return useMutation({
         mutationFn: async (payload: {
             storyboardId: string
@@ -99,6 +101,7 @@ export function useUpdateProjectPhotographyPlan(projectId: string) {
                 },
                 '保存摄影规则失败',
             ),
+        onSuccess: () => invalidateEpisodeStageQueries(queryClient, projectId),
     })
 }
 
@@ -107,6 +110,7 @@ export function useUpdateProjectPhotographyPlan(projectId: string) {
  */
 
 export function useUpdateProjectPanelActingNotes(projectId: string) {
+    const queryClient = useQueryClient()
     return useMutation({
         mutationFn: async (payload: {
             storyboardId: string
@@ -122,6 +126,7 @@ export function useUpdateProjectPanelActingNotes(projectId: string) {
                 },
                 '保存演技指导失败',
             ),
+        onSuccess: () => invalidateEpisodeStageQueries(queryClient, projectId),
     })
 }
 

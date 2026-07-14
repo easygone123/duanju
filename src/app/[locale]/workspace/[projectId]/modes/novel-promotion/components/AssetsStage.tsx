@@ -25,7 +25,7 @@ import {
   useAssets,
   useRefreshProjectAssets,
   useEpisodes,
-  useEpisodeData,
+  useEpisodeStageData,
 } from '@/lib/query/hooks'
 import {
   getAllClipsAssets,
@@ -50,6 +50,7 @@ import AssetToolbar from './assets/AssetToolbar'
 import AssetFilterBar, { type AssetKindFilter } from './assets/AssetFilterBar'
 import AssetsStageStatusOverlays from './assets/AssetsStageStatusOverlays'
 import AssetsStageModals from './assets/AssetsStageModals'
+import StageDataBoundary from './StageDataBoundary'
 
 interface AssetsStageProps {
   projectId: string
@@ -135,11 +136,12 @@ export default function AssetsStage({
   )
 
   // 分集筛选：获取选中集的 clips，解析出该集的资产名称
-  const { data: episodeData } = useEpisodeData(projectId, episodeFilter)
+  const episodeStageQuery = useEpisodeStageData(projectId, episodeFilter, 'script')
+  const { data: episodeStageData } = episodeStageQuery
   const episodeClips = useMemo(() => {
-    if (!episodeFilter || !episodeData) return null
-    return ((episodeData as { clips?: NovelPromotionClip[] }).clips) ?? null
-  }, [episodeFilter, episodeData])
+    if (!episodeFilter || !episodeStageData) return null
+    return episodeStageData.episode.clips as NovelPromotionClip[]
+  }, [episodeFilter, episodeStageData])
 
   // 按分集筛选资产 ID 集合
   const episodeAssetIds = useMemo(() => {
@@ -364,6 +366,19 @@ export default function AssetsStage({
     closeImageEditModal,
     closeCharacterImageEditModal,
   })
+
+  if (episodeFilter && episodeStageQuery.data === undefined) {
+    return (
+      <StageDataBoundary
+        data={episodeStageQuery.data}
+        status={episodeStageQuery.status}
+        error={episodeStageQuery.error}
+        refetch={episodeStageQuery.refetch}
+      >
+        {null}
+      </StageDataBoundary>
+    )
+  }
 
   return (
     <div className="space-y-4">

@@ -143,18 +143,19 @@ export function usePanelVideoModel({
     () => readSelectionForModel(capabilityOverrides, selectedModel),
     [capabilityOverrides, selectedModel],
   )
-  const selectedModelOverridesSignature = useMemo(
-    () => JSON.stringify(selectedModelOverrides),
-    [selectedModelOverrides],
-  )
-
-  useEffect(() => {
-    setGenerationOptions(normalizeVideoGenerationSelections({
+  const persistedGenerationOptions = useMemo(
+    () => normalizeVideoGenerationSelections({
       definitions: capabilityDefinitions,
       pricingTiers,
       selection: selectedModelOverrides,
-    }))
-  }, [selectedModel, selectedModelOverridesSignature, capabilityDefinitions, pricingTiers, selectedModelOverrides])
+    }),
+    [capabilityDefinitions, pricingTiers, selectedModelOverrides],
+  )
+  const hasGenerationOptionChanges = JSON.stringify(generationOptions) !== JSON.stringify(persistedGenerationOptions)
+
+  useEffect(() => {
+    setGenerationOptions(persistedGenerationOptions)
+  }, [persistedGenerationOptions])
 
   useEffect(() => {
     setGenerationOptions((previous) => normalizeVideoGenerationSelections({
@@ -234,6 +235,11 @@ export function usePanelVideoModel({
   const setIncludeDialogueInVideoPrompt = (value: boolean) => {
     setIncludeDialogueInVideoPromptState(value)
     setDialogueInclusionDirty(true)
+  }
+  const consumeGenerationSelection = () => {
+    setHasExplicitSelection(false)
+    setSelectedModelState(automaticModel)
+    setGenerationOptions(persistedGenerationOptions)
   }
   const saveVideoSettings = async () => {
     if (!onSaveSettings || (!durationOverrideDirty && !dialogueInclusionDirty)) return
@@ -323,6 +329,8 @@ export function usePanelVideoModel({
     resetDurationOverride,
     durationOverrideDirty,
     hasExplicitSelection,
+    hasGenerationOptionChanges,
+    consumeGenerationSelection,
     durationInput,
     includeDialogueInVideoPrompt,
     setIncludeDialogueInVideoPrompt,

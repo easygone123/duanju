@@ -171,6 +171,25 @@ Back up the database and run `npx prisma migrate deploy` before deploying the ne
 
 ---
 
+## ⚡ Workspace performance acceptance
+
+Run `npm run perf:workspace -- --compare` for a reproducible workspace performance comparison. The command validates architecture budgets with fixed clocks and fixtures, independent of machine load. The repository does not currently bundle an authenticated browser fixture, so this table is not a real-browser benchmark; browser measurements are supporting evidence only.
+
+| Scenario | Metric | Pre-optimization baseline | Current contract |
+| --- | --- | ---: | ---: |
+| Cold storyboard entry | Visible time | 1240 ms | 620 ms |
+| Cold storyboard entry | Requests / bytes | 3 / 1,876,000 B | 2 / 300,000 B |
+| Cold storyboard entry | JS chunks / mounted card bodies | 2 / 96 | 2 / 18 |
+| Cold storyboard entry | Refetches | 2 | 0 |
+| Cached stage switch | Visible time | 460 ms | 180 ms (budget ≤ 300 ms) |
+| Cached stage switch | Requests / bytes | 1 / 1,480,000 B | 0 / 0 B |
+| Cached stage switch | JS chunks / mounted card bodies | 0 / 96 | 0 / 18 |
+| Cached stage switch | Whole-project refetches | 1 | 0 |
+
+The initial data request names are exactly `project-shell` and `storyboard-stage`; unrelated task-completion refetches are exactly 0. CI enforces these budgets in `tests/performance/workspace-performance.contract.test.ts` and `tests/system/workspace-stage-performance.system.test.ts`.
+
+---
+
 ## 📦 Tech Stack
 
 - **Framework**: Next.js 15 + React 19

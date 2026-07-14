@@ -21,6 +21,7 @@ import { buildWorkspaceControllerViewModel } from './workspace-controller-view-m
 import type { NovelPromotionWorkspaceProps } from '../types'
 import { useRouter } from '@/i18n/navigation'
 import { resolveEpisodeStageArtifacts } from '@/lib/novel-promotion/stage-readiness'
+import { useEpisodeStageData } from '@/lib/query/hooks/useEpisodeStageData'
 
 export function useNovelPromotionWorkspaceController({
   project,
@@ -39,7 +40,13 @@ export function useNovelPromotionWorkspaceController({
   const router = useRouter()
   const { onRefresh } = useWorkspaceProvider()
 
-  const projectSnapshot = useWorkspaceProjectSnapshot({ project, episode, urlStage })
+  // The controller needs only current story text and compact readiness. Keeping
+  // this separate from the active stage payload avoids restoring the legacy
+  // full-episode request on workspace mount.
+  const { data: configStageData } = useEpisodeStageData(projectId, episodeId || null, 'config')
+  const configEpisode = configStageData?.episode
+
+  const projectSnapshot = useWorkspaceProjectSnapshot({ project, episode: configEpisode, urlStage })
   const { currentStage, ...projectSection } = projectSnapshot
 
   const assetsLoading = false
@@ -87,7 +94,7 @@ export function useNovelPromotionWorkspaceController({
 
   const rebuildState = useRebuildConfirm({
     episodeId,
-    episodeStoryboards: episode?.storyboards,
+    episodeStoryboardStats: configEpisode?.storyboardStats,
     getProjectStoryboardStats: configActions.getProjectStoryboardStats,
     t,
   })
@@ -129,7 +136,7 @@ export function useNovelPromotionWorkspaceController({
     execution.scriptToStoryboardStream.isRunning ||
     execution.scriptToStoryboardStream.isRecoveredRunning ||
     execution.scriptToStoryboardStream.status === 'running'
-  const stageArtifacts = resolveEpisodeStageArtifacts(episode)
+  const stageArtifacts = configEpisode?.readiness ?? resolveEpisodeStageArtifacts(episode)
 
   const isAnyOperationRunning =
     isStartingStoryToScript ||

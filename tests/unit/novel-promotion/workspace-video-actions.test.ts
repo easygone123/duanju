@@ -82,7 +82,7 @@ describe('useWorkspaceVideoActions', () => {
       supportsFirstLastFrame: false,
     }
 
-    await actions.handleGenerateVideo('storyboard-1', 5, 'fal::normal-only', choices)
+    const accepted = await actions.handleGenerateVideo('storyboard-1', 5, 'fal::normal-only', choices)
 
     expect(choices).toEqual(expect.objectContaining({
       lastFrameStoryboardId: 'storyboard-2',
@@ -90,5 +90,17 @@ describe('useWorkspaceVideoActions', () => {
     }))
     expect(generateVideoMutateAsyncMock).not.toHaveBeenCalled()
     expect(globalThis.alert).toHaveBeenCalledWith('FIRST_LAST_FRAME_MODEL_UNSUPPORTED')
+    expect(accepted).toBe(false)
+  })
+
+  it('returns accepted only after the video mutation succeeds', async () => {
+    generateVideoMutateAsyncMock.mockResolvedValueOnce({ async: true })
+    const actions = useWorkspaceVideoActions({
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      t: (key: string) => key,
+    })
+
+    await expect(actions.handleGenerateVideo('storyboard-1', 0, 'veo-3.1')).resolves.toBe(true)
   })
 })

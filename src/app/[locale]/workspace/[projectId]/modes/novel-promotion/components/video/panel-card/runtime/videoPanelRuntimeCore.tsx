@@ -11,6 +11,14 @@ import { usePanelVoiceManager } from './hooks/usePanelVoiceManager'
 import { usePanelLipSync } from './hooks/usePanelLipSync'
 import { useUpdateProjectPanelVideoSettings } from '@/lib/query/mutations/useVideoMutations'
 
+export async function consumeGenerationSelectionAfterAccepted(
+  submit: () => Promise<boolean>,
+  consume: () => void,
+): Promise<void> {
+  const accepted = await submit()
+  if (accepted) consume()
+}
+
 export function useVideoPanelActions({
   panel,
   panelIndex,
@@ -121,6 +129,12 @@ export function useVideoPanelActions({
 
   const showLipSyncSection = voiceManager.hasMatchedVoiceLines
   const canLipSync = hasVisibleBaseVideo && voiceManager.hasMatchedAudio && !taskStatus.isLipSyncTaskRunning
+  const handleGenerateVideo = (...args: Parameters<typeof onGenerateVideo>) => (
+    consumeGenerationSelectionAfterAccepted(
+      () => onGenerateVideo(...args),
+      videoModel.consumeGenerationSelection,
+    )
+  )
 
   return {
     t,
@@ -163,7 +177,7 @@ export function useVideoPanelActions({
       videoRatio,
     },
     actions: {
-      onGenerateVideo,
+      onGenerateVideo: handleGenerateVideo,
       onUpdatePanelVideoModel,
       onToggleLink,
       onUpdateFrameLink,

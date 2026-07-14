@@ -234,7 +234,7 @@ export default function StoryboardStage({
           onUndoSixGridPanel={undoSixGridPanel}
         />
 
-        {modalRuntime.editingPanel && (
+        {modalRuntime.isStageActive && modalRuntime.editingPanel && (
           <ImageEditModal
             projectId={modalRuntime.projectId}
             defaultAssets={modalRuntime.imageEditDefaults}
@@ -243,7 +243,7 @@ export default function StoryboardStage({
           />
         )}
 
-        {modalRuntime.aiDataPanel && modalRuntime.aiDataRuntime && (
+        {modalRuntime.isStageActive && modalRuntime.aiDataPanel && modalRuntime.aiDataRuntime && (
           <AIDataModal
             isOpen={true}
             onClose={modalRuntime.closeAIDataModal}
@@ -262,11 +262,11 @@ export default function StoryboardStage({
           />
         )}
 
-        {modalRuntime.previewImage && (
+        {modalRuntime.isStageActive && modalRuntime.previewImage && (
           <ImagePreviewModal imageUrl={modalRuntime.previewImage} onClose={modalRuntime.closePreviewImage} />
         )}
 
-        {modalRuntime.hasCharacterPicker && (
+        {modalRuntime.isStageActive && modalRuntime.hasCharacterPicker && (
           <CharacterPickerModal
             projectId={projectId}
             currentCharacters={modalRuntime.pickerPanelRuntime ? getPanelEditData(modalRuntime.pickerPanelRuntime.panel).characters : []}
@@ -275,7 +275,7 @@ export default function StoryboardStage({
           />
         )}
 
-        {modalRuntime.hasLocationPicker && (
+        {modalRuntime.isStageActive && modalRuntime.hasLocationPicker && (
           <LocationPickerModal
             projectId={projectId}
             currentLocation={modalRuntime.pickerPanelRuntime ? getPanelEditData(modalRuntime.pickerPanelRuntime.panel).location || null : null}

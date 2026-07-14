@@ -54,7 +54,7 @@ interface PanelCardProps {
   onRetrySave?: () => void
   onRemoveCharacter: (index: number) => void
   onRemoveLocation: () => void
-  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => void
+  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => Promise<boolean>
   onOpenEditModal: () => void
   onOpenAIDataModal: () => void
   onSelectCandidateIndex: (panelId: string, index: number) => void

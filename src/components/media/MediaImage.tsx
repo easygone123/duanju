@@ -31,6 +31,7 @@ export function MediaImage({
   height = 1200,
   sizes,
   priority = false,
+  loading,
   ...imgProps
 }: MediaImageProps) {
   if (!src) return null
@@ -44,6 +45,7 @@ export function MediaImage({
           fill
           sizes={sizes || '100vw'}
           priority={priority}
+          loading={loading ?? (priority ? 'eager' : 'lazy')}
           className={className}
           style={style}
           onClick={onClick}
@@ -60,6 +62,7 @@ export function MediaImage({
         height={height}
         sizes={sizes}
         priority={priority}
+        loading={loading ?? (priority ? 'eager' : 'lazy')}
         className={className}
         style={style}
         onClick={onClick}
@@ -77,7 +80,7 @@ export function MediaImage({
       className={className}
       style={style}
       onClick={onClick}
-      loading={priority ? 'eager' : 'lazy'}
+      loading={loading ?? (priority ? 'eager' : 'lazy')}
       {...imgProps}
     />
   )

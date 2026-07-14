@@ -1,12 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useWorkspaceStageActivity } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/WorkspaceStageActivityContext'
 
 export function useVoicePlayback() {
+  const isStageActive = useWorkspaceStageActivity()
   const [playingLineId, setPlayingLineId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const handleTogglePlayAudio = useCallback((lineId: string, audioUrl: string) => {
+    if (!isStageActive) return
     const currentAudio = audioRef.current
 
     if (currentAudio && playingLineId === lineId) {
@@ -37,16 +40,31 @@ export function useVoicePlayback() {
     }
 
     audio.play().catch(() => setPlayingLineId(null))
-  }, [playingLineId])
+  }, [isStageActive, playingLineId])
 
-  useEffect(() => {
-    return () => {
-      if (!audioRef.current) return
-      audioRef.current.pause()
-      audioRef.current.currentTime = 0
+  const clearAudio = useCallback(() => {
+    const audio = audioRef.current
+    if (audio) {
+      audio.onended = null
+      audio.onpause = null
+      audio.pause()
+      audio.currentTime = 0
       audioRef.current = null
     }
   }, [])
+
+  const stopPlayback = useCallback(() => {
+    clearAudio()
+    setPlayingLineId(null)
+  }, [clearAudio])
+
+  useEffect(() => {
+    if (!isStageActive) stopPlayback()
+  }, [isStageActive, stopPlayback])
+
+  useEffect(() => {
+    return clearAudio
+  }, [clearAudio])
 
   return {
     playingLineId,

@@ -19,6 +19,7 @@ import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import SixGridGroupControls from './SixGridGroupControls'
 import SixGridCropModal from './SixGridCropModal'
 import { isSixGridGroupBusy } from '@/lib/query/hooks/useSixGridStoryboard'
+import { useVirtualCardRetention } from '@/components/virtualization/VirtualCardRange'
 
 export default function StoryboardGroup({
   storyboard,
@@ -102,6 +103,9 @@ export default function StoryboardGroup({
     onInsertPanel,
     onPanelVariant,
   })
+  useVirtualCardRetention(
+    insertModalOpen || variantModalPanel !== null || cropCellIndex !== null,
+  )
 
   const {
     panelTaskErrorMap,
@@ -144,7 +148,7 @@ export default function StoryboardGroup({
   const handleRegeneratePanelImage = useCallback(
     (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => {
       clearPanelTaskError(panelId)
-      onRegeneratePanelImage(panelId, count, force, imageModel, generationOptions)
+      return onRegeneratePanelImage(panelId, count, force, imageModel, generationOptions)
     },
     [clearPanelTaskError, onRegeneratePanelImage],
   )

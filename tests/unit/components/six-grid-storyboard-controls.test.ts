@@ -211,8 +211,8 @@ describe('six-grid task requests and cache scope', () => {
 
   it('rolls back only the conflicted panel and preserves a concurrent successful panel update', async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const episodeKey = queryKeys.episodeData('project-1', 'episode-1')
-    const initial = { storyboards: [{ panels: [
+    const episodeKey = queryKeys.episodeStage('project-1', 'episode-1', 'storyboard')
+    const initialStoryboards = [{ panels: [
       {
         id: 'panel-1', imageUrl: '/current.webp', imageMediaId: 'current-1',
         previousImageUrl: '/previous.webp', previousImageMediaId: 'previous-1',
@@ -221,7 +221,8 @@ describe('six-grid task requests and cache scope', () => {
         id: 'panel-2', imageUrl: '/other.webp', imageMediaId: 'other-1',
         previousImageUrl: '/other-previous.webp', previousImageMediaId: 'other-previous-1',
       },
-    ] }] }
+    ] }]
+    const initial = { stage: 'storyboard' as const, episode: { storyboards: initialStoryboards } }
     queryClient.setQueryData(episodeKey, initial)
     apiFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'CONFLICT' }), {
       status: 409, headers: { 'Content-Type': 'application/json' },
@@ -232,18 +233,18 @@ describe('six-grid task requests and cache scope', () => {
       expectedCurrentMediaId: 'current-1', expectedPreviousMediaId: 'previous-1',
     }
     const context = await options.onMutate(input)
-    expect(queryClient.getQueryData<typeof initial>(episodeKey)?.storyboards[0].panels[0].imageMediaId).toBe('previous-1')
+    expect(queryClient.getQueryData<typeof initial>(episodeKey)?.episode.storyboards[0].panels[0].imageMediaId).toBe('previous-1')
     const request = options.mutationFn(input)
     await expect(request).rejects.toThrow()
     queryClient.setQueryData(episodeKey, (value: typeof initial | undefined) => ({
-      ...value!, storyboards: [{ panels: value!.storyboards[0].panels.map((panel) => panel.id === 'panel-2'
+      ...value!, episode: { ...value!.episode, storyboards: [{ panels: value!.episode.storyboards[0].panels.map((panel) => panel.id === 'panel-2'
         ? { ...panel, imageUrl: '/other-success.webp', imageMediaId: 'other-success-1' }
-        : panel) }],
+        : panel) }] },
     }))
     options.onError(new Error('conflict'), input, context)
     const rolledBack = queryClient.getQueryData<typeof initial>(episodeKey)!
-    expect(rolledBack.storyboards[0].panels[0]).toEqual(initial.storyboards[0].panels[0])
-    expect(rolledBack.storyboards[0].panels[1]).toMatchObject({
+    expect(rolledBack.episode.storyboards[0].panels[0]).toEqual(initial.episode.storyboards[0].panels[0])
+    expect(rolledBack.episode.storyboards[0].panels[1]).toMatchObject({
       imageUrl: '/other-success.webp', imageMediaId: 'other-success-1',
     })
     expect(apiFetchMock).toHaveBeenCalledWith('/api/novel-promotion/project-1/panel', {
@@ -257,20 +258,20 @@ describe('six-grid task requests and cache scope', () => {
 
   it('does not roll back over a newer update to the same panel', async () => {
     const queryClient = new QueryClient()
-    const key = queryKeys.episodeData('project-1', 'episode-1')
-    queryClient.setQueryData(key, { storyboards: [{ panels: [{
+    const key = queryKeys.episodeStage('project-1', 'episode-1', 'storyboard')
+    queryClient.setQueryData(key, { stage: 'storyboard', episode: { storyboards: [{ panels: [{
       id: 'panel-1', imageUrl: '/current.webp', imageMediaId: 'current-1',
       previousImageUrl: '/previous.webp', previousImageMediaId: 'previous-1',
-    }] }] })
+    }] }] } })
     const options = createPanelUndoMutationOptions(queryClient, 'project-1', 'episode-1')
     const input = { panelId: 'panel-1', storyboardId: 'storyboard-1', expectedCurrentMediaId: 'current-1', expectedPreviousMediaId: 'previous-1' }
     const context = await options.onMutate(input)
-    queryClient.setQueryData(key, { storyboards: [{ panels: [{
+    queryClient.setQueryData(key, { stage: 'storyboard', episode: { storyboards: [{ panels: [{
       id: 'panel-1', imageUrl: '/newer.webp', imageMediaId: 'newer-1',
       previousImageUrl: '/previous.webp', previousImageMediaId: 'previous-1',
-    }] }] })
+    }] }] } })
     options.onError(new Error('conflict'), input, context)
-    expect((queryClient.getQueryData<{ storyboards: Array<{ panels: Array<{ imageMediaId: string }> }> }>(key))?.storyboards[0].panels[0].imageMediaId).toBe('newer-1')
+    expect((queryClient.getQueryData<{ episode: { storyboards: Array<{ panels: Array<{ imageMediaId: string }> }> } }>(key))?.episode.storyboards[0].panels[0].imageMediaId).toBe('newer-1')
   })
 })
 

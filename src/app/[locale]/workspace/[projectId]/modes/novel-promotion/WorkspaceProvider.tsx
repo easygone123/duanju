@@ -1,6 +1,6 @@
 'use client'
 
-import {
+import React, {
   createContext,
   useCallback,
   useContext,
@@ -12,6 +12,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query/keys'
 import { useSSE } from '@/lib/query/hooks/useSSE'
 import type { SSEEvent } from '@/lib/task/types'
+import { WorkspaceDataProvider } from './WorkspaceDataProvider'
 
 type RefreshScope = 'all' | 'assets' | 'project'
 type RefreshOptions = { scope?: string; mode?: string }
@@ -28,7 +29,7 @@ interface WorkspaceContextValue {
 interface WorkspaceProviderProps {
   projectId: string
   episodeId?: string
-  children: ReactNode
+  children?: ReactNode
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
@@ -49,6 +50,7 @@ export function WorkspaceProvider({ projectId, episodeId, children }: WorkspaceP
     }
 
     if (episodeId) {
+      promises.push(queryClient.refetchQueries({ queryKey: queryKeys.episodeStages(projectId, episodeId) }))
       promises.push(queryClient.refetchQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) }))
       promises.push(queryClient.refetchQueries({ queryKey: queryKeys.storyboards.all(episodeId) }))
       promises.push(queryClient.refetchQueries({ queryKey: queryKeys.voiceLines.all(episodeId) }))
@@ -89,7 +91,11 @@ export function WorkspaceProvider({ projectId, episodeId, children }: WorkspaceP
     subscribeTaskEvents,
   }), [episodeId, onRefresh, projectId, refreshData, subscribeTaskEvents])
 
-  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
+  return (
+    <WorkspaceContext.Provider value={value}>
+      <WorkspaceDataProvider projectId={projectId}>{children}</WorkspaceDataProvider>
+    </WorkspaceContext.Provider>
+  )
 }
 
 export function useWorkspaceProvider() {

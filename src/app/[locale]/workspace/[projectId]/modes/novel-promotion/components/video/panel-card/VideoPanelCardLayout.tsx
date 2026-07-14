@@ -5,11 +5,20 @@ import VideoPanelCardHeader from './VideoPanelCardHeader'
 import VideoPanelCardBody from './VideoPanelCardBody'
 import VideoPanelCardFooter from './VideoPanelCardFooter'
 import { useVideoPanelActions, type VideoPanelCardShellProps } from './hooks/useVideoPanelActions'
+import { useVirtualCardRetention } from '@/components/virtualization/VirtualCardRange'
 
 export type { VideoPanelCardShellProps }
 
 function VideoPanelCardLayout(props: VideoPanelCardShellProps) {
   const runtime = useVideoPanelActions(props)
+  useVirtualCardRetention(
+    runtime.promptEditor.isEditing
+    || runtime.videoModel.hasSettingsChanges
+    || runtime.videoModel.hasExplicitSelection
+    || runtime.videoModel.hasGenerationOptionChanges
+    || runtime.player.isPlaying
+    || runtime.voiceManager.playingVoiceLineId !== null,
+  )
 
   return (
     <div className="glass-surface-elevated overflow-visible">

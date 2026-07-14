@@ -1,5 +1,11 @@
 import { decodeImageUrlsFromDb } from '@/lib/contracts/image-urls-contract'
-import { resolveMediaRef, resolveMediaRefFromLegacyValue } from './service'
+import {
+  createReadOnlyMediaResolver,
+  resolveMediaRef,
+  resolveMediaRefFromLegacyValue,
+  type MediaResolveCandidate,
+  type ReadOnlyMediaResolver,
+} from './service'
 import type { MediaRef } from './types'
 
 function parseStringArray(value: unknown): string[] {
@@ -90,12 +96,22 @@ export async function attachMediaFieldsToGlobalVoice<T extends Record<string, un
   }
 }
 
-async function attachMediaFieldsToPanel<T extends Record<string, unknown>>(panel: T) {
-  const imageMedia = await resolveMediaRef(panel.imageMediaId, panel.imageUrl)
-  const videoMedia = await resolveMediaRef(panel.videoMediaId, panel.videoUrl)
-  const lipSyncVideoMedia = await resolveMediaRef(panel.lipSyncVideoMediaId, panel.lipSyncVideoUrl)
-  const sketchImageMedia = await resolveMediaRef(panel.sketchImageMediaId, panel.sketchImageUrl)
-  const previousImageMedia = await resolveMediaRef(panel.previousImageMediaId, panel.previousImageUrl)
+const defaultMediaResolver: ReadOnlyMediaResolver = {
+  resolve: resolveMediaRef,
+  resolveLegacy: resolveMediaRefFromLegacyValue,
+}
+
+async function attachMediaFieldsToPanel<T extends Record<string, unknown>>(
+  panel: T,
+  resolver: ReadOnlyMediaResolver = defaultMediaResolver,
+) {
+  const imageMedia = await resolver.resolve(panel.imageMediaId, panel.imageUrl)
+  const videoMedia = await resolver.resolve(panel.videoMediaId, panel.videoUrl)
+  const lipSyncVideoMedia = await resolver.resolve(panel.lipSyncVideoMediaId, panel.lipSyncVideoUrl)
+  const sketchImageMedia = await resolver.resolve(panel.sketchImageMediaId, panel.sketchImageUrl)
+  const previousImageMedia = await resolver.resolve(panel.previousImageMediaId, panel.previousImageUrl)
+  const croppedImageMedia = await resolver.resolve(panel.croppedImageMediaId, panel.croppedImageUrl)
+  const upscaledImageMedia = await resolver.resolve(panel.upscaledImageMediaId, panel.upscaledImageUrl)
 
   const candidateRaw = parseStringArray(panel.candidateImages)
   const candidateMediaUrls: string[] = []
@@ -104,7 +120,7 @@ async function attachMediaFieldsToPanel<T extends Record<string, unknown>>(panel
       candidateMediaUrls.push(candidate)
       continue
     }
-    const media = await resolveMediaRefFromLegacyValue(candidate)
+    const media = await resolver.resolveLegacy(candidate)
     candidateMediaUrls.push(media?.url || candidate)
   }
 
@@ -116,28 +132,83 @@ async function attachMediaFieldsToPanel<T extends Record<string, unknown>>(panel
     lipSyncVideoMedia,
     sketchImageMedia,
     previousImageMedia,
+    croppedImageMedia,
+    upscaledImageMedia,
     imageUrl: imageMedia?.url || panel.imageUrl || null,
     videoUrl: videoMedia?.url || panel.videoUrl || null,
     lipSyncVideoUrl: lipSyncVideoMedia?.url || panel.lipSyncVideoUrl || null,
     sketchImageUrl: sketchImageMedia?.url || panel.sketchImageUrl || null,
     previousImageUrl: previousImageMedia?.url || panel.previousImageUrl || null,
+    croppedImageUrl: croppedImageMedia?.url || panel.croppedImageUrl || null,
+    upscaledImageUrl: upscaledImageMedia?.url || panel.upscaledImageUrl || null,
     candidateImages: candidateRaw.length > 0 ? JSON.stringify(candidateMediaUrls) : panel.candidateImages,
   }
 }
 
-async function attachMediaFieldsToStoryboard<T extends Record<string, unknown>>(storyboard: T) {
-  const storyboardImageMedia = await resolveMediaRefFromLegacyValue(storyboard.storyboardImageUrl)
+async function attachMediaFieldsToStoryboard<T extends Record<string, unknown>>(
+  storyboard: T,
+  resolver: ReadOnlyMediaResolver = defaultMediaResolver,
+) {
+  const storyboardImageMedia = await resolver.resolveLegacy(storyboard.storyboardImageUrl)
+  const sheetImageMedia = await resolver.resolve(storyboard.sheetImageMediaId, storyboard.sheetImageUrl)
+  const upscaledSheetImageMedia = await resolver.resolve(
+    storyboard.upscaledSheetImageMediaId,
+    storyboard.upscaledSheetImageUrl,
+  )
   const panels = await Promise.all(
-    ((storyboard.panels as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToPanel),
+    ((storyboard.panels as Array<Record<string, unknown>>) || []).map((panel) => (
+      attachMediaFieldsToPanel(panel, resolver)
+    )),
   )
 
   return {
     ...storyboard,
     media: storyboardImageMedia,
     storyboardImageMedia,
+    sheetImageMedia,
+    upscaledSheetImageMedia,
     storyboardImageUrl: storyboardImageMedia?.url || storyboard.storyboardImageUrl || null,
+    sheetImageUrl: sheetImageMedia?.url || storyboard.sheetImageUrl || null,
+    upscaledSheetImageUrl: upscaledSheetImageMedia?.url || storyboard.upscaledSheetImageUrl || null,
     panels,
   }
+}
+
+function collectStageMediaCandidates(projectLike: Record<string, unknown>): MediaResolveCandidate[] {
+  const candidates: MediaResolveCandidate[] = []
+  const storyboards = (projectLike.storyboards as Array<Record<string, unknown>>) || []
+  for (const storyboard of storyboards) {
+    candidates.push(
+      { legacyValue: storyboard.storyboardImageUrl },
+      { mediaId: storyboard.sheetImageMediaId, legacyValue: storyboard.sheetImageUrl },
+      { mediaId: storyboard.upscaledSheetImageMediaId, legacyValue: storyboard.upscaledSheetImageUrl },
+    )
+    for (const panel of (storyboard.panels as Array<Record<string, unknown>>) || []) {
+      candidates.push(
+        { mediaId: panel.imageMediaId, legacyValue: panel.imageUrl },
+        { mediaId: panel.videoMediaId, legacyValue: panel.videoUrl },
+        { mediaId: panel.lipSyncVideoMediaId, legacyValue: panel.lipSyncVideoUrl },
+        { mediaId: panel.sketchImageMediaId, legacyValue: panel.sketchImageUrl },
+        { mediaId: panel.previousImageMediaId, legacyValue: panel.previousImageUrl },
+        { mediaId: panel.croppedImageMediaId, legacyValue: panel.croppedImageUrl },
+        { mediaId: panel.upscaledImageMediaId, legacyValue: panel.upscaledImageUrl },
+      )
+      for (const candidate of parseStringArray(panel.candidateImages)) {
+        if (!candidate.startsWith('PENDING:')) candidates.push({ legacyValue: candidate })
+      }
+    }
+  }
+  return candidates
+}
+
+export async function attachMediaFieldsToStagePayload<T extends Record<string, unknown>>(projectLike: T) {
+  const resolver = await createReadOnlyMediaResolver(collectStageMediaCandidates(projectLike))
+  const storyboards = await Promise.all(
+    ((projectLike.storyboards as Array<Record<string, unknown>>) || []).map((storyboard) => (
+      attachMediaFieldsToStoryboard(storyboard, resolver)
+    )),
+  )
+  return { ...projectLike, storyboards }
 }
 
 async function attachMediaFieldsToProjectCharacter<T extends Record<string, unknown>>(character: T) {
@@ -218,7 +289,9 @@ export async function attachMediaFieldsToProject<T extends Record<string, unknow
     ((projectLike.shots as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToShot),
   )
   const storyboards = await Promise.all(
-    ((projectLike.storyboards as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToStoryboard),
+    ((projectLike.storyboards as Array<Record<string, unknown>>) || []).map((storyboard) => (
+      attachMediaFieldsToStoryboard(storyboard)
+    )),
   )
   const voiceLines = await Promise.all(
     ((projectLike.voiceLines as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToVoiceLine),

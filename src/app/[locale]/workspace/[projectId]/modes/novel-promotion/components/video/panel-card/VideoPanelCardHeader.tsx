@@ -4,6 +4,7 @@ import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 
 import type { VideoPanelRuntime } from './hooks/useVideoPanelActions'
 import { AppIcon } from '@/components/ui/icons'
+import { getAspectRatioConfig } from '@/lib/constants'
 
 interface VideoPanelCardHeaderProps {
   runtime: VideoPanelRuntime
@@ -33,6 +34,9 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
   const hasVisibleBaseVideo = !!media.baseVideoUrl
   const showFirstLastFrameSwitch = layout.hasNext
   const frameSourceMode = layout.frameLinkChoices?.lastFrame?.mode
+  const thumbnailSizes = getAspectRatioConfig(layout.videoRatio).isVertical
+    ? '(max-width: 767px) 50vw, (max-width: 1023px) 33vw, (max-width: 1279px) 25vw, 20vw'
+    : '(max-width: 767px) 100vw, (max-width: 1023px) 50vw, 33vw'
 
   return (
     <div className="bg-[var(--glass-bg-muted)] flex items-center justify-center relative" style={{ aspectRatio: player.cssAspectRatio }}>
@@ -56,6 +60,7 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
             alt={t('panelCard.shot', { number: panelIndex + 1 })}
             containerClassName="w-full h-full bg-black"
             className="w-full h-full object-contain bg-black"
+            sizes={thumbnailSizes}
           />
           <div className="absolute inset-0 flex items-center justify-center bg-[var(--glass-overlay)] group-hover:bg-[var(--glass-overlay)] transition-colors pointer-events-none">
             <div className="w-16 h-16 bg-[var(--glass-bg-surface-strong)] rounded-full flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
@@ -69,6 +74,7 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
           alt={t('panelCard.shot', { number: panelIndex + 1 })}
           containerClassName="w-full h-full bg-[var(--glass-bg-muted)]"
           className={`w-full h-full object-contain bg-[var(--glass-bg-muted)] ${media.onPreviewImage ? 'cursor-zoom-in' : ''}`}
+          sizes={thumbnailSizes}
           onClick={media.onPreviewImage ? player.handlePreviewImage : undefined}
         />
       ) : (

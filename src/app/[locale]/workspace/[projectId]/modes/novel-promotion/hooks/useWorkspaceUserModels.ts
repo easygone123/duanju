@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo } from 'react'
 import { logError as _ulogError } from '@/lib/logging/core'
-import { useUserModels } from '@/lib/query/hooks'
 import type { ModelCapabilities } from '@/lib/model-config-contract'
 import type { VideoPricingTier } from '@/lib/model-pricing/video-tier'
 import type { ComfyWorkflowPurpose } from '@/lib/comfyui/types'
+import { useWorkspaceData } from '../WorkspaceDataProvider'
 
 export interface UserModelOption {
   value: string
@@ -28,8 +28,8 @@ export interface UserModelsPayload {
 }
 
 export function useWorkspaceUserModels() {
-  const userModelsQuery = useUserModels()
-  const userModelsForSettings = (userModelsQuery.data || null) as UserModelsPayload | null
+  const sharedData = useWorkspaceData()
+  const userModelsForSettings = (sharedData.userModels || null) as UserModelsPayload | null
   const userVideoModels = useMemo<UserModelOption[]>(() => {
     if (!userModelsForSettings || !Array.isArray(userModelsForSettings.video)) return []
     return userModelsForSettings.video
@@ -38,13 +38,13 @@ export function useWorkspaceUserModels() {
     if (!userModelsForSettings || !Array.isArray(userModelsForSettings.upscale)) return []
     return userModelsForSettings.upscale
   }, [userModelsForSettings])
-  const userModelsLoaded = userModelsQuery.isFetched
+  const userModelsLoaded = sharedData.userModelsLoaded
 
   useEffect(() => {
-    if (userModelsQuery.error) {
-      _ulogError('Failed to fetch user models:', userModelsQuery.error)
+    if (sharedData.userModelsError) {
+      _ulogError('Failed to fetch user models:', sharedData.userModelsError)
     }
-  }, [userModelsQuery.error])
+  }, [sharedData.userModelsError])
 
   return {
     userModelsForSettings,

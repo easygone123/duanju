@@ -10,6 +10,7 @@ import { useAIDataModalState } from './hooks/useAIDataModalState'
 import AIDataModalFormPane from './AIDataModalFormPane'
 import AIDataModalPreviewPane from './AIDataModalPreviewPane'
 import { lockModalPageScroll } from './modal-scroll-lock'
+import { useWorkspaceStageActivity } from '../WorkspaceStageActivityContext'
 
 export type {
   AIDataModalProps,
@@ -36,6 +37,7 @@ export default function AIDataModal({
   videoRatio,
   onSave,
 }: AIDataModalProps) {
+  const isStageActive = useWorkspaceStageActivity()
   const t = useTranslations('storyboard')
   const [activeCharIdx, setActiveCharIdx] = useState(0)
 
@@ -85,11 +87,15 @@ export default function AIDataModal({
   }
 
   useEffect(() => {
-    if (!isOpen || typeof document === 'undefined') return undefined
+    if (!isStageActive || !isOpen || typeof document === 'undefined') return undefined
     return lockModalPageScroll(document)
-  }, [isOpen])
+  }, [isOpen, isStageActive])
 
-  if (!isOpen || typeof document === 'undefined') return null
+  useEffect(() => {
+    if (!isStageActive && isOpen) onClose()
+  }, [isOpen, isStageActive, onClose])
+
+  if (!isStageActive || !isOpen || typeof document === 'undefined') return null
 
   return createPortal(
     <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">

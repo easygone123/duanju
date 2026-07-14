@@ -7,6 +7,7 @@ import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import { AppIcon } from '@/components/ui/icons'
+import { useCloseOnWorkspaceStageInactive } from '../WorkspaceStageActivityContext'
 
 /**
  * InsertPanelModal - 插入分镜模态框
@@ -40,6 +41,7 @@ export default function InsertPanelModal({
     const t = useTranslations('storyboard')
     const [userInput, setUserInput] = useState('')
     const [mounted, setMounted] = useState(false)
+    const isStageActive = useCloseOnWorkspaceStageInactive(isOpen, onClose)
 
     useEffect(() => {
         setMounted(true)
@@ -62,7 +64,7 @@ export default function InsertPanelModal({
         })
         : null
 
-    if (!isOpen || !mounted) return null
+    if (!isStageActive || !isOpen || !mounted) return null
 
     const handleInsert = async () => {
         await onInsert(userInput)

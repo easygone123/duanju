@@ -5,6 +5,7 @@ import EmotionSettingsPanel from './EmotionSettingsPanel'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { resolveTaskPresentationState, type TaskPresentationState } from '@/lib/task/presentation'
 import { AppIcon } from '@/components/ui/icons'
+import { useVirtualCardRetention } from '@/components/virtualization/VirtualCardRange'
 
 interface VoiceLine {
     id: string
@@ -54,6 +55,7 @@ export default function VoiceLineCard({
 }: VoiceLineCardProps) {
     const t = useTranslations('voice')
     const [isEmotionExpanded, setIsEmotionExpanded] = useState(false)
+    useVirtualCardRetention(isEmotionExpanded)
     const hasPanelBinding = !!onLocatePanel && !!line.matchedStoryboardId && line.matchedPanelIndex !== null && line.matchedPanelIndex !== undefined
     const locateTitle = t("lineCard.locateVideo")
     const inlineStatusState = isVoiceTaskRunning

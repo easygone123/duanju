@@ -33,6 +33,7 @@ interface StoryboardLike {
 interface UseRebuildConfirmParams {
   episodeId?: string
   episodeStoryboards?: StoryboardLike[]
+  episodeStoryboardStats?: StoryboardStats
   getProjectStoryboardStats: (episodeId: string) => Promise<StoryboardStats>
   t: (key: string, values?: Record<string, string | number | Date>) => string
 }
@@ -40,6 +41,7 @@ interface UseRebuildConfirmParams {
 export function useRebuildConfirm({
   episodeId,
   episodeStoryboards,
+  episodeStoryboardStats,
   getProjectStoryboardStats,
   t,
 }: UseRebuildConfirmParams) {
@@ -49,6 +51,7 @@ export function useRebuildConfirm({
   const pendingRebuildActionRef = useRef<(() => Promise<void>) | null>(null)
 
   const getFallbackStoryboardStats = useCallback(() => {
+    if (episodeStoryboardStats) return episodeStoryboardStats
     const storyboards = Array.isArray(episodeStoryboards) ? episodeStoryboards : []
     const storyboardCount = storyboards.length
     const panelCount = storyboards.reduce((sum: number, storyboard) => {
@@ -56,7 +59,7 @@ export function useRebuildConfirm({
       return sum + panels
     }, 0)
     return { storyboardCount, panelCount }
-  }, [episodeStoryboards])
+  }, [episodeStoryboardStats, episodeStoryboards])
 
   const checkStoryboardDownstreamData = useCallback(async (): Promise<DownstreamCheckResult> => {
     if (!episodeId) {

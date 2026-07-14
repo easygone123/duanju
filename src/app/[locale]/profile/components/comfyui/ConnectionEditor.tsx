@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 
 import {
   initialConnectionValues,
+  resolveConnectionRequestError,
   validateConnectionCredentials,
   type ComfyConnectionView,
   type ConnectionFormValues,
@@ -32,8 +33,8 @@ export default function ConnectionEditor({ connection, onSubmit, onCancel }: Pro
       return
     }
     setSubmitting(true)
-    try { await onSubmit(values) } catch {
-      setError(t('requestFailed'))
+    try { await onSubmit(values) } catch (requestError) {
+      setError(t(resolveConnectionRequestError(requestError)))
     } finally { setSubmitting(false) }
   }
 

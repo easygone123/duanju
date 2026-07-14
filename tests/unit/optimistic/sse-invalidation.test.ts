@@ -8,7 +8,11 @@ type EffectCleanup = (() => void) | void | null
 
 const runtime = vi.hoisted(() => ({
   queryClient: {
-    invalidateQueries: vi.fn(async (_arg?: InvalidateArg) => undefined),
+    invalidateQueries: vi.fn(async (...args: [InvalidateArg?]) => {
+      void args
+      return undefined
+    }),
+    setQueriesData: vi.fn(),
   },
   effectCleanup: null as EffectCleanup,
   scheduledTimers: [] as Array<() => void>,
@@ -163,5 +167,64 @@ describe('sse invalidation behavior', () => {
         targetId: 'appearance-1',
       }),
     )
+  })
+
+  it('patches a completed panel output without broadly invalidating workspace data', async () => {
+    const { useSSE } = await import('@/lib/query/hooks/useSSE')
+
+    useSSE({ projectId: 'project-1', episodeId: 'episode-1', enabled: true })
+    FakeEventSource.instances[0].emit(TASK_SSE_EVENT_TYPE.LIFECYCLE, {
+      type: TASK_SSE_EVENT_TYPE.LIFECYCLE,
+      taskId: 'task-image-1',
+      taskType: 'image_panel',
+      targetType: 'NovelPromotionPanel',
+      targetId: 'panel-1',
+      episodeId: 'episode-1',
+      payload: {
+        lifecycleType: TASK_EVENT_TYPE.COMPLETED,
+        imageUrl: 'panels/panel-1.jpg',
+      },
+    })
+
+    const patchedKeys = runtime.queryClient.setQueriesData.mock.calls.map((call) => call[0]?.queryKey)
+    expect(patchedKeys).toContainEqual(queryKeys.episodeStage('project-1', 'episode-1', 'storyboard'))
+    expect(patchedKeys).toContainEqual(queryKeys.episodeStage('project-1', 'episode-1', 'videos'))
+    expect(patchedKeys).toContainEqual(queryKeys.episodeData('project-1', 'episode-1'))
+    expect(hasInvalidation((arg) => {
+      const root = arg.queryKey?.[0]
+      return root === 'episode-stages' || root === 'storyboards' || root === 'voice-lines' || root === 'project-data'
+    })).toBe(false)
+  })
+
+  it('debounces an unknown completion into one exact stage recovery', async () => {
+    const { useSSE } = await import('@/lib/query/hooks/useSSE')
+
+    useSSE({ projectId: 'project-1', episodeId: 'episode-1', enabled: true })
+    const source = FakeEventSource.instances[0]
+    const unknown = {
+      type: TASK_SSE_EVENT_TYPE.LIFECYCLE,
+      taskId: 'task-unknown-1',
+      taskType: 'custom_task',
+      targetType: 'NovelPromotionMystery',
+      targetId: 'mystery-1',
+      episodeId: 'episode-1',
+      payload: {
+        lifecycleType: TASK_EVENT_TYPE.COMPLETED,
+        workspaceStage: 'storyboard',
+      },
+    }
+    source.emit(TASK_SSE_EVENT_TYPE.LIFECYCLE, unknown)
+    source.emit(TASK_SSE_EVENT_TYPE.LIFECYCLE, { ...unknown, taskId: 'task-unknown-2' })
+
+    expect(hasInvalidation((arg) => arg.queryKey?.[0] === 'episode-stages')).toBe(false)
+    for (const cb of runtime.scheduledTimers) cb()
+
+    const stageRecoveries = runtime.queryClient.invalidateQueries.mock.calls.filter((call) =>
+      call[0]?.queryKey?.[0] === 'episode-stages')
+    expect(stageRecoveries).toHaveLength(1)
+    expect(stageRecoveries[0]?.[0]).toEqual({
+      queryKey: queryKeys.episodeStage('project-1', 'episode-1', 'storyboard'),
+    })
+    expect(hasInvalidation((arg) => arg.queryKey?.[0] === 'project-data')).toBe(false)
   })
 })

@@ -5,11 +5,13 @@ import { useWorkspaceStageRuntime } from '../WorkspaceStageRuntimeContext'
 import { useWorkspaceEpisodeStageData } from '../hooks/useWorkspaceEpisodeStageData'
 import type { Clip as VideoClip } from './video'
 import { useWorkspaceProvider } from '../WorkspaceProvider'
+import StageDataBoundary from './StageDataBoundary'
 
 export default function VideoStageRoute() {
   const runtime = useWorkspaceStageRuntime()
   const { projectId, episodeId } = useWorkspaceProvider()
-  const { clips, storyboards } = useWorkspaceEpisodeStageData()
+  const stageQuery = useWorkspaceEpisodeStageData('videos')
+  const { clips, storyboards } = stageQuery
   const normalizedClips: VideoClip[] = clips.map((clip) => ({
     id: clip.id,
     start: clip.start ?? 0,
@@ -18,6 +20,9 @@ export default function VideoStageRoute() {
   }))
 
   if (!episodeId) return null
+  if (stageQuery.data === undefined) {
+    return <StageDataBoundary data={stageQuery.data} status={stageQuery.status} error={stageQuery.error} refetch={stageQuery.refetch}>{null}</StageDataBoundary>
+  }
 
   return (
     <VideoStage

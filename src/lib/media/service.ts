@@ -18,6 +18,7 @@ type MediaObjectRow = {
 }
 
 type MediaModel = {
+  findMany: (args: unknown) => Promise<unknown>
   findUnique: (args: unknown) => Promise<unknown>
   upsert: (args: unknown) => Promise<unknown>
 }
@@ -82,6 +83,88 @@ function mapMediaObjectToRef(row: MediaObjectRow): MediaRef {
     durationMs: row.durationMs,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
     storageKey: row.storageKey,
+  }
+}
+
+export interface MediaResolveCandidate {
+  mediaId?: unknown
+  legacyValue?: unknown
+}
+
+export interface ReadOnlyMediaResolver {
+  resolve: (mediaId: unknown, legacyValue: unknown) => Promise<MediaRef | null>
+  resolveLegacy: (legacyValue: unknown) => Promise<MediaRef | null>
+}
+
+function legacyStringValue(value: unknown): string | null {
+  if (typeof value === 'string') return value
+  if (!value || typeof value !== 'object') return null
+  const record = value as { url?: unknown; imageUrl?: unknown; key?: unknown }
+  const nested = record.url ?? record.imageUrl ?? record.key
+  return typeof nested === 'string' ? nested : null
+}
+
+/**
+ * Resolve a read payload without migrating legacy values. All referenced media
+ * objects are loaded in one query; unresolved legacy values remain fallbacks.
+ */
+export async function createReadOnlyMediaResolver(
+  candidates: MediaResolveCandidate[],
+): Promise<ReadOnlyMediaResolver> {
+  const ids = new Set<string>()
+  const publicIds = new Set<string>()
+  const storageKeys = new Set<string>()
+
+  for (const candidate of candidates) {
+    if (typeof candidate.mediaId === 'string' && candidate.mediaId.trim()) {
+      ids.add(candidate.mediaId)
+    }
+    const legacyValue = legacyStringValue(candidate.legacyValue)
+    if (!legacyValue) continue
+    const publicId = extractPublicIdFromMediaRoute(legacyValue)
+    if (publicId) {
+      publicIds.add(publicId)
+      continue
+    }
+    const storageKey = extractStorageKeyFromLegacyValue(legacyValue)
+    if (storageKey) storageKeys.add(normalizeStorageKey(storageKey))
+  }
+
+  const filters: Array<Record<string, unknown>> = []
+  if (ids.size > 0) filters.push({ id: { in: [...ids] } })
+  if (publicIds.size > 0) filters.push({ publicId: { in: [...publicIds] } })
+  if (storageKeys.size > 0) filters.push({ storageKey: { in: [...storageKeys] } })
+
+  const rows = filters.length === 0
+    ? []
+    : (await mediaModel.findMany({ where: { OR: filters } })) as MediaObjectRow[]
+  const byId = new Map(rows.map((row) => [row.id, row]))
+  const byPublicId = new Map(rows.map((row) => [row.publicId, row]))
+  const byStorageKey = new Map(rows.map((row) => [normalizeStorageKey(row.storageKey), row]))
+
+  const resolveLegacy = async (legacyValue: unknown): Promise<MediaRef | null> => {
+    const value = legacyStringValue(legacyValue)
+    if (!value) return null
+    const publicId = extractPublicIdFromMediaRoute(value)
+    if (publicId) {
+      const row = byPublicId.get(publicId)
+      return row ? mapMediaObjectToRef(row) : null
+    }
+    const storageKey = extractStorageKeyFromLegacyValue(value)
+    if (!storageKey) return null
+    const row = byStorageKey.get(normalizeStorageKey(storageKey))
+    return row ? mapMediaObjectToRef(row) : null
+  }
+
+  return {
+    resolve: async (mediaId: unknown, legacyValue: unknown) => {
+      if (typeof mediaId === 'string' && mediaId.trim()) {
+        const row = byId.get(mediaId)
+        if (row) return mapMediaObjectToRef(row)
+      }
+      return resolveLegacy(legacyValue)
+    },
+    resolveLegacy,
   }
 }
 

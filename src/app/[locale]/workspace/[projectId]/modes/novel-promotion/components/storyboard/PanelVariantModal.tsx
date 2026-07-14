@@ -10,6 +10,7 @@ import type { PanelInfo, ShotVariantSuggestion } from './PanelVariantModal.types
 import PanelVariantModalSuggestionList from './PanelVariantModalSuggestionList'
 import PanelVariantModalCustomOptions from './PanelVariantModalCustomOptions'
 import { AppIcon } from '@/components/ui/icons'
+import { useCloseOnWorkspaceStageInactive } from '../WorkspaceStageActivityContext'
 
 interface PanelVariantModalProps {
   isOpen: boolean
@@ -42,14 +43,19 @@ export default function PanelVariantModal({
   const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null)
   const autoAnalyzeKeyRef = useRef<string | null>(null)
   const analyzingRef = useRef(false)
+  const analysisGenerationRef = useRef(0)
+  const isStageActiveRef = useRef(true)
   const analyzeShotVariantsMutation = useAnalyzeProjectShotVariants(projectId)
+  const isStageActive = useCloseOnWorkspaceStageInactive(isOpen, onClose)
+  isStageActiveRef.current = isStageActive
 
   useEffect(() => {
     setMounted(true)
   }, [])
 
   const analyzeShotVariants = useCallback(async () => {
-    if (analyzingRef.current) return
+    if (!isStageActiveRef.current || analyzingRef.current) return
+    const generation = ++analysisGenerationRef.current
     analyzingRef.current = true
     setIsAnalyzing(true)
     setError(null)
@@ -57,22 +63,35 @@ export default function PanelVariantModal({
 
     try {
       const data = await analyzeShotVariantsMutation.mutateAsync({ panelId: panel.id })
-      setSuggestions(data.suggestions || [])
+      if (isStageActiveRef.current && analysisGenerationRef.current === generation) {
+        setSuggestions(data.suggestions || [])
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : t('variant.analyzeFailed'))
+      if (isStageActiveRef.current && analysisGenerationRef.current === generation) {
+        setError(err instanceof Error ? err.message : t('variant.analyzeFailed'))
+      }
     } finally {
-      setIsAnalyzing(false)
-      analyzingRef.current = false
+      if (analysisGenerationRef.current === generation) {
+        setIsAnalyzing(false)
+        analyzingRef.current = false
+      }
     }
   }, [analyzeShotVariantsMutation, panel.id, t])
 
   useEffect(() => {
-    if (!isOpen || !panel.imageUrl) return
+    if (!isStageActive || !isOpen || !panel.imageUrl) return
     const autoAnalyzeKey = `${panel.id}:${panel.imageUrl}`
     if (autoAnalyzeKeyRef.current === autoAnalyzeKey) return
     autoAnalyzeKeyRef.current = autoAnalyzeKey
     void analyzeShotVariants()
-  }, [analyzeShotVariants, isOpen, panel.id, panel.imageUrl])
+  }, [analyzeShotVariants, isOpen, isStageActive, panel.id, panel.imageUrl])
+
+  useEffect(() => {
+    if (isStageActive) return
+    analysisGenerationRef.current += 1
+    analyzingRef.current = false
+    setIsAnalyzing(false)
+  }, [isStageActive])
 
   useEffect(() => {
     if (isOpen) return
@@ -139,7 +158,7 @@ export default function PanelVariantModal({
     })
     : null
 
-  if (!isOpen || !mounted) return null
+  if (!isStageActive || !isOpen || !mounted) return null
 
   const modalContent = (
     <div

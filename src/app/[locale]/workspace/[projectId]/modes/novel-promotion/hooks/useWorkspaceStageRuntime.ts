@@ -65,7 +65,7 @@ interface UseWorkspaceStageRuntimeParams {
     },
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
-  ) => Promise<void>
+  ) => Promise<boolean>
   handleGenerateAllVideos: (options?: BatchVideoGenerationParams) => Promise<void>
   handleUpdateVideoPrompt: (
     storyboardId: string,

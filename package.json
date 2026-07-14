@@ -24,6 +24,7 @@
     "start:watchdog": "tsx --env-file=.env scripts/watchdog.ts",
     "start:board": "tsx --env-file=.env scripts/bull-board.ts",
     "stats:errors": "tsx scripts/task-error-stats.ts",
+    "perf:workspace": "tsx scripts/measure-workspace-performance.ts",
     "check:api-handler": "node scripts/guards/api-route-contract-guard.mjs",
     "check:logs": "tsx scripts/check-no-console.ts",
     "check:log-semantic": "tsx scripts/check-log-semantic.ts",

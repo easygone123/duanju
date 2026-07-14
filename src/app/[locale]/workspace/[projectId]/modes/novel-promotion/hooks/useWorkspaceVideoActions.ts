@@ -60,11 +60,11 @@ export function useWorkspaceVideoActions({
     const normalizedVideoModel = typeof videoModel === 'string' ? videoModel.trim() : ''
     if (!normalizedVideoModel) {
       alert('Video model is required')
-      return
+      return false
     }
     if (firstLastFrame?.supportsFirstLastFrame === false) {
       alert('FIRST_LAST_FRAME_MODEL_UNSUPPORTED')
-      return
+      return false
     }
     const sanitizedFirstLastFrame = firstLastFrame
       ? {
@@ -84,10 +84,11 @@ export function useWorkspaceVideoActions({
         generationOptions,
         ...submissionMeta,
       })
+      return true
     } catch (err: unknown) {
       if (isAbortError(err)) {
         _ulogInfo(t('execution.requestAborted'))
-        return
+        return false
       }
       alert(`${t('execution.generationFailed')}: ${getErrorMessage(err)}`)
       throw err

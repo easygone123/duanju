@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { NovelPromotionPanel, NovelPromotionStoryboard } from '@/types/project'
 import { StoryboardPanel } from './hooks/useStoryboardState'
 import { PanelEditData } from '../PanelEditForm'
@@ -10,6 +10,7 @@ import type { PanelSaveState } from './hooks/usePanelCrudActions'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import type { SixGridUpscaleWorkflow } from './SixGridGroupControls'
 import { isSixGridPanelBusy } from '@/lib/query/hooks/useSixGridStoryboard'
+import { VirtualCardRange } from '@/components/virtualization/VirtualCardRange'
 
 interface StoryboardPanelListProps {
   storyboard: NovelPromotionStoryboard
@@ -33,7 +34,7 @@ interface StoryboardPanelListProps {
   onRemoveCharacter: (panel: StoryboardPanel, index: number) => void
   onRemoveLocation: (panel: StoryboardPanel) => void
   onRetryPanelSave: (panelId: string) => void
-  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => void
+  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => Promise<boolean>
   onOpenEditModal: (panelIndex: number) => void
   onOpenAIDataModal: (panelIndex: number) => void
   onSelectPanelCandidateIndex: (panelId: string, index: number) => void
@@ -92,12 +93,35 @@ export default function StoryboardPanelList({
   onUpscaleSixGridPanel,
   onUndoSixGridPanel,
 }: StoryboardPanelListProps) {
+  const [activeEditPanelId, setActiveEditPanelId] = useState<string | null>(null)
   const displayImages = useMemo(() => textPanels.map((panel) => panel.imageUrl || null), [textPanels])
   const isVertical = ASPECT_RATIO_CONFIGS[videoRatio]?.isVertical ?? false
+  const pinnedPanelIndices = textPanels.flatMap((panel, index) => {
+    const saveState = saveStateByPanel[panel.id]
+    const isBusy = savingPanels.has(panel.id)
+      || deletingPanelIds.has(panel.id)
+      || modifyingPanels.has(panel.id)
+      || saveState?.status === 'saving'
+      || isPanelTaskRunning(panel)
+      || Boolean(getPanelCandidates(panel as unknown as NovelPromotionPanel))
+    const isEditing = activeEditPanelId === panel.id
+      || hasUnsavedByPanel.has(panel.id)
+      || saveState?.status === 'error'
+    return isBusy || isEditing ? [index] : []
+  })
 
   return (
-    <div className={`grid gap-4 ${isVertical ? 'grid-cols-5' : 'grid-cols-3'} ${isSubmittingStoryboardTextTask ? 'opacity-50 pointer-events-none' : ''}`}>
-      {textPanels.map((panel, index) => {
+    <VirtualCardRange
+      items={textPanels}
+      getKey={(panel, index) => panel.id || String(index)}
+      estimatedCardHeight={760}
+      estimatedRowHeight={776}
+      overscan={1}
+      pinnedIndices={pinnedPanelIndices}
+      className={`grid gap-4 ${isVertical ? 'grid-cols-5' : 'grid-cols-3'} ${isSubmittingStoryboardTextTask ? 'opacity-50 pointer-events-none' : ''}`}
+      cardClassName="relative group/panel h-full"
+      cardStyle={(_panel, index) => ({ zIndex: textPanels.length - index })}
+      renderCard={(panel, index) => {
         const imageUrl = displayImages[index]
         const globalPanelNumber = storyboardStartIndex + index + 1
         const isPanelModifying =
@@ -118,12 +142,7 @@ export default function StoryboardPanelList({
         const panelCandidateData = getPanelCandidates(panel as unknown as NovelPromotionPanel)
 
         return (
-          <div
-            key={panel.id || index}
-            className="relative group/panel h-full"
-            style={{ zIndex: textPanels.length - index }}
-          >
-            <PanelCard
+          <PanelCard
               panel={panel}
               panelData={panelData}
               imageUrl={imageUrl}
@@ -138,7 +157,10 @@ export default function StoryboardPanelList({
               isSubmittingPanelImageTask={panelTaskRunning}
               failedError={panelFailedError}
               candidateData={panelCandidateData}
-              onUpdate={(updates) => onPanelUpdate(panel.id, panel, updates)}
+              onUpdate={(updates) => {
+                setActiveEditPanelId(panel.id)
+                onPanelUpdate(panel.id, panel, updates)
+              }}
               onDelete={() => onPanelDelete(panel.id)}
               onOpenCharacterPicker={() => onOpenCharacterPicker(panel.id)}
               onOpenLocationPicker={() => onOpenLocationPicker(panel.id)}
@@ -146,8 +168,14 @@ export default function StoryboardPanelList({
               onRemoveCharacter={(characterIndex) => onRemoveCharacter(panel, characterIndex)}
               onRemoveLocation={() => onRemoveLocation(panel)}
               onRegeneratePanelImage={onRegeneratePanelImage}
-              onOpenEditModal={() => onOpenEditModal(index)}
-              onOpenAIDataModal={() => onOpenAIDataModal(index)}
+              onOpenEditModal={() => {
+                setActiveEditPanelId(panel.id)
+                onOpenEditModal(index)
+              }}
+              onOpenAIDataModal={() => {
+                setActiveEditPanelId(panel.id)
+                onOpenAIDataModal(index)
+              }}
               onSelectCandidateIndex={onSelectPanelCandidateIndex}
               onConfirmCandidate={onConfirmPanelCandidate}
               onCancelCandidate={onCancelPanelCandidate}
@@ -183,10 +211,9 @@ export default function StoryboardPanelList({
                   ? () => void onUndoSixGridPanel(panel.id, panel.imageMediaId!, panel.previousImageMediaId!)
                   : undefined,
               } : undefined}
-            />
-          </div>
+          />
         )
-      })}
-    </div>
+      }}
+    />
   )
 }

@@ -14,6 +14,7 @@ import {
   connectionEditorKey,
   initialConnectionValues,
   safelyRunConnectionAction,
+  resolveConnectionRequestError,
   statusPollingInterval,
   validateConnectionCredentials,
   type ComfyConnectionView,
@@ -229,6 +230,16 @@ describe('ComfyUI connection settings', () => {
     )).resolves.toBeUndefined()
     expect(errors).toEqual([null, 'requestFailed'])
     expect(JSON.stringify(errors)).not.toContain('top-secret')
+  })
+
+  it('maps connection request failures to specific safe messages without exposing server details', () => {
+    expect(resolveConnectionRequestError({ status: 401, code: 'UNAUTHORIZED' })).toBe('requestUnauthorized')
+    expect(resolveConnectionRequestError({ status: 409, code: 'CONFLICT' })).toBe('connectionConflict')
+    expect(resolveConnectionRequestError({ status: 400, code: 'INVALID_PARAMS' })).toBe('connectionInvalid')
+    expect(resolveConnectionRequestError({ status: 500, code: 'INTERNAL_ERROR' })).toBe('serverUnavailable')
+    expect(resolveConnectionRequestError(
+      new Error('Authorization: Bearer top-secret server trace'),
+    )).toBe('requestFailed')
   })
 
   it('uses responsive profile navigation and content layout on narrow screens', () => {

@@ -4,6 +4,7 @@ import type { CapabilitySelections, CapabilityValue } from '@/lib/model-config-c
 import { VideoPanelCard, type VideoPanel, type VideoModelOption, type MatchedVoiceLine, type FirstLastFrameParams, type VideoGenerationOptions } from '../video'
 import type { PromptField } from '@/lib/novel-promotion/stages/video-stage-runtime/useVideoPromptState'
 import type { FrameLinkChoices } from '@/lib/novel-promotion/video/frame-link-resolver'
+import { VirtualCardRange } from '@/components/virtualization/VirtualCardRange'
 
 interface VideoRenderPanelProps {
   allPanels: VideoPanel[]
@@ -46,7 +47,7 @@ interface VideoRenderPanelProps {
       durationOverride?: number | null
       expectedPanelUpdatedAt?: string
     },
-  ) => Promise<void>
+  ) => Promise<boolean>
   onUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => Promise<void>
   onLipSync: (storyboardId: string, panelIndex: number, voiceLineId: string, panelId?: string) => Promise<void>
   onToggleLink: (panelKey: string, storyboardId: string, panelIndex: number) => Promise<void>
@@ -131,13 +132,45 @@ export default function VideoRenderPanel({
   updateLocalPrompt,
   savePrompt,
 }: VideoRenderPanelProps) {
+  const pinnedPanelIndices = allPanels.flatMap((panel, index) => {
+    const panelKey = `${panel.storyboardId}-${panel.panelIndex}`
+    const hasRunningVoice = (panelVoiceLines.get(panelKey) || []).some((line) => runningVoiceLineIds.has(line.id))
+    const isSavingPrompt = savingPrompts.has(`videoPrompt:${panelKey}`)
+      || savingPrompts.has(`firstLastFramePrompt:${panelKey}`)
+    return highlightedPanelKey === panelKey
+      || panel.videoTaskRunning
+      || panel.lipSyncTaskRunning
+      || hasRunningVoice
+      || isSavingPrompt
+      ? [index]
+      : []
+  })
+
   return (
-    <>
-      <div className={`grid gap-4 ${getAspectRatioConfig(videoRatio).isVertical
+    <VirtualCardRange
+      items={allPanels}
+      getKey={(panel) => `${panel.storyboardId}-${panel.panelIndex}`}
+      estimatedCardHeight={720}
+      estimatedRowHeight={736}
+      overscan={1}
+      pinnedIndices={pinnedPanelIndices}
+      className={`grid gap-4 ${getAspectRatioConfig(videoRatio).isVertical
         ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
         : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
-      }`}>
-        {allPanels.map((panel, idx) => {
+      }`}
+      onItemElement={(panel, _index, element) => {
+        const panelKey = `${panel.storyboardId}-${panel.panelIndex}`
+        if (element) panelRefs.current.set(panelKey, element)
+        else panelRefs.current.delete(panelKey)
+      }}
+      cardClassName={(panel) => {
+        const panelKey = `${panel.storyboardId}-${panel.panelIndex}`
+        return `transition-all duration-500 ${highlightedPanelKey === panelKey
+          ? 'ring-4 ring-[var(--glass-stroke-focus)] ring-offset-2 ring-offset-[var(--glass-bg-canvas)] rounded-2xl scale-[1.02]'
+          : ''
+        }`
+      }}
+      renderCard={(panel, idx) => {
           const panelKey = `${panel.storyboardId}-${panel.panelIndex}`
           const isLinked = linkedPanels.get(panelKey) || false
           const isLastFrame = isLinkedAsLastFrame(idx)
@@ -154,18 +187,7 @@ export default function VideoRenderPanel({
           const isSavingPrompt = savingPrompts.has(`${promptField}:${panelKey}`)
 
           return (
-            <div
-              key={panelKey}
-              ref={(element) => {
-                if (element) panelRefs.current.set(panelKey, element)
-                else panelRefs.current.delete(panelKey)
-              }}
-              className={`transition-all duration-500 ${highlightedPanelKey === panelKey
-                ? 'ring-4 ring-[var(--glass-stroke-focus)] ring-offset-2 ring-offset-[var(--glass-bg-canvas)] rounded-2xl scale-[1.02]'
-                : ''
-              }`}
-            >
-              <VideoPanelCard
+            <VideoPanelCard
                 panel={{
                   ...panel,
                   lipSyncTaskRunning: panel.lipSyncTaskRunning || false,
@@ -214,11 +236,9 @@ export default function VideoRenderPanel({
                 onResetFlPrompt={onResetFlPrompt}
                 onGenerateFirstLastFrame={onGenerateFirstLastFrame}
                 onPreviewImage={onPreviewImage}
-              />
-            </div>
+            />
           )
-        })}
-      </div>
-    </>
+      }}
+    />
   )
 }

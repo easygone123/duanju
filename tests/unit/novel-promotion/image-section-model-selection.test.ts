@@ -1,6 +1,9 @@
+// @vitest-environment jsdom
+
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { extractCapabilityFields } from '@/lib/model-capabilities/ui-fields'
 import { applyImageTaskCapabilityChange } from '@/lib/model-capabilities/ui-fields'
 import { buildPanelRegenerationPayload } from '@/lib/query/mutations/storyboard-panel-mutations'
@@ -20,18 +23,23 @@ const imageModels = vi.hoisted(() => ({
 }))
 
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }))
-vi.mock('@/lib/query/hooks/useUserModels', () => ({
-  useUserModels: () => ({ data: imageModels.current, isLoading: false }),
-  selectImageModelOptions: (payload: typeof imageModels.current | undefined) => payload?.image ?? [],
+vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/WorkspaceDataProvider', () => ({
+  useWorkspaceData: () => ({ imageModelOptions: imageModels.current.image }),
 }))
 vi.mock('@/components/ui/config-modals/ModelCapabilityDropdown', () => ({
   ModelCapabilityDropdown: (props: Record<string, unknown>) => {
     dropdownCapture.props = props
-    return React.createElement('div', { 'data-testid': 'image-model-dropdown' })
+    return React.createElement('button', {
+      'data-testid': 'image-model-dropdown',
+      onClick: () => (props.onModelChange as (value: string) => void)('cloud::image'),
+    })
   },
 }))
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/ImageSectionActionButtons', () => ({
-  default: () => null,
+  default: (props: { onRegeneratePanelImage: (id: string, count?: number, force?: boolean) => void }) => React.createElement(
+    'button',
+    { 'data-testid': 'regenerate-image', onClick: () => props.onRegeneratePanelImage('panel-1', 1, false) },
+  ),
 }))
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/ImageSectionCandidateMode', () => ({
   default: () => null,
@@ -41,6 +49,7 @@ import ImageSection from '@/app/[locale]/workspace/[projectId]/modes/novel-promo
 
 describe('ImageSection model selection', () => {
   beforeEach(() => { dropdownCapture.props = null })
+  afterEach(() => cleanup())
 
   it('renders the shared capability dropdown with full image-only user model options', () => {
     const html = renderToStaticMarkup(React.createElement(ImageSection, {
@@ -66,5 +75,28 @@ describe('ImageSection model selection', () => {
     expect(buildPanelRegenerationPayload('panel-1', 1, 'fal::banana-2', generationOptions)).toEqual({
       panelId: 'panel-1', count: 1, imageModel: 'fal::banana-2', generationOptions: { resolution: '4K' },
     })
+  })
+
+  it('keeps a failed submission selection for retry and clears it only after acceptance', async () => {
+    const onRegeneratePanelImage = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+    const view = render(React.createElement(ImageSection, {
+      panelId: 'panel-1', imageUrl: 'https://example.com/image.jpg', globalPanelNumber: 1,
+      shotType: 'close-up', videoRatio: '9:16', isDeleting: false, isModifying: false,
+      isSubmittingPanelImageTask: false, failedError: null, candidateData: null,
+      onRegeneratePanelImage, onOpenEditModal: vi.fn(), onOpenAIDataModal: vi.fn(),
+      onSelectCandidateIndex: vi.fn(), onConfirmCandidate: vi.fn(), onCancelCandidate: vi.fn(),
+      onClearError: vi.fn(),
+    }))
+
+    fireEvent.click(view.getByTestId('image-model-dropdown'))
+    expect(dropdownCapture.props?.value).toBe('cloud::image')
+    fireEvent.click(view.getByTestId('regenerate-image'))
+    await waitFor(() => expect(onRegeneratePanelImage).toHaveBeenCalledTimes(1))
+    expect(dropdownCapture.props?.value).toBe('cloud::image')
+
+    fireEvent.click(view.getByTestId('regenerate-image'))
+    await waitFor(() => expect(dropdownCapture.props?.value).toBeUndefined())
   })
 })

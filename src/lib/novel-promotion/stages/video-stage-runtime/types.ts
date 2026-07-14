@@ -57,7 +57,7 @@ export interface VideoStageShellProps {
       durationOverride?: number | null
       expectedPanelUpdatedAt?: string
     },
-  ) => Promise<void>
+  ) => Promise<boolean>
   onGenerateAllVideos: (options?: BatchVideoGenerationParams) => Promise<void>
   onBack: () => void
   onUpdateVideoPrompt: (

@@ -44,6 +44,10 @@
   "loadFailed": "无法加载 ComfyUI 节点。",
   "statusFailed": "无法刷新 ComfyUI 状态。",
   "requestFailed": "请求失败。",
+  "requestUnauthorized": "登录状态已失效，请重新登录后再添加节点。",
+  "connectionConflict": "这个 ComfyUI 地址已经添加过，请编辑已有节点。",
+  "connectionInvalid": "节点信息格式无效，请检查名称、IP、端口和认证方式。",
+  "serverUnavailable": "waoowaoo 服务端暂时不可用，请检查容器日志和数据库迁移。",
   "retry": "重试",
   "empty": "尚未添加 ComfyUI 节点。",
   "workflows": {
