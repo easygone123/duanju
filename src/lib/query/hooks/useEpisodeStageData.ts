@@ -21,18 +21,16 @@ export function episodeStageQueryOptions<S extends EpisodeStage>(
   projectId: string | null,
   episodeId: string | null,
   stage: S,
-  cursor?: string,
 ) {
   const enabled = !!projectId && !!episodeId
   return {
-    queryKey: queryKeys.episodeStage(projectId || '', episodeId || '', stage, cursor),
+    queryKey: queryKeys.episodeStage(projectId || '', episodeId || '', stage),
     queryFn: async (): Promise<EpisodeStagePayloadByStage[S]> => {
       if (!projectId || !episodeId) {
         throw new Error('Project ID and Episode ID are required')
       }
-      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
       const response = await apiFetch(
-        `/api/novel-promotion/${encodeURIComponent(projectId)}/episodes/${encodeURIComponent(episodeId)}/stage/${encodeURIComponent(stage)}${query}`,
+        `/api/novel-promotion/${encodeURIComponent(projectId)}/episodes/${encodeURIComponent(episodeId)}/stage/${encodeURIComponent(stage)}`,
       )
       if (!response.ok) {
         const error = await response.json()
@@ -53,7 +51,6 @@ export function useEpisodeStageData<S extends EpisodeStage>(
   projectId: string | null,
   episodeId: string | null,
   stage: S,
-  cursor?: string,
 ) {
-  return useQuery(episodeStageQueryOptions(projectId, episodeId, stage, cursor))
+  return useQuery(episodeStageQueryOptions(projectId, episodeId, stage))
 }

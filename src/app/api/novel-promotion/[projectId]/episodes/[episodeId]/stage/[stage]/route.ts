@@ -3,9 +3,8 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { isErrorResponse, requireProjectAuthLight } from '@/lib/api-auth'
-import { attachMediaFieldsToProject } from '@/lib/media/attach'
+import { attachMediaFieldsToStagePayload } from '@/lib/media/attach'
 import { isEpisodeStage, type EpisodeStage } from '@/lib/novel-promotion/episode-stage-data'
-import { resolveEpisodeStageArtifacts } from '@/lib/novel-promotion/stage-readiness'
 
 const coreSelect = {
   id: true,
@@ -168,23 +167,6 @@ const stageSelects = {
   config: {
     ...coreSelect,
     novelText: true,
-    clips: {
-      orderBy: { createdAt: 'asc' as const },
-      select: { screenplay: true },
-    },
-    storyboards: {
-      orderBy: { createdAt: 'asc' as const },
-      select: {
-        panels: {
-          orderBy: { panelIndex: 'asc' as const },
-          select: { id: true, videoUrl: true },
-        },
-      },
-    },
-    voiceLines: {
-      orderBy: { lineIndex: 'asc' as const },
-      select: { id: true },
-    },
   },
   script: {
     ...coreSelect,
@@ -220,23 +202,49 @@ function stageCore(row: StageRow) {
   return { id: row.id, episodeNumber: row.episodeNumber, name: row.name }
 }
 
-async function buildStageEpisode(stage: EpisodeStage, row: StageRow) {
+type ConfigArtifactCounts = {
+  scriptCount: number
+  storyboardCount: number
+  panelCount: number
+  videoCount: number
+  voiceCount: number
+}
+
+async function loadConfigArtifactCounts(episodeId: string): Promise<ConfigArtifactCounts> {
+  const [scriptCount, storyboardCount, panelCount, videoCount, voiceCount] = await Promise.all([
+    prisma.novelPromotionClip.count({
+      where: { episodeId, screenplay: { not: null }, NOT: { screenplay: '' } },
+    }),
+    prisma.novelPromotionStoryboard.count({ where: { episodeId } }),
+    prisma.novelPromotionPanel.count({ where: { storyboard: { episodeId } } }),
+    prisma.novelPromotionPanel.count({
+      where: { storyboard: { episodeId }, videoUrl: { not: null }, NOT: { videoUrl: '' } },
+    }),
+    prisma.novelPromotionVoiceLine.count({ where: { episodeId } }),
+  ])
+  return { scriptCount, storyboardCount, panelCount, videoCount, voiceCount }
+}
+
+async function buildStageEpisode(
+  stage: EpisodeStage,
+  row: StageRow,
+  configCounts?: ConfigArtifactCounts,
+) {
   if (stage === 'config') {
-    const storyboards = Array.isArray(row.storyboards) ? row.storyboards as Array<Record<string, unknown>> : []
+    if (!configCounts) throw new Error('Config artifact counts are required')
     return {
       ...stageCore(row),
       novelText: typeof row.novelText === 'string' ? row.novelText : null,
-      readiness: resolveEpisodeStageArtifacts({
-        novelText: typeof row.novelText === 'string' ? row.novelText : null,
-        clips: Array.isArray(row.clips) ? row.clips : [],
-        storyboards,
-        voiceLines: Array.isArray(row.voiceLines) ? row.voiceLines : [],
-      }),
+      readiness: {
+        hasStory: typeof row.novelText === 'string' && row.novelText.trim().length > 0,
+        hasScript: configCounts.scriptCount > 0,
+        hasStoryboard: configCounts.panelCount > 0,
+        hasVideo: configCounts.videoCount > 0,
+        hasVoice: configCounts.voiceCount > 0,
+      },
       storyboardStats: {
-        storyboardCount: storyboards.length,
-        panelCount: storyboards.reduce((count, storyboard) => (
-          count + (Array.isArray(storyboard.panels) ? storyboard.panels.length : 0)
-        ), 0),
+        storyboardCount: configCounts.storyboardCount,
+        panelCount: configCounts.panelCount,
       },
     }
   }
@@ -247,7 +255,7 @@ async function buildStageEpisode(stage: EpisodeStage, row: StageRow) {
     return { ...stageCore(row), clips: row.clips || [], storyboards: row.storyboards || [] }
   }
 
-  const withMedia = await attachMediaFieldsToProject(row)
+  const withMedia = await attachMediaFieldsToStagePayload(row)
   return {
     ...stageCore(row),
     clips: withMedia.clips || [],
@@ -273,9 +281,10 @@ export const GET = apiHandler(async (
     select: stageSelects[rawStage],
   })
   if (!episode) throw new ApiError('NOT_FOUND')
+  const configCounts = rawStage === 'config' ? await loadConfigArtifactCounts(episodeId) : undefined
 
   return NextResponse.json({
     stage: rawStage,
-    episode: await buildStageEpisode(rawStage, episode as StageRow),
+    episode: await buildStageEpisode(rawStage, episode as StageRow, configCounts),
   })
 })

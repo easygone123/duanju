@@ -115,6 +115,7 @@ export function useUpdateProjectEpisodeField(projectId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
+    scope: { id: `project-episode-field:${projectId}` },
     mutationFn: async ({
       episodeId,
       key,
@@ -136,12 +137,15 @@ export function useUpdateProjectEpisodeField(projectId: string) {
     onMutate: async (variables) => {
       const episodeQueryKey = queryKeys.episodeData(projectId, variables.episodeId)
       const projectQueryKey = queryKeys.projectData(projectId)
+      const configQueryKey = queryKeys.episodeStage(projectId, variables.episodeId, 'config')
 
       await queryClient.cancelQueries({ queryKey: episodeQueryKey })
       await queryClient.cancelQueries({ queryKey: projectQueryKey })
+      await queryClient.cancelQueries({ queryKey: configQueryKey, exact: true })
 
       const previousEpisode = queryClient.getQueryData<Record<string, unknown>>(episodeQueryKey)
       const previousProject = queryClient.getQueryData<Project>(projectQueryKey)
+      const previousConfig = queryClient.getQueryData<Record<string, unknown>>(configQueryKey)
 
       queryClient.setQueryData<Record<string, unknown> | undefined>(episodeQueryKey, (prev) => {
         if (!prev) return prev
@@ -167,17 +171,78 @@ export function useUpdateProjectEpisodeField(projectId: string) {
         }
       })
 
-      return { previousEpisode, previousProject, episodeId: variables.episodeId }
+      queryClient.setQueryData<Record<string, unknown> | undefined>(configQueryKey, (prev) => {
+        if (!prev || !prev.episode || typeof prev.episode !== 'object') return prev
+        return {
+          ...prev,
+          episode: {
+            ...prev.episode as Record<string, unknown>,
+            [variables.key]: variables.value,
+          },
+        }
+      })
+
+      return { previousEpisode, previousProject, previousConfig, episodeId: variables.episodeId }
     },
-    onError: (_error, _variables, context) => {
-      if (context?.previousEpisode && context.episodeId) {
-        queryClient.setQueryData(queryKeys.episodeData(projectId, context.episodeId), context.previousEpisode)
+    onError: (_error, variables, context) => {
+      if (!context?.episodeId) return
+      const restoreField = (
+        current: Record<string, unknown> | undefined,
+        previous: Record<string, unknown> | undefined,
+      ) => {
+        if (!current || current[variables.key] !== variables.value) return current
+        const restored = { ...current }
+        if (previous && Object.prototype.hasOwnProperty.call(previous, variables.key)) {
+          restored[variables.key] = previous[variables.key]
+        } else {
+          delete restored[variables.key]
+        }
+        return restored
       }
-      if (context?.previousProject) {
-        queryClient.setQueryData(queryKeys.projectData(projectId), context.previousProject)
-      }
+
+      queryClient.setQueryData<Record<string, unknown> | undefined>(
+        queryKeys.episodeData(projectId, context.episodeId),
+        (current) => restoreField(current, context.previousEpisode),
+      )
+      queryClient.setQueryData<Project | undefined>(queryKeys.projectData(projectId), (current) => {
+        if (!current?.novelPromotionData || !context.previousProject?.novelPromotionData) return current
+        const currentEpisodes = current.novelPromotionData.episodes
+        const previousEpisodes = context.previousProject.novelPromotionData.episodes
+        if (!Array.isArray(currentEpisodes) || !Array.isArray(previousEpisodes)) return current
+        return {
+          ...current,
+          novelPromotionData: {
+            ...current.novelPromotionData,
+            episodes: currentEpisodes.map((episode) => {
+              if (episode.id !== context.episodeId) return episode
+              const previous = previousEpisodes.find((candidate) => candidate.id === context.episodeId)
+              return restoreField(
+                episode as unknown as Record<string, unknown>,
+                previous as unknown as Record<string, unknown> | undefined,
+              ) as unknown as typeof episode
+            }),
+          },
+        }
+      })
+      queryClient.setQueryData<Record<string, unknown> | undefined>(
+        queryKeys.episodeStage(projectId, context.episodeId, 'config'),
+        (current) => {
+          if (!current?.episode || typeof current.episode !== 'object') return current
+          const previousEpisode = context.previousConfig?.episode
+          return {
+            ...current,
+            episode: restoreField(
+              current.episode as Record<string, unknown>,
+              previousEpisode && typeof previousEpisode === 'object'
+                ? previousEpisode as Record<string, unknown>
+                : undefined,
+            ),
+          }
+        },
+      )
     },
     onSettled: (_, __, variables) => {
+      if (variables.key === 'novelText') return
       invalidateQueryTemplates(queryClient, [
         queryKeys.projectData(projectId),
       ])

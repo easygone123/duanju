@@ -7,6 +7,10 @@ const prismaMock = vi.hoisted(() => ({
   novelPromotionEpisode: {
     findFirst: vi.fn(),
   },
+  novelPromotionClip: { count: vi.fn() },
+  novelPromotionStoryboard: { count: vi.fn() },
+  novelPromotionPanel: { count: vi.fn() },
+  novelPromotionVoiceLine: { count: vi.fn() },
 }))
 
 vi.mock('@/lib/api-auth', () => ({
@@ -14,7 +18,7 @@ vi.mock('@/lib/api-auth', () => ({
   requireProjectAuthLight: authMock,
 }))
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
-vi.mock('@/lib/media/attach', () => ({ attachMediaFieldsToProject: attachMediaMock }))
+vi.mock('@/lib/media/attach', () => ({ attachMediaFieldsToStagePayload: attachMediaMock }))
 
 type JsonObject = Record<string, unknown>
 
@@ -147,6 +151,12 @@ describe('episode stage data route', () => {
     prismaMock.novelPromotionEpisode.findFirst.mockImplementation(async ({ select }: { select: JsonObject }) => (
       applySelect(fixture, select)
     ))
+    prismaMock.novelPromotionClip.count.mockResolvedValue(2)
+    prismaMock.novelPromotionStoryboard.count.mockResolvedValue(2)
+    prismaMock.novelPromotionPanel.count.mockImplementation(async ({ where }: { where: JsonObject }) => (
+      where.videoUrl ? 2 : 3
+    ))
+    prismaMock.novelPromotionVoiceLine.count.mockResolvedValue(1)
   })
 
   it.each(['config', 'script', 'storyboard', 'videos', 'voice'] as const)(
@@ -244,6 +254,23 @@ describe('episode stage data route', () => {
     const response = await get('config')
     expect(response.status).toBe(401)
     expect(prismaMock.novelPromotionEpisode.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('loads config readiness and storyboard stats without selecting relation arrays', async () => {
+    const response = await get('config')
+    expect(response.status).toBe(200)
+    const body = await response.json()
+
+    const select = prismaMock.novelPromotionEpisode.findFirst.mock.calls[0]?.[0]?.select
+    expect(select).toEqual({ id: true, episodeNumber: true, name: true, novelText: true })
+    expect(prismaMock.novelPromotionClip.count).toHaveBeenCalledTimes(1)
+    expect(prismaMock.novelPromotionStoryboard.count).toHaveBeenCalledTimes(1)
+    expect(prismaMock.novelPromotionPanel.count).toHaveBeenCalledTimes(2)
+    expect(prismaMock.novelPromotionVoiceLine.count).toHaveBeenCalledTimes(1)
+    expect(body.episode).toMatchObject({
+      readiness: { hasStory: true, hasScript: true, hasStoryboard: true, hasVideo: true, hasVoice: true },
+      storyboardStats: { storyboardCount: 2, panelCount: 3 },
+    })
   })
 
   it('returns 404 when the episode is not owned by the route project', async () => {

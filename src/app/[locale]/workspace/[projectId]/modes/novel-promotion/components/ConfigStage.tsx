@@ -12,6 +12,7 @@ import { useToast } from '@/contexts/ToastContext'
 import { shouldLockStoryboardRunSettings } from '@/lib/novel-promotion/six-grid/run-settings'
 import type { StoryboardConfigKey } from '../hooks/useWorkspaceConfigActions'
 import { Link } from '@/i18n/navigation'
+import StageDataBoundary from './StageDataBoundary'
 
 /**
  * 配置阶段 — 整合 NovelInputStage + 长文本智能分集
@@ -24,7 +25,8 @@ export default function ConfigStage() {
   const t = useTranslations('novelPromotion.storyboardRunSettings')
   const { showToast } = useToast()
   const runtime = useWorkspaceStageRuntime()
-  const { episodeName, novelText } = useWorkspaceEpisodeStageData('config')
+  const stageQuery = useWorkspaceEpisodeStageData('config')
+  const { episodeName, novelText } = stageQuery
   const params = useParams<{ projectId: string }>()
   const projectId = params?.projectId ?? ''
   const settingsLocked = shouldLockStoryboardRunSettings({
@@ -69,6 +71,19 @@ export default function ConfigStage() {
     void triggerGlobalAnalysis
     window.location.reload()
   }, [])
+
+  if (stageQuery.data === undefined) {
+    return (
+      <StageDataBoundary
+        data={stageQuery.data}
+        status={stageQuery.status}
+        error={stageQuery.error}
+        refetch={stageQuery.refetch}
+      >
+        {null}
+      </StageDataBoundary>
+    )
+  }
 
   // 如果已进入智能分集模式，显示 SmartImportWizard
   if (smartSplitMode) {

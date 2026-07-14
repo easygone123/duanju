@@ -26,6 +26,7 @@ import {
   useDeleteProjectVoiceLine,
   useUpdateProjectVoiceLine,
 } from '@/lib/query/mutations/useVoiceMutations'
+import { useUpdateProjectEpisodeField } from '@/lib/query/mutations/useEpisodeMutations'
 
 const apiFetchMock = vi.hoisted(() => vi.fn())
 const workspaceContext = vi.hoisted(() => ({ projectId: 'project/one', episodeId: 'episode two' }))
@@ -52,12 +53,22 @@ function wrapper(queryClient: QueryClient) {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 afterEach(cleanup)
 
 describe('episode stage query', () => {
   beforeEach(() => apiFetchMock.mockReset())
 
-  it('isolates stages and cursors under a stable episode prefix', () => {
+  it('isolates stages under a stable episode prefix without a cursor dimension', () => {
     expect(queryKeys.episodeStages('project-1')).toEqual(['episode-stages', 'project-1'])
     expect(queryKeys.episodeStages('project-1', 'episode-1')).toEqual([
       'episode-stages', 'project-1', 'episode-1',
@@ -65,11 +76,25 @@ describe('episode stage query', () => {
     expect(queryKeys.episodeStage('project-1', 'episode-1', 'script')).toEqual([
       'episode-stages', 'project-1', 'episode-1', 'script',
     ])
-    expect(queryKeys.episodeStage('project-1', 'episode-1', 'script', 'cursor-2')).toEqual([
-      'episode-stages', 'project-1', 'episode-1', 'script', 'cursor-2',
-    ])
+    expect((queryKeys.episodeStage as (...args: string[]) => readonly string[])(
+      'project-1', 'episode-1', 'script', 'ignored-cursor',
+    )).toEqual(['episode-stages', 'project-1', 'episode-1', 'script'])
     expect(queryKeys.episodeStage('project-1', 'episode-1', 'storyboard')).not.toEqual(
       queryKeys.episodeStage('project-1', 'episode-1', 'videos'),
+    )
+  })
+
+  it('never appends an unsupported cursor query to the full stage endpoint', async () => {
+    apiFetchMock.mockResolvedValueOnce(response('script', { id: 'episode-1', name: 'Episode', clips: [] }))
+    const queryClient = client()
+    const options = (episodeStageQueryOptions as (...args: string[]) => ReturnType<typeof episodeStageQueryOptions>)(
+      'project-1', 'episode-1', 'script', 'ignored-cursor',
+    )
+
+    await queryClient.fetchQuery(options)
+
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/novel-promotion/project-1/episodes/episode-1/stage/script',
     )
   })
 
@@ -177,6 +202,131 @@ describe('episode stage query', () => {
     const legacySource = readFileSync('src/lib/query/hooks/useProjectData.ts', 'utf8')
     expect(legacySource).toContain('export function useEpisodeData')
     expect(legacySource).toContain('/episodes/${episodeId}`')
+  })
+
+  it('serializes rapid novelText writes while keeping the visible config cache at the latest value', async () => {
+    const firstResponse = deferred<Response>()
+    const secondResponse = deferred<Response>()
+    apiFetchMock
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockImplementationOnce(() => secondResponse.promise)
+    const queryClient = client()
+    const configKey = queryKeys.episodeStage('project-1', 'episode-1', 'config')
+    queryClient.setQueryData(configKey, {
+      stage: 'config',
+      episode: { id: 'episode-1', name: 'Episode', novelText: '' },
+    })
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    const mutation = renderHook(
+      () => useUpdateProjectEpisodeField('project-1'),
+      { wrapper: wrapper(queryClient) },
+    )
+
+    let firstWrite!: Promise<unknown>
+    let secondWrite!: Promise<unknown>
+    act(() => {
+      firstWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'a',
+      })
+      secondWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'ab',
+      })
+    })
+
+    await waitFor(() => {
+      const cached = queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)
+      expect(cached?.episode.novelText).toBe('ab')
+      expect(apiFetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    firstResponse.resolve(response('ignored', { ok: true }))
+    await act(async () => { await firstWrite })
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(2))
+    expect(queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText).toBe('ab')
+
+    secondResponse.resolve(response('ignored', { ok: true }))
+    await act(async () => { await secondWrite })
+
+    expect(apiFetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)).novelText)).toEqual(['a', 'ab'])
+    expect(queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText).toBe('ab')
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: queryKeys.episodeStages('project-1', 'episode-1'),
+    })
+  })
+
+  it('does not let an older failed novelText write roll back a newer optimistic value', async () => {
+    const firstResponse = deferred<Response>()
+    const secondResponse = deferred<Response>()
+    apiFetchMock
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockImplementationOnce(() => secondResponse.promise)
+    const queryClient = client()
+    const configKey = queryKeys.episodeStage('project-1', 'episode-1', 'config')
+    queryClient.setQueryData(configKey, {
+      stage: 'config',
+      episode: { id: 'episode-1', name: 'Episode', novelText: '' },
+    })
+    const mutation = renderHook(
+      () => useUpdateProjectEpisodeField('project-1'),
+      { wrapper: wrapper(queryClient) },
+    )
+
+    let failedWrite!: Promise<unknown>
+    let latestWrite!: Promise<unknown>
+    act(() => {
+      failedWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'a',
+      }).catch((error) => error)
+      latestWrite = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'ab',
+      })
+    })
+
+    await waitFor(() => expect(
+      queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText,
+    ).toBe('ab'))
+    firstResponse.resolve(new Response(JSON.stringify({ error: 'write failed' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    }))
+    await act(async () => { await failedWrite })
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(2))
+    expect(queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText).toBe('ab')
+
+    secondResponse.resolve(response('ignored', { ok: true }))
+    await act(async () => { await latestWrite })
+    expect(queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText).toBe('ab')
+  })
+
+  it('rolls back a failed latest novelText write to its config-stage snapshot', async () => {
+    const failedResponse = deferred<Response>()
+    apiFetchMock.mockImplementationOnce(() => failedResponse.promise)
+    const queryClient = client()
+    const configKey = queryKeys.episodeStage('project-1', 'episode-1', 'config')
+    queryClient.setQueryData(configKey, {
+      stage: 'config',
+      episode: { id: 'episode-1', name: 'Episode', novelText: 'server' },
+    })
+    const mutation = renderHook(
+      () => useUpdateProjectEpisodeField('project-1'),
+      { wrapper: wrapper(queryClient) },
+    )
+
+    let write!: Promise<unknown>
+    act(() => {
+      write = mutation.result.current.mutateAsync({
+        episodeId: 'episode-1', key: 'novelText', value: 'draft',
+      })
+    })
+
+    await waitFor(() => expect(
+      queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText,
+    ).toBe('draft'))
+    failedResponse.resolve(new Response(JSON.stringify({ error: 'write failed' }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    }))
+    await act(async () => { await expect(write).rejects.toThrow('write failed') })
+
+    expect(queryClient.getQueryData<{ episode: { novelText: string } }>(configKey)?.episode.novelText).toBe('server')
   })
 
   it('removes the old full episode query from every workspace cold-entry consumer', () => {

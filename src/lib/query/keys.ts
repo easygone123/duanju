@@ -125,10 +125,7 @@ export const queryKeys = {
         projectId: string,
         episodeId: string,
         stage: string,
-        cursor?: string,
-    ) => cursor
-        ? ['episode-stages', projectId, episodeId, stage, cursor] as const
-        : ['episode-stages', projectId, episodeId, stage] as const,
+    ) => ['episode-stages', projectId, episodeId, stage] as const,
 } as const
 
 /**
