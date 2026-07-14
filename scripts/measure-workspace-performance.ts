@@ -1,10 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 
-import {
-  createWorkspaceMetrics,
-  type WorkspaceRequestMetric,
-} from '../src/lib/performance/workspace-metrics'
+import type { WorkspaceRequestMetric } from '../src/lib/performance/workspace-metrics'
 
 export interface WorkspacePerformanceObservation {
   scenario: 'cold-entry' | 'cached-switch'
@@ -23,6 +20,19 @@ export interface WorkspacePerformanceBaseline {
   version: 1
   mode: 'baseline'
   observations: WorkspacePerformanceObservation[]
+}
+
+export const WORKSPACE_PERFORMANCE_CLI_USAGE =
+  'Usage: npm run perf:workspace -- --baseline'
+
+export function parseWorkspacePerformanceArgs(
+  args: readonly string[],
+): { mode: 'baseline' } {
+  if (args.length === 1 && args[0] === '--baseline') {
+    return { mode: 'baseline' }
+  }
+
+  throw new Error(WORKSPACE_PERFORMANCE_CLI_USAGE)
 }
 
 interface ScenarioFixture {
@@ -64,30 +74,17 @@ const scenarioFixtures: ScenarioFixture[] = [
 ]
 
 function measureScenario(fixture: ScenarioFixture): WorkspacePerformanceObservation {
-  const metrics = createWorkspaceMetrics({ enabled: true, now: () => fixture.startedAt })
-
-  metrics.stageStart('storyboard')
-  for (const request of fixture.requests) {
-    metrics.recordRequest(request.name, request.bytes, request.kind)
-  }
-  for (let index = 0; index < fixture.refetchCount; index += 1) {
-    metrics.recordRefetch(['workspace-performance', fixture.scenario, index])
-  }
-  metrics.setMountedCards('storyboard', fixture.mountedCardBodies)
-  metrics.stageVisible('storyboard', fixture.visibleAt)
-
-  const snapshot = metrics.snapshot()
-  const stage = snapshot.stages.storyboard
+  const requests = fixture.requests.map((request) => ({ ...request }))
 
   return {
     scenario: fixture.scenario,
-    stageVisibleMs: stage.visibleMs ?? 0,
-    requests: snapshot.requests,
-    requestCount: snapshot.requestCount,
-    requestBytes: snapshot.requestBytes,
-    refetchCount: snapshot.refetchCount,
+    stageVisibleMs: fixture.visibleAt - fixture.startedAt,
+    requests,
+    requestCount: requests.length,
+    requestBytes: requests.reduce((total, request) => total + request.bytes, 0),
+    refetchCount: fixture.refetchCount,
     jsChunks: [...fixture.jsChunks],
-    mountedCardBodies: stage.mountedCards ?? 0,
+    mountedCardBodies: fixture.mountedCardBodies,
     timestamp: fixture.timestamp,
   }
 }
@@ -105,5 +102,13 @@ const entryPath = process.argv[1] ? resolve(process.argv[1]) : undefined
 const isDirectRun = entryPath === fileURLToPath(import.meta.url)
 
 if (isDirectRun) {
-  console.log(JSON.stringify(buildWorkspacePerformanceBaseline(), null, 2))
+  try {
+    parseWorkspacePerformanceArgs(process.argv.slice(2))
+    console.log(JSON.stringify(buildWorkspacePerformanceBaseline(), null, 2))
+  } catch (error) {
+    console.error(
+      error instanceof Error ? error.message : WORKSPACE_PERFORMANCE_CLI_USAGE,
+    )
+    process.exitCode = 1
+  }
 }

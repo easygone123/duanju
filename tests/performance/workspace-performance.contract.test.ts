@@ -1,8 +1,17 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { buildWorkspacePerformanceBaseline } from '../../scripts/measure-workspace-performance'
+import {
+  buildWorkspacePerformanceBaseline,
+  parseWorkspacePerformanceArgs,
+} from '../../scripts/measure-workspace-performance'
+
+const CLI_USAGE = 'Usage: npm run perf:workspace -- --baseline'
 
 describe('workspace performance baseline contract', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('records deterministic cold-entry and cached-switch observations', () => {
     const report = buildWorkspacePerformanceBaseline()
 
@@ -52,5 +61,27 @@ describe('workspace performance baseline contract', () => {
     expect(cachedSwitch?.stageVisibleMs).toBe(460)
     expect(cachedSwitch?.refetchCount).toBe(1)
     expect(cachedSwitch?.mountedCardBodies).toBe(96)
+  })
+
+  it('parses baseline as the only supported CLI mode', () => {
+    expect(parseWorkspacePerformanceArgs(['--baseline'])).toEqual({ mode: 'baseline' })
+  })
+
+  it('rejects a missing CLI mode with concise usage', () => {
+    expect(() => parseWorkspacePerformanceArgs([])).toThrowError(CLI_USAGE)
+  })
+
+  it('rejects unknown CLI arguments with concise usage', () => {
+    expect(() => parseWorkspacePerformanceArgs(['--compare'])).toThrowError(CLI_USAGE)
+    expect(() => parseWorkspacePerformanceArgs(['--baseline', '--wat'])).toThrowError(
+      CLI_USAGE,
+    )
+  })
+
+  it('builds the same deterministic baseline in production', () => {
+    const expected = buildWorkspacePerformanceBaseline()
+    vi.stubEnv('NODE_ENV', 'production')
+
+    expect(buildWorkspacePerformanceBaseline()).toEqual(expected)
   })
 })
