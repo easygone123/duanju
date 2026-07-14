@@ -7,6 +7,7 @@ export const QUEUE_NAME = {
   VIDEO: 'waoowaoo-video',
   VOICE: 'waoowaoo-voice',
   TEXT: 'waoowaoo-text',
+  VIRAL_REPLICATION: 'waoowaoo-viral-replication',
 } as const
 
 const defaultJobOptions: JobsOptions = {
@@ -39,7 +40,12 @@ export const textQueue = new Queue<TaskJobData>(QUEUE_NAME.TEXT, {
   defaultJobOptions,
 })
 
-const ALL_QUEUES = [imageQueue, videoQueue, voiceQueue, textQueue]
+export const viralReplicationQueue = new Queue<TaskJobData>(QUEUE_NAME.VIRAL_REPLICATION, {
+  connection: queueRedis,
+  defaultJobOptions,
+})
+
+const ALL_QUEUES = [imageQueue, videoQueue, voiceQueue, textQueue, viralReplicationQueue]
 
 const IMAGE_TYPES = new Set<TaskType>([
   TASK_TYPE.IMAGE_PANEL,
@@ -62,16 +68,23 @@ const VOICE_TYPES = new Set<TaskType>([
   TASK_TYPE.VOICE_DESIGN,
   TASK_TYPE.ASSET_HUB_VOICE_DESIGN,
 ])
+const VIRAL_TYPES = new Set<TaskType>([
+  TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
+  TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
+])
 
 const SINGLE_ATTEMPT_TASK_TYPES = new Set<TaskType>([
   TASK_TYPE.STORY_TO_SCRIPT_RUN,
   TASK_TYPE.SCRIPT_TO_STORYBOARD_RUN,
+  TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
+  TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
 ])
 
 export function getQueueTypeByTaskType(type: TaskType): QueueType {
   if (IMAGE_TYPES.has(type)) return 'image'
   if (VIDEO_TYPES.has(type)) return 'video'
   if (VOICE_TYPES.has(type)) return 'voice'
+  if (VIRAL_TYPES.has(type)) return 'viral'
   return 'text'
 }
 
@@ -83,6 +96,8 @@ export function getQueueByType(type: QueueType) {
       return videoQueue
     case 'voice':
       return voiceQueue
+    case 'viral':
+      return viralReplicationQueue
     case 'text':
     default:
       return textQueue

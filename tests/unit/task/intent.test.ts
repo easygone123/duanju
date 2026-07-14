@@ -8,6 +8,11 @@ describe('resolveTaskIntent', () => {
     expect(resolveTaskIntent(TASK_TYPE.IMAGE_LOCATION)).toBe('generate')
     expect(resolveTaskIntent(TASK_TYPE.VIDEO_PANEL)).toBe('generate')
     expect(resolveTaskIntent(TASK_TYPE.AI_STORY_EXPAND)).toBe('generate')
+    expect(resolveTaskIntent(TASK_TYPE.VIRAL_STORYBOARD_GENERATION)).toBe('generate')
+  })
+
+  it('maps viral video analysis as analysis', () => {
+    expect(resolveTaskIntent(TASK_TYPE.VIRAL_VIDEO_ANALYSIS)).toBe('analyze')
   })
 
   it('maps regenerate and modify task types', () => {

@@ -45,6 +45,8 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   [TASK_TYPE.ASSET_HUB_AI_MODIFY_LOCATION]: 'progress.taskType.assetHubAiModifyLocation',
   [TASK_TYPE.ASSET_HUB_AI_MODIFY_PROP]: 'progress.taskType.assetHubAiModifyProp',
   [TASK_TYPE.ASSET_HUB_REFERENCE_TO_CHARACTER]: 'progress.taskType.assetHubReferenceToCharacter',
+  [TASK_TYPE.VIRAL_VIDEO_ANALYSIS]: 'progress.taskType.viralVideoAnalysis',
+  [TASK_TYPE.VIRAL_STORYBOARD_GENERATION]: 'progress.taskType.viralStoryboardGeneration',
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -86,6 +88,11 @@ const STAGE_LABELS: Record<string, string> = {
   llm_proxy_submit: 'progress.stage.llmProxySubmit',
   llm_proxy_execute: 'progress.stage.llmProxyExecute',
   llm_proxy_persist: 'progress.stage.llmProxyPersist',
+  viral_preprocess: 'progress.stage.viralPreprocess',
+  viral_shot_analysis: 'progress.stage.viralShotAnalysis',
+  viral_report_aggregation: 'progress.stage.viralReportAggregation',
+  viral_storyboard_generation: 'progress.stage.viralStoryboardGeneration',
+  viral_persistence: 'progress.stage.viralPersistence',
 }
 
 function asString(value: unknown): string | null {

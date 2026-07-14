@@ -86,7 +86,9 @@
     "assetHubAiModifyCharacter": "Asset hub character modify",
     "assetHubAiModifyLocation": "Asset hub location modify",
     "assetHubAiModifyProp": "Asset hub prop modify",
-    "assetHubReferenceToCharacter": "Asset hub reference to character"
+    "assetHubReferenceToCharacter": "Asset hub reference to character",
+    "viralVideoAnalysis": "Viral video analysis",
+    "viralStoryboardGeneration": "Viral storyboard generation"
   },
   "stage": {
     "received": "Task received",
@@ -126,7 +128,12 @@
     "enqueueFailed": "Task enqueue failed",
     "llmProxySubmit": "Submit LLM task",
     "llmProxyExecute": "Execute LLM task",
-    "llmProxyPersist": "Persist LLM result"
+    "llmProxyPersist": "Persist LLM result",
+    "viralPreprocess": "Preprocess source video",
+    "viralShotAnalysis": "Analyze video shots",
+    "viralReportAggregation": "Aggregate analysis report",
+    "viralStoryboardGeneration": "Generate replication storyboard",
+    "viralPersistence": "Persist viral replication result"
   },
   "runConsole": {
     "storyToScript": "Story to Script",

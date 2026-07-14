@@ -57,6 +57,8 @@ const BILLABLE_TASK_TYPES = new Set<TaskType>([
   TASK_TYPE.ASSET_HUB_AI_MODIFY_LOCATION,
   TASK_TYPE.ASSET_HUB_AI_MODIFY_PROP,
   TASK_TYPE.ASSET_HUB_REFERENCE_TO_CHARACTER,
+  TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
+  TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
 ])
 
 function toNumber(value: unknown, fallback: number) {
@@ -92,7 +94,11 @@ function pickFirstString(values: unknown[]): string | null {
 function buildTextTaskInfo(taskType: TaskType, payload: AnyPayload): TaskBillingInfo | null {
   const inputTokens = Math.max(0, Math.floor(toNumber(payload?.maxInputTokens, 3000)))
   const outputTokens = Math.max(0, Math.floor(toNumber(payload?.maxOutputTokens, 1200)))
-  const model = pickFirstString([payload?.analysisModel, payload?.model])
+  const model = pickFirstString([
+    payload?.analysisModelSnapshot,
+    payload?.analysisModel,
+    payload?.model,
+  ])
   if (!model) return null
 
   // calcText may throw if model has no built-in pricing (user custom pricing resolved later)
@@ -310,6 +316,8 @@ export function buildDefaultTaskBillingInfo(taskType: TaskType, payload: AnyPayl
     case TASK_TYPE.ASSET_HUB_AI_MODIFY_LOCATION:
     case TASK_TYPE.ASSET_HUB_AI_MODIFY_PROP:
     case TASK_TYPE.ASSET_HUB_REFERENCE_TO_CHARACTER:
+    case TASK_TYPE.VIRAL_VIDEO_ANALYSIS:
+    case TASK_TYPE.VIRAL_STORYBOARD_GENERATION:
       return buildTextTaskInfo(taskType, payload)
     case TASK_TYPE.PANEL_VARIANT:
       return buildImageTaskInfo(taskType, payload)

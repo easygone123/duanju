@@ -10,15 +10,17 @@ async function startWorkerProcess() {
   const boot = await bootstrapWorkerProcesses({
     env: process.env,
     createWorkers: async () => {
-      const [image, video, voice, text] = await Promise.all([
+      const [image, video, voice, text, viralReplication] = await Promise.all([
         import('./image.worker'),
         import('./video.worker'),
         import('./voice.worker'),
         import('./text.worker'),
+        import('./viral-replication.worker'),
       ])
       return [
         image.createImageWorker(), video.createVideoWorker(),
         voice.createVoiceWorker(), text.createTextWorker(),
+        viralReplication.createViralReplicationWorker(),
       ]
     },
     startRuntime: (config) => startComfyRuntime({

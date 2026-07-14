@@ -86,7 +86,9 @@
     "assetHubAiModifyCharacter": "资产库角色修改",
     "assetHubAiModifyLocation": "资产库场景修改",
     "assetHubAiModifyProp": "资产库道具修改",
-    "assetHubReferenceToCharacter": "资产库参考图转角色"
+    "assetHubReferenceToCharacter": "资产库参考图转角色",
+    "viralVideoAnalysis": "爆款视频分析",
+    "viralStoryboardGeneration": "爆款分镜生成"
   },
   "stage": {
     "received": "任务已接收",
@@ -126,7 +128,12 @@
     "enqueueFailed": "任务入队失败",
     "llmProxySubmit": "提交 LLM 任务",
     "llmProxyExecute": "执行 LLM 任务",
-    "llmProxyPersist": "保存 LLM 结果"
+    "llmProxyPersist": "保存 LLM 结果",
+    "viralPreprocess": "预处理源视频",
+    "viralShotAnalysis": "分析视频镜头",
+    "viralReportAggregation": "汇总分析报告",
+    "viralStoryboardGeneration": "生成复刻分镜",
+    "viralPersistence": "保存爆款复刻结果"
   },
   "runConsole": {
     "storyToScript": "内容到剧本",

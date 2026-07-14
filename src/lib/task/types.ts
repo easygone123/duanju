@@ -82,11 +82,13 @@ export const TASK_TYPE = {
   ASSET_HUB_AI_MODIFY_LOCATION: 'asset_hub_ai_modify_location',
   ASSET_HUB_AI_MODIFY_PROP: 'asset_hub_ai_modify_prop',
   ASSET_HUB_REFERENCE_TO_CHARACTER: 'asset_hub_reference_to_character',
+  VIRAL_VIDEO_ANALYSIS: 'viral_video_analysis',
+  VIRAL_STORYBOARD_GENERATION: 'viral_storyboard_generation',
 } as const
 
 export type TaskType = (typeof TASK_TYPE)[keyof typeof TASK_TYPE]
 
-export type QueueType = 'image' | 'video' | 'voice' | 'text'
+export type QueueType = 'image' | 'video' | 'voice' | 'text' | 'viral'
 
 export type BillingMode = 'OFF' | 'SHADOW' | 'ENFORCE'
 
