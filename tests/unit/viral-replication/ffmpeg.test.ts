@@ -20,6 +20,7 @@ function probePayload(overrides: Record<string, unknown> = {}): string {
     format: {
       format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
       duration: '15.000000',
+      tags: { major_brand: 'isom' },
     },
     streams: [
       {
@@ -82,13 +83,14 @@ describe('FFmpeg command boundary', () => {
       args: [
         '-v', 'error',
         '-show_entries',
-        'format=format_name,duration:stream=index,codec_type,codec_name,width,height,channels,sample_rate:stream_tags=language',
+        'format=format_name,duration:format_tags=major_brand:stream=index,codec_type,codec_name,width,height,channels,sample_rate:stream_tags=language',
         '-of', 'json',
         sourcePath,
       ],
     }])
     expect(metadata).toEqual({
       formatName: 'mov,mp4,m4a,3gp,3g2,mj2',
+      majorBrand: 'isom',
       durationMs: 15_000,
       width: 640,
       height: 360,
@@ -113,17 +115,27 @@ describe('FFmpeg command boundary', () => {
     ],
     [
       'non-finite duration',
-      probePayload({ format: { format_name: 'mov,mp4', duration: 'Infinity' } }),
+      probePayload({
+        format: { format_name: 'mov,mp4', duration: 'Infinity', tags: { major_brand: 'isom' } },
+      }),
       'FFPROBE_INVALID_DURATION',
     ],
     [
       'duration outside the safe millisecond range',
-      probePayload({ format: { format_name: 'mov,mp4', duration: '100000000000000' } }),
+      probePayload({
+        format: {
+          format_name: 'mov,mp4',
+          duration: '100000000000000',
+          tags: { major_brand: 'isom' },
+        },
+      }),
       'FFPROBE_INVALID_DURATION',
     ],
     [
       'unsupported container',
-      probePayload({ format: { format_name: 'matroska,webm', duration: '15' } }),
+      probePayload({
+        format: { format_name: 'matroska,webm', duration: '15', tags: { major_brand: 'isom' } },
+      }),
       'UNSUPPORTED_CONTAINER',
     ],
   ])('rejects %s with a stable domain code', async (_label, stdout, expectedCode) => {
@@ -139,6 +151,44 @@ describe('FFmpeg command boundary', () => {
     expect(caught).toBeInstanceOf(FfmpegBoundaryError)
     expect((caught as FfmpegBoundaryError).code).toBe(expectedCode)
   })
+
+  it.each(['3gp4', '3gp5', '3g2a', 'mjp2', 'M4A ', undefined])(
+    'rejects generic mov/mp4 demuxer output with disallowed major brand %s',
+    async (majorBrand) => {
+      const runner: CommandRunner = async () => ({
+        stdout: probePayload({
+          format: {
+            format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+            duration: '15',
+            ...(majorBrand === undefined ? {} : { tags: { major_brand: majorBrand } }),
+          },
+        }),
+        stderr: '',
+      })
+
+      await expect(probeVideo(sourcePath, runner)).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CONTAINER_BRAND',
+      })
+    },
+  )
+
+  it.each(['isom', 'mp42', 'qt  '])(
+    'accepts the allowed MP4/MOV major brand %s',
+    async (majorBrand) => {
+      const runner: CommandRunner = async () => ({
+        stdout: probePayload({
+          format: {
+            format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+            duration: '15',
+            tags: { major_brand: majorBrand },
+          },
+        }),
+        stderr: '',
+      })
+
+      await expect(probeVideo(sourcePath, runner)).resolves.toMatchObject({ majorBrand })
+    },
+  )
 
   it('parses scene timestamps deterministically and passes metacharacters as one argv item', async () => {
     const calls: Array<{ binary: string; args: string[] }> = []

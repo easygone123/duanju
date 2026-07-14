@@ -17,16 +17,18 @@ import {
 import {
   ViralUploadValidationError,
   hasIsoBaseMediaFtypSignature,
+  parseIsoBaseMediaMajorBrand,
   validateDeclaredVideoMime,
+  validateVideoUpload,
   validateViralDuration,
   validateViralUploadPrefix,
 } from '@/lib/viral-replication/upload-validation'
 
-function ftypPrefix(boxSize = 24): Buffer {
+function ftypPrefix(boxSize = 24, majorBrand = 'isom'): Buffer {
   const prefix = Buffer.alloc(24)
   prefix.writeUInt32BE(boxSize, 0)
   prefix.write('ftyp', 4, 'ascii')
-  prefix.write('isom', 8, 'ascii')
+  prefix.write(majorBrand, 8, 'ascii')
   prefix.writeUInt32BE(0x200, 12)
   prefix.write('isom', 16, 'ascii')
   prefix.write('mp42', 20, 'ascii')
@@ -35,7 +37,11 @@ function ftypPrefix(boxSize = 24): Buffer {
 
 function fakeProbePayload(subtitleCodec?: string): string {
   return JSON.stringify({
-    format: { format_name: 'mov,mp4,m4a,3gp,3g2,mj2', duration: '15' },
+    format: {
+      format_name: 'mov,mp4,m4a,3gp,3g2,mj2',
+      duration: '15',
+      tags: { major_brand: 'isom' },
+    },
     streams: [
       { index: 0, codec_type: 'video', codec_name: 'h264', width: 320, height: 180 },
       ...(subtitleCodec
@@ -48,10 +54,30 @@ function fakeProbePayload(subtitleCodec?: string): string {
 describe('viral upload validation', () => {
   it('recognizes a valid ISO base media ftyp prefix without consulting an extension', () => {
     expect(hasIsoBaseMediaFtypSignature(ftypPrefix())).toBe(true)
+    expect(parseIsoBaseMediaMajorBrand(ftypPrefix())).toBe('isom')
+    expect(validateVideoUpload(ftypPrefix(), 'video/mp4')).toBeUndefined()
     expect(validateViralUploadPrefix(ftypPrefix(), 'video/mp4')).toBeUndefined()
     expect(validateViralUploadPrefix(ftypPrefix(), 'video/quicktime')).toBeUndefined()
     expect(validateViralUploadPrefix(ftypPrefix(), 'video/mp4; codecs="avc1"')).toBeUndefined()
   })
+
+  it.each(['isom', 'iso2', 'mp41', 'mp42', 'avc1', 'M4V ', 'qt  '])(
+    'accepts allowed MP4/MOV ftyp major brand %s',
+    (majorBrand) => {
+      expect(parseIsoBaseMediaMajorBrand(ftypPrefix(24, majorBrand))).toBe(majorBrand)
+      expect(validateVideoUpload(ftypPrefix(24, majorBrand), 'video/mp4')).toBeUndefined()
+    },
+  )
+
+  it.each(['3gp4', '3gp5', '3g2a', 'mjp2', 'M4A '])(
+    'rejects disallowed ISO-BMFF ftyp major brand %s even when declared video/mp4',
+    (majorBrand) => {
+      expect(hasIsoBaseMediaFtypSignature(ftypPrefix(24, majorBrand))).toBe(true)
+      expect(() => validateVideoUpload(ftypPrefix(24, majorBrand), 'video/mp4')).toThrowError(
+        expect.objectContaining({ code: 'UNSUPPORTED_CONTAINER_BRAND' }),
+      )
+    },
+  )
 
   it.each([
     ['too short', Buffer.from('ftyp')],
@@ -59,6 +85,7 @@ describe('viral upload validation', () => {
     ['invalid box size', ftypPrefix(8)],
   ])('rejects a %s header safely', (_label, prefix) => {
     expect(hasIsoBaseMediaFtypSignature(prefix)).toBe(false)
+    expect(parseIsoBaseMediaMajorBrand(prefix)).toBeNull()
     expect(() => validateViralUploadPrefix(prefix, 'video/mp4')).toThrowError(
       expect.objectContaining({ code: 'INVALID_MEDIA_HEADER' }),
     )

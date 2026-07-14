@@ -18,6 +18,7 @@ export type FfmpegBoundaryErrorCode =
   | 'FFPROBE_INVALID_VIDEO'
   | 'FFPROBE_INVALID_DURATION'
   | 'UNSUPPORTED_CONTAINER'
+  | 'UNSUPPORTED_CONTAINER_BRAND'
 
 export class FfmpegBoundaryError extends Error {
   readonly code: FfmpegBoundaryErrorCode
@@ -52,6 +53,7 @@ export interface SubtitleStreamMetadata {
 
 export interface VideoMetadata {
   formatName: string
+  majorBrand: string
   durationMs: number
   width: number
   height: number
@@ -64,6 +66,19 @@ export interface VideoMetadata {
 }
 
 const DEFAULT_CAPTURE_LIMIT_BYTES = 1024 * 1024
+export const ALLOWED_VIRAL_VIDEO_MAJOR_BRANDS: ReadonlySet<string> = new Set([
+  'isom',
+  'iso2',
+  'iso3',
+  'iso4',
+  'iso5',
+  'iso6',
+  'mp41',
+  'mp42',
+  'avc1',
+  'M4V ',
+  'qt  ',
+])
 const TEXT_SUBTITLE_CODECS = new Set([
   'ass',
   'mov_text',
@@ -199,6 +214,10 @@ export function isSupportedMp4FormatName(formatName: string): boolean {
   return formatTokens.includes('mov') || formatTokens.includes('mp4')
 }
 
+export function isAllowedViralVideoMajorBrand(majorBrand: string): boolean {
+  return ALLOWED_VIRAL_VIDEO_MAJOR_BRANDS.has(majorBrand)
+}
+
 export async function assertFfmpegAvailable(
   runner: CommandRunner = defaultCommandRunner,
 ): Promise<void> {
@@ -214,7 +233,7 @@ export async function probeVideo(
   const { stdout } = await runner('ffprobe', [
     '-v', 'error',
     '-show_entries',
-    'format=format_name,duration:stream=index,codec_type,codec_name,width,height,channels,sample_rate:stream_tags=language',
+    'format=format_name,duration:format_tags=major_brand:stream=index,codec_type,codec_name,width,height,channels,sample_rate:stream_tags=language',
     '-of', 'json',
     sourcePath,
   ])
@@ -228,8 +247,10 @@ export async function probeVideo(
 
   const root = asRecord(parsed)
   const format = asRecord(root?.format)
+  const formatTags = asRecord(format?.tags)
   const streams = Array.isArray(root?.streams) ? root.streams : []
   const formatName = optionalString(format?.format_name)
+  const majorBrand = optionalString(formatTags?.major_brand)
   const durationSeconds = typeof format?.duration === 'string' || typeof format?.duration === 'number'
     ? Number(format.duration)
     : Number.NaN
@@ -239,6 +260,12 @@ export async function probeVideo(
     throw new FfmpegBoundaryError(
       'UNSUPPORTED_CONTAINER',
       `Unsupported video container: ${formatName ?? 'unknown'}`,
+    )
+  }
+  if (!majorBrand || !isAllowedViralVideoMajorBrand(majorBrand)) {
+    throw new FfmpegBoundaryError(
+      'UNSUPPORTED_CONTAINER_BRAND',
+      `Unsupported video container major brand: ${JSON.stringify(majorBrand)}`,
     )
   }
   if (
@@ -302,6 +329,7 @@ export async function probeVideo(
 
   return {
     formatName,
+    majorBrand,
     durationMs,
     width: videoStreams[0].width,
     height: videoStreams[0].height,
