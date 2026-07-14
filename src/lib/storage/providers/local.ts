@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises'
+import { createReadStream, createWriteStream } from 'node:fs'
 import path from 'node:path'
-import type { DeleteObjectsResult, SignedUrlParams, StorageProvider, UploadObjectParams, UploadObjectResult } from '@/lib/storage/types'
+import { randomUUID } from 'node:crypto'
+import { pipeline } from 'node:stream/promises'
+import type { DeleteObjectsResult, SignedUrlParams, StorageProvider, UploadObjectParams, UploadObjectResult, UploadObjectStreamParams } from '@/lib/storage/types'
 import { normalizeKey, toFetchableUrl } from '@/lib/storage/utils'
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || './data/uploads'
@@ -17,6 +20,23 @@ export class LocalStorageProvider implements StorageProvider {
     const filePath = resolveUploadPath(normalizedKey)
     await fs.mkdir(path.dirname(filePath), { recursive: true })
     await fs.writeFile(filePath, params.body)
+    return { key: normalizedKey }
+  }
+
+  async uploadObjectStream(params: UploadObjectStreamParams): Promise<UploadObjectResult> {
+    const normalizedKey = normalizeKey(params.key)
+    const filePath = resolveUploadPath(normalizedKey)
+    const tempPath = `${filePath}.part-${randomUUID()}`
+
+    await fs.mkdir(path.dirname(filePath), { recursive: true })
+    try {
+      await pipeline(params.body, createWriteStream(tempPath))
+      await fs.rename(tempPath, filePath)
+    } catch (error: unknown) {
+      await fs.rm(tempPath, { force: true }).catch(() => undefined)
+      throw error
+    }
+
     return { key: normalizedKey }
   }
 
@@ -55,6 +75,10 @@ export class LocalStorageProvider implements StorageProvider {
 
   async getObjectBuffer(key: string): Promise<Buffer> {
     return await fs.readFile(resolveUploadPath(key))
+  }
+
+  async getObjectStream(key: string): Promise<NodeJS.ReadableStream> {
+    return createReadStream(resolveUploadPath(normalizeKey(key)))
   }
 
   extractStorageKey(input: string | null | undefined): string | null {

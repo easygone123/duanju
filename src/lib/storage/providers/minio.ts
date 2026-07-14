@@ -1,4 +1,4 @@
-import type { DeleteObjectsResult, SignedUrlParams, StorageProvider, UploadObjectParams, UploadObjectResult } from '@/lib/storage/types'
+import type { DeleteObjectsResult, SignedUrlParams, StorageProvider, UploadObjectParams, UploadObjectResult, UploadObjectStreamParams } from '@/lib/storage/types'
 import { requireEnv, streamToBuffer, toFetchableUrl } from '@/lib/storage/utils'
 
 const DEFAULT_MINIO_REGION = 'us-east-1'
@@ -17,6 +17,12 @@ type S3SdkModule = {
 
 type PresignerModule = {
   getSignedUrl: (client: S3ClientLike, command: unknown, options: { expiresIn: number }) => Promise<string>
+}
+
+function isNodeReadableStream(body: unknown): body is NodeJS.ReadableStream {
+  return typeof body === 'object'
+    && body !== null
+    && typeof (body as { pipe?: unknown }).pipe === 'function'
 }
 
 export class MinioStorageProvider implements StorageProvider {
@@ -78,6 +84,20 @@ export class MinioStorageProvider implements StorageProvider {
     return { key: params.key }
   }
 
+  async uploadObjectStream(params: UploadObjectStreamParams): Promise<UploadObjectResult> {
+    const sdk = await this.loadSdk()
+    const client = await this.getClient()
+    await client.send(new sdk.PutObjectCommand({
+      Bucket: this.bucket,
+      Key: params.key,
+      Body: params.body,
+      ContentLength: params.contentLength,
+      ContentType: params.contentType,
+    }))
+
+    return { key: params.key }
+  }
+
   async deleteObject(key: string): Promise<void> {
     const sdk = await this.loadSdk()
     const client = await this.getClient()
@@ -133,6 +153,21 @@ export class MinioStorageProvider implements StorageProvider {
       Key: key,
     })) as { Body?: unknown }
     return await streamToBuffer(result.Body)
+  }
+
+  async getObjectStream(key: string): Promise<NodeJS.ReadableStream> {
+    const sdk = await this.loadSdk()
+    const client = await this.getClient()
+    const result = await client.send(new sdk.GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+    })) as { Body?: unknown }
+
+    if (!isNodeReadableStream(result.Body)) {
+      throw new Error('Storage object body is not a Node-readable stream')
+    }
+
+    return result.Body
   }
 
   extractStorageKey(input: string | null | undefined): string | null {

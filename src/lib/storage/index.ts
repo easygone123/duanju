@@ -51,6 +51,26 @@ export async function uploadObject(
   return result.key
 }
 
+export async function uploadObjectStream(
+  body: NodeJS.ReadableStream,
+  key: string,
+  contentLength: number,
+  contentType?: string,
+  maxRetries: number = UPLOAD_MAX_RETRIES,
+): Promise<string> {
+  const provider = getStorageProvider()
+
+  const result = await withRetry(
+    async () => {
+      return await provider.uploadObjectStream({ key, body, contentLength, contentType })
+    },
+    maxRetries,
+    RETRY_DELAY_BASE_MS,
+  )
+
+  return result.key
+}
+
 export async function deleteObject(key: string): Promise<void> {
   await getStorageProvider().deleteObject(key)
 }
@@ -65,6 +85,10 @@ export function extractStorageKey(input: string | null | undefined): string | nu
 
 export async function getObjectBuffer(key: string): Promise<Buffer> {
   return await getStorageProvider().getObjectBuffer(key)
+}
+
+export async function getObjectStream(key: string): Promise<NodeJS.ReadableStream> {
+  return await getStorageProvider().getObjectStream(key)
 }
 
 export async function getSignedObjectUrl(key: string, expiresInSeconds: number = DEFAULT_SIGNED_URL_EXPIRES_SECONDS): Promise<string> {
