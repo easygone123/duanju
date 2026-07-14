@@ -64,7 +64,7 @@ interface UseVideoFirstLastFrameFlowParams {
     },
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
-  ) => Promise<void>
+  ) => Promise<boolean>
   t: (key: string) => string
 }
 

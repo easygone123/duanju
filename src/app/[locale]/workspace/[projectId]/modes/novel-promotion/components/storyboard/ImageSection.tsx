@@ -14,6 +14,8 @@ import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapa
 import { applyImageTaskCapabilityChange, extractCapabilityFields } from '@/lib/model-capabilities/ui-fields'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import { useWorkspaceData } from '../../WorkspaceDataProvider'
+import { getAspectRatioConfig } from '@/lib/constants'
+import { useVirtualCardRetention } from '@/components/virtualization/VirtualCardRange'
 
 interface PanelCandidateData {
   candidates: string[]
@@ -33,7 +35,7 @@ interface ImageSectionProps {
   candidateData: PanelCandidateData | null
   previousImageUrl?: string | null
   taskPresentationState?: TaskPresentationState | null
-  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => void
+  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => Promise<boolean>
   onOpenEditModal: () => void
   onOpenAIDataModal: () => void
   onSelectCandidateIndex: (panelId: string, index: number) => void
@@ -72,6 +74,9 @@ export default function ImageSection({
   const [isTaskPulseAnimating, setIsTaskPulseAnimating] = useState(false)
   const [selectedImageModel, setSelectedImageModel] = useState('')
   const [capabilityOverrides, setCapabilityOverrides] = useState<ImageTaskCapabilityOverrides>({})
+  useVirtualCardRetention(
+    selectedImageModel !== '' || Object.keys(capabilityOverrides).length > 0,
+  )
   const { imageModelOptions: taskImageOptions } = useWorkspaceData()
   const selectedImageOption = taskImageOptions.find((option) => option.value === selectedImageModel)
   const capabilityFields = useMemo(
@@ -82,11 +87,29 @@ export default function ImageSection({
     ? capabilityOverrides
     : undefined
   const cssAspectRatio = videoRatio.replace(':', '/')
+  const thumbnailSizes = getAspectRatioConfig(videoRatio).isVertical ? '20vw' : '33vw'
   const hasValidCandidates = !!candidateData && candidateData.candidates.some((url) => !url.startsWith('PENDING:'))
 
   const triggerPulse = () => {
     setIsTaskPulseAnimating(true)
     setTimeout(() => setIsTaskPulseAnimating(false), 600)
+  }
+  const handleRegeneratePanelImage = async (
+    id: string,
+    count?: number,
+    force?: boolean,
+  ) => {
+    const accepted = await onRegeneratePanelImage(
+      id,
+      count,
+      force,
+      selectedImageModel || undefined,
+      taskCapabilityOverrides,
+    )
+    if (accepted) {
+      setSelectedImageModel('')
+      setCapabilityOverrides({})
+    }
   }
 
   const renderLoadingState = (
@@ -108,7 +131,7 @@ export default function ImageSection({
             alt={t('image.clickToPreview')}
             containerClassName="absolute inset-0 h-full w-full"
             className="absolute inset-0 h-full w-full object-cover"
-            sizes="(max-width: 768px) 100vw, 33vw"
+            sizes={thumbnailSizes}
           />
         )}
         <div className={`absolute inset-0 ${backdropImageUrl ? 'bg-black/45 backdrop-blur-[1px]' : 'bg-[var(--glass-bg-surface-modal)] backdrop-blur-md'}`} />
@@ -143,7 +166,7 @@ export default function ImageSection({
         size="sm"
         onClick={() => {
           triggerPulse()
-          onRegeneratePanelImage(panelId, 1, false, selectedImageModel || undefined, taskCapabilityOverrides)
+          void handleRegeneratePanelImage(panelId, 1, false)
         }}
       >
         {t('panel.generateImage')}
@@ -186,7 +209,7 @@ export default function ImageSection({
           className={`w-full h-full object-cover ${onPreviewImage ? 'cursor-zoom-in' : ''}`}
           onClick={onPreviewImage ? () => onPreviewImage(imageUrl) : undefined}
           title={onPreviewImage ? t('image.clickToPreview') : undefined}
-          sizes="(max-width: 768px) 100vw, 33vw"
+          sizes={thumbnailSizes}
         />
       ) : (
         renderEmptyState()
@@ -223,7 +246,7 @@ export default function ImageSection({
           previousImageUrl={previousImageUrl}
           isSubmittingPanelImageTask={isSubmittingPanelImageTask}
           isModifying={isModifying}
-           onRegeneratePanelImage={(id, count, force) => onRegeneratePanelImage(id, count, force, selectedImageModel || undefined, taskCapabilityOverrides)}
+          onRegeneratePanelImage={handleRegeneratePanelImage}
           onOpenEditModal={onOpenEditModal}
           onOpenAIDataModal={onOpenAIDataModal}
           onUndo={onUndo}

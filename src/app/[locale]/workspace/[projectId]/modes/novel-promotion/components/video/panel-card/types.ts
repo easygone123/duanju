@@ -53,7 +53,7 @@ export interface VideoPanelCardShellProps {
       durationOverride?: number | null
       expectedPanelUpdatedAt?: string
     },
-  ) => void
+  ) => Promise<boolean>
   onUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => void
   onToggleLink: (panelKey: string, storyboardId: string, panelIndex: number) => void
   onUpdateFrameLink: (

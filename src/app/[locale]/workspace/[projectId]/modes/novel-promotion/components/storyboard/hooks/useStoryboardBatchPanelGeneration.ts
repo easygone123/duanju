@@ -11,7 +11,7 @@ interface UseStoryboardBatchPanelGenerationProps {
   sortedStoryboards: NovelPromotionStoryboard[]
   submittingPanelImageIds: Set<string>
   getTextPanels: (storyboard: NovelPromotionStoryboard) => StoryboardPanel[]
-  regeneratePanelImage: (panelId: string, count?: number, force?: boolean) => Promise<void>
+  regeneratePanelImage: (panelId: string, count?: number, force?: boolean) => Promise<boolean>
   setIsEpisodeBatchSubmitting: (value: boolean) => void
 }
 
@@ -82,8 +82,8 @@ export function useStoryboardBatchPanelGeneration({
         _ulogInfo(`[批量生成] 已完成 ${completed}/${panelsToGenerate.length}`)
       }
 
-      const succeeded = results.filter((result) => result.status === 'fulfilled').length
-      const failed = results.filter((result) => result.status === 'rejected').length
+      const succeeded = results.filter((result) => result.status === 'fulfilled' && result.value === true).length
+      const failed = results.length - succeeded
       _ulogInfo(`[批量生成] 完成: 成功 ${succeeded}, 失败 ${failed}`)
 
       if (failed > 0) {

@@ -38,7 +38,7 @@ export function usePanelImageRegeneration({
 }: UsePanelImageRegenerationParams) {
   const regeneratePanelImage = useCallback(
     async (panelId: string, count: number = 1, force: boolean = false, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => {
-      if (!force && submittingPanelImageIds.has(panelId)) return
+      if (!force && submittingPanelImageIds.has(panelId)) return false
 
       setSubmittingPanelImageIds((previous) => new Set(previous).add(panelId))
 
@@ -60,7 +60,7 @@ export function usePanelImageRegeneration({
           }
           refreshEpisode()
           refreshStoryboards()
-          return
+          return true
         }
 
         if (onSilentRefresh) {
@@ -69,18 +69,21 @@ export function usePanelImageRegeneration({
         refreshEpisode()
         refreshStoryboards()
         selectPanelCandidateIndex(panelId, 0)
+        return true
       } catch (error: unknown) {
-        if (isAbortError(error)) return
+        if (isAbortError(error)) return false
         // Mutation errors (e.g. network failure, API 500) are transient.
         // The task was never created in the database, so we log and let user retry.
         _ulogWarn(`[regeneratePanelImage] mutation failed for panel ${panelId}:`, error)
+        return false
       } finally {
-        if (handoffToTaskState) return
-        setSubmittingPanelImageIds((previous) => {
-          const next = new Set(previous)
-          next.delete(panelId)
-          return next
-        })
+        if (!handoffToTaskState) {
+          setSubmittingPanelImageIds((previous) => {
+            const next = new Set(previous)
+            next.delete(panelId)
+            return next
+          })
+        }
       }
     },
     [

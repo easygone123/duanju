@@ -12,6 +12,7 @@ import { GlassButton } from '@/components/ui/primitives'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import type { SixGridUpscaleWorkflow } from './SixGridGroupControls'
 import type { CropEntry } from './SixGridCropModal'
+import { VirtualCardRange } from '@/components/virtualization/VirtualCardRange'
 
 interface StoryboardCanvasProps {
   sortedStoryboards: NovelPromotionStoryboard[]
@@ -55,7 +56,7 @@ interface StoryboardCanvasProps {
   onRemoveCharacter: (panel: StoryboardPanel, index: number, storyboardId: string) => void
   onRemoveLocation: (panel: StoryboardPanel, storyboardId: string) => void
   onRetryPanelSave: (panelId: string) => void
-  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => void
+  onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => Promise<boolean>
   onOpenEditModal: (storyboardId: string, panelIndex: number) => void
   onOpenAIDataModal: (storyboardId: string, panelIndex: number) => void
   getPanelCandidates: (panel: NovelPromotionPanel) => { candidates: string[]; selectedIndex: number } | null
@@ -152,11 +153,44 @@ export default function StoryboardCanvas({
     )
   }
 
+  const storyboardEntries = sortedStoryboards.map((storyboard, sbIndex) => ({
+    storyboard,
+    sbIndex,
+    clip: getClipInfo(storyboard.clipId),
+    textPanels: getTextPanels(storyboard),
+  }))
+  const pinnedGroupIndices = storyboardEntries.flatMap(({ storyboard, clip, textPanels }, index) => {
+    const hasActivePanel = textPanels.some((panel) => (
+      savingPanels.has(panel.id)
+      || deletingPanelIds.has(panel.id)
+      || hasUnsavedByPanel.has(panel.id)
+      || modifyingPanels.has(panel.id)
+      || submittingPanelImageIds.has(panel.id)
+      || Boolean(panel.imageTaskRunning)
+      || saveStateByPanel[panel.id]?.status === 'saving'
+      || saveStateByPanel[panel.id]?.status === 'error'
+      || insertingAfterPanelId === panel.id
+      || submittingVariantPanelId === panel.id
+    ))
+    const isActive = submittingStoryboardIds.has(storyboard.id)
+      || selectingCandidateIds.has(storyboard.id)
+      || submittingStoryboardTextIds.has(storyboard.id)
+      || sixGridTaskStoryboardId === storyboard.id
+      || movingClipId === clip?.id
+      || hasActivePanel
+    return isActive ? [index] : []
+  })
+
   return (
-    <>
-      {sortedStoryboards.map((storyboard, sbIndex) => {
-        const clip = getClipInfo(storyboard.clipId)
-        const textPanels = getTextPanels(storyboard)
+    <VirtualCardRange
+      items={storyboardEntries}
+      getKey={({ storyboard }) => storyboard.id}
+      estimatedCardHeight={960}
+      estimatedRowHeight={976}
+      overscan={1}
+      pinnedIndices={pinnedGroupIndices}
+      className="space-y-0"
+      renderCard={({ storyboard, sbIndex, clip, textPanels }) => {
         const isSubmittingStoryboardTask = submittingStoryboardIds.has(storyboard.id)
         const isSelectingCandidate = selectingCandidateIds.has(storyboard.id)
         const isSubmittingStoryboardTextTask = submittingStoryboardTextIds.has(storyboard.id)
@@ -241,7 +275,7 @@ export default function StoryboardCanvas({
             </div>
           </div>
         )
-      })}
-    </>
+      }}
+    />
   )
 }

@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import VideoPanelCardBody from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video/panel-card/VideoPanelCardBody'
 import type { VideoPanelRuntime } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video/panel-card/hooks/useVideoPanelActions'
+import { consumeGenerationSelectionAfterAccepted } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video/panel-card/runtime/videoPanelRuntimeCore'
 
 vi.mock('@/components/task/TaskStatusInline', () => ({
   default: () => React.createElement('span', null, 'task-status'),
@@ -169,6 +170,21 @@ function createRuntime(overrides: Partial<VideoPanelRuntime> = {}): VideoPanelRu
 }
 
 describe('VideoPanelCardBody', () => {
+  it('releases pending generation selections only after an accepted submission', async () => {
+    const consume = vi.fn()
+    await expect(consumeGenerationSelectionAfterAccepted(
+      () => Promise.reject(new Error('submission failed')),
+      consume,
+    )).rejects.toThrow('submission failed')
+    expect(consume).not.toHaveBeenCalled()
+
+    await consumeGenerationSelectionAfterAccepted(() => Promise.resolve(false), consume)
+    expect(consume).not.toHaveBeenCalled()
+
+    await consumeGenerationSelectionAfterAccepted(() => Promise.resolve(true), consume)
+    expect(consume).toHaveBeenCalledTimes(1)
+  })
+
   it('renders incoming and outgoing first-last-frame UI for chained panel', () => {
     const markup = renderToStaticMarkup(
       React.createElement(VideoPanelCardBody, {

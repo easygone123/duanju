@@ -2,12 +2,14 @@ import type { TaskPresentationState } from '@/lib/task/presentation'
 import type { VoiceLine } from '@/lib/novel-promotion/stages/voice-stage-runtime/types'
 import VoiceLineCard from '../voice/VoiceLineCard'
 import EmptyVoiceState from '../voice/EmptyVoiceState'
+import { VirtualCardRange } from '@/components/virtualization/VirtualCardRange'
 
 interface VoiceLineListProps {
   voiceLines: VoiceLine[]
   runningLineIds: Set<string>
   voiceStatusStateByLineId: Map<string, TaskPresentationState>
   playingLineId: string | null
+  editingLineId: string | null
   analyzing: boolean
   getSpeakerVoiceUrl: (speaker: string) => string | null
   onTogglePlayAudio: (lineId: string, audioUrl: string) => void
@@ -26,6 +28,7 @@ export default function VoiceLineList({
   runningLineIds,
   voiceStatusStateByLineId,
   playingLineId,
+  editingLineId,
   analyzing,
   getSpeakerVoiceUrl,
   onTogglePlayAudio,
@@ -42,11 +45,26 @@ export default function VoiceLineList({
     return <EmptyVoiceState onAnalyze={onAnalyze} analyzing={analyzing} />
   }
 
+  const pinnedLineIndices = voiceLines.flatMap((line, index) => (
+    runningLineIds.has(line.id)
+    || line.lineTaskRunning
+    || playingLineId === line.id
+    || editingLineId === line.id
+      ? [index]
+      : []
+  ))
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 px-2 pt-4">
-      {voiceLines.map((line) => (
+    <VirtualCardRange
+      items={voiceLines}
+      getKey={(line) => line.id}
+      estimatedCardHeight={440}
+      estimatedRowHeight={456}
+      overscan={1}
+      pinnedIndices={pinnedLineIndices}
+      className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 px-2 pt-4"
+      renderCard={(line) => (
         <VoiceLineCard
-          key={line.id}
           line={line}
           isVoiceTaskRunning={runningLineIds.has(line.id)}
           statusState={voiceStatusStateByLineId.get(line.id) || null}
@@ -61,7 +79,7 @@ export default function VoiceLineList({
           onDeleteAudio={onDeleteAudio}
           onSaveEmotionSettings={onSaveEmotionSettings}
         />
-      ))}
-    </div>
+      )}
+    />
   )
 }

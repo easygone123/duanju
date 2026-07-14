@@ -30,9 +30,9 @@ vi.mock('@/components/media/MediaImageWithLoading', () => ({
   MediaImageWithLoading: ({ src, alt }: { src: string; alt: string }) => React.createElement('img', { src, alt }),
 }))
 
-vi.mock('@/lib/query/hooks/useProjectAssets', () => ({
-  useProjectAssets: () => ({
-    data: {
+vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/WorkspaceDataProvider', () => ({
+  useWorkspaceData: () => ({
+    projectAssets: {
       characters: [{
         id: 'character-1',
         name: 'Ava',

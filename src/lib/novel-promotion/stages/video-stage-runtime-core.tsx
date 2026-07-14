@@ -355,11 +355,11 @@ export function useVideoStageRuntime({
       expectedPanelUpdatedAt?: string
     },
   ) => {
-    if (isSubmittingVideoBatch) return
+    if (isSubmittingVideoBatch) return false
 
     const panelKey = buildVideoSubmissionKey({ panelId, storyboardId, panelIndex })
     const currentPanel = panelBySubmissionKey.get(panelKey)
-    if (currentPanel?.videoTaskRunning || submittingVideoPanelKeys.has(panelKey)) return
+    if (currentPanel?.videoTaskRunning || submittingVideoPanelKeys.has(panelKey)) return false
 
     setSubmittingVideoPanelKeys((previous) => {
       if (previous.has(panelKey)) return previous
@@ -376,7 +376,29 @@ export function useVideoStageRuntime({
     }
 
     try {
-      await onGenerateVideo(storyboardId, panelIndex, videoModel, firstLastFrame, generationOptions, panelId, submissionMeta)
+      const accepted = await onGenerateVideo(
+        storyboardId,
+        panelIndex,
+        videoModel,
+        firstLastFrame,
+        generationOptions,
+        panelId,
+        submissionMeta,
+      )
+      if (accepted) return true
+      setSubmittingVideoPanelKeys((previous) => {
+        if (!previous.has(panelKey)) return previous
+        const next = new Set(previous)
+        next.delete(panelKey)
+        return next
+      })
+      setSubmittingVideoBaselines((previous) => {
+        if (!previous.has(panelKey)) return previous
+        const next = new Map(previous)
+        next.delete(panelKey)
+        return next
+      })
+      return false
     } catch (error) {
       setSubmittingVideoPanelKeys((previous) => {
         if (!previous.has(panelKey)) return previous

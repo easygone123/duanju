@@ -302,6 +302,7 @@ export function useVoiceStageRuntime({
           runningLineIds={runningLineIds}
           voiceStatusStateByLineId={voiceStatusStateByLineId}
           playingLineId={playingLineId}
+          editingLineId={editingLineId}
           analyzing={analyzing}
           getSpeakerVoiceUrl={getSpeakerVoiceUrl}
           onTogglePlayAudio={handleTogglePlayAudio}
