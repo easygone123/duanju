@@ -2,6 +2,7 @@ export type RouteCategory =
   | 'assets'
   | 'asset-hub'
   | 'novel-promotion'
+  | 'viral-replication'
   | 'projects'
   | 'tasks'
   | 'user'
@@ -19,6 +20,7 @@ export type RouteContractGroup =
   | 'user-project-routes'
   | 'auth-routes'
   | 'infra-routes'
+  | 'viral-replication-routes'
 
 export type RouteCatalogEntry = {
   routeFile: string
@@ -183,9 +185,13 @@ const ROUTE_FILES = [
   'src/app/api/user/ai-story-expand/route.ts',
   'src/app/api/user/models/route.ts',
   'src/app/api/user/transactions/route.ts',
+  'src/app/api/viral-replications/[id]/route.ts',
+  'src/app/api/viral-replications/[id]/video/route.ts',
+  'src/app/api/viral-replications/route.ts',
 ] as const
 
 function resolveCategory(routeFile: string): RouteCategory {
+  if (routeFile.startsWith('src/app/api/viral-replications/')) return 'viral-replication'
   if (routeFile.startsWith('src/app/api/assets/')) return 'assets'
   if (routeFile.startsWith('src/app/api/asset-hub/')) return 'asset-hub'
   if (routeFile.startsWith('src/app/api/novel-promotion/')) return 'novel-promotion'
@@ -204,6 +210,7 @@ function resolveCategory(routeFile: string): RouteCategory {
 }
 
 function resolveContractGroup(routeFile: string): RouteContractGroup {
+  if (routeFile.startsWith('src/app/api/viral-replications/')) return 'viral-replication-routes'
   if (
     routeFile.includes('/ai-')
     || routeFile.includes('/analyze')

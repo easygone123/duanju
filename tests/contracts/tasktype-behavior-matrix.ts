@@ -49,6 +49,9 @@ function resolveChainTestByTaskType(taskType: TaskType): string {
 }
 
 function resolveApiContractByTaskType(taskType: TaskType): string {
+  if (taskType === 'viral_video_analysis') {
+    return 'tests/integration/api/contract/viral-replication-routes.test.ts'
+  }
   if (
     taskType === 'analyze_novel'
     || taskType === 'story_to_script_run'

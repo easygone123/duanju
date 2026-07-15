@@ -17,9 +17,13 @@ const CONTRACT_TEST_BY_GROUP: Record<RouteCatalogEntry['contractGroup'], string>
   'user-project-routes': 'tests/integration/api/contract/crud-routes.test.ts',
   'auth-routes': 'tests/integration/api/contract/crud-routes.test.ts',
   'infra-routes': 'tests/integration/api/contract/infra-routes.test.ts',
+  'viral-replication-routes': 'tests/integration/api/contract/viral-replication-routes.test.ts',
 }
 
 function resolveChainTest(routeFile: string): string {
+  if (routeFile.startsWith('src/app/api/viral-replications/')) {
+    return 'tests/integration/chain/viral-replication.chain.test.ts'
+  }
   if (routeFile.includes('/generate-video/') || routeFile.includes('/lip-sync/')) {
     return 'tests/integration/chain/video.chain.test.ts'
   }

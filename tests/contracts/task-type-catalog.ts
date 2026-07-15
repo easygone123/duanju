@@ -15,7 +15,7 @@ const DEFAULT_TASK_TEST_LAYERS: ReadonlyArray<TaskTestLayer> = [
 ]
 
 const TASK_TYPE_LAYER_OVERRIDES: Partial<Record<TaskType, ReadonlyArray<TaskTestLayer>>> = {
-  [TASK_TYPE.VIRAL_VIDEO_ANALYSIS]: ['worker-unit', 'chain'],
+  [TASK_TYPE.VIRAL_VIDEO_ANALYSIS]: ['worker-unit', 'api-contract', 'chain'],
   [TASK_TYPE.VIRAL_STORYBOARD_GENERATION]: ['worker-unit', 'chain'],
 }
 

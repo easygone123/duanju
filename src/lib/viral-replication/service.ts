@@ -1,0 +1,312 @@
+import { createReadStream } from 'node:fs'
+import fs from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import type { Locale } from '@/i18n/routing'
+import { ApiError } from '@/lib/api-errors'
+import { stablePublicIdFromStorageKey } from '@/lib/media/hash'
+import { prisma } from '@/lib/prisma'
+import { deleteObject, uploadObjectStream } from '@/lib/storage'
+import { submitTask } from '@/lib/task/submitter'
+import { TASK_TYPE } from '@/lib/task/types'
+import { VIRAL_REPLICATION_STATUS } from './constants'
+import { FfmpegBoundaryError, probeVideo } from './ffmpeg'
+import { readOwnedViralReplication } from './ownership'
+import { writeRequestBodyToTempFile } from './temp-file'
+import {
+  ViralUploadValidationError,
+  validateViralUploadPrefix,
+  validateViralVideoMetadata,
+} from './upload-validation'
+
+const BRIEF_MUTABLE_STATUSES = [
+  VIRAL_REPLICATION_STATUS.UPLOADING,
+  VIRAL_REPLICATION_STATUS.REVIEW_READY,
+  VIRAL_REPLICATION_STATUS.FAILED,
+]
+const SUBMIT_FAILURE_MESSAGE = '爆款复刻分析任务提交失败，请稍后重试'
+
+type UploadVideoInput = {
+  id: string
+  userId: string
+  request: Request
+  mimeType: string
+  locale: Locale
+  maxBytes?: number
+  tempRoot?: string
+  now?: Date
+}
+
+function formatTimestamp(date: Date): string {
+  const part = (value: number) => String(value).padStart(2, '0')
+  return `${date.getUTCFullYear()}${part(date.getUTCMonth() + 1)}${part(date.getUTCDate())}-${part(date.getUTCHours())}${part(date.getUTCMinutes())}${part(date.getUTCSeconds())}`
+}
+
+function mediaUrl(publicId: string): string {
+  return `/m/${encodeURIComponent(publicId)}`
+}
+
+function serializeDetail<T extends {
+  errorMessage?: string | null
+  sourceVideoMedia?: { publicId: string; sizeBytes: bigint | number | null } | null
+}>(replication: T) {
+  const { sourceVideoMedia, errorMessage, ...rest } = replication
+  return {
+    ...rest,
+    errorMessage: errorMessage?.startsWith('__viral_upload_lock__:') ? null : (errorMessage ?? null),
+    sourceVideo: sourceVideoMedia
+      ? {
+          ...sourceVideoMedia,
+          sizeBytes: sourceVideoMedia.sizeBytes == null ? null : Number(sourceVideoMedia.sizeBytes),
+          url: mediaUrl(sourceVideoMedia.publicId),
+        }
+      : null,
+  }
+}
+
+export async function createViralReplication(input: {
+  userId: string
+  brief: string
+  videoRatio: string
+  artStyle: string
+}) {
+  return prisma.viralReplication.create({
+    data: {
+      ...input,
+      status: VIRAL_REPLICATION_STATUS.UPLOADING,
+    },
+    select: {
+      id: true, brief: true, videoRatio: true, artStyle: true, status: true, createdAt: true, updatedAt: true,
+    },
+  })
+}
+
+export async function getOwnedViralReplicationDetail(id: string, userId: string) {
+  return serializeDetail(await readOwnedViralReplication(id, userId))
+}
+
+export async function updateViralReplicationBrief(input: { id: string; userId: string; brief: string }) {
+  const result = await prisma.viralReplication.updateMany({
+    where: {
+      id: input.id,
+      userId: input.userId,
+      status: { in: BRIEF_MUTABLE_STATUSES },
+    },
+    data: { brief: input.brief },
+  })
+  if (result.count !== 1) {
+    await readOwnedViralReplication(input.id, input.userId)
+    throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_REPLICATION_BRIEF_LOCKED', field: 'brief' })
+  }
+  return getOwnedViralReplicationDetail(input.id, input.userId)
+}
+
+async function releaseUploadLock(id: string, userId: string, lockToken: string): Promise<void> {
+  try {
+    await prisma.viralReplication.updateMany({
+      where: { id, userId, status: VIRAL_REPLICATION_STATUS.UPLOADING, errorMessage: lockToken },
+      data: { errorMessage: null },
+    })
+  } catch {
+    // Preserve the original upload failure; a stale lock can be repaired explicitly.
+  }
+}
+
+export async function uploadViralReplicationVideo(input: UploadVideoInput) {
+  const replication = await readOwnedViralReplication(input.id, input.userId)
+  if (replication.status !== VIRAL_REPLICATION_STATUS.UPLOADING) {
+    throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_UPLOAD_NOT_ALLOWED' })
+  }
+  const preference = await prisma.userPreference.findUnique({ where: { userId: input.userId } })
+  if (!preference?.analysisModel) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'ANALYSIS_MODEL_REQUIRED',
+      field: 'analysisModel',
+    })
+  }
+
+  const lockToken = `__viral_upload_lock__:${randomUUID()}`
+  const acquired = await prisma.viralReplication.updateMany({
+    where: {
+      id: input.id,
+      userId: input.userId,
+      status: VIRAL_REPLICATION_STATUS.UPLOADING,
+      errorMessage: null,
+      projectId: null,
+      sourceVideoMediaId: null,
+    },
+    data: { errorMessage: lockToken },
+  })
+  if (acquired.count !== 1) {
+    throw new ApiError('NOT_FOUND')
+  }
+
+  let tempFile: Awaited<ReturnType<typeof writeRequestBodyToTempFile>> | null = null
+  let storageKey: string | null = null
+  let committed = false
+
+  try {
+    try {
+      tempFile = await writeRequestBodyToTempFile(input.request.body, {
+        maxBytes: input.maxBytes,
+        tempRoot: input.tempRoot,
+        prefix: 'viral-upload',
+      })
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('exceeds maximum size')) {
+        throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_VIDEO_TOO_LARGE', field: 'video' })
+      }
+      if (message === 'Request body is required') {
+        throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_VIDEO_REQUIRED', field: 'video' })
+      }
+      throw error
+    }
+
+    const handle = await fs.open(tempFile.filePath, 'r')
+    let prefix: Buffer
+    try {
+      prefix = Buffer.alloc(Math.min(64, tempFile.sizeBytes))
+      await handle.read(prefix, 0, prefix.length, 0)
+    } finally {
+      await handle.close()
+    }
+    let metadata: Awaited<ReturnType<typeof probeVideo>>
+    try {
+      validateViralUploadPrefix(prefix, input.mimeType)
+      metadata = await probeVideo(tempFile.filePath)
+      validateViralVideoMetadata(metadata)
+    } catch (error: unknown) {
+      if (error instanceof ViralUploadValidationError) {
+        throw new ApiError('INVALID_PARAMS', { code: error.code, field: 'video' })
+      }
+      if (
+        error instanceof FfmpegBoundaryError
+        && ['COMMAND_FAILED', 'FFPROBE_MALFORMED_JSON', 'FFPROBE_NO_VIDEO', 'FFPROBE_INVALID_VIDEO', 'FFPROBE_INVALID_DURATION', 'UNSUPPORTED_CONTAINER', 'UNSUPPORTED_CONTAINER_BRAND'].includes(error.code)
+      ) {
+        throw new ApiError('INVALID_PARAMS', { code: error.code, field: 'video' })
+      }
+      throw error
+    }
+
+    const normalizedMime = input.mimeType.split(';', 1)[0].trim().toLowerCase()
+    const extension = normalizedMime.includes('quicktime') || normalizedMime.endsWith('/mov') ? 'mov' : 'mp4'
+    const requestedStorageKey = `viral-replications/${input.id}/${randomUUID()}.${extension}`
+    storageKey = await uploadObjectStream(
+      () => createReadStream(tempFile!.filePath),
+      requestedStorageKey,
+      tempFile.sizeBytes,
+      normalizedMime,
+    )
+
+    const publicId = stablePublicIdFromStorageKey(storageKey)
+    const created = await prisma.$transaction(async (tx) => {
+      const media = await tx.mediaObject.create({
+        data: {
+          publicId,
+          storageKey: storageKey!,
+          mimeType: normalizedMime,
+          sizeBytes: BigInt(tempFile!.sizeBytes),
+          width: metadata.width,
+          height: metadata.height,
+          durationMs: metadata.durationMs,
+        },
+      })
+      const project = await tx.project.create({
+        data: {
+          name: `爆款复刻-${formatTimestamp(input.now ?? new Date())}`,
+          userId: input.userId,
+        },
+      })
+      const novelProject = await tx.novelPromotionProject.create({
+        data: {
+          projectId: project.id,
+          analysisModel: preference.analysisModel,
+          characterModel: preference.characterModel,
+          locationModel: preference.locationModel,
+          storyboardModel: preference.storyboardModel,
+          editModel: preference.editModel,
+          videoModel: preference.videoModel,
+          audioModel: preference.audioModel,
+          videoRatio: replication.videoRatio,
+          videoResolution: preference.videoResolution,
+          imageResolution: preference.imageResolution,
+          artStyle: replication.artStyle,
+          ttsRate: preference.ttsRate,
+        },
+      })
+      const episode = await tx.novelPromotionEpisode.create({
+        data: {
+          novelPromotionProjectId: novelProject.id,
+          episodeNumber: 1,
+          name: '第 1 集',
+        },
+      })
+      const linked = await tx.viralReplication.updateMany({
+        where: {
+          id: input.id,
+          userId: input.userId,
+          status: VIRAL_REPLICATION_STATUS.UPLOADING,
+          errorMessage: lockToken,
+          projectId: null,
+          sourceVideoMediaId: null,
+        },
+        data: {
+          projectId: project.id,
+          episodeId: episode.id,
+          sourceVideoMediaId: media.id,
+          analysisModelSnapshot: preference.analysisModel,
+          durationMs: metadata.durationMs,
+          status: VIRAL_REPLICATION_STATUS.ANALYZING,
+          errorMessage: null,
+        },
+      })
+      if (linked.count !== 1) {
+        throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_UPLOAD_CONFLICT' })
+      }
+      return { project, episode, media }
+    })
+    committed = true
+
+    const baseResult = {
+      id: input.id,
+      projectId: created.project.id,
+      episodeId: created.episode.id,
+      sourceVideoMediaId: created.media.id,
+    }
+    try {
+      const task = await submitTask({
+        userId: input.userId,
+        locale: input.locale,
+        projectId: created.project.id,
+        episodeId: created.episode.id,
+        type: TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
+        targetType: 'ViralReplication',
+        targetId: input.id,
+        maxAttempts: 1,
+        payload: {
+          sourceVideoMediaId: created.media.id,
+          analysisModelSnapshot: preference.analysisModel,
+        },
+      })
+      return { ...baseResult, status: VIRAL_REPLICATION_STATUS.ANALYZING, taskId: task.taskId }
+    } catch {
+      await prisma.viralReplication.update({
+        where: { id: input.id },
+        data: { status: VIRAL_REPLICATION_STATUS.FAILED, errorMessage: SUBMIT_FAILURE_MESSAGE },
+      })
+      return { ...baseResult, status: VIRAL_REPLICATION_STATUS.FAILED, taskId: null }
+    }
+  } catch (error: unknown) {
+    if (storageKey && !committed) {
+      try {
+        await deleteObject(storageKey)
+      } catch {
+        // Best-effort compensation must not mask the database/upload error.
+      }
+    }
+    if (!committed) await releaseUploadLock(input.id, input.userId, lockToken)
+    throw error
+  } finally {
+    await tempFile?.cleanup()
+  }
+}

@@ -178,19 +178,27 @@ describe('viral replication task queue registration', () => {
   })
 
   it.each([
-    TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
-    TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
-  ])('keeps %s in the exhaustive task coverage catalogs', (taskType) => {
+    {
+      taskType: TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
+      layers: ['worker-unit', 'api-contract', 'chain'],
+      apiContractTest: 'tests/integration/api/contract/viral-replication-routes.test.ts',
+    },
+    {
+      taskType: TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
+      layers: ['worker-unit', 'chain'],
+      apiContractTest: null,
+    },
+  ])('keeps $taskType in the exhaustive task coverage catalogs', ({ taskType, layers, apiContractTest }) => {
     expect(TASK_TYPE_CATALOG).toContainEqual(expect.objectContaining({
       taskType,
       owner: 'tests/unit/worker/viral-replication-worker.test.ts',
-      layers: ['worker-unit', 'chain'],
+      layers,
     }))
     expect(TASKTYPE_BEHAVIOR_MATRIX).toContainEqual(expect.objectContaining({
       taskType,
       workerTest: 'tests/unit/worker/viral-replication-worker.test.ts',
       chainTest: 'tests/integration/chain/viral-replication.chain.test.ts',
-      apiContractTest: null,
+      apiContractTest,
     }))
   })
 })
