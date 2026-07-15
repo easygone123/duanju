@@ -5,6 +5,7 @@ import type { BuildPromptInput } from './types'
 
 const SINGLE_PLACEHOLDER_PATTERN = /\{([A-Za-z0-9_]+)\}/g
 const DOUBLE_PLACEHOLDER_PATTERN = /\{\{([A-Za-z0-9_]+)\}\}/g
+const ANY_PLACEHOLDER_PATTERN = /\{\{([A-Za-z0-9_]+)\}\}|\{([A-Za-z0-9_]+)\}/g
 
 function extractPlaceholders(template: string): string[] {
   const keys = new Set<string>()
@@ -19,16 +20,6 @@ function extractPlaceholders(template: string): string[] {
   }
 
   return Array.from(keys)
-}
-
-function escapeRegex(raw: string) {
-  return raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function replaceAllPlaceholders(template: string, key: string, value: string): string {
-  const escaped = escapeRegex(key)
-  const pattern = new RegExp(`\\{\\{${escaped}\\}\\}|\\{${escaped}\\}`, 'g')
-  return template.replace(pattern, value)
 }
 
 export function buildPrompt(input: BuildPromptInput): string {
@@ -89,10 +80,8 @@ export function buildPrompt(input: BuildPromptInput): string {
     }
   }
 
-  let rendered = template
-  for (const key of entry.variableKeys) {
-    rendered = replaceAllPlaceholders(rendered, key, variables[key] || '')
-  }
-
-  return rendered
+  return template.replace(ANY_PLACEHOLDER_PATTERN, (_token, doubleKey, singleKey) => {
+    const key = (doubleKey || singleKey) as string
+    return variables[key] || ''
+  })
 }

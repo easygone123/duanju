@@ -24,6 +24,7 @@ export type FfmpegBoundaryErrorCode =
   | 'FFPROBE_INVALID_VIDEO'
   | 'FFPROBE_INVALID_DURATION'
   | 'FRAME_ARTIFACT_INVALID'
+  | 'FRAME_ARTIFACT_TOO_LARGE'
   | 'UNSUPPORTED_CONTAINER'
   | 'UNSUPPORTED_CONTAINER_BRAND'
 
@@ -80,6 +81,9 @@ export interface VideoMetadata {
 const DEFAULT_CAPTURE_LIMIT_BYTES = 1024 * 1024
 export const DEFAULT_COMMAND_TIMEOUT_MS = 120_000
 export const MAX_SCENE_TIMESTAMPS = 288
+export const MAX_FRAME_LONGEST_EDGE = 2_048
+export const MAX_FRAME_PIXELS = MAX_FRAME_LONGEST_EDGE * MAX_FRAME_LONGEST_EDGE
+export const MAX_FRAME_JPEG_BYTES = 8 * 1024 * 1024
 const MAX_SCENE_TIMESTAMP_MS = 180_000
 const MAX_SCENE_LINE_BUFFER_CHARS = 16_384
 
@@ -649,6 +653,7 @@ export async function extractFrame(
       '-i', sourcePath,
       '-map', `0:${videoStreamIndex}`,
       '-frames:v', '1',
+      '-vf', `scale='min(iw,${MAX_FRAME_LONGEST_EDGE})':'min(ih,${MAX_FRAME_LONGEST_EDGE})':force_original_aspect_ratio=decrease:force_divisible_by=2`,
       '-q:v', '2',
       temporaryPath,
     ])
@@ -666,6 +671,12 @@ export async function extractFrame(
       throw new FfmpegBoundaryError(
         'FRAME_ARTIFACT_INVALID',
         'FFmpeg produced an empty or non-regular frame artifact',
+      )
+    }
+    if (artifact.size > MAX_FRAME_JPEG_BYTES) {
+      throw new FfmpegBoundaryError(
+        'FRAME_ARTIFACT_TOO_LARGE',
+        `FFmpeg frame artifact exceeds ${MAX_FRAME_JPEG_BYTES} bytes`,
       )
     }
 

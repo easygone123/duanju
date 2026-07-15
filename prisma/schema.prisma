@@ -1059,6 +1059,8 @@ model ViralReplication {
   status                String                    @default("uploading")
   uploadLockToken       String?
   uploadLockExpiresAt   DateTime?
+  analysisExecutionToken String?
+  analysisExecutionExpiresAt DateTime?
   analysisModelSnapshot String?
   durationMs            Int?
   transcriptText        String?                   @db.LongText
@@ -1076,6 +1078,7 @@ model ViralReplication {
 
   @@index([userId, createdAt])
   @@index([status])
+  @@index([analysisExecutionExpiresAt])
   @@map("viral_replications")
 }
 

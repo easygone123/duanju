@@ -25,6 +25,25 @@ const shotBatchSchema = z.object({
 
 export type ViralShotAnalysisBatch = z.infer<typeof shotBatchSchema>
 
+export const MAX_VIRAL_TRANSCRIPT_PROMPT_CHARS = 50_000
+export const MAX_VIRAL_MODEL_PROMPT_CHARS = 100_000
+
+function truncateUntrustedText(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value
+  return `${value.slice(0, maxChars)}\n[TRUNCATED]`
+}
+
+function delimitUntrusted(label: string, value: string): string {
+  return `<<<BEGIN_UNTRUSTED_${label}>>>\n${value}\n<<<END_UNTRUSTED_${label}>>>`
+}
+
+function assertPromptLength(prompt: string): string {
+  if (prompt.length > MAX_VIRAL_MODEL_PROMPT_CHARS) {
+    throw new Error(`Viral model prompt length exceeds ${MAX_VIRAL_MODEL_PROMPT_CHARS} characters`)
+  }
+  return prompt
+}
+
 export const VIRAL_REPORT_SCHEMA_JSON = JSON.stringify({
   schemaVersion: 1,
   overview: {
@@ -62,11 +81,15 @@ export function buildViralShotAnalysisPrompt(input: {
   shots: PreprocessedViralShot[]
   subtitleContext: string | null
 }): string {
-  return buildPrompt({
+  const subtitleContext = truncateUntrustedText(
+    input.subtitleContext || 'None',
+    MAX_VIRAL_TRANSCRIPT_PROMPT_CHARS,
+  )
+  return assertPromptLength(buildPrompt({
     promptId: PROMPT_IDS.VIRAL_SHOT_ANALYSIS,
     locale: input.locale,
     variables: {
-      brief: input.brief,
+      brief: delimitUntrusted('BRIEF', input.brief),
       video_metadata: JSON.stringify(input.videoMetadata),
       shot_timeline: JSON.stringify(input.shots.map((shot) => ({
         shotIndex: shot.shotIndex,
@@ -74,9 +97,9 @@ export function buildViralShotAnalysisPrompt(input: {
         endMs: shot.endMs,
         representativeMs: shot.representativeMs,
       }))),
-      subtitle_context: input.subtitleContext || 'None',
+      subtitle_context: delimitUntrusted('SUBTITLE_CONTEXT', subtitleContext),
     },
-  })
+  }))
 }
 
 export function buildViralReportAggregationPrompt(input: {
@@ -85,16 +108,19 @@ export function buildViralReportAggregationPrompt(input: {
   durationMs: number
   batchResults: ViralShotAnalysisBatch[]
 }): string {
-  return buildPrompt({
+  return assertPromptLength(buildPrompt({
     promptId: PROMPT_IDS.VIRAL_REPORT_AGGREGATION,
     locale: input.locale,
     variables: {
-      brief: input.brief,
+      brief: delimitUntrusted('BRIEF', input.brief),
       duration_ms: String(input.durationMs),
-      batch_results_json: JSON.stringify(input.batchResults),
+      batch_results_json: delimitUntrusted(
+        'BATCH_RESULTS',
+        JSON.stringify(input.batchResults),
+      ),
       report_schema_json: VIRAL_REPORT_SCHEMA_JSON,
     },
-  })
+  }))
 }
 
 export function parseViralShotAnalysisBatch(

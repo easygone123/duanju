@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   FfmpegBoundaryError,
+  MAX_FRAME_JPEG_BYTES,
+  MAX_FRAME_LONGEST_EDGE,
+  MAX_FRAME_PIXELS,
   MAX_SCENE_TIMESTAMPS,
   assertFfmpegAvailable,
   createCommandRunner,
@@ -538,14 +541,36 @@ describe('FFmpeg command boundary', () => {
         '-i', sourcePath,
         '-map', '0:4',
         '-frames:v', '1',
+        '-vf', `scale='min(iw,${MAX_FRAME_LONGEST_EDGE})':'min(ih,${MAX_FRAME_LONGEST_EDGE})':force_original_aspect_ratio=decrease:force_divisible_by=2`,
         '-q:v', '2',
         tempOutputPath,
       ])
+      expect(MAX_FRAME_PIXELS).toBe(MAX_FRAME_LONGEST_EDGE ** 2)
       expect(path.dirname(tempOutputPath)).toBe(tempRoot)
       expect(tempOutputPath).not.toBe(outputPath)
       expect(tempOutputPath.endsWith('.jpg')).toBe(true)
       await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('valid jpeg placeholder')
       await expect(fs.readdir(tempRoot)).resolves.toEqual(['shot-000.jpg'])
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('fails closed and preserves the previous frame when a JPEG exceeds the byte cap', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'viral-frame-test-'))
+    const outputPath = path.join(tempRoot, 'shot.jpg')
+    await fs.writeFile(outputPath, 'previous valid frame')
+    const runner: CommandRunner = async (_binary, args) => {
+      await fs.writeFile(args.at(-1)!, Buffer.alloc(MAX_FRAME_JPEG_BYTES + 1))
+      return { stdout: '', stderr: '' }
+    }
+
+    try {
+      await expect(extractFrame(sourcePath, outputPath, 0, 0, runner)).rejects.toMatchObject({
+        code: 'FRAME_ARTIFACT_TOO_LARGE',
+      })
+      await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('previous valid frame')
+      await expect(fs.readdir(tempRoot)).resolves.toEqual(['shot.jpg'])
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true })
     }

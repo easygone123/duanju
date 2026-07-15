@@ -206,6 +206,8 @@ describe('chain contract - viral replication submission', () => {
       projectId: 'viral-project-analysis-chain',
       brief: 'Create an original product reveal',
       status: 'analyzing',
+      analysisExecutionToken: null,
+      analysisExecutionExpiresAt: null,
       analysisModelSnapshot: 'test::analysis-model',
       sourceVideoMediaId: 'media-analysis-chain',
       sourceVideoMedia: {
@@ -255,14 +257,19 @@ describe('chain contract - viral replication submission', () => {
         }),
       },
       mediaObject: {
-        create: vi.fn(async () => ({ id: `frame-media-${++mediaNumber}` })),
+        findUnique: vi.fn(async () => null),
+        upsert: vi.fn(async () => ({ id: `frame-media-${++mediaNumber}` })),
       },
       viralReplicationFrame: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-          frames.push(data)
-          return data
+        findUnique: vi.fn(async ({ where }: {
+          where: { replicationId_shotIndex: { shotIndex: number } }
+        }) => frames.find((frame) => frame.shotIndex === where.replicationId_shotIndex.shotIndex) || null),
+        upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => {
+          frames.push(create)
+          return create
         }),
       },
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => await callback(analysisPrisma)),
     }
 
     try {
@@ -296,7 +303,9 @@ describe('chain contract - viral replication submission', () => {
             transcriptText: 'A deterministic embedded subtitle',
           }
         }) as never,
+        readFrame: fs.readFile,
         uploadObject: vi.fn(async (_bytes, key) => key),
+        deleteObject: vi.fn(async () => undefined),
         runVision: vi.fn(async (input) => {
           modelCalls.push({ kind: 'vision', model: input.model })
           return completion(JSON.stringify({ shots: analyzedShots })) as never
@@ -324,7 +333,10 @@ describe('chain contract - viral replication submission', () => {
         reportProgress: vi.fn(async () => undefined),
         makeTempDirectory: vi.fn(async () => await fs.mkdtemp(path.join(root, 'worker-'))),
         removeTempDirectory: vi.fn(async (directory) => await fs.rm(directory, { recursive: true, force: true })),
-      })
+        now: () => new Date('2026-07-15T01:00:00.000Z'),
+        createExecutionToken: () => 'chain-execution-token',
+        warn: vi.fn(),
+      } as never)
 
       await handler({ data: queueCall.data } as never)
 
