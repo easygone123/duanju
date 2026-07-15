@@ -49,6 +49,7 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   const [workflows, setWorkflows] = useState<WorkflowView[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const selectedIdRef = useRef<string | null>(null)
+  const selectionRevisionRef = useRef(0)
   const archiveInFlightRef = useRef<string | null>(null)
   const newWorkflowButtonRef = useRef<HTMLButtonElement>(null)
   const [authorDraft, setAuthorDraft] = useState<WorkflowAuthorDraft | null>(null)
@@ -72,16 +73,18 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   }
 
   const load = async (preferId?: string) => {
+    const selectionRevision = selectionRevisionRef.current
     setLoading(true)
     try {
       const payload = await requestJson<{ workflows: WorkflowView[] }>('/api/comfyui/workflows')
+      if (selectionRevisionRef.current !== selectionRevision) return
       setWorkflows(payload.workflows)
       const targetId = preferId ?? selectedIdRef.current
-      const selected = payload.workflows.find((item) => item.id === targetId)
+      const selected = payload.workflows.find((item) => item.id === targetId) ?? payload.workflows[0]
       if (selected) {
         const version = selected.versions[0] ?? selected.currentVersion
         updateSelectedId(selected.id); setSavedVersion(version); setAuthorDraft(draftFromWorkflow(selected, version))
-      } else if (targetId && selectedIdRef.current === targetId) {
+      } else if (selectedIdRef.current === targetId) {
         updateSelectedId(null); setSavedVersion(null); setAuthorDraft(null)
       }
       setError(null)
@@ -90,6 +93,7 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   useEffect(() => { void load(initialWorkflowId ?? undefined) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectWorkflow = (id: string) => {
+    selectionRevisionRef.current += 1
     updateSelectedId(id); setError(null)
     const workflow = workflows.find((item) => item.id === id)
     if (!workflow) return

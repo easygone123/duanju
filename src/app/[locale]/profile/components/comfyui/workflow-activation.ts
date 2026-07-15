@@ -17,7 +17,7 @@ export interface WorkflowActivationState {
 
 export function initialWorkflowActivationState(options: { valid?: boolean; published?: boolean; tested?: boolean } = {}): WorkflowActivationState {
   if (options.valid === false) return { status: 'draft', testComplete: false, publishRequired: false, busy: null, error: null }
-  if (options.published) return { status: 'available', testComplete: true, publishRequired: false, busy: null, error: null }
+  if (options.published && options.tested) return { status: 'available', testComplete: true, publishRequired: false, busy: null, error: null }
   if (options.tested) return { status: 'ready_to_publish', testComplete: true, publishRequired: true, busy: null, error: null }
   return { status: 'needs_test', testComplete: false, publishRequired: false, busy: null, error: null }
 }

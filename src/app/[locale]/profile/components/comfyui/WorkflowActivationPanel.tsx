@@ -27,13 +27,17 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
   const enabledConnections = useMemo(() => (
     connectionsQuery.data?.connections ?? []
   ).filter((connection) => connection.enabled), [connectionsQuery.data?.connections])
+  const requiredDefinitions = useMemo(
+    () => version.variableDefinitions.filter((definition) => definition.required),
+    [version.variableDefinitions],
+  )
   const [connectionId, setConnectionId] = useState(() => enabledConnections[0]?.id ?? '')
   useEffect(() => {
     if (enabledConnections.some((connection) => connection.id === connectionId)) return
     setConnectionId(enabledConnections[0]?.id ?? '')
   }, [connectionId, enabledConnections])
   const [testPayload, setTestPayload] = useState<WorkflowTestPayload | null>(() => (
-    version.variableDefinitions.length === 0 ? emptyWorkflowTestPayload() : null
+    requiredDefinitions.length === 0 ? emptyWorkflowTestPayload() : null
   ))
   const [activation, setActivation] = useState(() => initialWorkflowActivationState({
     valid: version.validation.valid,
@@ -43,12 +47,25 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
   const [requestError, setRequestError] = useState<string | null>(null)
   const previousVersionIdRef = useRef(version.id)
   const versionRef = useRef(version)
+  const mountedRef = useRef(false)
+  const operationEpochRef = useRef(0)
+  const operationInFlightRef = useRef(false)
   versionRef.current = version
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      operationEpochRef.current += 1
+      operationInFlightRef.current = false
+    }
+  }, [])
   useEffect(() => {
     if (previousVersionIdRef.current === version.id) return
     previousVersionIdRef.current = version.id
+    operationEpochRef.current += 1
+    operationInFlightRef.current = false
     const nextVersion = versionRef.current
-    setTestPayload(nextVersion.variableDefinitions.length === 0 ? emptyWorkflowTestPayload() : null)
+    setTestPayload(nextVersion.variableDefinitions.some((definition) => definition.required) ? null : emptyWorkflowTestPayload())
     setActivation(initialWorkflowActivationState({
       valid: nextVersion.validation.valid,
       published: Boolean(nextVersion.publishedAt),
@@ -61,7 +78,27 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
     setActivation((current) => nextWorkflowActivationState(current, event))
   }
 
-  const publishExactVersion = async () => {
+  const beginOperation = () => {
+    if (operationInFlightRef.current) return null
+    operationInFlightRef.current = true
+    operationEpochRef.current += 1
+    return operationEpochRef.current
+  }
+  const isCurrentOperation = (epoch: number) => (
+    mountedRef.current && operationEpochRef.current === epoch
+  )
+  const finishOperation = (epoch: number) => {
+    if (!isCurrentOperation(epoch)) return
+    operationInFlightRef.current = false
+  }
+  const cancelOperations = () => {
+    operationEpochRef.current += 1
+    operationInFlightRef.current = false
+  }
+
+  const publishExactVersion = async (existingEpoch?: number) => {
+    const epoch = existingEpoch ?? beginOperation()
+    if (epoch === null || !isCurrentOperation(epoch)) return
     transition('publish_started')
     setRequestError(null)
     try {
@@ -71,17 +108,24 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
         body: JSON.stringify({ versionId: version.id }),
       })
     } catch (error) {
+      if (!isCurrentOperation(epoch)) return
       setRequestError(safeWorkflowErrorKey(error))
       transition('publish_failed')
+      finishOperation(epoch)
       return
     }
+    if (!isCurrentOperation(epoch)) return
     transition('publish_succeeded')
     await Promise.resolve(invalidateUserModels(queryClient)).catch(() => undefined)
+    if (!isCurrentOperation(epoch)) return
     await onActivated?.()
+    finishOperation(epoch)
   }
 
   const testAndPublish = async () => {
     if (!connectionId || !testPayload) return
+    const epoch = beginOperation()
+    if (epoch === null || !isCurrentOperation(epoch)) return
     transition('test_started')
     setRequestError(null)
     try {
@@ -96,12 +140,15 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
         }),
       })
     } catch (error) {
+      if (!isCurrentOperation(epoch)) return
       setRequestError(safeWorkflowErrorKey(error))
       transition('test_failed')
+      finishOperation(epoch)
       return
     }
+    if (!isCurrentOperation(epoch)) return
     transition('test_succeeded')
-    await publishExactVersion()
+    await publishExactVersion(epoch)
   }
 
   const busy = activation.busy !== null
@@ -112,16 +159,25 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
     : activation.status === 'ready_to_publish'
       ? 'readyToPublish'
       : activation.status
+  const statusText = activation.busy === 'publishing'
+    ? t('activation.publishing')
+    : activation.busy === 'testing'
+      ? t('activation.testing')
+      : t(`activation.${statusKey}`)
+  const closeActivation = () => {
+    cancelOperations()
+    onClose()
+  }
 
-  return <section aria-labelledby="workflow-activation-heading" className="glass-surface-soft space-y-4 rounded-xl p-4">
+  return <section aria-labelledby="workflow-activation-heading" aria-busy={busy} className="glass-surface-soft space-y-4 rounded-xl p-4">
     <header className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h3 id="workflow-activation-heading" className="font-semibold">{t('activation.title')}</h3>
       </div>
-      <button type="button" className="glass-btn-base px-3 py-1.5 text-xs" onClick={onClose}>{t('activation.close')}</button>
+      <button type="button" className="glass-btn-base px-3 py-1.5 text-xs" onClick={closeActivation}>{t('activation.close')}</button>
     </header>
 
-    <p role="status" className="text-sm font-medium">{t(`activation.${statusKey}`)}</p>
+    <p role="status" aria-live="polite" className="text-sm font-medium">{statusText}</p>
 
     {activation.status !== 'available' && <>
       {!activation.testComplete && (enabledConnections.length === 0
@@ -134,7 +190,7 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
 
       {!activation.testComplete && <WorkflowTestForm
         key={version.id}
-        definitions={version.variableDefinitions}
+        definitions={requiredDefinitions}
         onChange={setTestPayload}
         onError={(key) => setRequestError(key)}
       />}

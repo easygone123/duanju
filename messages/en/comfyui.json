@@ -93,6 +93,7 @@
       "instance": "Test instance",
       "testAndEnable": "Test and enable",
       "testing": "Testing workflow…",
+      "publishing": "Publishing workflow…",
       "publish": "Publish workflow",
       "retryPublish": "Retry publish",
       "testFailed": "The live test failed. Nothing was published.",

@@ -33,7 +33,10 @@ vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowCompatibilityTable', 
   default: () => null,
 }))
 vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowActivationPanel', () => ({
-  default: ({ workflowId }: { workflowId: string }) => <output aria-label="activation-workflow">{workflowId}</output>,
+  default: ({ workflowId, onActivated }: { workflowId: string; onActivated?(): void | Promise<void> }) => <>
+    <output aria-label="activation-workflow">{workflowId}</output>
+    <button type="button" onClick={() => void onActivated?.()}>COMPLETE ACTIVATION</button>
+  </>,
 }))
 
 const savedVersion = {
@@ -101,14 +104,12 @@ describe('ComfyUI workflow library removal', () => {
     vi.restoreAllMocks()
   })
 
-  it('does not offer saved-workflow actions until a workflow is selected', async () => {
+  it('selects the first saved workflow when there is no valid preferred or current selection', async () => {
     const view = renderLibrary()
 
-    await waitFor(() => expect(view.getByRole('button', { name: /Portrait/ })).toBeTruthy())
-    expect(view.queryByRole('button', { name: 'Delete workflow' })).toBeNull()
-    expect(view.queryByRole('button', { name: 'Save draft' })).toBeNull()
-    expect(view.queryByRole('button', { name: 'Publish workflow' })).toBeNull()
-    expect(view.queryByLabelText('draft-name')).toBeNull()
+    await waitFor(() => expect(view.getByLabelText('draft-name').textContent).toBe('Portrait'))
+    expect(view.getByRole('button', { name: /Portrait/ }).getAttribute('aria-current')).toBe('page')
+    expect(view.getByRole('button', { name: 'Delete workflow' })).toBeTruthy()
   })
 
   it('opens the dedicated creation flow from New workflow', async () => {
@@ -136,6 +137,30 @@ describe('ComfyUI workflow library removal', () => {
     await waitFor(() => expect(view.getByLabelText('activation-workflow').textContent).toBe(workflow.id))
     expect(view.queryByRole('button', { name: 'Publish' })).toBeNull()
     expect(view.queryByRole('button', { name: 'Delete workflow' })).toBeNull()
+  })
+
+  it('does not let a delayed activation reload steal a newer workflow selection', async () => {
+    const reload = deferred<Response>()
+    let listCalls = 0
+    apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/comfyui/workflows') {
+        listCalls += 1
+        return listCalls === 1 ? response({ workflows: [workflow, workflowB] }) : reload.promise
+      }
+      if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const view = renderLibrary({ initialWorkflowId: workflow.id, activationWorkflowId: workflow.id })
+    await waitFor(() => expect(view.getByLabelText('activation-workflow').textContent).toBe(workflow.id))
+
+    fireEvent.click(view.getByRole('button', { name: 'COMPLETE ACTIVATION' }))
+    await waitFor(() => expect(listCalls).toBe(2))
+    fireEvent.click(view.getByRole('button', { name: /Landscape/ }))
+    expect(view.getByLabelText('draft-name').textContent).toBe('Landscape')
+    reload.resolve(response({ workflows: [workflow] }))
+
+    await waitFor(() => expect(view.getByLabelText('draft-name').textContent).toBe('Landscape'))
+    expect(view.getByRole('button', { name: /Landscape/ }).getAttribute('aria-current')).toBe('page')
   })
 
   it('does not send DELETE when removal confirmation is canceled', async () => {

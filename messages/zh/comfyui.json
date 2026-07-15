@@ -93,6 +93,7 @@
       "instance": "测试实例",
       "testAndEnable": "测试并启用",
       "testing": "正在测试工作流…",
+      "publishing": "正在发布工作流…",
       "publish": "发布工作流",
       "retryPublish": "重试发布",
       "testFailed": "实时测试失败，工作流没有发布。",

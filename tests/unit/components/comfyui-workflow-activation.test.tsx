@@ -59,6 +59,12 @@ function renderPanel(props: Partial<React.ComponentProps<typeof WorkflowActivati
   return render(activationTree(queryClient, props))
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((settle) => { resolve = settle })
+  return { promise, resolve }
+}
+
 describe('workflow activation state', () => {
   it('keeps a statically invalid saved workflow in Draft', () => {
     expect(initialWorkflowActivationState({ valid: false }).status).toBe('draft')
@@ -69,6 +75,11 @@ describe('workflow activation state', () => {
     const failed = nextWorkflowActivationState(tested, 'publish_failed')
 
     expect(failed).toMatchObject({ status: 'ready_to_publish', testComplete: true, publishRequired: true, error: 'publish' })
+  })
+
+  it('requires both publication and a successful test before becoming available', () => {
+    expect(initialWorkflowActivationState({ published: true, tested: false }).status).toBe('needs_test')
+    expect(initialWorkflowActivationState({ published: true, tested: true }).status).toBe('available')
   })
 })
 
@@ -108,6 +119,98 @@ describe('WorkflowActivationPanel', () => {
     fireEvent.change(view.getByLabelText('prompt *'), { target: { value: 'a portrait' } })
 
     await waitFor(() => expect((view.getByRole('button', { name: 'Test and enable' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  it('asks only for required live-test variables', () => {
+    const liveVersion = version([
+      { name: 'prompt', type: 'string', required: true },
+      { name: 'optionalStyle', type: 'string', required: false, missingValuePolicy: 'preserve_original' },
+    ])
+    const view = renderPanel({ version: liveVersion })
+
+    expect(view.getByLabelText('prompt *')).toBeTruthy()
+    expect(view.queryByLabelText('optionalStyle')).toBeNull()
+  })
+
+  it('uses a synchronous lock to ignore same-frame activation double clicks', async () => {
+    const testRun = deferred<unknown>()
+    requestWorkflowActionMock.mockReturnValueOnce(testRun.promise).mockResolvedValueOnce({ success: true })
+    const view = renderPanel()
+    const activate = view.getByRole('button', { name: 'Test and enable' })
+
+    fireEvent.click(activate)
+    fireEvent.click(activate)
+
+    expect(requestWorkflowActionMock).toHaveBeenCalledTimes(1)
+    testRun.resolve({ success: true })
+    await waitFor(() => expect(view.getByText('Available as model')).toBeTruthy())
+    expect(requestWorkflowActionMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not publish a delayed test result after activation is closed', async () => {
+    const testRun = deferred<unknown>()
+    requestWorkflowActionMock.mockReturnValueOnce(testRun.promise)
+    const onClose = vi.fn()
+    const onActivated = vi.fn()
+    const view = renderPanel({ onClose, onActivated })
+
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Close activation' }))
+    testRun.resolve({ success: true })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(requestWorkflowActionMock).toHaveBeenCalledTimes(1)
+    expect(invalidateUserModelsMock).not.toHaveBeenCalled()
+    expect(onActivated).not.toHaveBeenCalled()
+  })
+
+  it('does not publish a delayed test result after unmount', async () => {
+    const testRun = deferred<unknown>()
+    requestWorkflowActionMock.mockReturnValueOnce(testRun.promise)
+    const view = renderPanel()
+
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    view.unmount()
+    testRun.resolve({ success: true })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(requestWorkflowActionMock).toHaveBeenCalledTimes(1)
+    expect(invalidateUserModelsMock).not.toHaveBeenCalled()
+  })
+
+  it('ignores a delayed test result after switching immutable versions', async () => {
+    const testRun = deferred<unknown>()
+    requestWorkflowActionMock.mockReturnValueOnce(testRun.promise)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(activationTree(queryClient))
+
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    view.rerender(activationTree(queryClient, { version: { ...version(), id: 'version-8', version: 8 } }))
+    testRun.resolve({ success: true })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(requestWorkflowActionMock).toHaveBeenCalledTimes(1)
+    expect(view.getByRole('button', { name: 'Test and enable' })).toBeTruthy()
+  })
+
+  it('announces publishing and exposes busy state while publish is delayed', async () => {
+    const publish = deferred<unknown>()
+    requestWorkflowActionMock.mockResolvedValueOnce({ success: true }).mockReturnValueOnce(publish.promise)
+    const view = renderPanel()
+
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    await waitFor(() => expect(requestWorkflowActionMock).toHaveBeenCalledTimes(2))
+
+    const region = view.getByRole('region', { name: 'Test and enable' })
+    expect(region.getAttribute('aria-busy')).toBe('true')
+    expect(view.getByRole('status').textContent).toBe('Publishing workflow…')
+    publish.resolve({ success: true })
+    await waitFor(() => expect(view.getByText('Available as model')).toBeTruthy())
+    expect(region.getAttribute('aria-busy')).toBe('false')
   })
 
   it('never publishes when the live test fails', async () => {
