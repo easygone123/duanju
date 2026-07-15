@@ -70,20 +70,25 @@ export function analyzeComfyApiWorkflow(input: {
 }
 
 export function readApiFormatGraph(raw: unknown): ComfyApiWorkflow {
-  if (Array.isArray(raw) || isNormalWorkflowJson(raw)) {
+  const graph = unwrapComfyApiWorkflowPayload(raw)
+  if (Array.isArray(graph) || isNormalWorkflowJson(graph)) {
     throw new WorkflowAutoMappingError(WORKFLOW_AUTO_MAPPING_ERROR.API_FORMAT_REQUIRED)
   }
-  if (!isRecord(raw)) {
+  if (!isRecord(graph)) {
     throw new WorkflowAutoMappingError(WORKFLOW_AUTO_MAPPING_ERROR.API_FORMAT_INVALID)
   }
 
-  for (const node of Object.values(raw)) {
+  for (const node of Object.values(graph)) {
     if (!isApiWorkflowNode(node)) {
       throw new WorkflowAutoMappingError(WORKFLOW_AUTO_MAPPING_ERROR.API_FORMAT_INVALID)
     }
   }
 
-  return structuredClone(raw) as ComfyApiWorkflow
+  return structuredClone(graph) as ComfyApiWorkflow
+}
+
+export function unwrapComfyApiWorkflowPayload(raw: unknown): unknown {
+  return isRecord(raw) && isRecord(raw.prompt) ? raw.prompt : raw
 }
 
 interface ScalarRule {

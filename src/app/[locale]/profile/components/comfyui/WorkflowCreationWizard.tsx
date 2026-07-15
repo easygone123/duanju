@@ -24,6 +24,7 @@ import {
 } from './workflow-requests'
 import {
   confirmWorkflowAnalysis,
+  safeWorkflowAnalysisErrorKey,
   safeWorkflowErrorKey,
   type WorkflowAuthorDraft,
   type WorkflowErrorKey,
@@ -132,7 +133,7 @@ export default function WorkflowCreationWizard({
       setRoles({})
       setSelectedOutput('')
       setStage('upload')
-      setError(safeWorkflowErrorKey(analysisError))
+      setError(safeWorkflowAnalysisErrorKey(analysisError))
     } finally {
       if (analysisAbortRef.current === controller) analysisAbortRef.current = null
       if (coordinatorRef.current.isCurrent(ticket)) setBusy(null)

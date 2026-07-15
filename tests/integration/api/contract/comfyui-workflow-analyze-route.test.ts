@@ -67,6 +67,47 @@ describe('ComfyUI workflow analysis route', () => {
     })
   })
 
+  it('analyzes an object-valued prompt wrapper as its bounded API Format graph', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const route = await import('@/app/api/comfyui/workflows/analyze/route')
+    const graph = {
+      '1': { class_type: 'CLIPTextEncode', inputs: { text: 'portrait' } },
+      '2': { class_type: 'SaveImage', inputs: { images: ['1', 0] } },
+    }
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/analyze', method: 'POST', body: {
+        kind: 'image_generation', apiFormatJson: { prompt: graph },
+      },
+    }), { params: Promise.resolve({}) })
+
+    expect(response.status).toBe(200)
+    expect(await responseJson(response)).toMatchObject({
+      analysis: { graph },
+    })
+  })
+
+  it('returns the distinct invalid diagnostic for malformed API Format nodes', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const route = await import('@/app/api/comfyui/workflows/analyze/route')
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/analyze', method: 'POST', body: {
+        kind: 'image_generation', apiFormatJson: {
+          '1': { class_type: '', inputs: [] },
+        },
+      },
+    }), { params: Promise.resolve({}) })
+
+    expect(response.status).toBe(400)
+    expect(await responseJson(response)).toMatchObject({
+      error: {
+        code: 'INVALID_PARAMS',
+        details: { reason: 'COMFY_WORKFLOW_API_FORMAT_INVALID' },
+      },
+    })
+  })
+
   it('analyzes an authenticated bounded API Format upload', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')

@@ -4,6 +4,7 @@ import { isErrorResponse, requireUserAuth } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import {
   analyzeComfyApiWorkflow,
+  unwrapComfyApiWorkflowPayload,
   WORKFLOW_AUTO_MAPPING_ERROR,
   WorkflowAutoMappingError,
 } from '@/lib/comfyui/workflow-auto-mapper'
@@ -25,7 +26,7 @@ export const POST = apiHandler(async (request: NextRequest) => {
   )
   if (!parsed.success) throw new ApiError('INVALID_PARAMS')
 
-  const graph = parseUploadedGraph(parsed.data.apiFormatJson)
+  const graph = unwrapComfyApiWorkflowPayload(parseUploadedGraph(parsed.data.apiFormatJson))
   assertBoundedWorkflowJson(graph)
 
   try {

@@ -12,6 +12,7 @@ import {
   validateWorkflowContract,
 } from '@/lib/comfyui/workflow-schema'
 import type { ComfyVariableType } from '@/lib/comfyui/types'
+import { unwrapComfyApiWorkflowPayload } from '@/lib/comfyui/workflow-auto-mapper'
 import {
   parseWorkflowImportText,
   readWorkflowImportFile,
@@ -260,8 +261,13 @@ export async function analyzeWorkflowJson(
   }
   const analysis = (payload as Record<string, unknown>).analysis
   if (!isWorkflowAnalysis(analysis)) throw malformedWorkflowResponse()
-  if (!isConsistentWorkflowAnalysis(kind, apiFormatJson, analysis)) throw malformedWorkflowResponse()
-  return { sourceText, analysis }
+  const expectedGraph = unwrapComfyApiWorkflowPayload(apiFormatJson)
+  if (!isRecord(expectedGraph)
+    || !isConsistentWorkflowAnalysis(kind, expectedGraph, analysis)) throw malformedWorkflowResponse()
+  return {
+    sourceText: expectedGraph === apiFormatJson ? sourceText : JSON.stringify(expectedGraph, null, 2),
+    analysis,
+  }
 }
 
 export async function createWorkflowDraft(draft: WorkflowAuthorDraft): Promise<string> {

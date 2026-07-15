@@ -294,11 +294,35 @@ export type WorkflowErrorKey =
   | 'workflowTimedOut'
   | 'workflowNetworkFailed'
   | 'workflowExternalFailed'
+  | WorkflowAnalysisErrorKey
+
+export type WorkflowAnalysisErrorReason =
+  | 'COMFY_WORKFLOW_API_FORMAT_REQUIRED'
+  | 'COMFY_WORKFLOW_API_FORMAT_INVALID'
+
+export type WorkflowAnalysisErrorKey =
+  | `guided.issues.${WorkflowAnalysisErrorReason}`
+  | 'guided.issues.unknown'
+
+const SAFE_WORKFLOW_ANALYSIS_REASONS = new Set<WorkflowAnalysisErrorReason>([
+  'COMFY_WORKFLOW_API_FORMAT_REQUIRED',
+  'COMFY_WORKFLOW_API_FORMAT_INVALID',
+])
+
+function safeWorkflowAnalysisReason(value: unknown): WorkflowAnalysisErrorReason | undefined {
+  return typeof value === 'string'
+    && SAFE_WORKFLOW_ANALYSIS_REASONS.has(value as WorkflowAnalysisErrorReason)
+    ? value as WorkflowAnalysisErrorReason
+    : undefined
+}
 
 export class WorkflowRequestError extends Error {
-  constructor(readonly code: string) {
+  readonly reason?: WorkflowAnalysisErrorReason
+
+  constructor(readonly code: string, reason?: unknown) {
     super('workflowRequestFailed')
     this.name = 'WorkflowRequestError'
+    this.reason = code === 'INVALID_PARAMS' ? safeWorkflowAnalysisReason(reason) : undefined
   }
 }
 
@@ -323,7 +347,10 @@ export function workflowRequestErrorFromPayload(payload: unknown): WorkflowReque
   const code = typeof nested?.code === 'string'
     ? nested.code
     : typeof record.code === 'string' ? record.code : 'UNKNOWN'
-  return new WorkflowRequestError(code)
+  const details = nested?.details && typeof nested.details === 'object' && !Array.isArray(nested.details)
+    ? nested.details as Record<string, unknown>
+    : null
+  return new WorkflowRequestError(code, details?.reason)
 }
 
 export function safeWorkflowErrorKey(error: unknown): WorkflowErrorKey {
@@ -332,4 +359,11 @@ export function safeWorkflowErrorKey(error: unknown): WorkflowErrorKey {
   }
   if (error instanceof WorkflowRequestError) return SAFE_WORKFLOW_API_ERRORS[error.code] ?? 'requestFailed'
   return 'requestFailed'
+}
+
+export function safeWorkflowAnalysisErrorKey(error: unknown): WorkflowErrorKey {
+  if (error instanceof WorkflowRequestError && error.reason) {
+    return `guided.issues.${error.reason}`
+  }
+  return safeWorkflowErrorKey(error)
 }

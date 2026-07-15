@@ -45,6 +45,16 @@ function ambiguousLoaderGraph() {
 }
 
 describe('ComfyUI API workflow auto mapper', () => {
+  it('unwraps the common object-valued prompt API payload', () => {
+    const result = analyzeComfyApiWorkflow({
+      graph: { prompt: apiGraph },
+      kind: 'image_generation',
+    })
+
+    expect(result.graph).toEqual(apiGraph)
+    expect(result.graph).not.toBe(apiGraph)
+  })
+
   it.each([
     { nodes: [], links: [] },
     [],

@@ -12,7 +12,9 @@ import {
 } from '@/app/[locale]/profile/components/comfyui/workflow-requests'
 import { createWorkflowAnalysisCoordinator } from '@/app/[locale]/profile/components/comfyui/guided-workflow-creation'
 import {
+  safeWorkflowAnalysisErrorKey,
   safeWorkflowErrorKey,
+  workflowRequestErrorFromPayload,
   WorkflowRequestError,
   type WorkflowAuthorDraft,
 } from '@/app/[locale]/profile/components/comfyui/workflow-ui'
@@ -533,6 +535,32 @@ describe('WorkflowCreationWizard', () => {
     expect(view.queryByRole('heading', { name: 'Review and confirm' })).toBeNull()
     expect(view.getByRole('alert').textContent).toBe('The workflow request failed.')
   })
+
+  it('renders a localized API Format instruction without leaking server details', async () => {
+    vi.spyOn(apiFetchModule, 'apiFetch').mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        code: 'INVALID_PARAMS',
+        message: '<script>private analyzer detail</script>',
+        details: { reason: 'COMFY_WORKFLOW_API_FORMAT_REQUIRED' },
+      },
+    }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+    const { view } = renderWizard({ analyze: undefined })
+    selectKindAndAdvance(view)
+    const sourceText = JSON.stringify({ nodes: [], links: [] })
+    const file = new File([sourceText], 'ui-workflow.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(sourceText) })
+
+    await act(async () => {
+      fireEvent.change(view.getByLabelText('Workflow JSON file'), { target: { files: [file] } })
+    })
+
+    const alert = view.getByRole('alert')
+    expect(alert.textContent).toBe(
+      'Export the workflow from ComfyUI in API Format, then upload that JSON file.',
+    )
+    expect(alert.textContent).not.toContain('The workflow settings are invalid')
+    expect(alert.textContent).not.toContain('private analyzer detail')
+  })
 })
 
 describe('workflow request helpers', () => {
@@ -552,6 +580,58 @@ describe('workflow request helpers', () => {
       method: 'POST',
       body: JSON.stringify({ kind: 'image_generation', apiFormatJson: graph }),
     }))
+  })
+
+  it('normalizes a wrapped upload while retaining strengthened response validation', async () => {
+    const graph = analysis().graph
+    const wrapped = { prompt: graph }
+    const sourceText = JSON.stringify(wrapped)
+    const apiFetch = vi.spyOn(apiFetchModule, 'apiFetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        analysis: analysis({ graph }),
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        analysis: analysis({
+          graph: { ...graph, extra: { class_type: 'SaveImage', inputs: {} } },
+        }),
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const file = new File([sourceText], 'wrapped.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(sourceText) })
+
+    const result = await analyzeWorkflowJson('image_generation', file)
+
+    expect(JSON.parse(result.sourceText)).toEqual(graph)
+    expect(result.analysis.graph).toEqual(graph)
+    await expect(analyzeWorkflowJson('image_generation', file)).rejects.toMatchObject({
+      name: 'WorkflowRequestError', code: 'UNKNOWN',
+    })
+    expect(apiFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('retains only allowlisted stable analysis reasons and safely maps unknown reasons', () => {
+    const known = workflowRequestErrorFromPayload({
+      error: {
+        code: 'INVALID_PARAMS',
+        details: { reason: 'COMFY_WORKFLOW_API_FORMAT_REQUIRED' },
+      },
+    })
+    const unknown = workflowRequestErrorFromPayload({
+      error: {
+        code: 'INVALID_PARAMS',
+        message: '<script>private diagnostic</script>',
+        details: { reason: 'PRIVATE_SERVER_REASON' },
+      },
+    })
+
+    expect(known).toMatchObject({
+      code: 'INVALID_PARAMS', reason: 'COMFY_WORKFLOW_API_FORMAT_REQUIRED',
+    })
+    expect(safeWorkflowAnalysisErrorKey(known))
+      .toBe('guided.issues.COMFY_WORKFLOW_API_FORMAT_REQUIRED')
+    expect(unknown).toMatchObject({ code: 'INVALID_PARAMS', reason: undefined })
+    expect(safeWorkflowAnalysisErrorKey(unknown)).toBe('workflowRequestInvalid')
+    expect(String(unknown)).not.toContain('private diagnostic')
+    expect(JSON.stringify(unknown)).not.toContain('PRIVATE_SERVER_REASON')
   })
 
   it('never parses or exposes a non-JSON error body', async () => {
