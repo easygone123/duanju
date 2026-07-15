@@ -65,20 +65,9 @@ Manual mappings are reset when the file or workflow kind changes, analysis is re
 - Controls are disabled while creation is pending or after completion.
 - Status and alert semantics remain available to assistive technology.
 
-## Testing
+## Validation
 
-Tests must cover:
-
-- a workflow with no prompt proposal shows compatible manual prompt candidates;
-- selecting a candidate removes `prompt` from missing required inputs and permits creation;
-- the created draft contains the selected prompt definition and binding;
-- a high-confidence existing mapping can be changed manually;
-- an occupied field cannot be selected as a second mapping;
-- graph links and incompatible literal types are not offered;
-- clearing or replacing the upload resets manual corrections;
-- busy/completed states disable every correction control;
-- deterministic validation rejects forged node/path/type selections;
-- Chinese and English strings stay in parity.
+Per the project owner's direction, this change will not add or run automated tests. Before submission, run only TypeScript checking, lint on affected files, translation-key parity inspection, and `git diff --check`. Do not run the repository-wide test suite.
 
 ## Non-Goals
 
