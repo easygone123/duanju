@@ -62,13 +62,13 @@ describe('guided ComfyUI workflow creation model', () => {
     expect(isGuidedWorkflowReady({ name: 'demo', review, busy: false })).toBe(false)
   })
 
-  it('does not count high-confidence optional mappings as preserved', () => {
+  it('recognizes high-confidence optional mappings while preserving their workflow defaults', () => {
     const review = buildGuidedWorkflowReview('image_generation', analysis({ proposals: [
       { id: 'prompt', canonicalName: 'prompt', nodeId: '1', inputPath: 'text', valueType: 'string', confidence: 'high', reasonCode: 'prompt', required: true },
       { id: 'width', canonicalName: 'width', nodeId: '2', inputPath: 'width', valueType: 'number', confidence: 'high', reasonCode: 'width', required: false },
     ] }), {}, '')
     expect(review.resolvedInputs).toEqual(['prompt', 'width'])
-    expect(review.preservedCount).toBe(0)
+    expect(review.preservedCount).toBe(1)
   })
 
   it('requires one output choice when several outputs have no primary', () => {
@@ -90,7 +90,7 @@ describe('guided ComfyUI workflow creation model', () => {
     }), {}, 'stale-node')
     expect(review.primaryOutputNodeId).toBe('')
     expect(review.needsPrimaryOutput).toBe(true)
-    expect(review.blockingIssueCodes).toContain('COMFY_WORKFLOW_OUTPUT_AMBIGUOUS')
+    expect(review.blockingIssueCodes).not.toContain('COMFY_WORKFLOW_OUTPUT_AMBIGUOUS')
     expect(isGuidedWorkflowReady({ name: 'demo', review, busy: false })).toBe(false)
   })
 

@@ -70,13 +70,13 @@ export function buildGuidedWorkflowReview(
     .filter((name) => !mappedInputs.has(name))
   return {
     resolvedInputs,
-    preservedCount: dispositions.filter(({ proposal, role }) => !proposal.required && role === 'preserve_original').length,
+    preservedCount: analysis.proposals.filter((proposal) => !proposal.required && (!roles[proposal.id] || roles[proposal.id] === 'preserve_original')).length,
     questions,
     primaryOutputNodeId,
     needsPrimaryOutput: analysis.outputs.length > 1 && !primaryOutputNodeId,
     missingRequiredInputs,
     blockingIssueCodes: analysis.issues
-      .filter((issue) => issue.code !== 'COMFY_WORKFLOW_OUTPUT_AMBIGUOUS' || !primaryOutputNodeId)
+      .filter((issue) => issue.code !== 'COMFY_WORKFLOW_OUTPUT_AMBIGUOUS')
       .map((issue) => issue.code),
   }
 }
