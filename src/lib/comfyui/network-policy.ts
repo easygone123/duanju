@@ -38,6 +38,18 @@ export const resolveComfyHost: ComfyResolver = async (hostname) => {
   return answers.map(({ address, family }) => ({ address, family: family as 4 | 6 }))
 }
 
+export function readComfyNetworkPolicy(
+  env: Record<string, string | undefined>,
+): ComfyNetworkPolicyConfig {
+  const mode = parseNetworkMode(env.COMFYUI_NETWORK_MODE)
+  const allowedHosts = parseHosts(env.COMFYUI_ALLOWED_HOSTS)
+  const allowedCidrs = parseCidrs(env.COMFYUI_ALLOWED_CIDRS)
+  if (mode === 'allowlist' && allowedHosts.length === 0 && allowedCidrs.length === 0) {
+    throw invalid('COMFYUI_ALLOWED_HOSTS/COMFYUI_ALLOWED_CIDRS')
+  }
+  return { mode, allowedHosts, allowedCidrs }
+}
+
 export async function authorizeComfyTarget(
   rawUrl: string | URL,
   config: ComfyNetworkPolicyConfig,
@@ -98,6 +110,55 @@ function normalizeHostname(hostname: string): string {
   return normalized.startsWith('[') && normalized.endsWith(']')
     ? normalized.slice(1, -1)
     : normalized
+}
+
+function parseNetworkMode(value: string | undefined): ComfyNetworkPolicyConfig['mode'] {
+  if (value === undefined || value === '' || value === 'trusted') return 'trusted'
+  if (value === 'allowlist') return 'allowlist'
+  throw invalid('COMFYUI_NETWORK_MODE')
+}
+
+function parseHosts(value: string | undefined) {
+  return parseList(value, 'COMFYUI_ALLOWED_HOSTS', (entry) => {
+    const host = entry.startsWith('*.') ? entry.slice(2) : entry
+    if (!host || (!isIP(host) && (/[\s/:?#@\[\]]/.test(host) || !isHostname(host)))) {
+      throw invalid('COMFYUI_ALLOWED_HOSTS')
+    }
+    return entry.toLowerCase()
+  })
+}
+
+function parseCidrs(value: string | undefined) {
+  return parseList(value, 'COMFYUI_ALLOWED_CIDRS', (entry) => {
+    const pieces = entry.split('/')
+    if (pieces.length !== 2) throw invalid('COMFYUI_ALLOWED_CIDRS')
+    const family = isIP(pieces[0])
+    const prefix = Number(pieces[1])
+    if (!family || !Number.isInteger(prefix) || prefix < 0
+      || prefix > (family === 4 ? 32 : 128)) throw invalid('COMFYUI_ALLOWED_CIDRS')
+    return entry.toLowerCase()
+  })
+}
+
+function parseList(
+  value: string | undefined,
+  key: string,
+  validate: (entry: string) => string,
+) {
+  if (!value?.trim()) return []
+  const entries = value.split(',').map((entry) => entry.trim())
+  if (entries.some((entry) => !entry)) throw invalid(key)
+  return [...new Set(entries.map(validate))]
+}
+
+function isHostname(value: string) {
+  return value.length <= 253 && value.split('.').every((label) =>
+    label.length > 0 && label.length <= 63
+      && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))
+}
+
+function invalid(key: string) {
+  return new Error(`Invalid ${key}`)
 }
 
 function hostMatches(hostname: string, allowedEntry: string): boolean {

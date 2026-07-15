@@ -177,10 +177,10 @@ describe('ComfyUI runtime lifecycle', () => {
 })
 
 describe('ComfyUI runtime configuration', () => {
-  it('uses secure defaults and parses every approved setting exactly', () => {
+  it('enables trusted ComfyUI by default and parses every approved setting exactly', () => {
     expect(readComfyRuntimeConfig({})).toMatchObject({
-      enabled: false,
-      networkPolicy: { mode: 'allowlist', allowedHosts: [], allowedCidrs: [] },
+      enabled: true,
+      networkPolicy: { mode: 'trusted', allowedHosts: [], allowedCidrs: [] },
     })
 
     expect(readComfyRuntimeConfig({
@@ -253,7 +253,10 @@ describe('ComfyUI runtime configuration', () => {
   })
 
   it('fails fast when enabled allowlist mode has no permitted hosts or networks', () => {
-    expect(() => readComfyRuntimeConfig({ COMFYUI_ENABLED: 'true' }))
+    expect(() => readComfyRuntimeConfig({
+      COMFYUI_ENABLED: 'true',
+      COMFYUI_NETWORK_MODE: 'allowlist',
+    }))
       .toThrow('Invalid COMFYUI_ALLOWED_HOSTS/COMFYUI_ALLOWED_CIDRS')
   })
 

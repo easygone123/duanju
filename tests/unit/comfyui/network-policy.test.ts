@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   authorizeComfyTarget,
+  readComfyNetworkPolicy,
   type ComfyNetworkPolicyConfig,
   type ComfyResolver,
 } from '@/lib/comfyui/network-policy'
@@ -20,6 +21,35 @@ function resolver(...addresses: string[]): ComfyResolver {
     })),
   )
 }
+
+describe('readComfyNetworkPolicy', () => {
+  it('uses trusted mode without requiring per-instance allowlist entries', () => {
+    expect(readComfyNetworkPolicy({})).toEqual({
+      mode: 'trusted',
+      allowedHosts: [],
+      allowedCidrs: [],
+    })
+  })
+
+  it('retains an explicitly configured allowlist', () => {
+    expect(readComfyNetworkPolicy({
+      COMFYUI_NETWORK_MODE: 'allowlist',
+      COMFYUI_ALLOWED_HOSTS: 'gpu.local, *.example.com',
+      COMFYUI_ALLOWED_CIDRS: '192.168.1.0/24',
+    })).toEqual({
+      mode: 'allowlist',
+      allowedHosts: ['gpu.local', '*.example.com'],
+      allowedCidrs: ['192.168.1.0/24'],
+    })
+  })
+
+  it('rejects invalid and empty explicit allowlists', () => {
+    expect(() => readComfyNetworkPolicy({ COMFYUI_NETWORK_MODE: 'open' }))
+      .toThrow('Invalid COMFYUI_NETWORK_MODE')
+    expect(() => readComfyNetworkPolicy({ COMFYUI_NETWORK_MODE: 'allowlist' }))
+      .toThrow('Invalid COMFYUI_ALLOWED_HOSTS/COMFYUI_ALLOWED_CIDRS')
+  })
+})
 
 describe('authorizeComfyTarget', () => {
   it('accepts an allowlisted HTTP host and returns a pinned DNS answer', async () => {

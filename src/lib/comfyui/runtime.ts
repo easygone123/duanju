@@ -1,6 +1,7 @@
-import { isIP } from 'node:net'
-
-import type { ComfyNetworkPolicyConfig } from './network-policy'
+import {
+  readComfyNetworkPolicy,
+  type ComfyNetworkPolicyConfig,
+} from './network-policy'
 
 const DEFAULTS = {
   healthIntervalMs: 10_000,
@@ -155,17 +156,11 @@ export function startComfyRuntime(options: StartComfyRuntimeOptions = {}): Comfy
 export function readComfyRuntimeConfig(
   env: Record<string, string | undefined>,
 ): ComfyRuntimeConfig {
-  const enabled = parseBoolean(env, 'COMFYUI_ENABLED', false)
+  const enabled = parseBoolean(env, 'COMFYUI_ENABLED', true)
   if (!enabled) return defaultRuntimeConfig()
-  const mode = parseNetworkMode(env.COMFYUI_NETWORK_MODE)
-  const allowedHosts = parseHosts(env.COMFYUI_ALLOWED_HOSTS)
-  const allowedCidrs = parseCidrs(env.COMFYUI_ALLOWED_CIDRS)
-  if (enabled && mode === 'allowlist' && allowedHosts.length === 0 && allowedCidrs.length === 0) {
-    throw invalid('COMFYUI_ALLOWED_HOSTS/COMFYUI_ALLOWED_CIDRS')
-  }
   return {
     enabled,
-    networkPolicy: { mode, allowedHosts, allowedCidrs },
+    networkPolicy: readComfyNetworkPolicy(env),
     healthIntervalMs: parseInteger(env, 'COMFYUI_HEALTH_INTERVAL_MS', DEFAULTS.healthIntervalMs, 100, 3_600_000),
     dispatchIntervalMs: parseInteger(env, 'COMFYUI_DISPATCH_INTERVAL_MS', DEFAULTS.dispatchIntervalMs, 100, 3_600_000),
     reconcileIntervalMs: parseInteger(env, 'COMFYUI_RECONCILE_INTERVAL_MS', DEFAULTS.reconcileIntervalMs, 100, 3_600_000),
@@ -211,12 +206,6 @@ function parseBoolean(env: Record<string, string | undefined>, key: string, fall
   throw invalid(key)
 }
 
-function parseNetworkMode(value: string | undefined): ComfyNetworkPolicyConfig['mode'] {
-  if (value === undefined || value === '' || value === 'allowlist') return 'allowlist'
-  if (value === 'trusted') return 'trusted'
-  throw invalid('COMFYUI_NETWORK_MODE')
-}
-
 function parseInteger(
   env: Record<string, string | undefined>,
   key: string,
@@ -229,45 +218,6 @@ function parseInteger(
   const value = Number(raw)
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum) throw invalid(key)
   return value
-}
-
-function parseHosts(value: string | undefined) {
-  return parseList(value, 'COMFYUI_ALLOWED_HOSTS', (entry) => {
-    const host = entry.startsWith('*.') ? entry.slice(2) : entry
-    if (!host || (!isIP(host) && (/[\s/:?#@\[\]]/.test(host) || !isHostname(host)))) {
-      throw invalid('COMFYUI_ALLOWED_HOSTS')
-    }
-    return entry.toLowerCase()
-  })
-}
-
-function parseCidrs(value: string | undefined) {
-  return parseList(value, 'COMFYUI_ALLOWED_CIDRS', (entry) => {
-    const pieces = entry.split('/')
-    if (pieces.length !== 2) throw invalid('COMFYUI_ALLOWED_CIDRS')
-    const family = isIP(pieces[0])
-    const prefix = Number(pieces[1])
-    if (!family || !Number.isInteger(prefix) || prefix < 0
-      || prefix > (family === 4 ? 32 : 128)) throw invalid('COMFYUI_ALLOWED_CIDRS')
-    return entry.toLowerCase()
-  })
-}
-
-function parseList(
-  value: string | undefined,
-  key: string,
-  validate: (entry: string) => string,
-) {
-  if (!value?.trim()) return []
-  const entries = value.split(',').map((entry) => entry.trim())
-  if (entries.some((entry) => !entry)) throw invalid(key)
-  return [...new Set(entries.map(validate))]
-}
-
-function isHostname(value: string) {
-  return value.length <= 253 && value.split('.').every((label) =>
-    label.length > 0 && label.length <= 63
-      && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))
 }
 
 function invalid(key: string) {

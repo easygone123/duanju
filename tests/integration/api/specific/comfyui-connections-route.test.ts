@@ -165,6 +165,34 @@ describe('ComfyUI private connection routes', () => {
     }))
   })
 
+  it('uses trusted network mode by default when probing a new connection', async () => {
+    delete process.env.COMFYUI_NETWORK_MODE
+    delete process.env.COMFYUI_ALLOWED_HOSTS
+    delete process.env.COMFYUI_ALLOWED_CIDRS
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => connection({ ...data }),
+    )
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    const route = await import('@/app/api/comfyui/connections/route')
+
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/connections',
+      method: 'POST',
+      body: { name: 'Home GPU', baseUrl: 'example.com/comfy', authType: 'none' },
+    }), collectionContext)
+
+    expect(response.status).toBe(201)
+    expect(authorizeComfyTargetMock).toHaveBeenCalledWith(
+      'http://example.com/comfy',
+      { mode: 'trusted', allowedHosts: [], allowedCidrs: [] },
+    )
+    expect(clientConstructedMock).toHaveBeenCalledWith(expect.objectContaining({
+      networkPolicy: { mode: 'trusted', allowedHosts: [], allowedCidrs: [] },
+    }))
+  })
+
   it('AC01 creates local and remote private connections with normalized owner-visible status', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')

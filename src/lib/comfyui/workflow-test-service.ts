@@ -7,7 +7,7 @@ import { prisma } from '@/lib/prisma'
 
 import { ComfyClient } from './client'
 import { COMFY_ERROR_CODE, ComfyError } from './errors'
-import { authorizeComfyTarget, type ComfyNetworkPolicyConfig } from './network-policy'
+import { authorizeComfyTarget, readComfyNetworkPolicy } from './network-policy'
 import { acquireComfyLease, releaseComfyLease, startComfyLeaseGuard } from './test-lease'
 import type {
   ComfyApiWorkflow,
@@ -110,7 +110,7 @@ async function runOwnedWorkflowTestInternal(
   })
   if (!connection) throw new ApiError('NOT_FOUND')
 
-  const networkPolicy = readNetworkPolicy()
+  const networkPolicy = readComfyNetworkPolicy(process.env)
   await authorizeComfyTarget(connection.normalizedBaseUrl, networkPolicy)
   const client = new ComfyClient({
     baseUrl: connection.normalizedBaseUrl, auth: connectionAuth(connection), networkPolicy,
@@ -313,14 +313,6 @@ function connectionAuth(connection: ComfyConnection): ComfyConnectionAuth {
   throw new ApiError('MISSING_CONFIG')
 }
 
-function readNetworkPolicy(): ComfyNetworkPolicyConfig {
-  return {
-    mode: process.env.COMFYUI_NETWORK_MODE === 'trusted' ? 'trusted' : 'allowlist',
-    allowedHosts: commaList(process.env.COMFYUI_ALLOWED_HOSTS),
-    allowedCidrs: commaList(process.env.COMFYUI_ALLOWED_CIDRS),
-  }
-}
-
 function decodeBoundedBase64(value: string): Uint8Array {
   const buffer = Buffer.from(value, 'base64')
   if (buffer.byteLength === 0
@@ -349,10 +341,6 @@ function isComfyErrorLike(value: unknown): value is { code: ComfyError['code']; 
   return !!value && typeof value === 'object' && 'code' in value
     && typeof value.code === 'string' && COMFY_ERROR_CODES.has(value.code)
     && 'retryable' in value && typeof value.retryable === 'boolean'
-}
-
-function commaList(value: string | undefined) {
-  return (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

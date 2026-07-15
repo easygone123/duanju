@@ -9,7 +9,7 @@ import {
   type ComfyCancellationDependencies,
 } from '@/lib/comfyui/dispatcher'
 import { comfyRequestLeaseValue, releaseComfyRequestLease } from '@/lib/comfyui/lease'
-import type { ComfyNetworkPolicyConfig } from '@/lib/comfyui/network-policy'
+import { readComfyNetworkPolicy } from '@/lib/comfyui/network-policy'
 import { comfyLeaseKey } from '@/lib/comfyui/test-lease'
 import type { ComfyConnectionAuth, ComfyRequestStatus } from '@/lib/comfyui/types'
 import { decryptApiKey } from '@/lib/crypto-utils'
@@ -47,7 +47,7 @@ function createCancellationDependencies(): ComfyCancellationDependencies {
         client = new ComfyClient({
           baseUrl: loaded.connection.normalizedBaseUrl,
           auth: decodeAuth(loaded.connection),
-          networkPolicy: networkPolicy(),
+          networkPolicy: readComfyNetworkPolicy(process.env),
         })
       }
       return {
@@ -147,18 +147,6 @@ function decodeAuth(connection: ComfyConnection): ComfyConnectionAuth {
     return { type: 'basic', username: value.username, password: value.password }
   }
   throw new ApiError('MISSING_CONFIG')
-}
-
-function networkPolicy(): ComfyNetworkPolicyConfig {
-  return {
-    mode: process.env.COMFYUI_NETWORK_MODE === 'trusted' ? 'trusted' : 'allowlist',
-    allowedHosts: list(process.env.COMFYUI_ALLOWED_HOSTS),
-    allowedCidrs: list(process.env.COMFYUI_ALLOWED_CIDRS),
-  }
-}
-
-function list(value: string | undefined) {
-  return (value ?? '').split(',').map((item) => item.trim()).filter(Boolean)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

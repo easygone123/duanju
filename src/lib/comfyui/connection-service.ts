@@ -7,7 +7,11 @@ import { randomUUID } from 'node:crypto'
 
 import { ComfyClient, type ComfyClientOptions } from './client'
 import { deriveComfyHealth, sanitizeComfyHealthDiagnostic } from './health'
-import { authorizeComfyTarget, type ComfyNetworkPolicyConfig } from './network-policy'
+import {
+  authorizeComfyTarget,
+  readComfyNetworkPolicy,
+  type ComfyNetworkPolicyConfig,
+} from './network-policy'
 import type { ComfyAuthType, ComfyConnectionAuth, ComfyDeviceSummary, ComfyHealthSummary } from './types'
 import { acquireComfyLease, releaseComfyLease, startComfyLeaseGuard } from './test-lease'
 
@@ -304,7 +308,7 @@ async function collectProbe(
   userId: string,
   options?: ComfyProbeOptions,
 ) {
-  const policy = options?.networkPolicy ?? readNetworkPolicy()
+  const policy = options?.networkPolicy ?? readComfyNetworkPolicy(process.env)
   const checkedAt = new Date()
   let summary: ComfyHealthSummary
   try {
@@ -423,24 +427,12 @@ function isBasicCredentials(value: unknown): value is { username: string; passwo
     && typeof value.password === 'string' && value.password.length > 0
 }
 
-function readNetworkPolicy(): ComfyNetworkPolicyConfig {
-  return {
-    mode: process.env.COMFYUI_NETWORK_MODE === 'trusted' ? 'trusted' : 'allowlist',
-    allowedHosts: commaList(process.env.COMFYUI_ALLOWED_HOSTS),
-    allowedCidrs: commaList(process.env.COMFYUI_ALLOWED_CIDRS),
-  }
-}
-
 export function createOwnedComfyClient(connection: ComfyConnection) {
   return new ComfyClient({
     baseUrl: connection.normalizedBaseUrl,
     auth: decodeCredentials(connection),
-    networkPolicy: readNetworkPolicy(),
+    networkPolicy: readComfyNetworkPolicy(process.env),
   })
-}
-
-function commaList(value: string | undefined) {
-  return (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)
 }
 
 function readStatusProbeConcurrency() {
