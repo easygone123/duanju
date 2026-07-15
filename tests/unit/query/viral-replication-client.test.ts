@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { queryKeys } from '@/lib/query/keys'
-import { uploadViralReplicationVideo } from '@/lib/viral-replication/client'
+import {
+  getViralReplicationAvailability,
+  uploadViralReplicationVideo,
+} from '@/lib/viral-replication/client'
 
 class FakeXMLHttpRequest {
   static instances: FakeXMLHttpRequest[] = []
@@ -54,6 +57,18 @@ describe('viral replication client', () => {
   it('uses a stable detail query key', () => {
     expect(queryKeys.viralReplication.detail('rep-1')).toEqual(['viral-replication', 'rep-1'])
     expect(queryKeys.viralReplication.detail('rep-1')).toEqual(queryKeys.viralReplication.detail('rep-1'))
+  })
+
+  it('reads the runtime availability endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(
+      JSON.stringify({ available: true }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ))
+    await expect(getViralReplicationAvailability()).resolves.toEqual({ available: true })
+    expect(fetchMock).toHaveBeenCalledWith('/api/viral-replications', expect.objectContaining({
+      headers: expect.any(Headers),
+    }))
+    fetchMock.mockRestore()
   })
 
   it('uploads the File body directly with PUT and reports percentage progress', async () => {

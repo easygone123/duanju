@@ -9,6 +9,7 @@ import { ART_STYLES, VIDEO_RATIOS } from '@/lib/constants'
 import { useRouter } from '@/i18n/navigation'
 import {
   createViralReplicationSession,
+  getViralReplicationAvailability,
   uploadViralReplicationVideo,
 } from '@/lib/viral-replication/client'
 
@@ -27,6 +28,7 @@ export default function ViralReplicationLauncher() {
   const t = useTranslations('home.viralReplication')
   const router = useRouter()
   const abortControllerRef = useRef<AbortController | null>(null)
+  const [available, setAvailable] = useState<boolean | null>(null)
   const [open, setOpen] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [brief, setBrief] = useState('')
@@ -37,7 +39,16 @@ export default function ViralReplicationLauncher() {
   const [validationError, setValidationError] = useState<'formatError' | 'sizeError' | null>(null)
   const [submitError, setSubmitError] = useState(false)
 
-  useEffect(() => () => abortControllerRef.current?.abort(), [])
+  useEffect(() => {
+    let active = true
+    void getViralReplicationAvailability()
+      .then((result) => { if (active) setAvailable(result.available) })
+      .catch(() => { if (active) setAvailable(false) })
+    return () => {
+      active = false
+      abortControllerRef.current?.abort()
+    }
+  }, [])
 
   const reset = () => {
     abortControllerRef.current?.abort()
@@ -106,12 +117,14 @@ export default function ViralReplicationLauncher() {
     <>
       <button
         type="button"
+        disabled={available !== true}
         onClick={() => setOpen(true)}
-        className="glass-btn-base flex h-10 items-center gap-1.5 border border-fuchsia-500/30 px-3 text-sm font-medium text-fuchsia-700"
+        className="glass-btn-base flex h-10 items-center gap-1.5 border border-fuchsia-500/30 px-3 text-sm font-medium text-fuchsia-700 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <AppIcon name="sparkles" className="h-4 w-4" />
         {t('trigger')}
       </button>
+      {available === false ? <span className="ml-2 text-xs text-[var(--glass-text-tertiary)]">{t('unavailable')}</span> : null}
       {open ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={close}>
           <div

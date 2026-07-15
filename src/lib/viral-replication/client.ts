@@ -41,6 +41,15 @@ export type ViralReplicationDetail = {
 
 type ReplicationResponse = { replication: ViralReplicationDetail }
 
+export async function getViralReplicationAvailability(): Promise<{ available: boolean }> {
+  const response = await apiFetch('/api/viral-replications')
+  const payload = await response.json().catch(() => null) as { available?: unknown } | null
+  if (!response.ok || typeof payload?.available !== 'boolean') {
+    throw new Error('VIRAL_REPLICATION_AVAILABILITY_FAILED')
+  }
+  return { available: payload.available }
+}
+
 async function parseJsonResponse(response: Response): Promise<ReplicationResponse> {
   const payload = await response.json().catch(() => null) as {
     replication?: ViralReplicationDetail

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildMockRequest } from '../../../helpers/request'
 
 const authState = vi.hoisted(() => ({ authenticated: true }))
+const runtimeHealthState = vi.hoisted(() => ({ available: true }))
 const serviceMock = vi.hoisted(() => ({
   createViralReplication: vi.fn(),
   getOwnedViralReplicationDetail: vi.fn(),
@@ -23,11 +24,19 @@ vi.mock('@/lib/api-auth', () => ({
 }))
 
 vi.mock('@/lib/viral-replication/service', () => serviceMock)
+vi.mock('@/lib/viral-replication/runtime-health', () => ({
+  getViralReplicationRuntimeHealth: async () => ({
+    available: runtimeHealthState.available,
+    ffmpeg: runtimeHealthState.available,
+    ffprobe: runtimeHealthState.available,
+  }),
+}))
 
 describe('api contract - viral replication routes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     authState.authenticated = true
+    runtimeHealthState.available = true
     serviceMock.createViralReplication.mockResolvedValue({
       id: 'rep-1', status: 'uploading', brief: '复刻节奏，不复制人物', videoRatio: '9:16', artStyle: 'realistic',
     })
@@ -47,6 +56,26 @@ describe('api contract - viral replication routes', () => {
     serviceMock.generateViralReplication.mockResolvedValue({
       id: 'rep-1', status: 'generating', taskId: 'task-generate-1',
     })
+  })
+
+  it('reports runtime availability and rejects session creation when FFmpeg is unavailable', async () => {
+    const { GET, POST } = await import('@/app/api/viral-replications/route')
+    const context = { params: Promise.resolve({}) }
+    expect(await (await GET(buildMockRequest({ path: '/api/viral-replications', method: 'GET' }), context)).json())
+      .toEqual({ available: true })
+
+    runtimeHealthState.available = false
+    expect(await (await GET(buildMockRequest({ path: '/api/viral-replications', method: 'GET' }), context)).json())
+      .toEqual({ available: false })
+    const response = await POST(buildMockRequest({
+      path: '/api/viral-replications', method: 'POST',
+      body: { brief: '方向', videoRatio: '9:16', artStyle: 'realistic' },
+    }), context)
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({
+      error: { details: { code: 'VIRAL_REPLICATION_UNAVAILABLE' } },
+    })
+    expect(serviceMock.createViralReplication).not.toHaveBeenCalled()
   })
 
   it('requires authentication for upload-session creation', async () => {

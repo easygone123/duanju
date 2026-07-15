@@ -9,6 +9,7 @@
   "noProjects": "No projects yet. Start your first creation from above!",
   "viralReplication": {
     "trigger": "Viral Remix",
+    "unavailable": "Viral Remix is unavailable because the video runtime is not installed",
     "title": "Upload a reference and create an original storyboard",
     "subtitle": "AI transfers pacing, composition, and camera methods without copying characters, plot, or dialogue",
     "close": "Close",

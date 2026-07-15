@@ -9,6 +9,7 @@
   "noProjects": "还没有项目，从上方开始你的第一个创作吧",
   "viralReplication": {
     "trigger": "爆款复刻",
+    "unavailable": "视频运行环境未安装，爆款复刻暂不可用",
     "title": "上传参考视频，生成原创分镜",
     "subtitle": "AI 只提取节奏、构图和镜头方法，不复制人物、剧情或对白",
     "close": "关闭",

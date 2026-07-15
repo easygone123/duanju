@@ -10,10 +10,18 @@ RUN npm ci
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# Keep the Next.js compiler and its type-check worker within small Docker Desktop VMs.
+ENV NODE_OPTIONS=--max-old-space-size=1024
+ENV NEXT_BUILD_LOW_MEMORY=1
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Prisma generate + Next.js build
+# Run strict gates serially so type-checking, linting, and webpack do not overlap in memory.
+RUN npm run typecheck
+RUN npm run lint:all
+
+# Prisma generate + Next.js build (the low-memory config skips only the duplicate internal gates)
 RUN npm run build
 
 # ==================== Stage 3: Production ====================
@@ -22,8 +30,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Install tini for proper signal handling
-RUN apk add --no-cache tini
+# Install process supervision and the video analysis runtime.
+RUN apk add --no-cache tini ffmpeg
 
 # node_modules（含 devDeps，因为 npm run start 需要 concurrently + tsx）
 COPY --from=builder /app/node_modules ./node_modules

@@ -12,6 +12,19 @@ export type RequirementCoverageEntry = {
 
 export const REQUIREMENTS_MATRIX: ReadonlyArray<RequirementCoverageEntry> = [
   {
+    id: 'REQ-VIRAL-VIDEO-REPLICATION',
+    feature: 'Viral video analysis and original storyboard replication',
+    userValue: '上传参考视频后获得可审核的镜头分析，并生成可编辑的原创分镜',
+    risk: '视频运行环境、异步状态或持久化契约漂移导致流程中断或生成不可编辑结果',
+    priority: 'P0',
+    tests: [
+      'tests/integration/api/contract/viral-replication-routes.test.ts',
+      'tests/integration/chain/viral-replication.chain.test.ts',
+      'tests/system/viral-replication.system.test.ts',
+      'tests/unit/optimistic/sse-invalidation.test.ts',
+    ],
+  },
+  {
     id: 'REQ-ASSETHUB-CHARACTER-EDIT',
     feature: 'Asset Hub character edit',
     userValue: '角色信息编辑后立即可见并正确保存',

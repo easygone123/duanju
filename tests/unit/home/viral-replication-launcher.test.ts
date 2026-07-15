@@ -12,6 +12,7 @@ const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 const client = vi.hoisted(() => ({
   createViralReplicationSession: vi.fn(),
   uploadViralReplicationVideo: vi.fn(),
+  getViralReplicationAvailability: vi.fn(),
 }))
 
 vi.mock('@/i18n/navigation', () => ({ useRouter: () => navigation }))
@@ -25,19 +26,32 @@ describe('viral replication homepage launcher', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     client.createViralReplicationSession.mockResolvedValue({ id: 'rep-1', status: 'uploading' })
+    client.getViralReplicationAvailability.mockResolvedValue({ available: true })
     client.uploadViralReplicationVideo.mockResolvedValue({
       id: 'rep-1', status: 'analyzing', projectId: 'project-1',
     })
   })
 
-  function openLauncher() {
+  it('disables the launcher when the FFmpeg runtime is unavailable', async () => {
+    client.getViralReplicationAvailability.mockResolvedValue({ available: false })
     const view = render(createElement(ViralReplicationLauncher))
-    fireEvent.click(view.getByRole('button', { name: 'trigger' }))
+    const trigger = view.getByRole('button', { name: 'trigger' }) as HTMLButtonElement
+    await waitFor(() => expect(trigger.disabled).toBe(true))
+    expect(view.getByText('unavailable')).toBeTruthy()
+    fireEvent.click(trigger)
+    expect(view.queryByRole('dialog')).toBeNull()
+  })
+
+  async function openLauncher() {
+    const view = render(createElement(ViralReplicationLauncher))
+    const trigger = view.getByRole('button', { name: 'trigger' }) as HTMLButtonElement
+    await waitFor(() => expect(trigger.disabled).toBe(false))
+    fireEvent.click(trigger)
     return view
   }
 
-  it('is visible and blocks missing brief, invalid format, and files over 500 MB', () => {
-    const view = openLauncher()
+  it('is visible and blocks missing brief, invalid format, and files over 500 MB', async () => {
+    const view = await openLauncher()
     const submit = view.getByRole('button', { name: 'start' }) as HTMLButtonElement
     expect(submit.disabled).toBe(true)
 
@@ -63,7 +77,7 @@ describe('viral replication homepage launcher', () => {
       options.onProgress?.(42)
       return await new Promise((resolve) => { resolveUpload = resolve })
     })
-    const view = openLauncher()
+    const view = await openLauncher()
     fireEvent.change(view.getByLabelText('briefLabel'), { target: { value: '原创都市反转故事' } })
     const file = new File(['video'], 'source.mov', { type: 'video/quicktime' })
     fireEvent.change(view.getByLabelText('videoLabel'), { target: { files: [file] } })
