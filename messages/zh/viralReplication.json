@@ -1,0 +1,61 @@
+{
+  "eyebrow": "爆款复刻",
+  "title": "视频分析与原创改编",
+  "states": {
+    "loading": "正在加载分析任务…",
+    "uploading": "正在接收视频",
+    "uploadingValidation": "视频上传完成后会先进行格式与完整性校验，再开始内容分析。",
+    "completed": "分镜已生成",
+    "redirecting": "正在进入可编辑分镜工作台…"
+  },
+  "progress": {
+    "analyzing": "正在分析参考视频",
+    "generating": "正在生成原创分镜",
+    "stages": {
+      "upload": "校验视频",
+      "probe": "读取媒体信息",
+      "frames": "提取关键画面",
+      "shots": "分析镜头结构",
+      "report": "汇总分析报告"
+    }
+  },
+  "report": {
+    "overview": "内容结构概览",
+    "hook": "开场钩子",
+    "coreAppeal": "核心吸引力",
+    "pacing": "节奏",
+    "emotionalArc": "情绪曲线",
+    "styleFingerprint": "风格指纹",
+    "composition": "构图",
+    "lighting": "光线",
+    "color": "色彩",
+    "editing": "剪辑",
+    "timeline": "镜头时间线",
+    "shotType": "景别",
+    "cameraAngle": "机位角度",
+    "cameraMove": "运镜",
+    "actionBeat": "动作事件",
+    "transition": "转场",
+    "subtitleSummary": "字幕摘要",
+    "narrativeFunction": "叙事作用",
+    "noSubtitle": "无可识别字幕",
+    "advice": "原创改编建议"
+  },
+  "audioSubtitleNotice": "提示：如果视频只有纯音频对白且没有字幕，当前分析可能无法完整捕捉对白内容。",
+  "brief": {
+    "label": "原创创作要求",
+    "help": "保留有效的叙事结构和镜头规律，明确写出需要替换的人物、情节、场景与表达。"
+  },
+  "actions": {
+    "save": "保存要求",
+    "saving": "保存中…",
+    "generate": "生成原创分镜",
+    "starting": "正在启动…",
+    "retry": "重试"
+  },
+  "errors": {
+    "generic": "任务暂时未能完成，请重试。",
+    "invalidReport": "分析报告格式无效，请重试分析。",
+    "projectMismatch": "该分析任务不属于当前项目。"
+  }
+}

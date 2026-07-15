@@ -1,0 +1,61 @@
+{
+  "eyebrow": "Viral Replication",
+  "title": "Video analysis and original adaptation",
+  "states": {
+    "loading": "Loading the analysis task…",
+    "uploading": "Receiving video",
+    "uploadingValidation": "After upload, the video is checked for format and integrity before content analysis begins.",
+    "completed": "Storyboards generated",
+    "redirecting": "Opening the editable storyboard workspace…"
+  },
+  "progress": {
+    "analyzing": "Analyzing the reference video",
+    "generating": "Generating original storyboards",
+    "stages": {
+      "upload": "Validate video",
+      "probe": "Read media details",
+      "frames": "Extract key frames",
+      "shots": "Analyze shot structure",
+      "report": "Build analysis report"
+    }
+  },
+  "report": {
+    "overview": "Content structure overview",
+    "hook": "Opening hook",
+    "coreAppeal": "Core appeal",
+    "pacing": "Pacing",
+    "emotionalArc": "Emotional arc",
+    "styleFingerprint": "Style fingerprint",
+    "composition": "Composition",
+    "lighting": "Lighting",
+    "color": "Color",
+    "editing": "Editing",
+    "timeline": "Shot timeline",
+    "shotType": "Shot type",
+    "cameraAngle": "Camera angle",
+    "cameraMove": "Camera move",
+    "actionBeat": "Action",
+    "transition": "Transition",
+    "subtitleSummary": "Subtitle summary",
+    "narrativeFunction": "Narrative function",
+    "noSubtitle": "No recognizable subtitles",
+    "advice": "Original adaptation advice"
+  },
+  "audioSubtitleNotice": "Note: dialogue delivered only as audio may not be fully captured when the video has no subtitles.",
+  "brief": {
+    "label": "Original creation brief",
+    "help": "Keep effective narrative and shot patterns while specifying the characters, plot, setting, and expression to replace."
+  },
+  "actions": {
+    "save": "Save brief",
+    "saving": "Saving…",
+    "generate": "Generate original storyboards",
+    "starting": "Starting…",
+    "retry": "Retry"
+  },
+  "errors": {
+    "generic": "The task could not be completed. Please retry.",
+    "invalidReport": "The analysis report is invalid. Please retry the analysis.",
+    "projectMismatch": "This analysis task does not belong to the current project."
+  }
+}
