@@ -136,6 +136,13 @@ export type TaskJobData = {
     taskId: string
     externalId: string
   }
+  viralAnalysisResume?: {
+    version: 1
+    taskId: string
+    replicationId: string
+    observedExecutionToken: string
+    retryAt: number
+  }
 }
 
 export type SSEEvent = {

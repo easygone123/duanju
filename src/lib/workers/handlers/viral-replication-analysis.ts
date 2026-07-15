@@ -6,7 +6,7 @@ import path from 'node:path'
 import type { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
-import type { Job } from 'bullmq'
+import { DelayedError, type Job } from 'bullmq'
 
 import { safeParseJson } from '@/lib/json-repair'
 import { getCompletionContent } from '@/lib/llm/completion-parts'
@@ -18,6 +18,7 @@ import {
 } from '@/lib/model-gateway/llm'
 import { prisma } from '@/lib/prisma'
 import { deleteObject, getObjectStream, uploadObject } from '@/lib/storage'
+import { touchTaskHeartbeat } from '@/lib/task/service'
 import type { TaskJobData } from '@/lib/task/types'
 import { VIRAL_REPLICATION_STATUS } from '@/lib/viral-replication/constants'
 import { parseViralAnalysisReport, type ViralAnalysisReportV1 } from '@/lib/viral-replication/contracts'
@@ -46,6 +47,7 @@ type ReplicationRecord = {
   status: string
   sourceVideoMediaId: string | null
   analysisModelSnapshot: string | null
+  analysisExecutionTaskId: string | null
   analysisExecutionToken: string | null
   analysisExecutionExpiresAt: Date | null
   sourceVideoMedia: { id: string; storageKey: string } | null
@@ -99,6 +101,7 @@ export type ViralReplicationAnalysisDependencies = {
   runVision(input: Parameters<typeof runModelGatewayVisionCompletion>[0]): Promise<VisionCompletion>
   runText(input: Parameters<typeof runModelGatewayTextCompletion>[0]): Promise<TextCompletion>
   reportProgress(job: Job<TaskJobData>, progress: number, payload?: Record<string, unknown>): Promise<unknown>
+  touchTaskHeartbeat(taskId: string): Promise<boolean>
   makeTempDirectory(): Promise<string>
   removeTempDirectory(directory: string): Promise<void>
   now(): Date
@@ -116,6 +119,7 @@ const defaultDependencies: ViralReplicationAnalysisDependencies = {
   runVision: runModelGatewayVisionCompletion,
   runText: runModelGatewayTextCompletion,
   reportProgress: reportTaskProgress,
+  touchTaskHeartbeat,
   makeTempDirectory: async () => await fs.mkdtemp(path.join(os.tmpdir(), 'viral-analysis-')),
   removeTempDirectory: async (directory) => await fs.rm(directory, { recursive: true, force: true }),
   now: () => new Date(),
@@ -150,6 +154,7 @@ function executionWhere(input: {
     status: VIRAL_REPLICATION_STATUS.ANALYZING,
     sourceVideoMediaId: input.sourceVideoMediaId,
     analysisModelSnapshot: input.model,
+    analysisExecutionTaskId: input.job.data.taskId,
     analysisExecutionToken: input.token,
   }
 }
@@ -158,13 +163,67 @@ function nextLeaseExpiry(dependencies: ViralReplicationAnalysisDependencies): Da
   return new Date(dependencies.now().getTime() + ANALYSIS_EXECUTION_LEASE_MS)
 }
 
+type ClaimResult =
+  | { outcome: 'claimed' }
+  | { outcome: 'terminal_success'; status: string }
+
+const ANALYSIS_TERMINAL_SUCCESS_STATUSES = new Set<string>([
+  VIRAL_REPLICATION_STATUS.REVIEW_READY,
+  VIRAL_REPLICATION_STATUS.GENERATING,
+  VIRAL_REPLICATION_STATUS.COMPLETED,
+])
+
+async function clearViralAnalysisResumeMarker(job: Job<TaskJobData>): Promise<void> {
+  if (!job.data.viralAnalysisResume || typeof job.updateData !== 'function') return
+  const nextData = { ...job.data }
+  delete nextData.viralAnalysisResume
+  await job.updateData(nextData)
+}
+
+async function yieldActiveSameTaskExecution(input: {
+  dependencies: ViralReplicationAnalysisDependencies
+  job: Job<TaskJobData>
+  token: string
+  expiresAt: Date
+}): Promise<never> {
+  if (typeof input.job.moveToDelayed !== 'function'
+    || typeof input.job.updateData !== 'function'
+    || !input.job.token) {
+    throw new Error('VIRAL_ANALYSIS_DELAY_UNAVAILABLE')
+  }
+  const nowMs = input.dependencies.now().getTime()
+  const retryAt = Math.max(
+    nowMs + 1_000,
+    Math.min(input.expiresAt.getTime(), nowMs + 5_000),
+  )
+  const previousData = input.job.data
+  await input.job.updateData({
+    ...previousData,
+    viralAnalysisResume: {
+      version: 1,
+      taskId: previousData.taskId,
+      replicationId: previousData.targetId,
+      observedExecutionToken: input.token,
+      retryAt,
+    },
+  })
+  await input.dependencies.touchTaskHeartbeat(previousData.taskId)
+  try {
+    await input.job.moveToDelayed(retryAt, input.job.token)
+  } catch (error: unknown) {
+    await input.job.updateData(previousData)
+    throw error
+  }
+  throw new DelayedError()
+}
+
 async function claimExecution(input: {
   dependencies: ViralReplicationAnalysisDependencies
   job: Job<TaskJobData>
   sourceVideoMediaId: string
   model: string
   token: string
-}): Promise<void> {
+}): Promise<ClaimResult> {
   const now = input.dependencies.now()
   const claimed = await input.dependencies.prisma.viralReplication.updateMany({
     where: {
@@ -174,16 +233,65 @@ async function claimExecution(input: {
       sourceVideoMediaId: input.sourceVideoMediaId,
       analysisModelSnapshot: input.model,
       OR: [
-        { analysisExecutionToken: null },
+        {
+          analysisExecutionTaskId: null,
+          analysisExecutionToken: null,
+        },
         { analysisExecutionExpiresAt: { lte: now } },
       ],
     },
     data: {
+      analysisExecutionTaskId: input.job.data.taskId,
       analysisExecutionToken: input.token,
       analysisExecutionExpiresAt: new Date(now.getTime() + ANALYSIS_EXECUTION_LEASE_MS),
     },
   })
-  if (claimed.count !== 1) throw new ViralAnalysisSupersededError()
+  if (claimed.count === 1) {
+    await clearViralAnalysisResumeMarker(input.job)
+    return { outcome: 'claimed' }
+  }
+
+  const current = await input.dependencies.prisma.viralReplication.findFirst({
+    where: {
+      id: input.job.data.targetId,
+      userId: input.job.data.userId,
+    },
+    select: {
+      id: true,
+      status: true,
+      sourceVideoMediaId: true,
+      analysisModelSnapshot: true,
+      analysisExecutionTaskId: true,
+      analysisExecutionToken: true,
+      analysisExecutionExpiresAt: true,
+    },
+  })
+  if (!current
+    || current.sourceVideoMediaId !== input.sourceVideoMediaId
+    || current.analysisModelSnapshot !== input.model) {
+    throw new ViralAnalysisSupersededError('Viral analysis immutable input was superseded')
+  }
+  if (current.status === VIRAL_REPLICATION_STATUS.FAILED) {
+    throw new Error('Viral analysis domain execution failed')
+  }
+  const sameTask = current.analysisExecutionTaskId === input.job.data.taskId
+  if (sameTask && ANALYSIS_TERMINAL_SUCCESS_STATUSES.has(current.status)) {
+    await clearViralAnalysisResumeMarker(input.job)
+    return { outcome: 'terminal_success', status: current.status }
+  }
+  if (current.status === VIRAL_REPLICATION_STATUS.ANALYZING
+    && sameTask
+    && current.analysisExecutionToken
+    && current.analysisExecutionExpiresAt
+    && current.analysisExecutionExpiresAt.getTime() > now.getTime()) {
+    return await yieldActiveSameTaskExecution({
+      dependencies: input.dependencies,
+      job: input.job,
+      token: current.analysisExecutionToken,
+      expiresAt: current.analysisExecutionExpiresAt,
+    })
+  }
+  throw new ViralAnalysisSupersededError()
 }
 
 async function extendExecutionLease(
@@ -207,6 +315,7 @@ async function markFailed(
       where: executionWhere(execution),
       data: {
         status: VIRAL_REPLICATION_STATUS.FAILED,
+        analysisExecutionTaskId: null,
         analysisExecutionToken: null,
         analysisExecutionExpiresAt: null,
       },
@@ -394,7 +503,14 @@ export function createViralReplicationAnalysisHandler(
       const model = requirePayloadString(payload, 'analysisModelSnapshot')
       const token = dependencies.createExecutionToken()
       execution = { job, token, sourceVideoMediaId, model }
-      await claimExecution({ dependencies, job, sourceVideoMediaId, model, token })
+      const claim = await claimExecution({ dependencies, job, sourceVideoMediaId, model, token })
+      if (claim.outcome === 'terminal_success') {
+        return {
+          replicationId: job.data.targetId,
+          reconciled: true,
+          status: claim.status,
+        }
+      }
 
       const replication = await dependencies.prisma.viralReplication.findFirst({
         where: executionWhere(execution),
@@ -406,6 +522,7 @@ export function createViralReplicationAnalysisHandler(
           status: true,
           sourceVideoMediaId: true,
           analysisModelSnapshot: true,
+          analysisExecutionTaskId: true,
           analysisExecutionToken: true,
           analysisExecutionExpiresAt: true,
           sourceVideoMedia: { select: { id: true, storageKey: true } },
@@ -514,7 +631,9 @@ export function createViralReplicationAnalysisHandler(
       })
       return { replicationId: replication.id, frameCount: preprocessed.shots.length }
     } catch (error: unknown) {
-      if (execution && !(error instanceof ViralAnalysisSupersededError)) {
+      const delayed = error instanceof DelayedError
+        || (error instanceof Error && error.name === 'DelayedError')
+      if (execution && !delayed && !(error instanceof ViralAnalysisSupersededError)) {
         await markFailed(dependencies, execution)
       }
       throw error

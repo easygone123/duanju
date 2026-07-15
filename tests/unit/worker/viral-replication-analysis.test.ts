@@ -77,6 +77,7 @@ function whereMatches(record: Record<string, unknown>, where: Record<string, unk
     'status',
     'sourceVideoMediaId',
     'analysisModelSnapshot',
+    'analysisExecutionTaskId',
     'analysisExecutionToken',
   ]) {
     if (key in where && record[key] !== where[key]) return false
@@ -111,6 +112,7 @@ async function createHarness(options: HarnessOptions = {}) {
     projectId: 'project-1',
     brief: 'Make an original launch video',
     status: options.initialStatus ?? 'analyzing',
+    analysisExecutionTaskId: null,
     analysisExecutionToken: options.initialExecutionToken ?? null,
     analysisExecutionExpiresAt: options.initialExecutionExpiresAt ?? null,
     analysisModelSnapshot: 'provider::pinned-analysis-model',
@@ -126,6 +128,7 @@ async function createHarness(options: HarnessOptions = {}) {
   const textCalls: Array<Record<string, unknown>> = []
   let nextMedia = 1
   let nextAnalyzedShot = 0
+  let nextExecutionToken = 0
   if (options.existingFrameMedia) {
     frameMedia.push({
       id: 'existing-frame-media',
@@ -298,6 +301,7 @@ async function createHarness(options: HarnessOptions = {}) {
     reportProgress: vi.fn(async (_job, value, payload) => {
       progress.push({ value, payload })
     }),
+    touchTaskHeartbeat: vi.fn(async () => true),
     makeTempDirectory: vi.fn(async () => await fs.mkdtemp(path.join(root, 'worker-'))),
     removeTempDirectory: vi.fn(async (directory: string) => {
       await fs.rm(directory, { recursive: true, force: true })
@@ -305,7 +309,9 @@ async function createHarness(options: HarnessOptions = {}) {
     }),
     warn,
     now: () => options.now ?? new Date('2026-07-15T01:00:00.000Z'),
-    createExecutionToken: () => 'execution-token-new',
+    createExecutionToken: () => (
+      nextExecutionToken++ === 0 ? 'execution-token-new' : `execution-token-${nextExecutionToken}`
+    ),
   } as never)
 
   const job = {
@@ -322,6 +328,12 @@ async function createHarness(options: HarnessOptions = {}) {
         analysisModelSnapshot: 'provider::pinned-analysis-model',
       },
     },
+    queueName: 'viral',
+    token: 'bull-token-task-1',
+    updateData: vi.fn(async (nextData: Record<string, unknown>) => {
+      job.data = nextData as typeof job.data
+    }),
+    moveToDelayed: vi.fn(async () => undefined),
   }
 
   return {
@@ -422,9 +434,17 @@ describe('viral replication analysis handler', () => {
     expect(harness.runText).not.toHaveBeenCalled()
     expect(harness.updates.filter((update) => update.status === 'failed')).toEqual([{
       status: 'failed',
+      analysisExecutionTaskId: null,
       analysisExecutionToken: null,
       analysisExecutionExpiresAt: null,
     }])
+    expect(harness.updateWheres.at(-1)).toMatchObject({
+      status: 'analyzing',
+      sourceVideoMediaId: 'source-media',
+      analysisModelSnapshot: 'provider::pinned-analysis-model',
+      analysisExecutionTaskId: 'task-1',
+      analysisExecutionToken: 'execution-token-new',
+    })
   })
 
   it('rejects a payload media mismatch before downloading or preprocessing', async () => {
@@ -446,16 +466,29 @@ describe('viral replication analysis handler', () => {
     await harness.handler(harness.job as never)
 
     expect(harness.updates[0]).toMatchObject({
+      analysisExecutionTaskId: 'task-1',
       analysisExecutionToken: expect.any(String),
       analysisExecutionExpiresAt: expect.any(Date),
     })
+    const ownedExecutionWheres = harness.updateWheres.filter((where) => (
+      where.analysisExecutionToken === 'execution-token-new'
+    ))
+    expect(ownedExecutionWheres.length).toBeGreaterThan(0)
+    expect(ownedExecutionWheres.every((where) => (
+      where.status === 'analyzing'
+      && where.sourceVideoMediaId === 'source-media'
+      && where.analysisModelSnapshot === 'provider::pinned-analysis-model'
+      && where.analysisExecutionTaskId === 'task-1'
+    ))).toBe(true)
   })
 
   it.each(['generating', 'completed', 'failed'])('does not claim when status is %s', async (status) => {
     const harness = await createHarness({ frameCount: 3, initialStatus: status })
     roots.push(harness.root)
 
-    await expect(harness.handler(harness.job as never)).rejects.toThrow(/superseded/i)
+    await expect(harness.handler(harness.job as never)).rejects.toThrow(
+      status === 'failed' ? /failed/i : /superseded/i,
+    )
 
     expect(harness.getObjectStream).not.toHaveBeenCalled()
     expect(harness.replication.status).toBe(status)
@@ -519,7 +552,7 @@ describe('viral replication analysis handler', () => {
     const first = harness.handler(harness.job as never)
     await vi.waitFor(() => expect(harness.getObjectStream).toHaveBeenCalledOnce())
     const second = harness.handler(harness.job as never)
-    const secondExpectation = expect(second).rejects.toThrow(/superseded/i)
+    const secondExpectation = expect(second).rejects.toMatchObject({ name: 'DelayedError' })
     await Promise.resolve()
     releaseSource()
 
@@ -575,6 +608,9 @@ describe('viral replication analysis handler', () => {
 
     await harness.handler(harness.job as never)
     harness.replication.status = 'analyzing'
+    harness.replication.analysisExecutionTaskId = null
+    harness.replication.analysisExecutionToken = null
+    harness.replication.analysisExecutionExpiresAt = null
     await harness.handler(harness.job as never)
 
     expect(harness.uploadObject).toHaveBeenCalledTimes(3)

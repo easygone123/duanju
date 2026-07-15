@@ -33,8 +33,16 @@ function truncateUntrustedText(value: string, maxChars: number): string {
   return `${value.slice(0, maxChars)}\n[TRUNCATED]`
 }
 
-function delimitUntrusted(label: string, value: string): string {
-  return `<<<BEGIN_UNTRUSTED_${label}>>>\n${value}\n<<<END_UNTRUSTED_${label}>>>`
+function serializeUntrusted(value: unknown): string {
+  return JSON.stringify(value).replace(/[<>&]/g, (character) => {
+    if (character === '<') return '\\u003c'
+    if (character === '>') return '\\u003e'
+    return '\\u0026'
+  })
+}
+
+function delimitUntrusted(label: string, value: unknown): string {
+  return `<<<BEGIN_UNTRUSTED_${label}>>>\n${serializeUntrusted(value)}\n<<<END_UNTRUSTED_${label}>>>`
 }
 
 function assertPromptLength(prompt: string): string {
@@ -116,7 +124,7 @@ export function buildViralReportAggregationPrompt(input: {
       duration_ms: String(input.durationMs),
       batch_results_json: delimitUntrusted(
         'BATCH_RESULTS',
-        JSON.stringify(input.batchResults),
+        input.batchResults,
       ),
       report_schema_json: VIRAL_REPORT_SCHEMA_JSON,
     },

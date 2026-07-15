@@ -1060,6 +1060,7 @@ model ViralReplication {
   uploadLockToken       String?
   uploadLockExpiresAt   DateTime?
   analysisExecutionToken String?
+  analysisExecutionTaskId String?
   analysisExecutionExpiresAt DateTime?
   analysisModelSnapshot String?
   durationMs            Int?
@@ -1079,6 +1080,7 @@ model ViralReplication {
   @@index([userId, createdAt])
   @@index([status])
   @@index([analysisExecutionExpiresAt])
+  @@index([analysisExecutionTaskId])
   @@map("viral_replications")
 }
 

@@ -14,6 +14,10 @@ import { TASK_STATUS, TASK_EVENT_TYPE } from './types'
 import { publishTaskEvent } from './publisher'
 import { rollbackTaskBillingForTask } from './service'
 import {
+    failOwnedViralAnalysisExecution,
+    reconcileFailedViralAnalysisExecutions,
+} from '@/lib/viral-replication/reconcile'
+import {
     imageQueue,
     videoQueue,
     voiceQueue,
@@ -123,6 +127,7 @@ async function failOrphanedTask(
     })
 
     if (result.count > 0) {
+        await failOwnedViralAnalysisExecution(task.id, errorMessage)
         // 发送 FAILED 事件，触发前端 SSE 更新 + 数据刷新
         await publishTaskEvent({
             taskId: task.id,
@@ -210,6 +215,18 @@ export async function reconcileActiveTasks(): Promise<string[]> {
 
 let watchdogTimer: ReturnType<typeof setInterval> | null = null
 
+export async function sweepStaleTasksAndViralAnalysis(input: {
+    processingThresholdMs: number
+}) {
+    const { sweepStaleTasks } = await import('./service')
+    const sweptTasks = await sweepStaleTasks(input)
+    for (const task of sweptTasks) {
+        await failOwnedViralAnalysisExecution(task.id, task.errorMessage)
+    }
+    await reconcileFailedViralAnalysisExecutions()
+    return sweptTasks
+}
+
 /**
  * 启动任务 watchdog 定时器。
  * 每个巡检周期执行：
@@ -228,8 +245,7 @@ export function startTaskWatchdog() {
     watchdogTimer = setInterval(async () => {
         try {
             // 1. 清理心跳超时的 processing 任务（已有逻辑，此前未被调用）
-            const { sweepStaleTasks } = await import('./service')
-            const sweptProcessing = await sweepStaleTasks({
+            const sweptProcessing = await sweepStaleTasksAndViralAnalysis({
                 processingThresholdMs: PROCESSING_TIMEOUT_MS,
             })
             for (const task of sweptProcessing) {

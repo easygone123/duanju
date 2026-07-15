@@ -206,6 +206,7 @@ describe('chain contract - viral replication submission', () => {
       projectId: 'viral-project-analysis-chain',
       brief: 'Create an original product reveal',
       status: 'analyzing',
+      analysisExecutionTaskId: null,
       analysisExecutionToken: null,
       analysisExecutionExpiresAt: null,
       analysisModelSnapshot: 'test::analysis-model',
@@ -331,6 +332,7 @@ describe('chain contract - viral replication submission', () => {
           })) as never
         }),
         reportProgress: vi.fn(async () => undefined),
+        touchTaskHeartbeat: vi.fn(async () => true),
         makeTempDirectory: vi.fn(async () => await fs.mkdtemp(path.join(root, 'worker-'))),
         removeTempDirectory: vi.fn(async (directory) => await fs.rm(directory, { recursive: true, force: true })),
         now: () => new Date('2026-07-15T01:00:00.000Z'),
