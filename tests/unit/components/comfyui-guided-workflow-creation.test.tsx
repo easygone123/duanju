@@ -7,8 +7,13 @@ import { NextIntlClientProvider } from 'next-intl'
 
 import WorkflowJsonDropzone from '@/app/[locale]/profile/components/comfyui/WorkflowJsonDropzone'
 import WorkflowTypePicker from '@/app/[locale]/profile/components/comfyui/WorkflowTypePicker'
+import WorkflowAdvancedMappingInspector from '@/app/[locale]/profile/components/comfyui/WorkflowAdvancedMappingInspector'
+import WorkflowAnalysisSummary from '@/app/[locale]/profile/components/comfyui/WorkflowAnalysisSummary'
+import WorkflowMappingQuestions from '@/app/[locale]/profile/components/comfyui/WorkflowMappingQuestions'
+import { buildGuidedWorkflowReview } from '@/app/[locale]/profile/components/comfyui/guided-workflow-creation'
 import {
   WORKFLOW_IMPORT_KIND_META,
+  type WorkflowAutoMappingResult,
   type WorkflowImportKind,
 } from '@/lib/comfyui/workflow-auto-mapping-types'
 import enComfyui from '../../../messages/en/comfyui.json'
@@ -40,6 +45,43 @@ function dropzone(overrides: Partial<React.ComponentProps<typeof WorkflowJsonDro
     onNameChange: vi.fn(),
     ...overrides,
   })))
+}
+
+function guidedAnalysis(): WorkflowAutoMappingResult {
+  return {
+    graph: {},
+    mediaType: 'image',
+    purpose: 'generation',
+    referenceCapacity: 1,
+    issues: [],
+    proposals: [
+      {
+        id: 'positive-prompt', canonicalName: 'prompt', nodeId: 'prompt-node',
+        inputPath: 'text', valueType: 'string', confidence: 'high', required: true,
+        reasonCode: 'COMFY_MAPPING_PROMPT_POSITIVE_LABEL', nodeTitle: 'Positive Prompt',
+      },
+      {
+        id: 'workflow-seed', canonicalName: 'seed', nodeId: 'sampler-node',
+        inputPath: 'seed', valueType: 'number', confidence: 'preserve_original', required: false,
+        reasonCode: 'COMFY_MAPPING_SEED_INPUT', nodeTitle: 'Sampler',
+      },
+      {
+        id: 'source-question', canonicalName: 'sourceImage', nodeId: 'image-loader',
+        inputPath: 'image', valueType: 'image_ref', confidence: 'ambiguous', required: true,
+        reasonCode: 'COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS', nodeTitle: 'Load Image',
+      },
+    ],
+    outputs: [
+      { name: '最终图片', nodeId: 'save-final', fieldPath: 'images', mediaType: 'image', primary: false },
+      { name: '预览图片', nodeId: 'preview-result', fieldPath: 'images', mediaType: 'image', primary: false },
+    ],
+  }
+}
+
+function textOutsideDetails(element: HTMLElement) {
+  const clone = element.cloneNode(true) as HTMLElement
+  clone.querySelectorAll('details').forEach((details) => details.remove())
+  return clone.textContent || ''
 }
 
 describe('guided ComfyUI workflow type selection', () => {
@@ -179,10 +221,106 @@ describe('guided ComfyUI workflow JSON upload', () => {
   })
 })
 
+describe('guided ComfyUI workflow review', () => {
+  it('summarizes automatic recognition and preserved workflow defaults without raw identifiers', () => {
+    const analysis = guidedAnalysis()
+    const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
+    const view = render(withZh(<WorkflowAnalysisSummary review={review} />))
+
+    expect(view.getByText('提示词已自动识别')).toBeTruthy()
+    expect(view.getByText('已保留 1 项工作流默认值')).toBeTruthy()
+    expect(view.container.textContent).not.toContain('prompt-node')
+    expect(view.container.textContent).not.toContain('text')
+    expect(view.container.textContent).not.toContain('COMFY_MAPPING_PROMPT_POSITIVE_LABEL')
+  })
+
+  it('asks only the unresolved required image question and reports canonical role changes', () => {
+    const analysis = guidedAnalysis()
+    const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
+    const onRoleChange = vi.fn()
+    const view = render(withZh(<WorkflowMappingQuestions
+      analysis={analysis}
+      review={review}
+      roles={{}}
+      primaryOutputNodeId=""
+      onRoleChange={onRoleChange}
+      onPrimaryOutputChange={vi.fn()}
+    />))
+
+    expect(review.questions).toHaveLength(1)
+    expect(view.container.querySelectorAll('fieldset')).toHaveLength(2)
+    expect(view.getByRole('group', { name: '这张图片在工作流中是什么用途？' })).toBeTruthy()
+    expect(view.queryByRole('group', { name: /种子/ })).toBeNull()
+    expect(textOutsideDetails(view.container)).not.toContain('image-loader')
+    expect(textOutsideDetails(view.container)).not.toContain('image')
+    expect(textOutsideDetails(view.container)).not.toContain('ambiguous')
+    expect(textOutsideDetails(view.container)).not.toContain('COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS')
+
+    fireEvent.click(view.getByRole('radio', { name: '源图片' }))
+    expect(onRoleChange).toHaveBeenCalledWith('source-question', 'sourceImage')
+  })
+
+  it('selects a named output while keeping its node and field identifiers in closed technical details', () => {
+    const analysis = guidedAnalysis()
+    const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
+    const onPrimaryOutputChange = vi.fn()
+    const view = render(withZh(<WorkflowMappingQuestions
+      analysis={analysis}
+      review={review}
+      roles={{}}
+      primaryOutputNodeId=""
+      onRoleChange={vi.fn()}
+      onPrimaryOutputChange={onPrimaryOutputChange}
+    />))
+
+    expect(review.needsPrimaryOutput).toBe(true)
+    expect(view.getByRole('group', { name: '哪一个输出是最终结果？' })).toBeTruthy()
+    expect(textOutsideDetails(view.container)).not.toContain('save-final')
+    expect(textOutsideDetails(view.container)).not.toContain('images')
+    fireEvent.click(view.getByRole('radio', { name: '最终图片' }))
+    expect(onPrimaryOutputChange).toHaveBeenCalledWith('save-final')
+
+    const outputDetails = view.getAllByText('技术信息')
+      .map((summary) => summary.closest('details'))
+      .find((details) => details?.textContent?.includes('save-final')) as HTMLDetailsElement
+    expect(outputDetails.open).toBe(false)
+    fireEvent.click(outputDetails.querySelector('summary') as HTMLElement)
+    expect(outputDetails.open).toBe(true)
+    expect(outputDetails.textContent).toContain('save-final')
+    expect(outputDetails.textContent).toContain('images')
+  })
+
+  it('keeps the complete mapping table in closed Advanced Settings', () => {
+    const analysis = guidedAnalysis()
+    const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
+    const view = render(withZh(<WorkflowAdvancedMappingInspector
+      analysis={analysis}
+      roles={{}}
+      primaryOutputNodeId={review.primaryOutputNodeId}
+      onRoleChange={vi.fn()}
+      onPrimaryOutputChange={vi.fn()}
+    />))
+
+    const disclosure = view.getByText('高级设置').closest('details') as HTMLDetailsElement
+    expect(disclosure.open).toBe(false)
+    expect(disclosure.className).toContain('glass-surface-soft')
+    expect(disclosure.className).toContain('min-w-0')
+    expect(disclosure.querySelector('.overflow-x-auto')).toBeTruthy()
+    fireEvent.click(disclosure.querySelector('summary') as HTMLElement)
+    expect(disclosure.open).toBe(true)
+    expect(disclosure.textContent).toContain('自动输入映射')
+  })
+})
+
 describe('guided workflow translations', () => {
   const requiredKeys = [
     'typeTitle', 'typeHint', 'jsonInput', 'dropTitle', 'dropHint',
-    'chooseFile', 'analyzing', 'name', 'selected',
+    'chooseFile', 'analyzing', 'name', 'selected', 'summaryTitle',
+    'recognizedInputs', 'recognizedInput', 'preservedDefaults', 'recognizedOutput',
+    'outputReady', 'outputNeedsChoice', 'missingRequiredInputs', 'questionsTitle',
+    'sourceRoleQuestion', 'promptRoleQuestion', 'inputRoleQuestion', 'outputQuestion',
+    'technicalDetails', 'nodeTitle', 'nodeId', 'inputPath', 'outputFieldPath',
+    'confidence', 'reason', 'advancedSettings', 'issues',
   ]
 
   it('keeps the English and Chinese guided message objects structurally identical', () => {
@@ -191,6 +329,11 @@ describe('guided workflow translations', () => {
 
     expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort())
     expect(Object.keys(zh).sort()).toEqual([...requiredKeys, 'types'].sort())
+    expect(Object.keys(zh.issues).sort()).toEqual(Object.keys(en.issues).sort())
+    expect(Object.keys(zh.issues).sort()).toEqual([
+      'COMFY_WORKFLOW_API_FORMAT_REQUIRED', 'COMFY_WORKFLOW_API_FORMAT_INVALID',
+      'COMFY_WORKFLOW_OUTPUT_REQUIRED', 'COMFY_WORKFLOW_OUTPUT_AMBIGUOUS', 'unknown',
+    ].sort())
     expect(Object.keys(zh.types)).toEqual(canonicalKinds)
     expect(Object.keys(en.types)).toEqual(canonicalKinds)
     for (const kind of canonicalKinds) {
