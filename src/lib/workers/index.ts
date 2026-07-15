@@ -5,24 +5,12 @@ import { createProductionComfyRuntimeDeps } from '@/lib/comfyui/runtime-deps'
 import { startComfyRuntime } from '@/lib/comfyui/runtime'
 
 import { bootstrapWorkerProcesses, closeWorkerProcesses } from './comfy-runtime'
+import { createProductionWorkers } from './production-workers'
 
 async function startWorkerProcess() {
   const boot = await bootstrapWorkerProcesses({
     env: process.env,
-    createWorkers: async () => {
-      const [image, video, voice, text, viralReplication] = await Promise.all([
-        import('./image.worker'),
-        import('./video.worker'),
-        import('./voice.worker'),
-        import('./text.worker'),
-        import('./viral-replication.worker'),
-      ])
-      return [
-        image.createImageWorker(), video.createVideoWorker(),
-        voice.createVoiceWorker(), text.createTextWorker(),
-        viralReplication.createViralReplicationWorker(),
-      ]
-    },
+    createWorkers: createProductionWorkers,
     startRuntime: (config) => startComfyRuntime({
       config,
       deps: createProductionComfyRuntimeDeps(),

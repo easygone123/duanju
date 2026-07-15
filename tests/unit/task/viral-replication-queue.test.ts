@@ -90,6 +90,28 @@ describe('viral replication task queue registration', () => {
     })
   })
 
+  it.each([
+    TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
+    TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
+  ])('forces %s jobs to one attempt when callers omit attempts', async (taskType) => {
+    await addTaskJob(buildJob(taskType))
+
+    expect(queueState.addCalls).toHaveLength(1)
+    expect(queueState.addCalls[0]).toMatchObject({
+      queueName: 'waoowaoo-viral-replication',
+      name: taskType,
+      opts: { attempts: 1 },
+    })
+  })
+
+  it('preserves requested and default queue attempts for non-viral tasks', async () => {
+    await addTaskJob(buildJob(TASK_TYPE.ANALYZE_NOVEL, 'nonviral-default'))
+    await addTaskJob(buildJob(TASK_TYPE.ANALYZE_NOVEL, 'nonviral-nine'), { attempts: 9 })
+
+    expect(queueState.addCalls[0]?.opts).not.toHaveProperty('attempts')
+    expect(queueState.addCalls[1]?.opts).toMatchObject({ attempts: 9 })
+  })
+
   it('includes the viral replication queue when removing task jobs', async () => {
     queueState.removableJobQueueName = 'waoowaoo-viral-replication'
 
@@ -162,12 +184,13 @@ describe('viral replication task queue registration', () => {
     expect(TASK_TYPE_CATALOG).toContainEqual(expect.objectContaining({
       taskType,
       owner: 'tests/unit/worker/viral-replication-worker.test.ts',
+      layers: ['worker-unit', 'chain'],
     }))
     expect(TASKTYPE_BEHAVIOR_MATRIX).toContainEqual(expect.objectContaining({
       taskType,
       workerTest: 'tests/unit/worker/viral-replication-worker.test.ts',
-      chainTest: 'tests/integration/chain/text.chain.test.ts',
-      apiContractTest: 'tests/integration/api/contract/llm-observe-routes.test.ts',
+      chainTest: 'tests/integration/chain/viral-replication.chain.test.ts',
+      apiContractTest: null,
     }))
   })
 })

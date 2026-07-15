@@ -1,14 +1,10 @@
 import { JobsOptions, Queue } from 'bullmq'
 import { queueRedis } from '@/lib/redis'
 import { QueueType, TaskType, TASK_TYPE, type TaskJobData } from './types'
+import { QUEUE_NAME } from './queue-names'
+import { resolveTaskMaxAttempts } from './retry-policy'
 
-export const QUEUE_NAME = {
-  IMAGE: 'waoowaoo-image',
-  VIDEO: 'waoowaoo-video',
-  VOICE: 'waoowaoo-voice',
-  TEXT: 'waoowaoo-text',
-  VIRAL_REPLICATION: 'waoowaoo-viral-replication',
-} as const
+export { QUEUE_NAME } from './queue-names'
 
 const defaultJobOptions: JobsOptions = {
   removeOnComplete: 500,
@@ -73,13 +69,6 @@ const VIRAL_TYPES = new Set<TaskType>([
   TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
 ])
 
-const SINGLE_ATTEMPT_TASK_TYPES = new Set<TaskType>([
-  TASK_TYPE.STORY_TO_SCRIPT_RUN,
-  TASK_TYPE.SCRIPT_TO_STORYBOARD_RUN,
-  TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
-  TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
-])
-
 export function getQueueTypeByTaskType(type: TaskType): QueueType {
   if (IMAGE_TYPES.has(type)) return 'image'
   if (VIDEO_TYPES.has(type)) return 'video'
@@ -108,9 +97,10 @@ export async function addTaskJob(data: TaskJobData, opts?: JobsOptions) {
   const queueType = getQueueTypeByTaskType(data.type)
   const queue = getQueueByType(queueType)
   const priority = typeof opts?.priority === 'number' ? opts.priority : 0
-  const attempts = SINGLE_ATTEMPT_TASK_TYPES.has(data.type)
-    ? 1
-    : (typeof opts?.attempts === 'number' ? opts.attempts : undefined)
+  const attempts = resolveTaskMaxAttempts(
+    data.type,
+    typeof opts?.attempts === 'number' ? opts.attempts : undefined,
+  )
   return await queue.add(data.type, data, {
     jobId: data.taskId,
     priority,

@@ -8,6 +8,17 @@ export type TaskTypeCoverageEntry = {
   layers: ReadonlyArray<TaskTestLayer>
 }
 
+const DEFAULT_TASK_TEST_LAYERS: ReadonlyArray<TaskTestLayer> = [
+  'worker-unit',
+  'api-contract',
+  'chain',
+]
+
+const TASK_TYPE_LAYER_OVERRIDES: Partial<Record<TaskType, ReadonlyArray<TaskTestLayer>>> = {
+  [TASK_TYPE.VIRAL_VIDEO_ANALYSIS]: ['worker-unit', 'chain'],
+  [TASK_TYPE.VIRAL_STORYBOARD_GENERATION]: ['worker-unit', 'chain'],
+}
+
 const TASK_TYPE_OWNER_MAP = {
   [TASK_TYPE.IMAGE_PANEL]: 'tests/unit/worker/panel-image-task-handler.test.ts',
   [TASK_TYPE.IMAGE_CHARACTER]: 'tests/unit/worker/character-image-task-handler.test.ts',
@@ -61,7 +72,7 @@ export const TASK_TYPE_CATALOG: ReadonlyArray<TaskTypeCoverageEntry> = (Object.v
   .map((taskType) => ({
     taskType,
     owner: TASK_TYPE_OWNER_MAP[taskType],
-    layers: ['worker-unit', 'api-contract', 'chain'],
+    layers: TASK_TYPE_LAYER_OVERRIDES[taskType] || DEFAULT_TASK_TEST_LAYERS,
   }))
 
 export const TASK_TYPE_COUNT = TASK_TYPE_CATALOG.length

@@ -1,6 +1,6 @@
 import { Worker, type Job } from 'bullmq'
 import { queueRedis } from '@/lib/redis'
-import { QUEUE_NAME } from '@/lib/task/queues'
+import { QUEUE_NAME } from '@/lib/task/queue-names'
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 import { withTaskLifecycle } from './shared'
 import { handleViralReplicationAnalysisTask } from './handlers/viral-replication-analysis'

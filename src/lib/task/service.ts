@@ -6,6 +6,7 @@ import { locales } from '@/i18n/routing'
 import { parseComfyExternalId } from '@/lib/comfyui/external-id'
 import { COMFY_REQUEST_STATUS } from '@/lib/comfyui/types'
 import { TASK_STATUS, type CreateTaskInput, type TaskBillingInfo, type TaskJobData, type TaskStatus } from './types'
+import { resolveTaskMaxAttempts } from './retry-policy'
 
 const ACTIVE_STATUSES: TaskStatus[] = [TASK_STATUS.QUEUED, TASK_STATUS.PROCESSING]
 const COMFY_REQUEST_STATUSES = new Set<string>(Object.values(COMFY_REQUEST_STATUS))
@@ -229,7 +230,7 @@ export async function createTask(input: CreateTaskInput) {
     status: TASK_STATUS.QUEUED,
     progress: 0,
     attempt: 0,
-    maxAttempts: input.maxAttempts ?? 5,
+    maxAttempts: resolveTaskMaxAttempts(input.type, input.maxAttempts) ?? 5,
     priority: input.priority ?? 0,
     dedupeKey: input.dedupeKey || null,
     payload: toNullableJson(input.payload ?? null),

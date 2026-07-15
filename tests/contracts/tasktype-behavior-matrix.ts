@@ -4,12 +4,15 @@ import type { TaskType } from '@/lib/task/types'
 export type TaskTypeBehaviorMatrixEntry = {
   taskType: TaskType
   caseId: string
-  workerTest: string
-  chainTest: string
-  apiContractTest: string
+  workerTest: string | null
+  chainTest: string | null
+  apiContractTest: string | null
 }
 
 function resolveChainTestByTaskType(taskType: TaskType): string {
+  if (taskType === 'viral_video_analysis' || taskType === 'viral_storyboard_generation') {
+    return 'tests/integration/chain/viral-replication.chain.test.ts'
+  }
   if (taskType === 'video_panel' || taskType === 'lip_sync') {
     return 'tests/integration/chain/video.chain.test.ts'
   }
@@ -39,8 +42,6 @@ function resolveChainTestByTaskType(taskType: TaskType): string {
     || taskType === 'asset_hub_ai_modify_character'
     || taskType === 'asset_hub_ai_modify_location'
     || taskType === 'asset_hub_reference_to_character'
-    || taskType === 'viral_video_analysis'
-    || taskType === 'viral_storyboard_generation'
   ) {
     return 'tests/integration/chain/text.chain.test.ts'
   }
@@ -71,8 +72,6 @@ function resolveApiContractByTaskType(taskType: TaskType): string {
     || taskType === 'asset_hub_ai_modify_character'
     || taskType === 'asset_hub_ai_modify_location'
     || taskType === 'asset_hub_reference_to_character'
-    || taskType === 'viral_video_analysis'
-    || taskType === 'viral_storyboard_generation'
   ) {
     return 'tests/integration/api/contract/llm-observe-routes.test.ts'
   }
@@ -101,9 +100,15 @@ function resolveApiContractByTaskType(taskType: TaskType): string {
 export const TASKTYPE_BEHAVIOR_MATRIX: ReadonlyArray<TaskTypeBehaviorMatrixEntry> = TASK_TYPE_CATALOG.map((entry) => ({
   taskType: entry.taskType,
   caseId: `TASKTYPE:${entry.taskType}`,
-  workerTest: entry.owner,
-  chainTest: resolveChainTestByTaskType(entry.taskType),
-  apiContractTest: resolveApiContractByTaskType(entry.taskType),
+  workerTest:
+    entry.layers.includes('worker-unit') || entry.layers.includes('unit-helper')
+      ? entry.owner
+      : null,
+  chainTest: entry.layers.includes('chain') ? resolveChainTestByTaskType(entry.taskType) : null,
+  apiContractTest:
+    entry.layers.includes('api-contract')
+      ? resolveApiContractByTaskType(entry.taskType)
+      : null,
 }))
 
 export const TASKTYPE_BEHAVIOR_COUNT = TASKTYPE_BEHAVIOR_MATRIX.length
