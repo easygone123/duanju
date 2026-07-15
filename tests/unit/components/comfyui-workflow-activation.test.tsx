@@ -213,6 +213,39 @@ describe('WorkflowActivationPanel', () => {
     expect(region.getAttribute('aria-busy')).toBe('false')
   })
 
+  it('invalidates models without completing stale UI after close while publish is delayed', async () => {
+    const publish = deferred<unknown>()
+    const onClose = vi.fn()
+    const onActivated = vi.fn()
+    requestWorkflowActionMock.mockResolvedValueOnce({ success: true }).mockReturnValueOnce(publish.promise)
+    const view = renderPanel({ onClose, onActivated })
+
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    await waitFor(() => expect(requestWorkflowActionMock).toHaveBeenCalledTimes(2))
+    fireEvent.click(view.getByRole('button', { name: 'Close activation' }))
+    publish.resolve({ success: true })
+
+    await waitFor(() => expect(invalidateUserModelsMock).toHaveBeenCalledTimes(1))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onActivated).not.toHaveBeenCalled()
+    expect(view.getByRole('status').textContent).toBe('Publishing workflow…')
+  })
+
+  it('invalidates models without stale callbacks after unmount while publish is delayed', async () => {
+    const publish = deferred<unknown>()
+    const onActivated = vi.fn()
+    requestWorkflowActionMock.mockResolvedValueOnce({ success: true }).mockReturnValueOnce(publish.promise)
+    const view = renderPanel({ onActivated })
+
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    await waitFor(() => expect(requestWorkflowActionMock).toHaveBeenCalledTimes(2))
+    view.unmount()
+    publish.resolve({ success: true })
+
+    await waitFor(() => expect(invalidateUserModelsMock).toHaveBeenCalledTimes(1))
+    expect(onActivated).not.toHaveBeenCalled()
+  })
+
   it('never publishes when the live test fails', async () => {
     requestWorkflowActionMock.mockRejectedValueOnce(new Error('test failed'))
     const view = renderPanel()
