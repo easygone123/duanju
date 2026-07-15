@@ -25,34 +25,58 @@ export function guidedCompatibleRoles(proposal: WorkflowMappingProposal): Canoni
   return [proposal.canonicalName]
 }
 
+function effectiveProposalRole(
+  proposal: WorkflowMappingProposal,
+  roles: Record<string, CanonicalWorkflowInput | 'preserve_original'>,
+): CanonicalWorkflowInput | 'preserve_original' | null {
+  const selectedRole = roles[proposal.id]
+  if (selectedRole) return selectedRole
+  if (proposal.confidence === 'high') return proposal.canonicalName
+  if (proposal.confidence === 'preserve_original' || (proposal.confidence === 'ambiguous' && !proposal.required)) {
+    return 'preserve_original'
+  }
+  return null
+}
+
 export function buildGuidedWorkflowReview(
   kind: WorkflowImportKind,
   analysis: WorkflowAutoMappingResult,
   roles: Record<string, CanonicalWorkflowInput | 'preserve_original'>,
   selectedPrimaryOutput: string,
 ): GuidedWorkflowReview {
-  const questions = analysis.proposals.filter((proposal) => proposal.required && proposal.confidence === 'ambiguous' && !roles[proposal.id])
-  const resolvedInputs = [...new Set(analysis.proposals
-    .filter((proposal) => proposal.confidence === 'high' || Boolean(roles[proposal.id] && roles[proposal.id] !== 'preserve_original'))
-    .map((proposal) => roles[proposal.id] || proposal.canonicalName)
-    .filter((value): value is CanonicalWorkflowInput => value !== 'preserve_original'))]
-  const automaticPrimary = analysis.outputs.find((output) => output.primary)?.nodeId || (analysis.outputs.length === 1 ? analysis.outputs[0]?.nodeId : '')
-  const primaryOutputNodeId = selectedPrimaryOutput || automaticPrimary || ''
+  const dispositions = analysis.proposals.map((proposal) => ({
+    proposal,
+    role: effectiveProposalRole(proposal, roles),
+  }))
+  const questions = dispositions
+    .filter(({ proposal, role }) => proposal.required && proposal.confidence === 'ambiguous' && (!role || role === 'preserve_original'))
+    .map(({ proposal }) => proposal)
+  const resolvedInputs = [...new Set(dispositions
+    .map(({ role }) => role)
+    .filter((role): role is CanonicalWorkflowInput => Boolean(role && role !== 'preserve_original')))]
+  const selectedPrimary = analysis.outputs.some((output) => output.nodeId === selectedPrimaryOutput)
+    ? selectedPrimaryOutput
+    : ''
+  const automaticPrimary = analysis.outputs.find((output) => output.primary)?.nodeId
+    || (analysis.outputs.length === 1 ? analysis.outputs[0]?.nodeId : '')
+  const primaryOutputNodeId = selectedPrimary || automaticPrimary || ''
   const mappedInputs = new Set<CanonicalWorkflowInput>([
     ...resolvedInputs,
-    ...analysis.proposals.filter((proposal) => proposal.required).map((proposal) => proposal.canonicalName),
+    ...analysis.proposals
+      .filter((proposal) => proposal.required && proposal.confidence === 'ambiguous' && !roles[proposal.id])
+      .map((proposal) => proposal.canonicalName),
   ])
   const missingRequiredInputs = WORKFLOW_IMPORT_KIND_META[kind].requiredInputs
     .filter((name) => !mappedInputs.has(name))
   return {
     resolvedInputs,
-    preservedCount: analysis.proposals.filter((proposal) => !proposal.required && (!roles[proposal.id] || roles[proposal.id] === 'preserve_original')).length,
+    preservedCount: dispositions.filter(({ proposal, role }) => !proposal.required && role === 'preserve_original').length,
     questions,
     primaryOutputNodeId,
     needsPrimaryOutput: analysis.outputs.length > 1 && !primaryOutputNodeId,
     missingRequiredInputs,
     blockingIssueCodes: analysis.issues
-      .filter((issue) => issue.code !== 'COMFY_WORKFLOW_OUTPUT_AMBIGUOUS')
+      .filter((issue) => issue.code !== 'COMFY_WORKFLOW_OUTPUT_AMBIGUOUS' || !primaryOutputNodeId)
       .map((issue) => issue.code),
   }
 }

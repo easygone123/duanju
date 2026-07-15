@@ -41,6 +41,36 @@ describe('guided ComfyUI workflow creation model', () => {
     expect(review.preservedCount).toBe(1)
   })
 
+  it('reports a required input missing after its proposal is remapped to the wrong role', () => {
+    const review = buildGuidedWorkflowReview('image_edit', analysis({ proposals: [
+      { id: 'prompt', canonicalName: 'prompt', nodeId: '1', inputPath: 'text', valueType: 'string', confidence: 'high', reasonCode: 'prompt', required: true },
+      { id: 'source', canonicalName: 'sourceImage', nodeId: '3', inputPath: 'image', valueType: 'image_ref', confidence: 'ambiguous', reasonCode: 'source', required: true },
+    ] }), { source: 'referenceImages' }, '')
+    expect(review.resolvedInputs).toEqual(['prompt', 'referenceImages'])
+    expect(review.questions).toEqual([])
+    expect(review.missingRequiredInputs).toEqual(['sourceImage'])
+    expect(isGuidedWorkflowReady({ name: 'demo', review, busy: false })).toBe(false)
+  })
+
+  it('keeps a required preserved proposal unresolved and missing', () => {
+    const review = buildGuidedWorkflowReview('image_edit', analysis({ proposals: [
+      { id: 'prompt', canonicalName: 'prompt', nodeId: '1', inputPath: 'text', valueType: 'string', confidence: 'high', reasonCode: 'prompt', required: true },
+      { id: 'source', canonicalName: 'sourceImage', nodeId: '3', inputPath: 'image', valueType: 'image_ref', confidence: 'ambiguous', reasonCode: 'source', required: true },
+    ] }), { source: 'preserve_original' }, '')
+    expect(review.questions.map((item) => item.id)).toEqual(['source'])
+    expect(review.missingRequiredInputs).toEqual(['sourceImage'])
+    expect(isGuidedWorkflowReady({ name: 'demo', review, busy: false })).toBe(false)
+  })
+
+  it('does not count high-confidence optional mappings as preserved', () => {
+    const review = buildGuidedWorkflowReview('image_generation', analysis({ proposals: [
+      { id: 'prompt', canonicalName: 'prompt', nodeId: '1', inputPath: 'text', valueType: 'string', confidence: 'high', reasonCode: 'prompt', required: true },
+      { id: 'width', canonicalName: 'width', nodeId: '2', inputPath: 'width', valueType: 'number', confidence: 'high', reasonCode: 'width', required: false },
+    ] }), {}, '')
+    expect(review.resolvedInputs).toEqual(['prompt', 'width'])
+    expect(review.preservedCount).toBe(0)
+  })
+
   it('requires one output choice when several outputs have no primary', () => {
     const review = buildGuidedWorkflowReview('image_generation', analysis({ outputs: [
       { name: 'preview', nodeId: '8', fieldPath: 'images', mediaType: 'image', primary: false },
@@ -48,6 +78,34 @@ describe('guided ComfyUI workflow creation model', () => {
     ] }), {}, '')
     expect(review.needsPrimaryOutput).toBe(true)
     expect(isGuidedWorkflowReady({ name: 'demo', review, busy: false })).toBe(false)
+  })
+
+  it('rejects a stale primary output selection', () => {
+    const review = buildGuidedWorkflowReview('image_generation', analysis({
+      outputs: [
+        { name: 'preview', nodeId: '8', fieldPath: 'images', mediaType: 'image', primary: false },
+        { name: 'save', nodeId: '9', fieldPath: 'images', mediaType: 'image', primary: false },
+      ],
+      issues: [{ code: 'COMFY_WORKFLOW_OUTPUT_AMBIGUOUS', message: 'Select one output.', path: 'outputs' }],
+    }), {}, 'stale-node')
+    expect(review.primaryOutputNodeId).toBe('')
+    expect(review.needsPrimaryOutput).toBe(true)
+    expect(review.blockingIssueCodes).toContain('COMFY_WORKFLOW_OUTPUT_AMBIGUOUS')
+    expect(isGuidedWorkflowReady({ name: 'demo', review, busy: false })).toBe(false)
+  })
+
+  it('clears output ambiguity after a valid primary output is selected', () => {
+    const review = buildGuidedWorkflowReview('image_generation', analysis({
+      outputs: [
+        { name: 'preview', nodeId: '8', fieldPath: 'images', mediaType: 'image', primary: false },
+        { name: 'save', nodeId: '9', fieldPath: 'images', mediaType: 'image', primary: false },
+      ],
+      issues: [{ code: 'COMFY_WORKFLOW_OUTPUT_AMBIGUOUS', message: 'Select one output.', path: 'outputs' }],
+    }), {}, '9')
+    expect(review.primaryOutputNodeId).toBe('9')
+    expect(review.needsPrimaryOutput).toBe(false)
+    expect(review.blockingIssueCodes).not.toContain('COMFY_WORKFLOW_OUTPUT_AMBIGUOUS')
+    expect(isGuidedWorkflowReady({ name: 'demo', review, busy: false })).toBe(true)
   })
 
   it('offers only value-type-compatible roles', () => {

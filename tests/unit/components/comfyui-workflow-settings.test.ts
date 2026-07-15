@@ -222,6 +222,11 @@ describe('ComfyUI workflow settings UI contract', () => {
       id: 'required', canonicalName: 'sourceImage' as const, nodeId: '2', inputPath: 'image', valueType: 'image_ref' as const,
       confidence: 'ambiguous' as const, reasonCode: 'COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS', required: true,
     }] }, { roles: {} })).toThrow('workflowMappingConfirmationRequired')
+
+    expect(() => confirmWorkflowAnalysis({ ...base, proposals: [{
+      id: 'required', canonicalName: 'sourceImage' as const, nodeId: '2', inputPath: 'image', valueType: 'image_ref' as const,
+      confidence: 'ambiguous' as const, reasonCode: 'COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS', required: true,
+    }] }, { roles: { required: 'preserve_original' } })).toThrow('workflowMappingConfirmationRequired')
   })
 
   it('exposes an upload-first automatic mapping wizard for new workflows', () => {
