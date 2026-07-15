@@ -103,13 +103,4 @@ describe('viral replication worker', () => {
     expect(workerState.options).toMatchObject({ concurrency: 2 })
   })
 
-  it('keeps the future generation handler behind a stable NOT_IMPLEMENTED error', async () => {
-    const generationHandler = await vi.importActual<
-      typeof import('@/lib/workers/handlers/viral-replication-generation')
-    >('@/lib/workers/handlers/viral-replication-generation')
-
-    await expect(generationHandler.handleViralReplicationGenerationTask(
-      buildJob(TASK_TYPE.VIRAL_STORYBOARD_GENERATION),
-    )).rejects.toThrow('VIRAL_STORYBOARD_GENERATION_NOT_IMPLEMENTED')
-  })
 })

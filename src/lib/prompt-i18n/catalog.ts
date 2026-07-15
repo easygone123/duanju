@@ -165,4 +165,14 @@ export const PROMPT_CATALOG: Record<PromptId, PromptCatalogEntry> = {
     pathStem: 'viral-replication/shot_analysis',
     variableKeys: ['brief', 'video_metadata', 'shot_timeline', 'subtitle_context'],
   },
+  [PROMPT_IDS.VIRAL_STORYBOARD_GENERATION]: {
+    pathStem: 'viral-replication/storyboard_generation',
+    variableKeys: [
+      'brief',
+      'video_ratio',
+      'art_style',
+      'analysis_report_json',
+      'generation_schema_json',
+    ],
+  },
 }

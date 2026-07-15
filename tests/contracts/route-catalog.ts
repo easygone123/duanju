@@ -187,6 +187,8 @@ const ROUTE_FILES = [
   'src/app/api/user/models/route.ts',
   'src/app/api/user/transactions/route.ts',
   'src/app/api/viral-replications/[id]/route.ts',
+  'src/app/api/viral-replications/[id]/generate/route.ts',
+  'src/app/api/viral-replications/[id]/retry/route.ts',
   'src/app/api/viral-replications/[id]/video/route.ts',
   'src/app/api/viral-replications/route.ts',
 ] as const

@@ -8,6 +8,8 @@ const serviceMock = vi.hoisted(() => ({
   getOwnedViralReplicationDetail: vi.fn(),
   updateViralReplicationBrief: vi.fn(),
   uploadViralReplicationVideo: vi.fn(),
+  retryViralReplication: vi.fn(),
+  generateViralReplication: vi.fn(),
 }))
 
 vi.mock('@/lib/api-auth', () => ({
@@ -39,6 +41,12 @@ describe('api contract - viral replication routes', () => {
     serviceMock.uploadViralReplicationVideo.mockResolvedValue({
       id: 'rep-1', status: 'analyzing', projectId: 'project-1', episodeId: 'episode-1', sourceVideoMediaId: 'media-1', taskId: 'task-1',
     })
+    serviceMock.retryViralReplication.mockResolvedValue({
+      id: 'rep-1', status: 'analyzing', taskId: 'task-retry-1',
+    })
+    serviceMock.generateViralReplication.mockResolvedValue({
+      id: 'rep-1', status: 'generating', taskId: 'task-generate-1',
+    })
   })
 
   it('requires authentication for upload-session creation', async () => {
@@ -55,6 +63,8 @@ describe('api contract - viral replication routes', () => {
     ['GET', '/api/viral-replications/rep-1'],
     ['PATCH', '/api/viral-replications/rep-1'],
     ['PUT', '/api/viral-replications/rep-1/video'],
+    ['POST_RETRY', '/api/viral-replications/rep-1/retry'],
+    ['POST_GENERATE', '/api/viral-replications/rep-1/generate'],
   ] as const)('requires authentication for %s %s', async (method, path) => {
     authState.authenticated = false
     const context = { params: Promise.resolve({ id: 'rep-1' }) }
@@ -65,16 +75,24 @@ describe('api contract - viral replication routes', () => {
     } else if (method === 'PATCH') {
       const { PATCH } = await import('@/app/api/viral-replications/[id]/route')
       response = await PATCH(buildMockRequest({ path, method, body: { brief: '方向' } }), context)
-    } else {
+    } else if (method === 'PUT') {
       const { PUT } = await import('@/app/api/viral-replications/[id]/video/route')
       response = await PUT(new NextRequest(`http://localhost:3000${path}`, {
         method, headers: { 'content-type': 'video/mp4' }, body: Buffer.from('video'),
       }), context)
+    } else if (method === 'POST_RETRY') {
+      const { POST } = await import('@/app/api/viral-replications/[id]/retry/route')
+      response = await POST(buildMockRequest({ path, method: 'POST' }), context)
+    } else {
+      const { POST } = await import('@/app/api/viral-replications/[id]/generate/route')
+      response = await POST(buildMockRequest({ path, method: 'POST', body: { brief: '方向' } }), context)
     }
     expect(response.status).toBe(401)
     expect(serviceMock.getOwnedViralReplicationDetail).not.toHaveBeenCalled()
     expect(serviceMock.updateViralReplicationBrief).not.toHaveBeenCalled()
     expect(serviceMock.uploadViralReplicationVideo).not.toHaveBeenCalled()
+    expect(serviceMock.retryViralReplication).not.toHaveBeenCalled()
+    expect(serviceMock.generateViralReplication).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -174,5 +192,42 @@ describe('api contract - viral replication routes', () => {
       id: 'rep-1', userId: 'user-1', request, mimeType: 'video/mp4', locale: 'zh',
     }))
     expect(await response.json()).toMatchObject({ replication: { status: 'analyzing', taskId: 'task-1' } })
+  })
+
+  it('retries a failed analysis using the owner-scoped lifecycle service', async () => {
+    const { POST } = await import('@/app/api/viral-replications/[id]/retry/route')
+    const request = buildMockRequest({
+      path: '/api/viral-replications/rep-1/retry', method: 'POST', headers: { 'accept-language': 'zh-CN' },
+    })
+    const response = await POST(request, { params: Promise.resolve({ id: 'rep-1' }) })
+    expect(response.status).toBe(202)
+    expect(serviceMock.retryViralReplication).toHaveBeenCalledWith({
+      id: 'rep-1', userId: 'user-1', locale: 'zh',
+    })
+    expect(await response.json()).toMatchObject({ replication: { status: 'analyzing', taskId: 'task-retry-1' } })
+  })
+
+  it('confirms the latest brief and queues original storyboard generation', async () => {
+    const { POST } = await import('@/app/api/viral-replications/[id]/generate/route')
+    const request = buildMockRequest({
+      path: '/api/viral-replications/rep-1/generate', method: 'POST',
+      headers: { 'accept-language': 'zh-CN' }, body: { brief: ' 最新原创方向 ' },
+    })
+    const response = await POST(request, { params: Promise.resolve({ id: 'rep-1' }) })
+    expect(response.status).toBe(202)
+    expect(serviceMock.generateViralReplication).toHaveBeenCalledWith({
+      id: 'rep-1', userId: 'user-1', locale: 'zh', brief: '最新原创方向',
+    })
+    expect(await response.json()).toMatchObject({ replication: { status: 'generating', taskId: 'task-generate-1' } })
+  })
+
+  it('rejects generate fields other than a valid brief', async () => {
+    const { POST } = await import('@/app/api/viral-replications/[id]/generate/route')
+    const response = await POST(buildMockRequest({
+      path: '/api/viral-replications/rep-1/generate', method: 'POST',
+      body: { brief: '方向', status: 'completed' },
+    }), { params: Promise.resolve({ id: 'rep-1' }) })
+    expect(response.status).toBe(400)
+    expect(serviceMock.generateViralReplication).not.toHaveBeenCalled()
   })
 })

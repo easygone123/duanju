@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
+import { Prisma } from '@prisma/client'
 import type { Locale } from '@/i18n/routing'
 import { ApiError } from '@/lib/api-errors'
 import { stablePublicIdFromStorageKey } from '@/lib/media/hash'
@@ -25,6 +26,7 @@ const BRIEF_MUTABLE_STATUSES = [
   VIRAL_REPLICATION_STATUS.FAILED,
 ]
 const SUBMIT_FAILURE_MESSAGE = '爆款复刻分析任务提交失败，请稍后重试'
+const GENERATION_SUBMIT_FAILURE_MESSAGE = '爆款复刻分镜生成任务提交失败，请稍后重试'
 const DEFAULT_UPLOAD_LOCK_TTL_MS = 15 * 60 * 1_000
 
 type UploadVideoInput = {
@@ -101,6 +103,155 @@ export async function updateViralReplicationBrief(input: { id: string; userId: s
     throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_REPLICATION_BRIEF_LOCKED', field: 'brief' })
   }
   return getOwnedViralReplicationDetail(input.id, input.userId)
+}
+
+function requireDraftTargets(replication: Awaited<ReturnType<typeof readOwnedViralReplication>>) {
+  const projectId = replication.project?.id
+  const episodeId = replication.episode?.id
+  const sourceVideoMediaId = replication.sourceVideoMedia?.id
+  if (!projectId || !episodeId || !sourceVideoMediaId) {
+    throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_REPLICATION_DRAFT_INCOMPLETE' })
+  }
+  return { projectId, episodeId, sourceVideoMediaId }
+}
+
+export async function retryViralReplication(input: {
+  id: string
+  userId: string
+  locale: Locale
+}) {
+  const replication = await readOwnedViralReplication(input.id, input.userId)
+  if (replication.status !== VIRAL_REPLICATION_STATUS.FAILED) {
+    throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_RETRY_NOT_ALLOWED' })
+  }
+  const targets = requireDraftTargets(replication)
+  const prepared = await prisma.$transaction(async (tx) => {
+    const preference = await tx.userPreference.findUnique({ where: { userId: input.userId } })
+    if (!preference?.analysisModel) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'ANALYSIS_MODEL_REQUIRED',
+        field: 'analysisModel',
+      })
+    }
+    const updated = await tx.viralReplication.updateMany({
+      where: {
+        id: input.id,
+        userId: input.userId,
+        status: VIRAL_REPLICATION_STATUS.FAILED,
+        projectId: targets.projectId,
+        episodeId: targets.episodeId,
+        sourceVideoMediaId: targets.sourceVideoMediaId,
+      },
+      data: {
+        status: VIRAL_REPLICATION_STATUS.ANALYZING,
+        analysisModelSnapshot: preference.analysisModel,
+        analysisExecutionTaskId: null,
+        analysisExecutionToken: null,
+        analysisExecutionExpiresAt: null,
+        transcriptText: null,
+        reportJson: Prisma.DbNull,
+        errorMessage: null,
+        confirmedAt: null,
+      },
+    })
+    if (updated.count !== 1) {
+      throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_RETRY_CONFLICT' })
+    }
+    await tx.viralReplicationFrame.deleteMany({ where: { replicationId: input.id } })
+    return { analysisModelSnapshot: preference.analysisModel }
+  })
+
+  try {
+    const task = await submitTask({
+      userId: input.userId,
+      locale: input.locale,
+      projectId: targets.projectId,
+      episodeId: targets.episodeId,
+      type: TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
+      targetType: 'ViralReplication',
+      targetId: input.id,
+      dedupeKey: `viral_video_analysis:${input.id}`,
+      maxAttempts: 1,
+      payload: {
+        sourceVideoMediaId: targets.sourceVideoMediaId,
+        analysisModelSnapshot: prepared.analysisModelSnapshot,
+      },
+    })
+    return { id: input.id, status: VIRAL_REPLICATION_STATUS.ANALYZING, taskId: task.taskId }
+  } catch {
+    await prisma.viralReplication.updateMany({
+      where: { id: input.id, userId: input.userId, status: VIRAL_REPLICATION_STATUS.ANALYZING },
+      data: { status: VIRAL_REPLICATION_STATUS.FAILED, errorMessage: SUBMIT_FAILURE_MESSAGE },
+    })
+    return { id: input.id, status: VIRAL_REPLICATION_STATUS.FAILED, taskId: null }
+  }
+}
+
+export async function generateViralReplication(input: {
+  id: string
+  userId: string
+  locale: Locale
+  brief: string
+}) {
+  const replication = await readOwnedViralReplication(input.id, input.userId)
+  if (replication.status !== VIRAL_REPLICATION_STATUS.REVIEW_READY || !replication.reportJson) {
+    throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_GENERATE_NOT_ALLOWED' })
+  }
+  const targets = requireDraftTargets(replication)
+  const prepared = await prisma.$transaction(async (tx) => {
+    const preference = await tx.userPreference.findUnique({ where: { userId: input.userId } })
+    if (!preference?.analysisModel) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'ANALYSIS_MODEL_REQUIRED',
+        field: 'analysisModel',
+      })
+    }
+    const updated = await tx.viralReplication.updateMany({
+      where: {
+        id: input.id,
+        userId: input.userId,
+        status: VIRAL_REPLICATION_STATUS.REVIEW_READY,
+        projectId: targets.projectId,
+        episodeId: targets.episodeId,
+      },
+      data: {
+        brief: input.brief,
+        status: VIRAL_REPLICATION_STATUS.GENERATING,
+        analysisModelSnapshot: preference.analysisModel,
+        confirmedAt: new Date(),
+        errorMessage: null,
+      },
+    })
+    if (updated.count !== 1) {
+      throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_GENERATE_CONFLICT' })
+    }
+    return { analysisModelSnapshot: preference.analysisModel }
+  })
+
+  try {
+    const task = await submitTask({
+      userId: input.userId,
+      locale: input.locale,
+      projectId: targets.projectId,
+      episodeId: targets.episodeId,
+      type: TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
+      targetType: 'ViralReplication',
+      targetId: input.id,
+      dedupeKey: `viral_storyboard_generation:${input.id}`,
+      maxAttempts: 1,
+      payload: { analysisModelSnapshot: prepared.analysisModelSnapshot },
+    })
+    return { id: input.id, status: VIRAL_REPLICATION_STATUS.GENERATING, taskId: task.taskId }
+  } catch {
+    await prisma.viralReplication.updateMany({
+      where: { id: input.id, userId: input.userId, status: VIRAL_REPLICATION_STATUS.GENERATING },
+      data: {
+        status: VIRAL_REPLICATION_STATUS.FAILED,
+        errorMessage: GENERATION_SUBMIT_FAILURE_MESSAGE,
+      },
+    })
+    return { id: input.id, status: VIRAL_REPLICATION_STATUS.FAILED, taskId: null }
+  }
 }
 
 async function releaseUploadLock(id: string, userId: string, lockToken: string): Promise<void> {

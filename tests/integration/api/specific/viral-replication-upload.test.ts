@@ -261,6 +261,101 @@ describe('viral replication streamed upload with real database', () => {
     expect(deleteObjectMock).not.toHaveBeenCalled()
   })
 
+  it('retries only the failed analysis while reusing the source and clearing stale report frames', async () => {
+    const { uploadViralReplicationVideo, retryViralReplication } = await import('@/lib/viral-replication/service')
+    const uploaded = await uploadViralReplicationVideo({
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+    })
+    await prisma.viralReplicationFrame.create({
+      data: {
+        replicationId,
+        mediaId: uploaded.sourceVideoMediaId,
+        shotIndex: 0,
+        timestampMs: 1_000,
+        startMs: 0,
+        endMs: 2_000,
+      },
+    })
+    await prisma.viralReplication.update({
+      where: { id: replicationId },
+      data: {
+        status: 'failed',
+        reportJson: { stale: true },
+        transcriptText: 'stale transcript',
+        errorMessage: 'stale failure',
+      },
+    })
+    await prisma.userPreference.update({
+      where: { userId },
+      data: { analysisModel: 'openai::analysis-v2' },
+    })
+    submitTaskMock.mockClear()
+
+    const retried = await retryViralReplication({ id: replicationId, userId, locale: 'zh' })
+
+    expect(retried).toMatchObject({ id: replicationId, status: 'analyzing', taskId: expect.any(String) })
+    expect(await prisma.viralReplicationFrame.count({ where: { replicationId } })).toBe(0)
+    expect(await prisma.viralReplication.findUniqueOrThrow({ where: { id: replicationId } })).toMatchObject({
+      projectId: uploaded.projectId,
+      episodeId: uploaded.episodeId,
+      sourceVideoMediaId: uploaded.sourceVideoMediaId,
+      status: 'analyzing',
+      analysisModelSnapshot: 'openai::analysis-v2',
+      reportJson: null,
+      transcriptText: null,
+      errorMessage: null,
+    })
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'viral_video_analysis',
+      maxAttempts: 1,
+      dedupeKey: `viral_video_analysis:${replicationId}`,
+      payload: {
+        sourceVideoMediaId: uploaded.sourceVideoMediaId,
+        analysisModelSnapshot: 'openai::analysis-v2',
+      },
+    }))
+  })
+
+  it('atomically confirms the latest brief and queues one pinned generation task', async () => {
+    const { uploadViralReplicationVideo, generateViralReplication } = await import('@/lib/viral-replication/service')
+    const uploaded = await uploadViralReplicationVideo({
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+    })
+    await prisma.viralReplication.update({
+      where: { id: replicationId },
+      data: { status: 'review_ready', reportJson: { schemaVersion: 1 } },
+    })
+    await prisma.userPreference.update({
+      where: { userId },
+      data: { analysisModel: 'openai::generation-v2' },
+    })
+    submitTaskMock.mockClear()
+
+    const generated = await generateViralReplication({
+      id: replicationId,
+      userId,
+      locale: 'zh',
+      brief: '最新原创方向',
+    })
+
+    expect(generated).toMatchObject({ id: replicationId, status: 'generating', taskId: expect.any(String) })
+    expect(await prisma.viralReplication.findUniqueOrThrow({ where: { id: replicationId } })).toMatchObject({
+      projectId: uploaded.projectId,
+      episodeId: uploaded.episodeId,
+      status: 'generating',
+      brief: '最新原创方向',
+      analysisModelSnapshot: 'openai::generation-v2',
+      confirmedAt: expect.any(Date),
+      errorMessage: null,
+    })
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'viral_storyboard_generation',
+      maxAttempts: 1,
+      dedupeKey: `viral_storyboard_generation:${replicationId}`,
+      payload: { analysisModelSnapshot: 'openai::generation-v2' },
+    }))
+  })
+
   it('reports a normalized conflict while another upload lock is active', async () => {
     const now = new Date('2026-07-15T09:00:00.000Z')
     await prisma.viralReplication.update({

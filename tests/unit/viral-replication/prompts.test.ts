@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildViralReportAggregationPrompt,
   buildViralShotAnalysisPrompt,
+  buildViralStoryboardGenerationPrompt,
 } from '@/lib/viral-replication/prompts'
 
 const analyzedShot = {
@@ -77,5 +78,26 @@ describe('viral replication prompt boundaries', () => {
       durationMs: 1_000,
       batchResults: [{ shots: [{ ...analyzedShot, composition: 'x'.repeat(600_000) }] }],
     })).toThrow(/prompt.*length/i)
+  })
+
+  it('delimits the creator brief and analysis report for original storyboard generation', () => {
+    const prompt = buildViralStoryboardGenerationPrompt({
+      locale: 'zh',
+      brief: '创作一个全新的都市故事',
+      videoRatio: '9:16',
+      artStyle: 'realistic',
+      report: {
+        schemaVersion: 1,
+        overview: { hook: '悬念', coreAppeal: '反转', pacing: '快', emotionalArc: '上升' },
+        styleFingerprint: { composition: [], lighting: [], color: [], editing: [] },
+        shots: [analyzedShot],
+        originalAdaptationAdvice: [],
+      },
+    })
+
+    expect(prompt).toContain('<<<BEGIN_UNTRUSTED_BRIEF>>>')
+    expect(prompt).toContain('<<<BEGIN_UNTRUSTED_ANALYSIS_REPORT>>>')
+    expect(prompt).toContain('严禁复制或近似改写')
+    expect(prompt).toContain('总分镜数不得超过 72')
   })
 })

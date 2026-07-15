@@ -4,6 +4,7 @@ import type { Locale } from '@/i18n/routing'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
 import { safeParseJson } from '@/lib/json-repair'
 import type { PreprocessedViralShot } from './preprocess'
+import type { ViralAnalysisReportV1 } from './contracts'
 
 const analyzedShotSchema = z.object({
   shotIndex: z.number().int().nonnegative(),
@@ -82,6 +83,28 @@ export const VIRAL_REPORT_SCHEMA_JSON = JSON.stringify({
   originalAdaptationAdvice: ['string'],
 })
 
+export const VIRAL_GENERATION_SCHEMA_JSON = JSON.stringify({
+  schemaVersion: 1,
+  title: 'string',
+  synopsis: 'string',
+  novelText: 'string',
+  characters: [{ name: 'string', description: 'string' }],
+  storyboards: [{
+    sequence: 0,
+    summary: 'string',
+    panels: [{
+      panelIndex: 0,
+      durationSeconds: 2,
+      shotType: 'string',
+      cameraMove: 'string',
+      description: 'string',
+      imagePrompt: 'string',
+      videoPrompt: 'string',
+      sourceNarrativeFunction: 'string',
+    }],
+  }],
+})
+
 export function buildViralShotAnalysisPrompt(input: {
   locale: Locale
   brief: string
@@ -127,6 +150,26 @@ export function buildViralReportAggregationPrompt(input: {
         input.batchResults,
       ),
       report_schema_json: VIRAL_REPORT_SCHEMA_JSON,
+    },
+  }))
+}
+
+export function buildViralStoryboardGenerationPrompt(input: {
+  locale: Locale
+  brief: string
+  videoRatio: string
+  artStyle: string
+  report: ViralAnalysisReportV1
+}): string {
+  return assertPromptLength(buildPrompt({
+    promptId: PROMPT_IDS.VIRAL_STORYBOARD_GENERATION,
+    locale: input.locale,
+    variables: {
+      brief: delimitUntrusted('BRIEF', input.brief),
+      video_ratio: input.videoRatio,
+      art_style: input.artStyle,
+      analysis_report_json: delimitUntrusted('ANALYSIS_REPORT', input.report),
+      generation_schema_json: VIRAL_GENERATION_SCHEMA_JSON,
     },
   }))
 }
