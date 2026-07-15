@@ -72,8 +72,8 @@ function guidedAnalysis(): WorkflowAutoMappingResult {
       },
     ],
     outputs: [
-      { name: '最终图片', nodeId: 'save-final', fieldPath: 'images', mediaType: 'image', primary: false },
-      { name: '预览图片', nodeId: 'preview-result', fieldPath: 'images', mediaType: 'image', primary: false },
+      { name: 'output_17', nodeId: '17', fieldPath: 'images', mediaType: 'image', primary: false },
+      { name: 'output_22', nodeId: '22', fieldPath: 'images', mediaType: 'image', primary: false },
     ],
   }
 }
@@ -225,13 +225,53 @@ describe('guided ComfyUI workflow review', () => {
   it('summarizes automatic recognition and preserved workflow defaults without raw identifiers', () => {
     const analysis = guidedAnalysis()
     const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
-    const view = render(withZh(<WorkflowAnalysisSummary review={review} />))
+    const view = render(withZh(<WorkflowAnalysisSummary
+      review={review}
+      outputCount={analysis.outputs.length}
+      automaticPrimaryOutputNodeId=""
+    />))
 
     expect(view.getByText('提示词已自动识别')).toBeTruthy()
     expect(view.getByText('已保留 1 项工作流默认值')).toBeTruthy()
     expect(view.container.textContent).not.toContain('prompt-node')
     expect(view.container.textContent).not.toContain('text')
     expect(view.container.textContent).not.toContain('COMFY_MAPPING_PROMPT_POSITIVE_LABEL')
+  })
+
+  it('distinguishes unavailable, automatic, manually confirmed, and unresolved output states', () => {
+    const base = guidedAnalysis()
+    const renderSummary = (
+      analysis: WorkflowAutoMappingResult,
+      selectedPrimaryOutput = '',
+      automaticPrimaryOutputNodeId = '',
+    ) => {
+      const review = buildGuidedWorkflowReview('image_edit', analysis, {}, selectedPrimaryOutput)
+      return render(withZh(<WorkflowAnalysisSummary
+        review={review}
+        outputCount={analysis.outputs.length}
+        automaticPrimaryOutputNodeId={automaticPrimaryOutputNodeId}
+      />))
+    }
+
+    const unavailable = renderSummary({ ...base, outputs: [] })
+    expect(unavailable.getByText('未检测到可用输出')).toBeTruthy()
+    unavailable.unmount()
+
+    const analyzerPrimary = { ...base, outputs: base.outputs.map((output, index) => ({
+      ...output,
+      primary: index === 0,
+    })) }
+    const automatic = renderSummary(analyzerPrimary, '', '17')
+    expect(automatic.getByText('已自动识别最终输出')).toBeTruthy()
+    automatic.unmount()
+
+    const manual = renderSummary(base, '22')
+    expect(manual.getByText('已确认最终输出')).toBeTruthy()
+    expect(manual.container.textContent).not.toContain('22')
+    manual.unmount()
+
+    const unresolved = renderSummary(base)
+    expect(unresolved.getByText('请选择一个最终输出')).toBeTruthy()
   })
 
   it('asks only the unresolved required image question and reports canonical role changes', () => {
@@ -260,7 +300,7 @@ describe('guided ComfyUI workflow review', () => {
     expect(onRoleChange).toHaveBeenCalledWith('source-question', 'sourceImage')
   })
 
-  it('selects a named output while keeping its node and field identifiers in closed technical details', () => {
+  it('replaces technical output names with friendly ordinal labels outside closed technical details', () => {
     const analysis = guidedAnalysis()
     const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
     const onPrimaryOutputChange = vi.fn()
@@ -275,18 +315,24 @@ describe('guided ComfyUI workflow review', () => {
 
     expect(review.needsPrimaryOutput).toBe(true)
     expect(view.getByRole('group', { name: '哪一个输出是最终结果？' })).toBeTruthy()
-    expect(textOutsideDetails(view.container)).not.toContain('save-final')
+    expect(view.getByRole('radio', { name: '候选输出 1' })).toBeTruthy()
+    expect(view.getByRole('radio', { name: '候选输出 2' })).toBeTruthy()
+    expect(textOutsideDetails(view.container)).not.toContain('output_17')
+    expect(textOutsideDetails(view.container)).not.toContain('output_22')
+    expect(textOutsideDetails(view.container)).not.toContain('17')
+    expect(textOutsideDetails(view.container)).not.toContain('22')
     expect(textOutsideDetails(view.container)).not.toContain('images')
-    fireEvent.click(view.getByRole('radio', { name: '最终图片' }))
-    expect(onPrimaryOutputChange).toHaveBeenCalledWith('save-final')
+    fireEvent.click(view.getByRole('radio', { name: '候选输出 1' }))
+    expect(onPrimaryOutputChange).toHaveBeenCalledWith('17')
 
     const outputDetails = view.getAllByText('技术信息')
       .map((summary) => summary.closest('details'))
-      .find((details) => details?.textContent?.includes('save-final')) as HTMLDetailsElement
+      .find((details) => details?.textContent?.includes('output_17')) as HTMLDetailsElement
     expect(outputDetails.open).toBe(false)
     fireEvent.click(outputDetails.querySelector('summary') as HTMLElement)
     expect(outputDetails.open).toBe(true)
-    expect(outputDetails.textContent).toContain('save-final')
+    expect(outputDetails.textContent).toContain('output_17')
+    expect(outputDetails.textContent).toContain('17')
     expect(outputDetails.textContent).toContain('images')
   })
 
@@ -317,7 +363,8 @@ describe('guided workflow translations', () => {
     'typeTitle', 'typeHint', 'jsonInput', 'dropTitle', 'dropHint',
     'chooseFile', 'analyzing', 'name', 'selected', 'summaryTitle',
     'recognizedInputs', 'recognizedInput', 'preservedDefaults', 'recognizedOutput',
-    'outputReady', 'outputNeedsChoice', 'missingRequiredInputs', 'questionsTitle',
+    'outputUnavailable', 'outputReady', 'outputConfirmed', 'outputNeedsChoice',
+    'outputCandidate', 'outputName', 'missingRequiredInputs', 'questionsTitle',
     'sourceRoleQuestion', 'promptRoleQuestion', 'inputRoleQuestion', 'outputQuestion',
     'technicalDetails', 'nodeTitle', 'nodeId', 'inputPath', 'outputFieldPath',
     'confidence', 'reason', 'advancedSettings', 'issues',

@@ -21,6 +21,16 @@ interface Props {
   onPrimaryOutputChange(nodeId: string): void
 }
 
+function userFacingOutputName(name: string, nodeId: string) {
+  const normalizedName = name.trim()
+  const normalizedNodeId = nodeId.trim()
+  if (!normalizedName || /^output(?:_.*)?$/i.test(normalizedName)) return null
+  if (normalizedNodeId && normalizedName.toLocaleLowerCase().includes(normalizedNodeId.toLocaleLowerCase())) {
+    return null
+  }
+  return normalizedName
+}
+
 export default function WorkflowMappingQuestions({
   analysis,
   review,
@@ -81,7 +91,7 @@ export default function WorkflowMappingQuestions({
     {review.needsPrimaryOutput && <fieldset className="glass-surface-soft min-w-0 space-y-3 rounded-xl p-4">
       <legend className="max-w-full break-words px-1 text-sm font-medium">{t('outputQuestion')}</legend>
       <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2">
-        {analysis.outputs.map((output) => <div key={output.nodeId} className="min-w-0 rounded-lg border border-[var(--glass-stroke-base)] p-3">
+        {analysis.outputs.map((output, outputIndex) => <div key={output.nodeId} className="min-w-0 rounded-lg border border-[var(--glass-stroke-base)] p-3">
           <label className="flex min-w-0 items-center gap-2 text-sm">
             <input
               type="radio"
@@ -89,11 +99,14 @@ export default function WorkflowMappingQuestions({
               checked={primaryOutputNodeId === output.nodeId}
               onChange={() => onPrimaryOutputChange(output.nodeId)}
             />
-            <span className="min-w-0 break-words">{output.name}</span>
+            <span className="min-w-0 break-words">
+              {userFacingOutputName(output.name, output.nodeId) || t('outputCandidate', { index: outputIndex + 1 })}
+            </span>
           </label>
           <details className="mt-2 min-w-0 text-xs text-[var(--glass-text-secondary)]">
             <summary className="cursor-pointer break-words">{t('technicalDetails')}</summary>
             <dl className="mt-2 min-w-0 space-y-1 rounded-lg border border-[var(--glass-stroke-base)] p-3">
+              <div className="min-w-0"><dt className="font-medium">{t('outputName')}</dt><dd className="break-all">{output.name}</dd></div>
               <div className="min-w-0"><dt className="font-medium">{t('nodeId')}</dt><dd className="break-all">{output.nodeId}</dd></div>
               <div className="min-w-0"><dt className="font-medium">{t('outputFieldPath')}</dt><dd className="break-all">{output.fieldPath}</dd></div>
             </dl>

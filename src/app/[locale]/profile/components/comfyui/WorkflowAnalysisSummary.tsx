@@ -4,7 +4,11 @@ import React from 'react'
 import { useTranslations } from 'next-intl'
 import type { GuidedWorkflowReview } from './guided-workflow-creation'
 
-interface Props { review: GuidedWorkflowReview }
+interface Props {
+  review: GuidedWorkflowReview
+  outputCount: number
+  automaticPrimaryOutputNodeId: string
+}
 
 type GuidedIssueKey =
   | 'COMFY_WORKFLOW_API_FORMAT_REQUIRED'
@@ -24,7 +28,11 @@ function guidedIssueKey(code: string): GuidedIssueKey | 'unknown' {
   }
 }
 
-export default function WorkflowAnalysisSummary({ review }: Props) {
+export default function WorkflowAnalysisSummary({
+  review,
+  outputCount,
+  automaticPrimaryOutputNodeId,
+}: Props) {
   const t = useTranslations('comfyui.workflows.guided')
   const canonical = useTranslations('comfyui.workflows.canonicalInputs')
 
@@ -45,9 +53,13 @@ export default function WorkflowAnalysisSummary({ review }: Props) {
       <article className="glass-surface-soft min-w-0 rounded-xl p-4">
         <h4 className="text-sm font-medium">{t('recognizedOutput')}</h4>
         <p className="mt-1 break-words text-sm text-[var(--glass-text-secondary)]">
-          {review.primaryOutputNodeId
-            ? t('outputReady')
-            : t('outputNeedsChoice')}
+          {outputCount === 0
+            ? t('outputUnavailable')
+            : review.primaryOutputNodeId && review.primaryOutputNodeId === automaticPrimaryOutputNodeId
+              ? t('outputReady')
+              : review.primaryOutputNodeId
+                ? t('outputConfirmed')
+                : t('outputNeedsChoice')}
         </p>
       </article>
       {review.missingRequiredInputs.length > 0 && <article role="alert" className="glass-surface-soft min-w-0 rounded-xl p-4 text-sm text-[var(--glass-tone-danger-fg)]">
