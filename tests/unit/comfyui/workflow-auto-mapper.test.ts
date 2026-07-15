@@ -55,6 +55,31 @@ describe('ComfyUI API workflow auto mapper', () => {
     expect(result.graph).not.toBe(apiGraph)
   })
 
+  it('does not unwrap a prompt graph embedded in normal UI Workflow JSON', () => {
+    expect(() => analyzeComfyApiWorkflow({
+      graph: { nodes: [], links: [], prompt: apiGraph },
+      kind: 'image_generation',
+    })).toThrow('COMFY_WORKFLOW_API_FORMAT_REQUIRED')
+  })
+
+  it('keeps a legitimate top-level API graph whose node id is prompt', () => {
+    const graph = {
+      prompt: {
+        class_type: 'CLIPTextEncode',
+        inputs: { text: 'portrait' },
+        _meta: { title: 'Positive Prompt' },
+      },
+      output: { class_type: 'SaveImage', inputs: { images: ['prompt', 0] } },
+    }
+
+    const result = analyzeComfyApiWorkflow({ graph, kind: 'image_generation' })
+
+    expect(result.graph).toEqual(graph)
+    expect(result.proposals).toContainEqual(expect.objectContaining({
+      nodeId: 'prompt', canonicalName: 'prompt', confidence: 'high',
+    }))
+  })
+
   it.each([
     { nodes: [], links: [] },
     [],

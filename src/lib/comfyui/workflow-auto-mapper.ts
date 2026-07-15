@@ -88,7 +88,14 @@ export function readApiFormatGraph(raw: unknown): ComfyApiWorkflow {
 }
 
 export function unwrapComfyApiWorkflowPayload(raw: unknown): unknown {
-  return isRecord(raw) && isRecord(raw.prompt) ? raw.prompt : raw
+  if (!isRecord(raw)) return raw
+  if (isApiWorkflowGraph(raw) || isNormalWorkflowJson(raw)) return raw
+
+  const envelopeKeys = new Set(['prompt', 'client_id', 'extra_data', 'number', 'front'])
+  const keys = Object.keys(raw)
+  return isApiWorkflowGraph(raw.prompt) && keys.every((key) => envelopeKeys.has(key))
+    ? raw.prompt
+    : raw
 }
 
 interface ScalarRule {
@@ -399,6 +406,12 @@ function isApiWorkflowNode(value: unknown): value is ComfyApiWorkflowNode {
     && typeof value.class_type === 'string'
     && value.class_type.trim().length > 0
     && isRecord(value.inputs)
+}
+
+function isApiWorkflowGraph(value: unknown): value is ComfyApiWorkflow {
+  return isRecord(value)
+    && Object.keys(value).length > 0
+    && Object.values(value).every(isApiWorkflowNode)
 }
 
 function isNormalWorkflowJson(value: unknown) {
