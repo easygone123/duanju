@@ -36,17 +36,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function isAllowedValue(value: unknown, allowed: ReadonlySet<string>): value is string {
+  return typeof value === 'string' && allowed.has(value)
+}
+
+function isWorkflowGraph(value: unknown) {
+  return isRecord(value) && Object.values(value).every(node => isRecord(node)
+    && isNonEmptyString(node.class_type)
+    && isRecord(node.inputs))
+}
+
 function isMappingProposal(value: unknown) {
   if (!isRecord(value)) return false
-  return typeof value.id === 'string'
-    && CANONICAL_INPUTS.has(String(value.canonicalName))
-    && typeof value.nodeId === 'string'
-    && typeof value.inputPath === 'string'
-    && VARIABLE_TYPES.has(String(value.valueType))
-    && MAPPING_CONFIDENCE.has(String(value.confidence))
-    && typeof value.reasonCode === 'string'
+  return isNonEmptyString(value.id)
+    && isAllowedValue(value.canonicalName, CANONICAL_INPUTS)
+    && isNonEmptyString(value.nodeId)
+    && isNonEmptyString(value.inputPath)
+    && isAllowedValue(value.valueType, VARIABLE_TYPES)
+    && isAllowedValue(value.confidence, MAPPING_CONFIDENCE)
+    && isNonEmptyString(value.reasonCode)
     && typeof value.required === 'boolean'
-    && (value.transform === undefined || BINDING_TRANSFORMS.has(String(value.transform)))
+    && (value.transform === undefined || isAllowedValue(value.transform, BINDING_TRANSFORMS))
     && (value.referenceIndex === undefined
       || (Number.isInteger(value.referenceIndex) && Number(value.referenceIndex) >= 0))
     && (value.nodeTitle === undefined || typeof value.nodeTitle === 'string')
@@ -54,17 +68,17 @@ function isMappingProposal(value: unknown) {
 
 function isOutputBinding(value: unknown) {
   if (!isRecord(value)) return false
-  return typeof value.name === 'string'
-    && typeof value.nodeId === 'string'
-    && typeof value.fieldPath === 'string'
+  return isNonEmptyString(value.name)
+    && isNonEmptyString(value.nodeId)
+    && isNonEmptyString(value.fieldPath)
     && (value.mediaType === 'image' || value.mediaType === 'video')
     && typeof value.primary === 'boolean'
 }
 
 function isValidationIssue(value: unknown) {
   if (!isRecord(value)) return false
-  return typeof value.code === 'string'
-    && typeof value.message === 'string'
+  return isNonEmptyString(value.code)
+    && isNonEmptyString(value.message)
     && (value.path === undefined || typeof value.path === 'string')
 }
 
@@ -76,7 +90,7 @@ async function safeResponseJson(response: Response): Promise<unknown> {
 function isWorkflowAnalysis(value: unknown): value is WorkflowAutoMappingResult {
   if (!isRecord(value)) return false
   const item = value
-  return isRecord(item.graph)
+  return isWorkflowGraph(item.graph)
     && (item.mediaType === 'image' || item.mediaType === 'video')
     && (item.purpose === 'generation' || item.purpose === 'upscale')
     && Array.isArray(item.proposals) && item.proposals.every(isMappingProposal)
@@ -89,13 +103,21 @@ function malformedWorkflowResponse(): WorkflowRequestError {
   return new WorkflowRequestError('UNKNOWN')
 }
 
+async function workflowApiFetch(endpoint: string, init: RequestInit): Promise<Response> {
+  try {
+    return await apiFetch(endpoint, init)
+  } catch {
+    throw new WorkflowRequestError('NETWORK_ERROR')
+  }
+}
+
 export async function analyzeWorkflowJson(
   kind: WorkflowImportKind,
   file: File,
 ): Promise<WorkflowAnalysisResponse> {
   const sourceText = await readWorkflowImportFile(file)
   const apiFormatJson = parseWorkflowImportText(sourceText)
-  const response = await apiFetch(ANALYZE_ENDPOINT, {
+  const response = await workflowApiFetch(ANALYZE_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ kind, apiFormatJson }),
@@ -111,14 +133,15 @@ export async function analyzeWorkflowJson(
 }
 
 export async function createWorkflowDraft(draft: WorkflowAuthorDraft): Promise<string> {
-  const response = await apiFetch(WORKFLOWS_ENDPOINT, {
+  const body = JSON.stringify({
+    ...workflowPayload(draft),
+    name: draft.name,
+    mediaType: draft.mediaType,
+  })
+  const response = await workflowApiFetch(WORKFLOWS_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      ...workflowPayload(draft),
-      name: draft.name,
-      mediaType: draft.mediaType,
-    }),
+    body,
   })
   const payload = await safeResponseJson(response)
   if (!response.ok) throw workflowRequestErrorFromPayload(payload)

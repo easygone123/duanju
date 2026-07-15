@@ -12,6 +12,7 @@ import {
 } from '@/app/[locale]/profile/components/comfyui/workflow-requests'
 import { createWorkflowAnalysisCoordinator } from '@/app/[locale]/profile/components/comfyui/guided-workflow-creation'
 import {
+  safeWorkflowErrorKey,
   WorkflowRequestError,
   type WorkflowAuthorDraft,
 } from '@/app/[locale]/profile/components/comfyui/workflow-ui'
@@ -364,6 +365,24 @@ describe('WorkflowCreationWizard', () => {
     expect((view.getByRole('radio', { name: 'resultB' }) as HTMLInputElement).checked).toBe(false)
     expect((view.getByRole('button', { name: 'Create workflow' }) as HTMLButtonElement).disabled).toBe(true)
   })
+
+  it('keeps a malformed successful analysis response out of wizard state', async () => {
+    vi.spyOn(apiFetchModule, 'apiFetch').mockResolvedValue(new Response(JSON.stringify({
+      analysis: { ...analysis(), graph: { '1': null } },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const { view } = renderWizard({ analyze: undefined })
+    selectKindAndAdvance(view)
+    const file = new File(['{}'], 'malformed.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve('{}') })
+
+    await act(async () => {
+      fireEvent.change(view.getByLabelText('Workflow JSON file'), { target: { files: [file] } })
+    })
+
+    expect(view.getByRole('heading', { name: 'Upload workflow' })).toBeTruthy()
+    expect(view.queryByRole('heading', { name: 'Review and confirm' })).toBeNull()
+    expect(view.getByRole('alert').textContent).toBe('The workflow request failed.')
+  })
 })
 
 describe('workflow request helpers', () => {
@@ -396,33 +415,80 @@ describe('workflow request helpers', () => {
     })
   })
 
-  it('rejects malformed success and network failures safely', async () => {
+  it('maps analyze network failures to a typed safe error without raw details', async () => {
     vi.spyOn(apiFetchModule, 'apiFetch')
-      .mockResolvedValueOnce(new Response('{"ok":true}', {
-        status: 200, headers: { 'Content-Type': 'application/json' },
-      }))
       .mockRejectedValueOnce(new Error('socket details'))
     const file = new File(['{}'], 'graph.json', { type: 'application/json' })
     Object.defineProperty(file, 'text', { value: () => Promise.resolve('{}') })
 
-    await expect(analyzeWorkflowJson('image_generation', file)).rejects.toMatchObject({ code: 'UNKNOWN' })
-    await expect(analyzeWorkflowJson('image_generation', file)).rejects.toThrow('socket details')
+    const error = await analyzeWorkflowJson('image_generation', file).catch((reason: unknown) => reason)
+    expect(error).toBeInstanceOf(WorkflowRequestError)
+    expect(error).toMatchObject({ code: 'NETWORK_ERROR', message: 'workflowRequestFailed' })
+    expect(safeWorkflowErrorKey(error)).toBe('workflowNetworkFailed')
+    expect(String(error)).not.toContain('socket details')
+    expect((error as Error & { cause?: unknown }).cause).toBeUndefined()
   })
 
-  it('rejects malformed nested analysis entries before the review can render them', async () => {
-    vi.spyOn(apiFetchModule, 'apiFetch').mockResolvedValue(new Response(JSON.stringify({
-      analysis: {
-        graph: {}, mediaType: 'image', purpose: 'generation', referenceCapacity: 0,
-        proposals: [null], outputs: [], issues: [],
-      },
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+  it('does not mask client file parse errors as network failures', async () => {
+    const apiFetch = vi.spyOn(apiFetchModule, 'apiFetch')
+    const file = new File(['{}'], 'graph.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve('{invalid') })
+
+    await expect(analyzeWorkflowJson('image_generation', file)).rejects.toThrow('workflowInvalidJson')
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+
+  it('rejects table-driven malformed successful analysis payloads', async () => {
+    const base = analysis()
+    const proposal = base.proposals[0]!
+    const output = base.outputs[0]!
+    const malformedCases: Array<[string, unknown]> = [
+      ['array graph', { ...base, graph: [] }],
+      ['invalid graph node', { ...base, graph: { '1': null } }],
+      ['blank graph class', { ...base, graph: { '1': { class_type: ' ', inputs: {} } } }],
+      ['array graph inputs', { ...base, graph: { '1': { class_type: 'X', inputs: [] } } }],
+      ['invalid proposal entry', { ...base, proposals: [null] }],
+      ['blank proposal id', { ...base, proposals: [{ ...proposal, id: ' ' }] }],
+      ['blank proposal node', { ...base, proposals: [{ ...proposal, nodeId: '' }] }],
+      ['blank proposal path', { ...base, proposals: [{ ...proposal, inputPath: ' ' }] }],
+      ['blank proposal reason', { ...base, proposals: [{ ...proposal, reasonCode: '' }] }],
+      ['invalid proposal canonical enum', { ...base, proposals: [{ ...proposal, canonicalName: 'style' }] }],
+      ['invalid proposal value enum', { ...base, proposals: [{ ...proposal, valueType: 'json' }] }],
+      ['invalid proposal confidence enum', { ...base, proposals: [{ ...proposal, confidence: 'maybe' }] }],
+      ['invalid proposal boolean', { ...base, proposals: [{ ...proposal, required: 'yes' }] }],
+      ['invalid optional transform', { ...base, proposals: [{ ...proposal, transform: 'basename' }] }],
+      ['negative optional index', { ...base, proposals: [{ ...proposal, referenceIndex: -1 }] }],
+      ['fractional optional index', { ...base, proposals: [{ ...proposal, referenceIndex: 1.5 }] }],
+      ['invalid optional title', { ...base, proposals: [{ ...proposal, nodeTitle: 7 }] }],
+      ['invalid output entry', { ...base, outputs: [null] }],
+      ['blank output name', { ...base, outputs: [{ ...output, name: ' ' }] }],
+      ['blank output node', { ...base, outputs: [{ ...output, nodeId: '' }] }],
+      ['blank output path', { ...base, outputs: [{ ...output, fieldPath: ' ' }] }],
+      ['invalid output enum', { ...base, outputs: [{ ...output, mediaType: 'audio' }] }],
+      ['invalid output boolean', { ...base, outputs: [{ ...output, primary: 1 }] }],
+      ['invalid issue entry', { ...base, issues: [null] }],
+      ['blank issue code', { ...base, issues: [{ code: '', message: 'invalid' }] }],
+      ['blank issue message', { ...base, issues: [{ code: 'INVALID', message: ' ' }] }],
+      ['invalid issue path', { ...base, issues: [{ code: 'INVALID', message: 'invalid', path: 1 }] }],
+      ['negative reference capacity', { ...base, referenceCapacity: -1 }],
+      ['fractional reference capacity', { ...base, referenceCapacity: 1.5 }],
+      ['invalid media type', { ...base, mediaType: 'audio' }],
+      ['invalid purpose', { ...base, purpose: 'editing' }],
+    ]
+    const apiFetch = vi.spyOn(apiFetchModule, 'apiFetch')
     const file = new File(['{}'], 'graph.json', { type: 'application/json' })
     Object.defineProperty(file, 'text', { value: () => Promise.resolve('{}') })
 
-    await expect(analyzeWorkflowJson('image_generation', file)).rejects.toMatchObject({ code: 'UNKNOWN' })
+    for (const [name, malformed] of malformedCases) {
+      apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ analysis: malformed }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }))
+      const error = await analyzeWorkflowJson('image_generation', file).catch((reason: unknown) => reason)
+      expect(error, name).toMatchObject({ name: 'WorkflowRequestError', code: 'UNKNOWN' })
+    }
   })
 
-  it('creates a workflow payload and rejects a malformed created workflow safely', async () => {
+  it('creates a workflow payload and rejects blank IDs and network failures safely', async () => {
     const draft: WorkflowAuthorDraft = {
       name: 'Portrait', mediaType: 'image', purpose: 'generation', apiFormatJson: '{}',
       variableDefinitions: [], bindings: [],
@@ -432,9 +498,10 @@ describe('workflow request helpers', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ workflow: { id: 'created-id' } }), {
         status: 201, headers: { 'Content-Type': 'application/json' },
       }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ workflow: {} }), {
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workflow: { id: '   ' } }), {
         status: 201, headers: { 'Content-Type': 'application/json' },
       }))
+      .mockRejectedValueOnce(new Error('private network diagnostics'))
 
     await expect(createWorkflowDraft(draft)).resolves.toBe('created-id')
     expect(apiFetch).toHaveBeenLastCalledWith('/api/comfyui/workflows', expect.objectContaining({
@@ -445,5 +512,12 @@ describe('workflow request helpers', () => {
       }),
     }))
     await expect(createWorkflowDraft(draft)).rejects.toMatchObject({ code: 'UNKNOWN' })
+    const networkError = await createWorkflowDraft(draft).catch((reason: unknown) => reason)
+    expect(networkError).toMatchObject({
+      name: 'WorkflowRequestError', code: 'NETWORK_ERROR', message: 'workflowRequestFailed',
+    })
+    expect(safeWorkflowErrorKey(networkError)).toBe('workflowNetworkFailed')
+    expect(String(networkError)).not.toContain('private network diagnostics')
+    expect((networkError as Error & { cause?: unknown }).cause).toBeUndefined()
   })
 })
