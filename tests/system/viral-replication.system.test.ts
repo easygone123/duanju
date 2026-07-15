@@ -306,6 +306,7 @@ describe('system - viral replication runtime acceptance', () => {
       })
       expect(panels).toHaveLength(3)
       expect(panels.every((panel) => Boolean(panel.imagePrompt && panel.videoPrompt))).toBe(true)
+      expect(panels.every((panel) => panel.imageMediaId === null && panel.videoMediaId === null)).toBe(true)
 
       const { GET: getStage } = await import(
         '@/app/api/novel-promotion/[projectId]/episodes/[episodeId]/stage/[stage]/route'
@@ -326,14 +327,18 @@ describe('system - viral replication runtime acceptance', () => {
         },
       })
 
-      expect(systemState.submittedTasks.map((task) => task.type)).toEqual([
-        'viral_video_analysis',
-        'viral_storyboard_generation',
+      expect(systemState.submittedTasks.map((task) => ({
+        type: task.type,
+        maxAttempts: task.maxAttempts,
+      }))).toEqual([
+        { type: 'viral_video_analysis', maxAttempts: 1 },
+        { type: 'viral_storyboard_generation', maxAttempts: 1 },
       ])
       const firstRefetch = await getOwnedViralReplicationDetail(created.id, user.id)
       const secondRefetch = await getOwnedViralReplicationDetail(created.id, user.id)
       expect(firstRefetch).toMatchObject({
         status: 'completed',
+        reportVersion: 1,
         project: { id: uploaded.projectId },
         episode: { id: uploaded.episodeId },
       })
