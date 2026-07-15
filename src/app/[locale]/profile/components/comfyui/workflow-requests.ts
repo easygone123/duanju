@@ -45,7 +45,9 @@ function isAllowedValue(value: unknown, allowed: ReadonlySet<string>): value is 
 }
 
 function isWorkflowGraph(value: unknown) {
-  return isRecord(value) && Object.values(value).every(node => isRecord(node)
+  return isRecord(value) && Object.entries(value).every(([nodeId, node]) => isNonEmptyString(nodeId)
+    && nodeId.trim() === nodeId
+    && isRecord(node)
     && isNonEmptyString(node.class_type)
     && isRecord(node.inputs))
 }
@@ -153,6 +155,8 @@ export async function createWorkflowDraft(draft: WorkflowAuthorDraft): Promise<s
     throw malformedWorkflowResponse()
   }
   const id = (workflow as Record<string, unknown>).id
-  if (typeof id !== 'string' || !id.trim()) throw malformedWorkflowResponse()
-  return id
+  if (typeof id !== 'string') throw malformedWorkflowResponse()
+  const normalizedId = id.trim()
+  if (!normalizedId) throw malformedWorkflowResponse()
+  return normalizedId
 }

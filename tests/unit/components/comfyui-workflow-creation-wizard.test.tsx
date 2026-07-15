@@ -388,7 +388,12 @@ describe('WorkflowCreationWizard', () => {
 describe('workflow request helpers', () => {
   it('analyzes the bounded original JSON with authenticated apiFetch', async () => {
     const apiFetch = vi.spyOn(apiFetchModule, 'apiFetch').mockResolvedValue(new Response(JSON.stringify({
-      analysis: analysis(),
+      analysis: analysis({
+        graph: {
+          '1': { class_type: 'X', inputs: {} },
+          node_alpha: { class_type: 'Y', inputs: {} },
+        },
+      }),
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     const file = new File(['{"1":{"class_type":"X","inputs":{}}}'], 'graph.json', { type: 'application/json' })
     Object.defineProperty(file, 'text', { value: () => Promise.resolve('{"1":{"class_type":"X","inputs":{}}}') })
@@ -444,6 +449,9 @@ describe('workflow request helpers', () => {
     const output = base.outputs[0]!
     const malformedCases: Array<[string, unknown]> = [
       ['array graph', { ...base, graph: [] }],
+      ['empty graph key', { ...base, graph: { '': { class_type: 'X', inputs: {} } } }],
+      ['whitespace graph key', { ...base, graph: { '   ': { class_type: 'X', inputs: {} } } }],
+      ['padded graph key', { ...base, graph: { ' 1 ': { class_type: 'X', inputs: {} } } }],
       ['invalid graph node', { ...base, graph: { '1': null } }],
       ['blank graph class', { ...base, graph: { '1': { class_type: ' ', inputs: {} } } }],
       ['array graph inputs', { ...base, graph: { '1': { class_type: 'X', inputs: [] } } }],
@@ -495,7 +503,7 @@ describe('workflow request helpers', () => {
       outputs: [{ name: 'result', nodeId: '9', fieldPath: 'images', mediaType: 'image', primary: true }],
     }
     const apiFetch = vi.spyOn(apiFetchModule, 'apiFetch')
-      .mockResolvedValueOnce(new Response(JSON.stringify({ workflow: { id: 'created-id' } }), {
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workflow: { id: ' created-id ' } }), {
         status: 201, headers: { 'Content-Type': 'application/json' },
       }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ workflow: { id: '   ' } }), {
