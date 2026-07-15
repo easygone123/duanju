@@ -6,6 +6,7 @@ import { initializeFonts, createLabelSVG } from '@/lib/fonts'
 import { decodeImageUrlsFromDb, encodeImageUrls } from '@/lib/contracts/image-urls-contract'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
+import { PRIMARY_APPEARANCE_INDEX } from '@/lib/constants'
 
 interface CharacterAppearanceRecord {
   id: string
@@ -24,8 +25,17 @@ interface LocationRecord {
 }
 
 interface UploadAssetImageDb {
+  novelPromotionCharacter: {
+    findFirst(args: Record<string, unknown>): Promise<{
+      id: string
+      name: string
+      profileConfirmed: boolean
+    } | null>
+    update(args: Record<string, unknown>): Promise<unknown>
+  }
   characterAppearance: {
-    findUnique(args: Record<string, unknown>): Promise<CharacterAppearanceRecord | null>
+    findFirst(args: Record<string, unknown>): Promise<CharacterAppearanceRecord | null>
+    upsert(args: Record<string, unknown>): Promise<CharacterAppearanceRecord>
     update(args: Record<string, unknown>): Promise<unknown>
   }
   novelPromotionLocation: {
@@ -69,6 +79,45 @@ export const POST = apiHandler(async (
     throw new ApiError('INVALID_PARAMS')
   }
 
+  let character: Awaited<ReturnType<UploadAssetImageDb['novelPromotionCharacter']['findFirst']>> = null
+  let targetAppearance: CharacterAppearanceRecord | null = null
+  const confirmsPendingProfile = type === 'character' && !appearanceId
+  if (type === 'character') {
+    character = await db.novelPromotionCharacter.findFirst({
+      where: { id, novelPromotionProject: { projectId } },
+      select: { id: true, name: true, profileConfirmed: true },
+    })
+    if (!character) throw new ApiError('NOT_FOUND')
+
+    targetAppearance = appearanceId
+      ? await db.characterAppearance.findFirst({
+        where: {
+          id: appearanceId,
+          characterId: id,
+          character: { novelPromotionProject: { projectId } },
+        },
+      })
+      : await db.characterAppearance.upsert({
+        where: {
+          characterId_appearanceIndex: {
+            characterId: id,
+            appearanceIndex: PRIMARY_APPEARANCE_INDEX,
+          },
+        },
+        update: {},
+        create: {
+          characterId: id,
+          appearanceIndex: PRIMARY_APPEARANCE_INDEX,
+          changeReason: '初始形象',
+          description: labelText.trim(),
+          descriptions: JSON.stringify([labelText.trim()]),
+          imageUrls: encodeImageUrls([]),
+          previousImageUrls: encodeImageUrls([]),
+        },
+      })
+    if (!targetAppearance) throw new ApiError('NOT_FOUND')
+  }
+
   // 读取文件
   const arrayBuffer = await file.arrayBuffer()
   const buffer = Buffer.from(arrayBuffer)
@@ -93,21 +142,14 @@ export const POST = apiHandler(async (
 
   // 生成唯一key并上传
   const keyPrefix = type === 'character'
-    ? `char-${id}-${appearanceId}-upload`
+    ? `char-${id}-${targetAppearance?.id}-upload`
     : `loc-${id}-upload`
   const key = generateUniqueKey(keyPrefix, 'jpg')
   await uploadObject(processed, key)
 
   // 更新数据库
-  if (type === 'character' && appearanceId !== null) {
-    // 更新角色形象图片 - 使用 UUID 直接查询
-    const appearance = await db.characterAppearance.findUnique({
-      where: { id: appearanceId }
-    })
-
-    if (!appearance) {
-      throw new ApiError('NOT_FOUND')
-    }
+  if (type === 'character' && targetAppearance) {
+    const appearance = targetAppearance
 
     // 解析现有图片数组
     const imageUrls = decodeImageUrlsFromDb(appearance.imageUrls, 'characterAppearance.imageUrls')
@@ -144,8 +186,16 @@ export const POST = apiHandler(async (
       data: updateData
     })
 
+    if (confirmsPendingProfile && character && !character.profileConfirmed) {
+      await db.novelPromotionCharacter.update({
+        where: { id: character.id },
+        data: { profileConfirmed: true },
+      })
+    }
+
     return NextResponse.json({
       success: true,
+      appearanceId: appearance.id,
       imageKey: key,
       imageIndex: targetIndex
     })

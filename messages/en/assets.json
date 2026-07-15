@@ -321,6 +321,7 @@
         "keywordsPlaceholder": "e.g.: Elite aura, Ascetic style",
         "editDialogTitle": "Edit Character Profile - {name}",
         "confirmAndGenerate": "Confirm & Generate",
+        "uploadImage": "Upload Character Image",
         "useExisting": "Use Existing",
         "editProfile": "Edit Profile",
         "delete": "Delete Character",

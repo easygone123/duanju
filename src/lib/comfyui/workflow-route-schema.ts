@@ -1,6 +1,20 @@
 import { z } from 'zod'
 import { isBoundedLiveVariables } from './workflow-limits'
 
+export const analyzeWorkflowSchema = z.object({
+  kind: z.enum([
+    'image_generation',
+    'image_edit',
+    'image_upscale',
+    'video_generation',
+    'video_to_video',
+  ]),
+  apiFormatJson: z.union([
+    z.string().max(4 * 1024 * 1024),
+    z.record(z.string(), z.unknown()),
+  ]),
+}).strict()
+
 const uploadPayloadSchema = z.object({
   filename: z.string().min(1).max(255).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
   contentType: z.enum([

@@ -258,6 +258,33 @@ describe('ComfyUI request state machine', () => {
     }, rejected)).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
     expect(rejected.create).not.toHaveBeenCalled()
   })
+
+  it('rejects reference images beyond the mapped workflow capacity before resolving media', async () => {
+    const dependencies = requestDependenciesWithDefinitions([{
+      name: 'referenceImages', type: 'image_ref_list', required: false, maxItems: 2,
+    }])
+
+    await expect(createComfyGenerationRequest({
+      invocationKey: 'invoke-too-many-references', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'image', workflowId: 'workflow-1',
+      variables: {
+        referenceImages: [
+          { storageKey: 'images/one.png' },
+          { storageKey: 'images/two.png' },
+          { storageKey: 'images/three.png' },
+        ],
+      },
+    }, dependencies)).rejects.toMatchObject({
+      code: 'INVALID_PARAMS',
+      details: {
+        reason: 'COMFY_REFERENCE_CAPACITY_EXCEEDED',
+        variable: 'referenceImages',
+        maxItems: 2,
+      },
+    })
+    expect(dependencies.resolveOwnedMedia).not.toHaveBeenCalled()
+    expect(dependencies.create).not.toHaveBeenCalled()
+  })
 })
 
 function requestDependenciesWithDefinitions(variableDefinitions: unknown[]) {

@@ -449,6 +449,34 @@ describe('worker script-to-storyboard behavior', () => {
     expect(persistStoryboardOutputsMock).not.toHaveBeenCalled()
   })
 
+  it.each([
+    'six_grid_episode_plan',
+    'six_grid_group_1_phase1',
+    'six_grid_group_1_phase2_cinematography',
+    'six_grid_group_1_phase2_acting',
+    'six_grid_group_1_phase3_detail',
+  ])('六宫格步骤 %s 可从任务控制台重试', async (retryStepKey) => {
+    mockSingleSixGridGroup()
+    getRunInputSnapshotMock.mockResolvedValueOnce({
+      runId: 'run-test-storyboard',
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      workflowType: 'script_to_storyboard_run',
+      input: { storyboardGenerationMode: 'six_grid', sixGridCellAspectRatio: '16:9' },
+    })
+
+    const result = await handleScriptToStoryboardTask(buildJob({
+      episodeId: 'episode-1',
+      retryStepKey,
+      retryStepAttempt: 2,
+    }))
+
+    expect(runScriptToStoryboardOrchestratorMock).toHaveBeenCalledTimes(1)
+    expect(runScriptToStoryboardAtomicRetryMock).not.toHaveBeenCalled()
+    expect(chatCompletionMock).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ retryStepKey, voiceLineCount: 0, panelCount: 6 })
+  })
+
   it('保留同 clip 多组身份并交给 six-grid 原子持久化', async () => {
     getRunInputSnapshotMock.mockResolvedValueOnce({
       runId: 'run-test-storyboard',

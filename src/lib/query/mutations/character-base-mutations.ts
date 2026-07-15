@@ -170,7 +170,7 @@ export function useUploadProjectCharacterImage(projectId: string) {
         }: {
             file: File
             characterId: string
-            appearanceId: string
+            appearanceId?: string
             imageIndex?: number
             labelText?: string
         }) => {
@@ -178,7 +178,7 @@ export function useUploadProjectCharacterImage(projectId: string) {
             formData.append('file', file)
             formData.append('type', 'character')
             formData.append('id', characterId)
-            formData.append('appearanceId', appearanceId)
+            if (appearanceId) formData.append('appearanceId', appearanceId)
             if (imageIndex !== undefined) formData.append('imageIndex', imageIndex.toString())
             if (labelText) formData.append('labelText', labelText)
 

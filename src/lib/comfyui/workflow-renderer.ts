@@ -17,6 +17,7 @@ import type {
 
 const WHOLE_PLACEHOLDER = /^\$\{([^{}]+)\}$/
 const EMBEDDED_PLACEHOLDER = /\$\{([^{}]+)\}/g
+const SKIP_BINDING = Symbol('skip-binding')
 
 export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflow {
   const rendered = validateComfyApiWorkflow(input.graph)
@@ -56,7 +57,9 @@ export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflo
     const value = variables[binding.variable]
     if (value !== undefined) {
       const transformed = transformBindingValue(binding, value, input.uploads)
-      setPath(rendered[binding.nodeId].inputs, binding.inputPath, transformed)
+      if (transformed !== SKIP_BINDING) {
+        setPath(rendered[binding.nodeId].inputs, binding.inputPath, transformed)
+      }
     }
   }
 
@@ -97,7 +100,7 @@ function assertSafeBinding(graph: ComfyApiWorkflow, binding: ComfyInputBinding):
   }
   if (
     binding.transform !== undefined
-    && !['filename', 'image_ref', 'filename_list'].includes(binding.transform)
+    && !['filename', 'image_ref', 'filename_list', 'filename_at'].includes(binding.transform)
   ) {
     throw bindingError(binding, `Unsupported transform "${String(binding.transform)}".`)
   }
@@ -111,6 +114,28 @@ function transformBindingValue(
   if (!binding.transform) return cloneValue(value)
 
   const upload = uploads[binding.variable]
+  if (binding.transform === 'filename_at') {
+    const valueIndex = binding.valueIndex
+    if (!Number.isInteger(valueIndex) || (valueIndex as number) < 0) {
+      throw bindingError(binding, `Indexed upload binding for "${binding.variable}" is invalid.`)
+    }
+    if (!Array.isArray(value) || !Array.isArray(upload)) {
+      throw bindingError(binding, `Upload list for "${binding.variable}" is missing or malformed.`)
+    }
+    const indexedValue = value[valueIndex as number]
+    const indexedUpload = upload[valueIndex as number]
+    if (indexedValue === undefined && indexedUpload === undefined
+      && binding.missingValuePolicy === 'preserve_original') {
+      return SKIP_BINDING
+    }
+    if (indexedValue === undefined || !isUploadedFile(indexedUpload)) {
+      throw bindingError(
+        binding,
+        `Upload at index ${String(valueIndex)} for "${binding.variable}" is missing or malformed.`,
+      )
+    }
+    return indexedUpload.name
+  }
   if (binding.transform === 'filename_list') {
     if (
       !Array.isArray(value)

@@ -74,6 +74,7 @@ const ROUTE_FILES = [
   'src/app/api/comfyui/connections/route.ts',
   'src/app/api/comfyui/connections/status/route.ts',
   'src/app/api/comfyui/requests/[requestId]/cancel/route.ts',
+  'src/app/api/comfyui/workflows/analyze/route.ts',
   'src/app/api/comfyui/workflows/[workflowId]/publish/route.ts',
   'src/app/api/comfyui/workflows/[workflowId]/route.ts',
   'src/app/api/comfyui/workflows/[workflowId]/test-run/route.ts',
@@ -211,6 +212,7 @@ function resolveCategory(routeFile: string): RouteCategory {
 
 function resolveContractGroup(routeFile: string): RouteContractGroup {
   if (routeFile.startsWith('src/app/api/viral-replications/')) return 'viral-replication-routes'
+  if (routeFile === 'src/app/api/comfyui/workflows/analyze/route.ts') return 'infra-routes'
   if (
     routeFile.includes('/ai-')
     || routeFile.includes('/analyze')

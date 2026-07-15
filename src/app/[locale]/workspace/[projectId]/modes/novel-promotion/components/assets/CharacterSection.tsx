@@ -246,6 +246,7 @@ export default function CharacterSection({
                                 <CharacterProfileCard
                                     key={character.id}
                                     characterId={character.id}
+                                    projectId={projectId}
                                     name={character.name}
                                     profileData={profileData}
                                     onEdit={() => onEditProfile(character.id, character.name)}

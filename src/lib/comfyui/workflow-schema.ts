@@ -8,6 +8,7 @@ import type {
   WorkflowContractInput,
   WorkflowValidationIssue,
 } from './types'
+import { COMFY_REFERENCE_UPLOAD_LIMIT } from './types'
 
 const PLACEHOLDER_PATTERN = /\$\{([^{}]+)\}/g
 const NUMERIC_LINK_INDEX = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
@@ -16,7 +17,7 @@ const SAFE_PATH_SEGMENT = /^[A-Za-z0-9_-]+$/
 const VARIABLE_TYPES = new Set<ComfyVariableType>([
   'string', 'number', 'boolean', 'image_ref', 'image_ref_list', 'video_ref',
 ])
-const BINDING_TRANSFORMS = new Set(['filename', 'image_ref', 'filename_list'])
+const BINDING_TRANSFORMS = new Set(['filename', 'image_ref', 'filename_list', 'filename_at'])
 
 export function validateComfyApiWorkflow(raw: unknown): ComfyApiWorkflow {
   const issues = collectFormatIssues(raw)
@@ -105,6 +106,11 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
     const missingPolicyValid = binding.missingValuePolicy === undefined
       || binding.missingValuePolicy === 'preserve_original'
     const definition = variableValid ? definitions.get(binding.variable as string) : undefined
+    const valueIndexValid = binding.transform === 'filename_at'
+      ? Number.isInteger(binding.valueIndex) && (binding.valueIndex as number) >= 0
+        && (definition?.maxItems === undefined
+          || (binding.valueIndex as number) < definition.maxItems)
+      : binding.valueIndex === undefined
 
     if (!nodeIdValid) {
       issues.push(issue(
@@ -153,6 +159,12 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
       issues.push(issue(
         'COMFY_BINDING_MISSING_POLICY_INVALID', `${path}.missingValuePolicy`,
         'Binding missing value policy is unsupported.',
+      ))
+    }
+    if (!valueIndexValid) {
+      issues.push(issue(
+        'COMFY_BINDING_VALUE_INDEX_INVALID', `${path}.valueIndex`,
+        'filename_at bindings require a nonnegative valueIndex within maxItems.',
       ))
     }
   })
@@ -285,6 +297,7 @@ export function isComfyTransformCompatible(
   type: ComfyVariableType,
 ): boolean {
   if (transform === 'filename_list') return type === 'image_ref_list'
+  if (transform === 'filename_at') return type === 'image_ref_list'
   return (transform === 'filename' || transform === 'image_ref')
     && (type === 'image_ref' || type === 'video_ref')
 }
@@ -346,6 +359,17 @@ function validateDefinitions(
         'Variable missing value policy is unsupported.',
       ))
     }
+    const maxItemsValid = definition.maxItems === undefined
+      || (definition.type === 'image_ref_list'
+        && Number.isInteger(definition.maxItems)
+        && (definition.maxItems as number) > 0
+        && (definition.maxItems as number) <= COMFY_REFERENCE_UPLOAD_LIMIT)
+    if (!maxItemsValid) {
+      issues.push(issue(
+        'COMFY_VARIABLE_MAX_ITEMS_INVALID', `${path}.maxItems`,
+        `maxItems must be an integer from 1 to ${COMFY_REFERENCE_UPLOAD_LIMIT} for image_ref_list variables.`,
+      ))
+    }
     if (
       definition.defaultValue !== undefined
       && (!typeValid || !matchesComfyVariableType(
@@ -371,7 +395,7 @@ function validateDefinitions(
       ))
     }
     if (nameValid && !duplicateName && !definitions.has(definition.name as string)
-      && typeValid && requiredValid && missingPolicyValid) {
+      && typeValid && requiredValid && missingPolicyValid && maxItemsValid) {
       definitions.set(definition.name as string, definition as unknown as ComfyVariableDefinition)
     }
   })

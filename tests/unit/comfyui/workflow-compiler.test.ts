@@ -324,6 +324,112 @@ describe('ComfyUI workflow compiler', () => {
     expect(uploads).toEqual({ image: upload, images: [upload, secondUpload] })
   })
 
+  it('maps indexed reference images into separate scalar loader inputs', () => {
+    const firstUpload = { name: 'reference-1.png', subfolder: 'refs', type: 'input' }
+    const secondUpload = { name: 'reference-2.png', subfolder: 'refs', type: 'input' }
+    const contract = {
+      graph: {
+        '1': { class_type: 'LoadImage', inputs: { image: 'original-1.png' } },
+        '2': { class_type: 'LoadImage', inputs: { image: 'original-2.png' } },
+      },
+      variableDefinitions: [{
+        name: 'referenceImages', type: 'image_ref_list' as const, required: false,
+        maxItems: 2, missingValuePolicy: 'preserve_original' as const,
+      }],
+      bindings: [
+        {
+          nodeId: '1', inputPath: 'image', variable: 'referenceImages',
+          valueType: 'image_ref_list' as const, transform: 'filename_at' as const,
+          valueIndex: 0, missingValuePolicy: 'preserve_original' as const,
+        },
+        {
+          nodeId: '2', inputPath: 'image', variable: 'referenceImages',
+          valueType: 'image_ref_list' as const, transform: 'filename_at' as const,
+          valueIndex: 1, missingValuePolicy: 'preserve_original' as const,
+        },
+      ],
+      outputs: [{
+        name: 'image', nodeId: '2', fieldPath: 'images', mediaType: 'image' as const, primary: true,
+      }],
+    }
+
+    expect(validateWorkflowContract(contract)).toEqual([])
+    expect(renderComfyWorkflow({
+      ...contract,
+      variables: {
+        referenceImages: [{ storageKey: 'ref-1' }, { storageKey: 'ref-2' }],
+      },
+      uploads: { referenceImages: [firstUpload, secondUpload] },
+    })).toMatchObject({
+      '1': { inputs: { image: 'reference-1.png' } },
+      '2': { inputs: { image: 'reference-2.png' } },
+    })
+  })
+
+  it('preserves original reference loader filenames when optional references are absent', () => {
+    const rendered = renderComfyWorkflow({
+      graph: {
+        '1': { class_type: 'LoadImage', inputs: { image: 'original-1.png' } },
+        '2': { class_type: 'LoadImage', inputs: { image: 'original-2.png' } },
+      },
+      variables: {},
+      variableDefinitions: [{
+        name: 'referenceImages', type: 'image_ref_list', required: false, maxItems: 2,
+        missingValuePolicy: 'preserve_original',
+      }],
+      bindings: [0, 1].map((valueIndex) => ({
+        nodeId: String(valueIndex + 1), inputPath: 'image', variable: 'referenceImages',
+        valueType: 'image_ref_list' as const, transform: 'filename_at' as const,
+        valueIndex, missingValuePolicy: 'preserve_original' as const,
+      })),
+      uploads: {},
+    })
+
+    expect(rendered['1'].inputs.image).toBe('original-1.png')
+    expect(rendered['2'].inputs.image).toBe('original-2.png')
+  })
+
+  it('rejects invalid indexed reference-image contract fields', () => {
+    const issues = validateWorkflowContract({
+      graph: { '1': { class_type: 'LoadImage', inputs: { image: 'original.png' } } },
+      variableDefinitions: [{
+        name: 'referenceImages', type: 'image_ref_list', required: false,
+        maxItems: 0, missingValuePolicy: 'preserve_original',
+      }],
+      bindings: [{
+        nodeId: '1', inputPath: 'image', variable: 'referenceImages',
+        valueType: 'image_ref_list', transform: 'filename_at', valueIndex: -1,
+        missingValuePolicy: 'preserve_original',
+      }],
+      outputs: [{
+        name: 'image', nodeId: '1', fieldPath: 'images', mediaType: 'image', primary: true,
+      }],
+    })
+
+    expect(issues.map((issue) => issue.code)).toEqual(expect.arrayContaining([
+      'COMFY_VARIABLE_MAX_ITEMS_INVALID',
+      'COMFY_BINDING_VALUE_INDEX_INVALID',
+    ]))
+  })
+
+  it('rejects reference capacity above the bounded upload limit', () => {
+    const issues = validateWorkflowContract({
+      graph: { '1': { class_type: 'SaveImage', inputs: {} } },
+      variableDefinitions: [{
+        name: 'referenceImages', type: 'image_ref_list', required: false,
+        maxItems: 9, missingValuePolicy: 'preserve_original',
+      }],
+      bindings: [],
+      outputs: [{
+        name: 'image', nodeId: '1', fieldPath: 'images', mediaType: 'image', primary: true,
+      }],
+    })
+
+    expect(issues).toContainEqual(expect.objectContaining({
+      code: 'COMFY_VARIABLE_MAX_ITEMS_INVALID',
+    }))
+  })
+
   it('rejects transform/type incompatibility during rendering', () => {
     const error = captureError(() =>
       renderComfyWorkflow({

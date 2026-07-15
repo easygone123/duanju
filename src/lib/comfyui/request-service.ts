@@ -4,6 +4,7 @@ import { ApiError } from '@/lib/api-errors'
 import { prisma } from '@/lib/prisma'
 
 import {
+  COMFY_REFERENCE_UPLOAD_LIMIT,
   COMFY_REQUEST_STATUS,
   type ComfyMediaType,
   type ComfyMediaRef,
@@ -346,6 +347,17 @@ async function sanitizeVariableSnapshot(
     if (!supplied && definition.required) throw new ApiError('INVALID_PARAMS')
     if (value === undefined) continue
     if (!matchesComfyVariableType(value, definition.type)) throw new ApiError('INVALID_PARAMS')
+    if (
+      definition.type === 'image_ref_list'
+      && definition.maxItems !== undefined
+      && (value as ComfyMediaRef[]).length > definition.maxItems
+    ) {
+      throw new ApiError('INVALID_PARAMS', {
+        reason: 'COMFY_REFERENCE_CAPACITY_EXCEEDED',
+        variable: definition.name,
+        maxItems: definition.maxItems,
+      })
+    }
     snapshot[definition.name] = await sanitizeVariableValue(
       value, definition.type, userId, projectId, resolveOwnedMedia,
     )
@@ -359,6 +371,12 @@ function isVariableDefinition(value: unknown): value is ComfyVariableDefinition 
     && ['string', 'number', 'boolean', 'image_ref', 'image_ref_list', 'video_ref']
       .includes(String(value.type))
     && typeof value.required === 'boolean'
+    && (value.maxItems === undefined || (
+      value.type === 'image_ref_list'
+      && Number.isInteger(value.maxItems)
+      && (value.maxItems as number) > 0
+      && (value.maxItems as number) <= COMFY_REFERENCE_UPLOAD_LIMIT
+    ))
 }
 
 async function sanitizeVariableValue(

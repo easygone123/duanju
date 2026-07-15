@@ -261,6 +261,8 @@ async function runStepWithRetry<T>(
   parse: (text: string) => T,
 ): Promise<{ output: ScriptToStoryboardStepOutput; parsed: T }> {
   let lastError: Error | null = null
+  let currentPrompt = prompt
+  let previousOutputText = ''
   for (let attempt = 1; attempt <= MAX_STEP_ATTEMPTS; attempt++) {
     const meta = attempt === 1
       ? baseMeta
@@ -271,7 +273,8 @@ async function runStepWithRetry<T>(
         stepTitle: baseMeta.stepTitle,
       }
     try {
-      const output = await runStep(meta, prompt, action, maxOutputTokens)
+      const output = await runStep(meta, currentPrompt, action, maxOutputTokens)
+      previousOutputText = output.text
       const parsed = parse(output.text)
       return { output, parsed }
     } catch (error) {
@@ -301,6 +304,15 @@ async function runStepWithRetry<T>(
       if (!shouldRetry) {
         break
       }
+      if (error instanceof JsonParseError || error instanceof SixGridValidationError) {
+        const errorCode = getScriptToStoryboardStepErrorCode(error, normalizedError.code)
+        currentPrompt = [
+          prompt,
+          'Correct the previous response. Return the complete corrected JSON only; do not explain the correction.',
+          `Validation error code: ${errorCode}`,
+          `Previous response (may be truncated): ${previousOutputText.slice(0, 4_000)}`,
+        ].join('\n\n')
+      }
       const retryDelayMs = computeRetryDelayMs(attempt)
       await wait(retryDelayMs)
     }
@@ -318,7 +330,10 @@ async function runSixGridScriptToStoryboardOrchestrator(
     .map((clip) => clip.id)
   const episodePlanningPrompt = [
     'Plan the complete episode into continuous six-shot scene groups.',
-    'Return one JSON array. Every group must contain sceneKey, clipId, incomingContinuity, outgoingContinuity, and exactly six panels.',
+    'Return JSON only: one array with no markdown fences or commentary.',
+    'Every group must contain sceneKey, clipId, incomingContinuity, outgoingContinuity, and exactly six panels.',
+    'Every panel must contain panel_number, description, location, source_text, and characters. panel_number must be the integers 1 through 6 in order; description, location, and source_text must be non-empty strings; characters must be an array. Optional props must be an array of non-empty strings.',
+    'Each panel.location must exactly equal its group sceneKey. sceneKey is the canonical location identity, not a free-form scene description.',
     'Never cross a hard location boundary to fill a group. Adjacent groups in the same scene must copy the previous outgoingContinuity exactly into incomingContinuity.',
     'Continuity anchors must preserve characters, clothing, props, lighting, and emotion.',
     `Immutable run settings: ${JSON.stringify(input.runSettings)}`,
@@ -416,21 +431,27 @@ async function runSixGridScriptToStoryboardOrchestrator(
         },
       )
 
-      const phase2Prompt = promptTemplates.phase2CinematographyTemplate
+      const groupNumberingConstraint = [
+        'For this group, panel_number must restart at 1 and contain exactly [1, 2, 3, 4, 5, 6] in that order.',
+        'Do not continue numbering from any previous group and do not use 0-based or episode-global numbering.',
+        'Return the complete JSON array only.',
+      ].join('\n')
+
+      const phase2Prompt = `${promptTemplates.phase2CinematographyTemplate
         .replace('{panels_json}', JSON.stringify(group.panels, null, 2))
         .replace(/\{panel_count\}/g, '6')
         .replace('{locations_description}', filteredLocationsDescription)
         .replace('{characters_info}', filteredFullDescription)
-        .replace('{props_description}', filteredPropsDescription)
-      const phase2ActingPrompt = promptTemplates.phase2ActingTemplate
+        .replace('{props_description}', filteredPropsDescription)}\n\n${groupNumberingConstraint}`
+      const phase2ActingPrompt = `${promptTemplates.phase2ActingTemplate
         .replace('{panels_json}', JSON.stringify(group.panels, null, 2))
         .replace(/\{panel_count\}/g, '6')
-        .replace('{characters_info}', filteredFullDescription)
-      const phase3Prompt = promptTemplates.phase3DetailTemplate
+        .replace('{characters_info}', filteredFullDescription)}\n\n${groupNumberingConstraint}`
+      const phase3Prompt = `${promptTemplates.phase3DetailTemplate
         .replace('{panels_json}', JSON.stringify(group.panels, null, 2))
         .replace('{characters_age_gender}', filteredFullDescription)
         .replace('{locations_description}', filteredLocationsDescription)
-        .replace('{props_description}', filteredPropsDescription)
+        .replace('{props_description}', filteredPropsDescription)}\n\n${groupNumberingConstraint}`
 
       const [{ parsed: photographyRules }, { parsed: actingDirections }] = await Promise.all([
         runStepWithRetry(

@@ -1,6 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
+import { useRef } from 'react'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 /**
@@ -10,9 +11,12 @@ import { resolveTaskPresentationState } from '@/lib/task/presentation'
 
 import { CharacterProfileData } from '@/types/character-profile'
 import { AppIcon } from '@/components/ui/icons'
+import { useUploadProjectCharacterImage } from '@/lib/query/mutations'
+import { shouldShowError } from '@/lib/error-utils'
 
 interface CharacterProfileCardProps {
     characterId: string
+    projectId: string
     name: string
     profileData: CharacterProfileData
     onEdit: () => void
@@ -49,6 +53,8 @@ function isRoleLevel(value: string): value is RoleLevel {
 }
 
 export default function CharacterProfileCard({
+    characterId,
+    projectId,
     name,
     profileData,
     onEdit,
@@ -59,6 +65,21 @@ export default function CharacterProfileCard({
     isDeleting = false
 }: CharacterProfileCardProps) {
     const t = useTranslations('assets')
+    const fileInputRef = useRef<HTMLInputElement>(null)
+    const uploadImage = useUploadProjectCharacterImage(projectId)
+    const handleUpload = () => {
+        const file = fileInputRef.current?.files?.[0]
+        if (!file) return
+        uploadImage.mutate({ file, characterId, labelText: name }, {
+            onSuccess: () => alert(t('image.uploadSuccess')),
+            onError: (error) => {
+                if (shouldShowError(error)) alert(`${t('image.uploadFailed')}: ${error.message}`)
+            },
+            onSettled: () => {
+                if (fileInputRef.current) fileInputRef.current.value = ''
+            },
+        })
+    }
     const deletingState = isDeleting
         ? resolveTaskPresentationState({
             phase: 'processing',
@@ -83,6 +104,13 @@ export default function CharacterProfileCard({
 
     return (
         <div className="glass-surface overflow-hidden hover:shadow-md transition-shadow">
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleUpload}
+                className="hidden"
+            />
             <div className="p-5">
                 {/* 头部 */}
                 <div className="flex items-start justify-between mb-3">
@@ -168,7 +196,7 @@ export default function CharacterProfileCard({
                 </div>
 
                 {/* 操作按钮 */}
-                <div className="flex gap-2 pt-3 border-t border-[var(--glass-stroke-base)]">
+                <div className="flex flex-wrap gap-2 pt-3 border-t border-[var(--glass-stroke-base)]">
                     <button
                         onClick={onEdit}
                         disabled={isConfirming}
@@ -185,6 +213,14 @@ export default function CharacterProfileCard({
                             {t('characterProfile.useExisting')}
                         </button>
                     )}
+                    <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isConfirming || isDeleting || uploadImage.isPending}
+                        className="glass-btn-base glass-btn-tone-info flex-1 px-3 py-1.5 text-sm rounded-lg disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+                    >
+                        <AppIcon name="upload" className="w-4 h-4" />
+                        {t('characterProfile.uploadImage')}
+                    </button>
                     <button
                         onClick={onConfirm}
                         disabled={isConfirming}

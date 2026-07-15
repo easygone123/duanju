@@ -169,17 +169,17 @@ export default function WorkflowLibraryPanel() {
 
   const issues = savedVersion?.validation.issues ?? []
 
-  return <section aria-labelledby="comfyui-workflow-library-heading" className="flex min-h-0 flex-col overflow-hidden">
+  return <section aria-labelledby="comfyui-workflow-library-heading" className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--glass-stroke-base)] px-5 py-4 sm:px-6">
       <div><h2 id="comfyui-workflow-library-heading" className="text-lg font-semibold">{t('title')}</h2><p className="mt-1 text-sm text-[var(--glass-text-secondary)]">{t('description')}</p></div>
       <button type="button" className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm" onClick={() => selectWorkflow('new')}>{t('newWorkflow')}</button>
     </header>
-    <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto p-5 2xl:grid-cols-[16rem_minmax(0,1fr)] sm:p-6">
+    <div className="grid min-h-0 min-w-0 flex-1 gap-5 overflow-y-auto p-5 sm:p-6">
       <nav aria-label={t('library')} className="space-y-2">{loading && <p role="status" className="text-sm">{t('loading')}</p>}
         {workflows.map((workflow) => <button key={workflow.id} type="button" onClick={() => selectWorkflow(workflow.id)} aria-current={selectedId === workflow.id ? 'page' : undefined}
           className="glass-surface-soft w-full rounded-xl p-3 text-left"><span className="block truncate font-medium">{workflow.name}</span><span className="text-xs text-[var(--glass-text-tertiary)]">{t(workflow.mediaType)} · {t(`purposes.${workflow.purpose}`)} · {t(`statuses.${workflow.status}`)}</span></button>)}</nav>
       <div className="min-w-0 space-y-6">
-        <WorkflowEditor value={authorDraft} disabled={busy} identityLocked={selectedId !== 'new'} onChange={setAuthorDraft} onImportError={(key) => setError(key as ErrorKey)} />
+        <WorkflowEditor key={selectedId} value={authorDraft} disabled={busy} identityLocked={selectedId !== 'new'} onChange={setAuthorDraft} onImportError={(key) => setError(key as ErrorKey)} />
         {savedVersion && <div className="glass-surface-soft rounded-xl p-3 text-xs" aria-label={t('savedVersion')}>
           {t('savedVersion')} v{savedVersion.version} · {savedVersion.validation.valid ? t('staticValid') : t('staticInvalid')} · {savedVersion.lastSuccessfulTestAt ? t('tested') : t('notTested')}
         </div>}

@@ -6,6 +6,10 @@ import type {
   ComfyWorkflowPurpose,
   WorkflowValidationIssue,
 } from '@/lib/comfyui/types'
+import type {
+  CanonicalWorkflowInput,
+  WorkflowAutoMappingResult,
+} from '@/lib/comfyui/workflow-auto-mapping-types'
 
 export type WorkflowCompatibilityStatus = 'online' | 'offline' | 'auth_failed' | 'disabled' | 'timeout'
 
@@ -139,6 +143,79 @@ export interface WorkflowAuthorDraft {
   variableDefinitions: ComfyVariableDefinition[]
   bindings: ComfyInputBinding[]
   outputs: ComfyOutputBinding[]
+}
+
+export interface WorkflowMappingConfirmation {
+  roles: Record<string, CanonicalWorkflowInput | 'preserve_original'>
+  primaryOutputNodeId?: string
+}
+
+export function confirmWorkflowAnalysis(
+  analysis: WorkflowAutoMappingResult,
+  confirmation: WorkflowMappingConfirmation,
+): Pick<WorkflowAuthorDraft, 'variableDefinitions' | 'bindings' | 'outputs'> {
+  const definitions = new Map<string, ComfyVariableDefinition>()
+  const bindings: ComfyInputBinding[] = []
+  let nextReferenceIndex = 0
+
+  for (const proposal of analysis.proposals) {
+    const selectedRole = confirmation.roles[proposal.id]
+    if (proposal.confidence === 'ambiguous' && !selectedRole) {
+      throw new Error('workflowMappingConfirmationRequired')
+    }
+    const canonicalName = selectedRole || proposal.canonicalName
+    if (canonicalName === 'preserve_original') continue
+
+    const isReferenceList = canonicalName === 'referenceImages'
+    const valueType = isReferenceList ? 'image_ref_list' : proposal.valueType
+    const existing = definitions.get(canonicalName)
+    const required = Boolean(existing?.required || proposal.required)
+    const referenceIndex = isReferenceList
+      ? (proposal.referenceIndex ?? nextReferenceIndex)
+      : undefined
+    if (referenceIndex !== undefined) {
+      nextReferenceIndex = Math.max(nextReferenceIndex, referenceIndex + 1)
+    }
+    const referenceCapacity = isReferenceList
+      ? Math.max(existing?.maxItems ?? 0, analysis.referenceCapacity, (referenceIndex ?? 0) + 1)
+      : undefined
+    definitions.set(canonicalName, {
+      name: canonicalName,
+      type: valueType,
+      required,
+      ...(!required ? { missingValuePolicy: 'preserve_original' as const } : {}),
+      ...(isReferenceList ? { maxItems: referenceCapacity } : {}),
+    })
+    bindings.push({
+      nodeId: proposal.nodeId,
+      inputPath: proposal.inputPath,
+      variable: canonicalName,
+      valueType,
+      ...(isReferenceList
+        ? {
+          transform: proposal.transform === 'filename_list' ? 'filename_list' : 'filename_at',
+          ...(proposal.transform === 'filename_list' ? {} : { valueIndex: referenceIndex }),
+        }
+        : proposal.transform ? { transform: proposal.transform } : {}),
+      ...(!required ? { missingValuePolicy: 'preserve_original' as const } : {}),
+    })
+  }
+
+  const primaryNodeId = confirmation.primaryOutputNodeId
+    || analysis.outputs.find((output) => output.primary)?.nodeId
+    || (analysis.outputs.length === 1 ? analysis.outputs[0]?.nodeId : undefined)
+  if (!primaryNodeId || !analysis.outputs.some((output) => output.nodeId === primaryNodeId)) {
+    throw new Error('workflowPrimaryOutputRequired')
+  }
+
+  return {
+    variableDefinitions: [...definitions.values()],
+    bindings,
+    outputs: analysis.outputs.map((output) => ({
+      ...output,
+      primary: output.nodeId === primaryNodeId,
+    })),
+  }
 }
 
 export function emptyWorkflowDraft(): WorkflowAuthorDraft {

@@ -321,6 +321,7 @@
         "keywordsPlaceholder": "如: 精英气质、禁欲系",
         "editDialogTitle": "编辑角色档案 - {name}",
         "confirmAndGenerate": "确认并生成",
+        "uploadImage": "上传角色图片",
         "useExisting": "使用已有形象",
         "editProfile": "编辑档案",
         "delete": "删除此角色",

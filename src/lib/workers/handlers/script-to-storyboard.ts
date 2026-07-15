@@ -59,6 +59,11 @@ function isReasoningEffort(value: unknown): value is 'minimal' | 'low' | 'medium
   return value === 'minimal' || value === 'low' || value === 'medium' || value === 'high'
 }
 
+function isSixGridRetryStepKey(value: string) {
+  return value === 'six_grid_episode_plan'
+    || /^six_grid_group_[1-9]\d*_(phase1|phase2_cinematography|phase2_acting|phase3_detail)$/.test(value)
+}
+
 export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
   const payload = (job.data.payload || {}) as AnyObj
   const projectId = job.data.projectId
@@ -133,7 +138,9 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
     throw new Error('No clips found')
   }
   const retryTarget = parseStoryboardRetryTarget(retryStepKey)
-  if (retryStepKey && retryStepKey !== 'voice_analyze' && !retryTarget) {
+  const retryWholeSixGrid = runSettings.storyboardGenerationMode === 'six_grid'
+    && isSixGridRetryStepKey(retryStepKey)
+  if (retryStepKey && retryStepKey !== 'voice_analyze' && !retryTarget && !retryWholeSixGrid) {
     throw new Error(`unsupported retry step for script_to_storyboard: ${retryStepKey}`)
   }
   const retryClipId = retryTarget?.clipId || null

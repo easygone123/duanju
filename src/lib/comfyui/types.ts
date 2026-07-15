@@ -116,6 +116,8 @@ export interface ComfyMediaRef {
 
 export type ComfyVariableValue = string | number | boolean | ComfyMediaRef | ComfyMediaRef[]
 
+export const COMFY_REFERENCE_UPLOAD_LIMIT = 8
+
 export type ComfyMissingValuePolicy = 'preserve_original'
 
 export interface ComfyVariableDefinition {
@@ -125,9 +127,10 @@ export interface ComfyVariableDefinition {
   defaultValue?: ComfyVariableValue
   missingValuePolicy?: ComfyMissingValuePolicy
   options?: Array<string | number | boolean>
+  maxItems?: number
 }
 
-export type ComfyBindingTransform = 'filename' | 'image_ref' | 'filename_list'
+export type ComfyBindingTransform = 'filename' | 'image_ref' | 'filename_list' | 'filename_at'
 
 export interface ComfyInputBinding {
   nodeId: string
@@ -136,6 +139,7 @@ export interface ComfyInputBinding {
   valueType: ComfyVariableType
   transform?: ComfyBindingTransform
   missingValuePolicy?: ComfyMissingValuePolicy
+  valueIndex?: number
 }
 
 export interface RenderWorkflowInput {

@@ -342,12 +342,39 @@ describe('six-grid continuous scene planner', () => {
     expect(result.sixGridGroups?.map((item) => item.groupSequence)).toEqual([1, 2])
   })
 
+  it('tells the model the exact episode-plan contract enforced by the validator', async () => {
+    let planningPrompt = ''
+    const runStep = vi.fn(async (_meta, prompt: string, action: string) => {
+      if (action === 'storyboard_six_grid_scene_plan') {
+        planningPrompt = prompt
+        return { text: JSON.stringify([group({ sceneKey: 'room-a', incomingContinuity: 'start', outgoingContinuity: 'end' })]), reasoning: '' }
+      }
+      if (action === 'storyboard_phase2_cinematography') {
+        return { text: JSON.stringify([1, 2, 3, 4, 5, 6].map(photographyRule)), reasoning: '' }
+      }
+      if (action === 'storyboard_phase2_acting') {
+        return { text: JSON.stringify([1, 2, 3, 4, 5, 6].map((panel_number) => ({ panel_number, characters: [] }))), reasoning: '' }
+      }
+      return { text: JSON.stringify(panels('room-a')), reasoning: '' }
+    })
+
+    await runScriptToStoryboardOrchestrator(buildSixGridInput(runStep))
+
+    for (const requiredField of ['panel_number', 'description', 'location', 'source_text', 'characters']) {
+      expect(planningPrompt).toContain(requiredField)
+    }
+    expect(planningPrompt).toContain('panel.location must exactly equal its group sceneKey')
+    expect(planningPrompt).toContain('JSON only')
+  })
+
   it('retries a malformed whole-episode plan and succeeds with corrected output', async () => {
     let planAttempts = 0
+    const planningPrompts: string[] = []
     const validGroup = group({ sceneKey: 'room-a', incomingContinuity: 'start', outgoingContinuity: 'end' })
     const runStep = vi.fn(async (_meta, prompt: string, action: string) => {
       if (action === 'storyboard_six_grid_scene_plan') {
         planAttempts += 1
+        planningPrompts.push(prompt)
         return {
           text: JSON.stringify(planAttempts === 1 ? [{ ...validGroup, panels: panels('room-a', 5) }] : [validGroup]),
           reasoning: '',
@@ -365,6 +392,9 @@ describe('six-grid continuous scene planner', () => {
 
     await runScriptToStoryboardOrchestrator(buildSixGridInput(runStep))
     expect(planAttempts).toBe(2)
+    expect(planningPrompts[1]).toContain(SIX_GRID_REQUIRES_EXACTLY_SIX_PANELS)
+    expect(planningPrompts[1]).toContain('Correct the previous response')
+    expect(planningPrompts[1]).not.toBe(planningPrompts[0])
   })
 
   it.each(['missing', 'duplicate'])('retries invalid %s cinematography numbering', async (kind) => {
@@ -441,6 +471,38 @@ describe('six-grid continuous scene planner', () => {
       'six-grid:1:clip-room-a:1',
       'six-grid:2:clip-room-a:2',
     ])
+  })
+
+  it('resets panel numbering to 1..6 for the third six-grid group in every refinement prompt', async () => {
+    const plannedGroups = [1, 2, 3].map((sequence) => group({
+      clipId: 'clip-room-a',
+      sceneKey: 'room-a',
+      incomingContinuity: sequence === 1 ? 'start' : `anchor-${sequence - 1}`,
+      outgoingContinuity: sequence === 3 ? 'end' : `anchor-${sequence}`,
+    }))
+    const thirdGroupPrompts: string[] = []
+    const runStep = vi.fn(async (meta, prompt: string, action: string) => {
+      if (action === 'storyboard_six_grid_scene_plan') {
+        return { text: JSON.stringify(plannedGroups), reasoning: '' }
+      }
+      if (String(meta.stepId).startsWith('six_grid_group_3_')) thirdGroupPrompts.push(prompt)
+      if (action === 'storyboard_phase2_cinematography') {
+        return { text: JSON.stringify([1, 2, 3, 4, 5, 6].map(photographyRule)), reasoning: '' }
+      }
+      if (action === 'storyboard_phase2_acting') {
+        return { text: JSON.stringify([1, 2, 3, 4, 5, 6].map((panel_number) => ({ panel_number, characters: [] }))), reasoning: '' }
+      }
+      return { text: JSON.stringify(panels('room-a')), reasoning: '' }
+    })
+
+    await runScriptToStoryboardOrchestrator(buildSixGridInput(runStep))
+
+    expect(thirdGroupPrompts).toHaveLength(3)
+    for (const prompt of thirdGroupPrompts) {
+      expect(prompt).toContain('For this group, panel_number must restart at 1')
+      expect(prompt).toContain('[1, 2, 3, 4, 5, 6]')
+      expect(prompt).toContain('Do not continue numbering from any previous group')
+    }
   })
 
   it('fails with a stable code after every scene-plan attempt is malformed', async () => {

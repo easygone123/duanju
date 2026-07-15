@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import {
   discoverPlaceholderNames,
+  confirmWorkflowAnalysis,
   createWorkflowCompatibilityCoordinator,
   draftFromWorkflow,
   mapWorkflowCompatibility,
@@ -102,6 +103,20 @@ describe('ComfyUI workflow settings UI contract', () => {
     expect(source).toContain('aria-label')
   })
 
+  it('keeps the workflow authoring pane within its fixed profile surface', () => {
+    const settings = read(`${base}/ComfyUiSettings.tsx`)
+    const library = read(`${base}/WorkflowLibraryPanel.tsx`)
+    const editor = read(`${base}/WorkflowEditor.tsx`)
+    const mapping = read(`${base}/WorkflowMappingTable.tsx`)
+
+    expect(settings).toContain('h-full min-h-0 min-w-0')
+    expect(settings).toContain('min-w-0 min-h-[32rem]')
+    expect(library).toContain('h-full min-h-0 min-w-0')
+    expect(editor).toContain('className="min-w-0 space-y-5"')
+    expect(editor).not.toContain('xl:grid-cols-5')
+    expect(mapping).not.toContain('2xl:grid-cols-5')
+  })
+
   it('supports bounded file and paste import without a graph canvas', () => {
     const source = read(`${base}/WorkflowEditor.tsx`)
     expect(source).toContain('MAX_WORKFLOW_JSON_BYTES')
@@ -124,6 +139,78 @@ describe('ComfyUI workflow settings UI contract', () => {
     expect(mapping).toContain('setPrimaryOutput')
     expect(editor).toContain("value.purpose === 'upscale'")
     expect(editor).toContain('purposeImmutable')
+  })
+
+  it('converts confirmed automatic proposals into the existing workflow overlay', () => {
+    const result = confirmWorkflowAnalysis({
+      graph: {
+        '1': { class_type: 'CLIPTextEncode', inputs: { text: 'portrait' } },
+        '2': { class_type: 'LoadImage', inputs: { image: 'reference.png' } },
+        '9': { class_type: 'SaveImage', inputs: { images: ['1', 0] } },
+      },
+      mediaType: 'image',
+      purpose: 'generation',
+      proposals: [
+        { id: '1:text:prompt', canonicalName: 'prompt', nodeId: '1', inputPath: 'text', valueType: 'string', confidence: 'high', reasonCode: 'prompt', required: true },
+        { id: '2:image:reference', canonicalName: 'referenceImages', nodeId: '2', inputPath: 'image', valueType: 'image_ref', transform: 'filename_at', confidence: 'ambiguous', reasonCode: 'reference', required: false, referenceIndex: 0 },
+      ],
+      outputs: [{ name: 'output_9', nodeId: '9', fieldPath: 'images', mediaType: 'image', primary: true }],
+      issues: [],
+      referenceCapacity: 1,
+    }, {
+      roles: { '2:image:reference': 'referenceImages' },
+      primaryOutputNodeId: '9',
+    })
+
+    expect(result).toMatchObject({
+      variableDefinitions: [
+        { name: 'prompt', type: 'string', required: true },
+        { name: 'referenceImages', type: 'image_ref_list', required: false, maxItems: 1 },
+      ],
+      bindings: [
+        { variable: 'prompt', nodeId: '1', inputPath: 'text' },
+        { variable: 'referenceImages', nodeId: '2', inputPath: 'image', transform: 'filename_at', valueIndex: 0 },
+      ],
+      outputs: [{ nodeId: '9', primary: true }],
+    })
+  })
+
+  it('expands reference capacity when ambiguous image inputs are confirmed as references', () => {
+    const proposals = ['2', '3'].map((nodeId) => ({
+      id: `${nodeId}:image:sourceImage`, canonicalName: 'sourceImage' as const,
+      nodeId, inputPath: 'image', valueType: 'image_ref' as const,
+      transform: 'filename' as const, confidence: 'ambiguous' as const,
+      reasonCode: 'ambiguous', required: false,
+    }))
+    const result = confirmWorkflowAnalysis({
+      graph: {
+        '2': { class_type: 'LoadImage', inputs: { image: 'one.png' } },
+        '3': { class_type: 'LoadImage', inputs: { image: 'two.png' } },
+        '9': { class_type: 'SaveImage', inputs: { images: ['2', 0] } },
+      },
+      mediaType: 'image', purpose: 'generation', proposals,
+      outputs: [{ name: 'out', nodeId: '9', fieldPath: 'images', mediaType: 'image', primary: true }],
+      issues: [], referenceCapacity: 0,
+    }, {
+      roles: {
+        '2:image:sourceImage': 'referenceImages',
+        '3:image:sourceImage': 'referenceImages',
+      },
+    })
+
+    expect(result.variableDefinitions).toContainEqual(expect.objectContaining({
+      name: 'referenceImages', maxItems: 2,
+    }))
+    expect(result.bindings.map((binding) => binding.valueIndex)).toEqual([0, 1])
+  })
+
+  it('exposes an upload-first automatic mapping wizard for new workflows', () => {
+    const editor = read(`${base}/WorkflowEditor.tsx`)
+    expect(read(`${base}/WorkflowUploadStep.tsx`)).toContain('/api/comfyui/workflows/analyze')
+    expect(read(`${base}/WorkflowAutoMappingTable.tsx`)).toContain('confidence')
+    expect(editor).toContain("'upload'")
+    expect(editor).toContain("'mapping'")
+    expect(editor).toContain('confirmWorkflowAnalysis')
   })
 
   it('keeps the author form separate from saved versions and exposes draft actions', () => {
