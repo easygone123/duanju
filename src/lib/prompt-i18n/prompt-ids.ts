@@ -30,6 +30,8 @@ export const PROMPT_IDS = {
   NP_SIX_GRID_SHEET_IMAGE: 'np_six_grid_sheet_image',
   NP_STORYBOARD_EDIT: 'np_storyboard_edit',
   NP_VOICE_ANALYSIS: 'np_voice_analysis',
+  VIRAL_REPORT_AGGREGATION: 'viral_report_aggregation',
+  VIRAL_SHOT_ANALYSIS: 'viral_shot_analysis',
 } as const
 
 export type PromptId = (typeof PROMPT_IDS)[keyof typeof PROMPT_IDS]

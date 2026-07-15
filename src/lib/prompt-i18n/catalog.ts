@@ -157,4 +157,12 @@ export const PROMPT_CATALOG: Record<PromptId, PromptCatalogEntry> = {
     pathStem: 'novel-promotion/voice_analysis',
     variableKeys: ['input', 'characters_lib_name', 'characters_introduction', 'storyboard_json'],
   },
+  [PROMPT_IDS.VIRAL_REPORT_AGGREGATION]: {
+    pathStem: 'viral-replication/report_aggregation',
+    variableKeys: ['brief', 'duration_ms', 'batch_results_json', 'report_schema_json'],
+  },
+  [PROMPT_IDS.VIRAL_SHOT_ANALYSIS]: {
+    pathStem: 'viral-replication/shot_analysis',
+    variableKeys: ['brief', 'video_metadata', 'shot_timeline', 'subtitle_context'],
+  },
 }

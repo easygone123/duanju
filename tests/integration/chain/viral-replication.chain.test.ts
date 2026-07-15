@@ -1,7 +1,13 @@
+import fs from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { Readable } from 'node:stream'
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { submitTask } from '@/lib/task/submitter'
 import { QUEUE_NAME } from '@/lib/task/queue-names'
 import { TASK_TYPE, type TaskJobData, type TaskType } from '@/lib/task/types'
+import { createViralReplicationAnalysisHandler } from '@/lib/workers/handlers/viral-replication-analysis'
 
 type StoredTask = Record<string, unknown> & {
   id: string
@@ -174,5 +180,164 @@ describe('chain contract - viral replication submission', () => {
       jobName: TASK_TYPE.ANALYZE_NOVEL,
       options: { attempts: expected },
     })
+  })
+
+  it('runs a submitted analysis task through the real handler into a review-ready report', async () => {
+    const { task, queueCall } = await submit({
+      type: TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
+      suffix: 'analysis-chain',
+    })
+    if (!queueCall) throw new Error('Analysis task was not enqueued')
+
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'viral-chain-'))
+    const replication: Record<string, unknown> & {
+      id: string
+      userId: string
+      projectId: string
+      brief: string
+      status: string
+      analysisModelSnapshot: string
+      sourceVideoMediaId: string
+      sourceVideoMedia: { id: string; storageKey: string }
+      reportJson?: Record<string, unknown>
+    } = {
+      id: 'viral-replication-analysis-chain',
+      userId: 'user-analysis-chain',
+      projectId: 'viral-project-analysis-chain',
+      brief: 'Create an original product reveal',
+      status: 'analyzing',
+      analysisModelSnapshot: 'test::analysis-model',
+      sourceVideoMediaId: 'media-analysis-chain',
+      sourceVideoMedia: {
+        id: 'media-analysis-chain',
+        storageKey: 'viral/source.mp4',
+      },
+    }
+    const frames: Array<Record<string, unknown>> = []
+    let mediaNumber = 0
+    const modelCalls: Array<{ kind: 'vision' | 'text'; model: string }> = []
+    const shots = Array.from({ length: 3 }, (_, shotIndex) => ({
+      shotIndex,
+      startMs: shotIndex * 1_000,
+      endMs: (shotIndex + 1) * 1_000,
+      representativeMs: shotIndex * 1_000 + 500,
+    }))
+    const analyzedShots = shots.map((shot) => ({
+      shotIndex: shot.shotIndex,
+      startMs: shot.startMs,
+      endMs: shot.endMs,
+      shotType: 'close-up',
+      cameraAngle: 'eye-level',
+      cameraMove: 'static',
+      composition: 'centered subject',
+      actionBeat: `beat ${shot.shotIndex}`,
+      transition: 'cut',
+      subtitleSummary: null,
+      narrativeFunction: `function ${shot.shotIndex}`,
+    }))
+    const completion = (text: string) => ({
+      id: 'deterministic',
+      object: 'chat.completion',
+      created: 0,
+      model: 'test::analysis-model',
+      choices: [{
+        index: 0,
+        finish_reason: 'stop',
+        message: { role: 'assistant', content: text, refusal: null },
+      }],
+    })
+    const analysisPrisma = {
+      viralReplication: {
+        findFirst: vi.fn(async () => replication),
+        updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(replication, data)
+          return { count: 1 }
+        }),
+      },
+      mediaObject: {
+        create: vi.fn(async () => ({ id: `frame-media-${++mediaNumber}` })),
+      },
+      viralReplicationFrame: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          frames.push(data)
+          return data
+        }),
+      },
+    }
+
+    try {
+      const handler = createViralReplicationAnalysisHandler({
+        prisma: analysisPrisma as never,
+        getObjectStream: vi.fn(async () => Readable.from(Buffer.from('deterministic-video'))),
+        preprocess: vi.fn(async ({ outputDirectory }: { outputDirectory: string }) => {
+          await fs.mkdir(outputDirectory, { recursive: true })
+          const persistedShots = []
+          for (const shot of shots) {
+            const framePath = path.join(outputDirectory, `${shot.shotIndex}.jpg`)
+            await fs.writeFile(framePath, Buffer.from(`jpeg-${shot.shotIndex}`))
+            persistedShots.push({ ...shot, framePath })
+          }
+          return {
+            metadata: {
+              formatName: 'mov,mp4,m4a,3gp,3g2,mj2',
+              majorBrand: 'isom',
+              videoStreamIndex: 0,
+              durationMs: 3_000,
+              width: 1080,
+              height: 1920,
+              hasVideo: true,
+              hasAudio: true,
+              hasSubtitles: true,
+              videoStreams: [],
+              audioStreams: [],
+              subtitleStreams: [],
+            },
+            shots: persistedShots,
+            transcriptText: 'A deterministic embedded subtitle',
+          }
+        }) as never,
+        uploadObject: vi.fn(async (_bytes, key) => key),
+        runVision: vi.fn(async (input) => {
+          modelCalls.push({ kind: 'vision', model: input.model })
+          return completion(JSON.stringify({ shots: analyzedShots })) as never
+        }),
+        runText: vi.fn(async (input) => {
+          modelCalls.push({ kind: 'text', model: input.model })
+          return completion(JSON.stringify({
+            schemaVersion: 1,
+            overview: {
+              hook: 'Immediate reveal',
+              coreAppeal: 'Visual transformation',
+              pacing: 'Three even beats',
+              emotionalArc: 'Curiosity to payoff',
+            },
+            styleFingerprint: {
+              composition: ['centered'],
+              lighting: ['soft'],
+              color: ['warm'],
+              editing: ['hard cuts'],
+            },
+            shots: analyzedShots,
+            originalAdaptationAdvice: ['Invent a new subject while retaining the pacing.'],
+          })) as never
+        }),
+        reportProgress: vi.fn(async () => undefined),
+        makeTempDirectory: vi.fn(async () => await fs.mkdtemp(path.join(root, 'worker-'))),
+        removeTempDirectory: vi.fn(async (directory) => await fs.rm(directory, { recursive: true, force: true })),
+      })
+
+      await handler({ data: queueCall.data } as never)
+
+      expect(replication.status).toBe('review_ready')
+      expect(replication.reportJson).toMatchObject({ schemaVersion: 1 })
+      expect(frames.length).toBeGreaterThanOrEqual(3)
+      expect(task.maxAttempts).toBe(1)
+      expect(modelCalls).toEqual([
+        { kind: 'vision', model: 'test::analysis-model' },
+        { kind: 'text', model: 'test::analysis-model' },
+      ])
+    } finally {
+      await fs.rm(root, { recursive: true, force: true })
+    }
   })
 })

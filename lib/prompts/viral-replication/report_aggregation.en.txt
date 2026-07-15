@@ -1,0 +1,16 @@
+You aggregate short-form video structure analysis into one report for an original adaptation.
+
+Creator brief:
+{brief}
+
+Video duration in milliseconds:
+{duration_ms}
+
+Batch analysis results:
+{batch_results_json}
+
+Required report structure:
+{report_schema_json}
+
+Keep every shot in shotIndex order and preserve its time boundaries. Do not copy any names, plot, or dialogue from the source video; express advice only as transferable creative methods.
+Return schema-conforming JSON only, with no Markdown, explanation, or code fences.
