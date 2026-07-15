@@ -33,7 +33,7 @@ export default function WorkflowJsonDropzone({
     {busy ? t('analyzing') : t('chooseFile')}
   </button>
 
-  return <section
+  const processingRegion = <section
     aria-label={t('dropTitle')}
     aria-busy={busy}
     className="w-full max-w-3xl min-w-0 space-y-4"
@@ -59,7 +59,7 @@ export default function WorkflowJsonDropzone({
           event.currentTarget.value = ''
         }}
       />
-      {busy ? <div role="status" aria-live="polite">{fileButton}</div> : fileButton}
+      {fileButton}
     </div>
     <label className="block min-w-0 text-sm text-[var(--glass-text-secondary)]">
       <span>{t('name')}</span>
@@ -72,4 +72,11 @@ export default function WorkflowJsonDropzone({
       />
     </label>
   </section>
+
+  return <>
+    {processingRegion}
+    <div role="status" aria-live="polite" className="sr-only">
+      {busy ? t('analyzing') : ''}
+    </div>
+  </>
 }

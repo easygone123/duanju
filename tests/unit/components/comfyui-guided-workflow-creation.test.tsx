@@ -140,6 +140,31 @@ describe('guided ComfyUI workflow JSON upload', () => {
     expect(view.getByRole('status').textContent).toBe('正在分析…')
   })
 
+  it('keeps the focused file button and persistent live status stable when processing starts', () => {
+    const props = {
+      name: '初始名称',
+      onFile: vi.fn(),
+      onNameChange: vi.fn(),
+    }
+    const view = render(withZh(createElement(WorkflowJsonDropzone, { ...props, busy: false })))
+    const button = view.getByRole('button', { name: '选择 JSON 文件' })
+    const status = view.getByRole('status')
+
+    expect(status.textContent).toBe('')
+    button.focus()
+    expect(document.activeElement).toBe(button)
+
+    view.rerender(withZh(createElement(WorkflowJsonDropzone, { ...props, busy: true })))
+
+    expect(view.getByRole('button', { name: '正在分析…' })).toBe(button)
+    expect(document.activeElement).toBe(button)
+    expect(view.getByRole('status')).toBe(status)
+    expect(status.textContent).toBe('正在分析…')
+    const processingRegion = view.getByRole('region', { name: '上传工作流 JSON' })
+    expect(processingRegion.getAttribute('aria-busy')).toBe('true')
+    expect(processingRegion.contains(status)).toBe(false)
+  })
+
   it('prevents default drag behavior and uses a bounded width-safe layout', () => {
     const view = dropzone()
     const region = view.getByRole('region', { name: '上传工作流 JSON' })
