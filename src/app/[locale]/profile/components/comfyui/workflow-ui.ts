@@ -160,10 +160,13 @@ export function confirmWorkflowAnalysis(
 
   for (const proposal of analysis.proposals) {
     const selectedRole = confirmation.roles[proposal.id]
-    if (proposal.confidence === 'ambiguous' && !selectedRole) {
+    if (proposal.confidence === 'ambiguous' && proposal.required && !selectedRole) {
       throw new Error('workflowMappingConfirmationRequired')
     }
-    const canonicalName = selectedRole || proposal.canonicalName
+    const canonicalName = selectedRole
+      || (proposal.confidence === 'ambiguous' || proposal.confidence === 'preserve_original'
+        ? 'preserve_original'
+        : proposal.canonicalName)
     if (canonicalName === 'preserve_original') continue
 
     const isReferenceList = canonicalName === 'referenceImages'

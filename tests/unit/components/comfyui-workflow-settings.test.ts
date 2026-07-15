@@ -204,6 +204,26 @@ describe('ComfyUI workflow settings UI contract', () => {
     expect(result.bindings.map((binding) => binding.valueIndex)).toEqual([0, 1])
   })
 
+  it('preserves unresolved optional ambiguity but blocks required ambiguity', () => {
+    const base = {
+      graph: { '9': { class_type: 'SaveImage', inputs: {} } },
+      mediaType: 'image' as const, purpose: 'generation' as const,
+      outputs: [{ name: 'output', nodeId: '9', fieldPath: 'images', mediaType: 'image' as const, primary: true }],
+      issues: [], referenceCapacity: 1,
+    }
+    const optional = confirmWorkflowAnalysis({ ...base, proposals: [{
+      id: 'optional', canonicalName: 'referenceImages' as const, nodeId: '2', inputPath: 'image', valueType: 'image_ref' as const,
+      confidence: 'ambiguous' as const, reasonCode: 'COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS', required: false,
+    }] }, { roles: {} })
+    expect(optional.variableDefinitions).toEqual([])
+    expect(optional.bindings).toEqual([])
+
+    expect(() => confirmWorkflowAnalysis({ ...base, proposals: [{
+      id: 'required', canonicalName: 'sourceImage' as const, nodeId: '2', inputPath: 'image', valueType: 'image_ref' as const,
+      confidence: 'ambiguous' as const, reasonCode: 'COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS', required: true,
+    }] }, { roles: {} })).toThrow('workflowMappingConfirmationRequired')
+  })
+
   it('exposes an upload-first automatic mapping wizard for new workflows', () => {
     const editor = read(`${base}/WorkflowEditor.tsx`)
     expect(read(`${base}/WorkflowUploadStep.tsx`)).toContain('/api/comfyui/workflows/analyze')
