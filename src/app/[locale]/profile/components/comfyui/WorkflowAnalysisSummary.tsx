@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { useTranslations } from 'next-intl'
+import { useFormatter, useTranslations } from 'next-intl'
 import type { GuidedWorkflowReview } from './guided-workflow-creation'
 
 interface Props {
@@ -35,6 +35,7 @@ export default function WorkflowAnalysisSummary({
 }: Props) {
   const t = useTranslations('comfyui.workflows.guided')
   const canonical = useTranslations('comfyui.workflows.canonicalInputs')
+  const format = useFormatter()
 
   return <section className="w-full min-w-0 max-w-4xl space-y-3" aria-labelledby="workflow-analysis-summary">
     <h3 id="workflow-analysis-summary" className="font-medium">{t('summaryTitle')}</h3>
@@ -64,7 +65,7 @@ export default function WorkflowAnalysisSummary({
       </article>
       {review.missingRequiredInputs.length > 0 && <article role="alert" className="glass-surface-soft min-w-0 rounded-xl p-4 text-sm text-[var(--glass-tone-danger-fg)]">
         {t('missingRequiredInputs', {
-          inputs: review.missingRequiredInputs.map((input) => canonical(input)).join('、'),
+          inputs: format.list(review.missingRequiredInputs.map((input) => canonical(input))),
         })}
       </article>}
       {review.blockingIssueCodes.map((code, index) => <article

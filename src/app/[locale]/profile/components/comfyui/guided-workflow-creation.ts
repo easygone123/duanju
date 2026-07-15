@@ -16,6 +16,35 @@ export interface GuidedWorkflowReview {
   blockingIssueCodes: string[]
 }
 
+const GUIDED_MAPPING_REASON_KEYS = [
+  'COMFY_MAPPING_PROMPT_POSITIVE_LABEL',
+  'COMFY_MAPPING_PROMPT_NEGATIVE_LABEL',
+  'COMFY_MAPPING_PROMPT_POLARITY_AMBIGUOUS',
+  'COMFY_MAPPING_WIDTH_INPUT',
+  'COMFY_MAPPING_HEIGHT_INPUT',
+  'COMFY_MAPPING_SEED_INPUT',
+  'COMFY_MAPPING_DURATION_INPUT',
+  'COMFY_MAPPING_FPS_INPUT',
+  'COMFY_MAPPING_SOURCE_IMAGE_LABEL',
+  'COMFY_MAPPING_REFERENCE_IMAGE_LABEL',
+  'COMFY_MAPPING_REFERENCE_LIST_LABEL',
+  'COMFY_MAPPING_FIRST_FRAME_LABEL',
+  'COMFY_MAPPING_LAST_FRAME_LABEL',
+  'COMFY_MAPPING_SOURCE_VIDEO_LABEL',
+  'COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS',
+  'COMFY_MAPPING_VIDEO_ROLE_AMBIGUOUS',
+] as const
+
+export type GuidedMappingReasonKey = typeof GUIDED_MAPPING_REASON_KEYS[number] | 'unknown'
+
+const guidedMappingReasonKeys = new Set<string>(GUIDED_MAPPING_REASON_KEYS)
+
+export function guidedMappingReasonKey(reasonCode: string): GuidedMappingReasonKey {
+  return guidedMappingReasonKeys.has(reasonCode)
+    ? reasonCode as Exclude<GuidedMappingReasonKey, 'unknown'>
+    : 'unknown'
+}
+
 export const deriveWorkflowName = (filename: string) => filename.trim().replace(/\.json$/i, '').trim()
 
 export function guidedCompatibleRoles(proposal: WorkflowMappingProposal): CanonicalWorkflowInput[] {

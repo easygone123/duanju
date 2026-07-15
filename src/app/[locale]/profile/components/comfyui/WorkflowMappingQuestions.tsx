@@ -9,6 +9,7 @@ import type {
 } from '@/lib/comfyui/workflow-auto-mapping-types'
 import {
   guidedCompatibleRoles,
+  guidedMappingReasonKey,
   type GuidedWorkflowReview,
 } from './guided-workflow-creation'
 
@@ -24,11 +25,25 @@ interface Props {
 function userFacingOutputName(name: string, nodeId: string) {
   const normalizedName = name.trim()
   const normalizedNodeId = nodeId.trim()
-  if (!normalizedName || /^output(?:_.*)?$/i.test(normalizedName)) return null
+  if (!normalizedName || /^(?:outputs?|images?|files?)$/i.test(normalizedName)) return null
+  if (/[\\/_.]/.test(normalizedName)) return null
   if (normalizedNodeId && normalizedName.toLocaleLowerCase().includes(normalizedNodeId.toLocaleLowerCase())) {
     return null
   }
   return normalizedName
+}
+
+function userFacingNodeTitle(nodeTitle: string | undefined, nodeId: string) {
+  const normalizedTitle = nodeTitle?.trim()
+  const normalizedNodeId = nodeId.trim()
+  if (!normalizedTitle || /[\\/_.]/.test(normalizedTitle)) return null
+  if (normalizedNodeId && normalizedTitle.toLocaleLowerCase().includes(normalizedNodeId.toLocaleLowerCase())) {
+    return null
+  }
+  if (/^(?:node|input|loader|image|video|load (?:image|video)|(?:image|video) (?:loader|input))$/i.test(normalizedTitle)) {
+    return null
+  }
+  return normalizedTitle
 }
 
 export default function WorkflowMappingQuestions({
@@ -54,15 +69,29 @@ export default function WorkflowMappingQuestions({
     return t('inputRoleQuestion', { input: canonical(proposal.canonicalName) })
   }
 
+  const candidateText = (proposal: WorkflowMappingProposal, questionIndex: number) => {
+    const nodeTitle = userFacingNodeTitle(proposal.nodeTitle, proposal.nodeId)
+    return nodeTitle
+      ? t('inputCandidateNamed', { name: nodeTitle, index: questionIndex + 1 })
+      : t('inputCandidate', { index: questionIndex + 1 })
+  }
+
   if (review.questions.length === 0 && !review.needsPrimaryOutput) return null
 
   return <section className="w-full min-w-0 max-w-4xl space-y-4" aria-labelledby={`${groupPrefix}-title`}>
     <h3 id={`${groupPrefix}-title`} className="font-medium">{t('questionsTitle')}</h3>
-    {review.questions.map((proposal, questionIndex) => <fieldset
+    {review.questions.map((proposal, questionIndex) => {
+      const reasonKey = guidedMappingReasonKey(proposal.reasonCode)
+      return <fieldset
       key={proposal.id}
       className="glass-surface-soft min-w-0 space-y-3 rounded-xl p-4"
     >
-      <legend className="max-w-full break-words px-1 text-sm font-medium">{questionText(proposal)}</legend>
+      <legend className="max-w-full break-words px-1 text-sm font-medium">
+        {t('questionCandidate', {
+          question: questionText(proposal),
+          candidate: candidateText(proposal, questionIndex),
+        })}
+      </legend>
       <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2">
         {guidedCompatibleRoles(proposal).map((role) => <label
           key={role}
@@ -84,10 +113,15 @@ export default function WorkflowMappingQuestions({
           <div className="min-w-0"><dt className="font-medium">{t('nodeId')}</dt><dd className="break-all">{proposal.nodeId}</dd></div>
           <div className="min-w-0"><dt className="font-medium">{t('inputPath')}</dt><dd className="break-all">{proposal.inputPath}</dd></div>
           <div className="min-w-0"><dt className="font-medium">{t('confidence')}</dt><dd className="break-all">{proposal.confidence} · {workflows(`mappingConfidence.${proposal.confidence}`)}</dd></div>
-          <div className="min-w-0 md:col-span-2"><dt className="font-medium">{t('reason')}</dt><dd className="break-all">{proposal.reasonCode} · {workflows(`mappingReasons.${proposal.reasonCode}`)}</dd></div>
+          <div className="min-w-0 md:col-span-2"><dt className="font-medium">{t('reason')}</dt><dd className="break-all">
+            {reasonKey === 'unknown'
+              ? workflows('mappingReasons.unknown')
+              : <>{proposal.reasonCode} · {workflows(`mappingReasons.${reasonKey}`)}</>}
+          </dd></div>
         </dl>
       </details>
-    </fieldset>)}
+    </fieldset>
+    })}
     {review.needsPrimaryOutput && <fieldset className="glass-surface-soft min-w-0 space-y-3 rounded-xl p-4">
       <legend className="max-w-full break-words px-1 text-sm font-medium">{t('outputQuestion')}</legend>
       <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2">

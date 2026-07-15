@@ -106,6 +106,9 @@
       "outputName": "输出名称",
       "missingRequiredInputs": "还缺少必填输入：{inputs}",
       "questionsTitle": "需要你确认",
+      "questionCandidate": "{question}（{candidate}）",
+      "inputCandidate": "输入候选 {index}",
+      "inputCandidateNamed": "{name} · 输入候选 {index}",
       "sourceRoleQuestion": "{media, select, video {这个视频在工作流中是什么用途？} other {这张图片在工作流中是什么用途？}}",
       "promptRoleQuestion": "这段文字是提示词还是负面提示词？",
       "inputRoleQuestion": "“{input}”在工作流中是什么用途？",
@@ -176,7 +179,8 @@
       "COMFY_MAPPING_LAST_FRAME_LABEL": "根据尾帧加载节点识别。",
       "COMFY_MAPPING_SOURCE_VIDEO_LABEL": "根据源视频加载节点识别。",
       "COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS": "这个图片加载节点可能承担多种角色。",
-      "COMFY_MAPPING_VIDEO_ROLE_AMBIGUOUS": "这个视频加载节点没有标明用途。"
+      "COMFY_MAPPING_VIDEO_ROLE_AMBIGUOUS": "这个视频加载节点没有标明用途。",
+      "unknown": "无法识别这项映射的技术依据。"
     },
     "importFile": "导入 JSON 文件",
     "importPaste": "粘贴 API Format JSON",

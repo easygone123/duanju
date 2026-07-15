@@ -23,10 +23,24 @@ afterEach(cleanup)
 
 const canonicalKinds = Object.keys(WORKFLOW_IMPORT_KIND_META) as WorkflowImportKind[]
 
-function withZh(node: React.ReactNode) {
+function withZh(
+  node: React.ReactNode,
+  onError?: React.ComponentProps<typeof NextIntlClientProvider>['onError'],
+) {
   return <NextIntlClientProvider
     locale="zh"
     messages={{ comfyui: zhComfyui }}
+    timeZone="Asia/Shanghai"
+    onError={onError}
+  >
+    {node}
+  </NextIntlClientProvider>
+}
+
+function withEn(node: React.ReactNode) {
+  return <NextIntlClientProvider
+    locale="en"
+    messages={{ comfyui: enComfyui }}
     timeZone="Asia/Shanghai"
   >
     {node}
@@ -82,6 +96,11 @@ function textOutsideDetails(element: HTMLElement) {
   const clone = element.cloneNode(true) as HTMLElement
   clone.querySelectorAll('details').forEach((details) => details.remove())
   return clone.textContent || ''
+}
+
+function toggleDetails(details: HTMLDetailsElement) {
+  fireEvent.click(details.querySelector('summary') as HTMLElement)
+  fireEvent(details, new Event('toggle', { bubbles: true }))
 }
 
 describe('guided ComfyUI workflow type selection', () => {
@@ -222,6 +241,46 @@ describe('guided ComfyUI workflow JSON upload', () => {
 })
 
 describe('guided ComfyUI workflow review', () => {
+  it('uses a safe localized fallback for unknown reason codes in guided and advanced views', () => {
+    const unknownReasonCode = 'COMFY_MAPPING_PLUGIN_PRIVATE_REASON'
+    const analysis = guidedAnalysis()
+    analysis.proposals = analysis.proposals.map((proposal) => proposal.id === 'source-question'
+      ? { ...proposal, reasonCode: unknownReasonCode }
+      : proposal)
+    const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
+    const strictIntlError = (error: unknown) => { throw error }
+
+    let guidedView: ReturnType<typeof render> | undefined
+    expect(() => {
+      guidedView = render(withZh(<WorkflowMappingQuestions
+        analysis={analysis}
+        review={review}
+        roles={{}}
+        primaryOutputNodeId=""
+        onRoleChange={vi.fn()}
+        onPrimaryOutputChange={vi.fn()}
+      />, strictIntlError))
+    }).not.toThrow()
+    expect(guidedView?.container.textContent).toContain('无法识别这项映射的技术依据。')
+    expect(guidedView?.container.textContent).not.toContain(unknownReasonCode)
+    guidedView?.unmount()
+
+    let advancedView: ReturnType<typeof render> | undefined
+    expect(() => {
+      advancedView = render(withZh(<WorkflowAdvancedMappingInspector
+        analysis={analysis}
+        roles={{}}
+        primaryOutputNodeId=""
+        onRoleChange={vi.fn()}
+        onPrimaryOutputChange={vi.fn()}
+      />, strictIntlError))
+    }).not.toThrow()
+    const disclosure = advancedView?.getByText('高级设置').closest('details') as HTMLDetailsElement
+    expect(() => toggleDetails(disclosure)).not.toThrow()
+    expect(disclosure.textContent).toContain('无法识别这项映射的技术依据。')
+    expect(disclosure.textContent).not.toContain(unknownReasonCode)
+  })
+
   it('summarizes automatic recognition and preserved workflow defaults without raw identifiers', () => {
     const analysis = guidedAnalysis()
     const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
@@ -274,6 +333,21 @@ describe('guided ComfyUI workflow review', () => {
     expect(unresolved.getByText('请选择一个最终输出')).toBeTruthy()
   })
 
+  it('formats multiple missing inputs with locale-aware English list punctuation', () => {
+    const analysis = guidedAnalysis()
+    const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
+    review.missingRequiredInputs = ['prompt', 'sourceImage', 'sourceVideo']
+    const view = render(withEn(<WorkflowAnalysisSummary
+      review={review}
+      outputCount={analysis.outputs.length}
+      automaticPrimaryOutputNodeId=""
+    />))
+
+    expect(view.getByText(
+      'Required input still missing: Prompt, Source image, and Source video',
+    )).toBeTruthy()
+  })
+
   it('asks only the unresolved required image question and reports canonical role changes', () => {
     const analysis = guidedAnalysis()
     const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
@@ -289,7 +363,9 @@ describe('guided ComfyUI workflow review', () => {
 
     expect(review.questions).toHaveLength(1)
     expect(view.container.querySelectorAll('fieldset')).toHaveLength(2)
-    expect(view.getByRole('group', { name: '这张图片在工作流中是什么用途？' })).toBeTruthy()
+    expect(view.getByRole('group', {
+      name: '这张图片在工作流中是什么用途？（输入候选 1）',
+    })).toBeTruthy()
     expect(view.queryByRole('group', { name: /种子/ })).toBeNull()
     expect(textOutsideDetails(view.container)).not.toContain('image-loader')
     expect(textOutsideDetails(view.container)).not.toContain('image')
@@ -298,6 +374,59 @@ describe('guided ComfyUI workflow review', () => {
 
     fireEvent.click(view.getByRole('radio', { name: '源图片' }))
     expect(onRoleChange).toHaveBeenCalledWith('source-question', 'sourceImage')
+  })
+
+  it('distinguishes multiple same-kind ambiguity questions with safe ordinal legends', () => {
+    const analysis = guidedAnalysis()
+    const firstImageQuestion = analysis.proposals.find((proposal) => proposal.id === 'source-question')!
+    analysis.proposals = analysis.proposals
+      .filter((proposal) => proposal.id !== 'source-question')
+      .concat([
+        { ...firstImageQuestion, id: 'source-question-17', nodeId: 'image-loader-17', nodeTitle: 'Load Image' },
+        { ...firstImageQuestion, id: 'source-question-22', nodeId: 'image-loader-22', nodeTitle: 'Load Image' },
+      ])
+    const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
+    const view = render(withZh(<WorkflowMappingQuestions
+      analysis={analysis}
+      review={review}
+      roles={{}}
+      primaryOutputNodeId=""
+      onRoleChange={vi.fn()}
+      onPrimaryOutputChange={vi.fn()}
+    />))
+
+    expect(review.questions).toHaveLength(2)
+    expect(view.getByRole('group', {
+      name: '这张图片在工作流中是什么用途？（输入候选 1）',
+    })).toBeTruthy()
+    expect(view.getByRole('group', {
+      name: '这张图片在工作流中是什么用途？（输入候选 2）',
+    })).toBeTruthy()
+    const visibleText = textOutsideDetails(view.container)
+    expect(visibleText).not.toContain('image-loader-17')
+    expect(visibleText).not.toContain('image-loader-22')
+    expect(visibleText).not.toContain('ambiguous')
+    expect(visibleText).not.toContain('COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS')
+  })
+
+  it('keeps a genuinely user-facing node title in the ordinal candidate descriptor', () => {
+    const analysis = guidedAnalysis()
+    analysis.proposals = analysis.proposals.map((proposal) => proposal.id === 'source-question'
+      ? { ...proposal, nodeTitle: 'Character portrait' }
+      : proposal)
+    const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
+    const view = render(withZh(<WorkflowMappingQuestions
+      analysis={analysis}
+      review={review}
+      roles={{}}
+      primaryOutputNodeId=""
+      onRoleChange={vi.fn()}
+      onPrimaryOutputChange={vi.fn()}
+    />))
+
+    expect(view.getByRole('group', {
+      name: '这张图片在工作流中是什么用途？（Character portrait · 输入候选 1）',
+    })).toBeTruthy()
   })
 
   it('replaces technical output names with friendly ordinal labels outside closed technical details', () => {
@@ -336,7 +465,44 @@ describe('guided ComfyUI workflow review', () => {
     expect(outputDetails.textContent).toContain('images')
   })
 
-  it('keeps the complete mapping table in closed Advanced Settings', () => {
+  it('rejects generic and identifier-like output labels while preserving friendly names', () => {
+    const analysis = guidedAnalysis()
+    const technicalNames = [
+      'output',
+      'images',
+      'files',
+      'results/images',
+      'result.image',
+      'save_image',
+    ]
+    analysis.outputs = [...technicalNames, 'Final image'].map((name, index) => ({
+      name,
+      nodeId: `node-${index + 1}`,
+      fieldPath: 'images',
+      mediaType: 'image' as const,
+      primary: false,
+    }))
+    const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
+    const view = render(withEn(<WorkflowMappingQuestions
+      analysis={analysis}
+      review={review}
+      roles={{}}
+      primaryOutputNodeId=""
+      onRoleChange={vi.fn()}
+      onPrimaryOutputChange={vi.fn()}
+    />))
+    const outputGroup = view.getByRole('group', { name: 'Which output is the final result?' })
+    const visibleOutputText = textOutsideDetails(outputGroup)
+
+    technicalNames.forEach((name, index) => {
+      expect(view.getByRole('radio', { name: `Output candidate ${index + 1}` })).toBeTruthy()
+      expect(view.queryByRole('radio', { name })).toBeNull()
+      if (name !== 'output') expect(visibleOutputText).not.toContain(name)
+    })
+    expect(view.getByRole('radio', { name: 'Final image' })).toBeTruthy()
+  })
+
+  it('defers the advanced table until first open and keeps it mounted after closing', () => {
     const analysis = guidedAnalysis()
     const review = buildGuidedWorkflowReview('image_edit', analysis, {}, '')
     const view = render(withZh(<WorkflowAdvancedMappingInspector
@@ -351,9 +517,14 @@ describe('guided ComfyUI workflow review', () => {
     expect(disclosure.open).toBe(false)
     expect(disclosure.className).toContain('glass-surface-soft')
     expect(disclosure.className).toContain('min-w-0')
-    expect(disclosure.querySelector('.overflow-x-auto')).toBeTruthy()
-    fireEvent.click(disclosure.querySelector('summary') as HTMLElement)
+    expect(disclosure.textContent).not.toContain('自动输入映射')
+    expect(disclosure.querySelector('.overflow-x-auto')).toBeNull()
+    toggleDetails(disclosure)
     expect(disclosure.open).toBe(true)
+    expect(disclosure.textContent).toContain('自动输入映射')
+    expect(disclosure.querySelector('.overflow-x-auto')).toBeTruthy()
+    toggleDetails(disclosure)
+    expect(disclosure.open).toBe(false)
     expect(disclosure.textContent).toContain('自动输入映射')
   })
 })
@@ -365,6 +536,7 @@ describe('guided workflow translations', () => {
     'recognizedInputs', 'recognizedInput', 'preservedDefaults', 'recognizedOutput',
     'outputUnavailable', 'outputReady', 'outputConfirmed', 'outputNeedsChoice',
     'outputCandidate', 'outputName', 'missingRequiredInputs', 'questionsTitle',
+    'questionCandidate', 'inputCandidate', 'inputCandidateNamed',
     'sourceRoleQuestion', 'promptRoleQuestion', 'inputRoleQuestion', 'outputQuestion',
     'technicalDetails', 'nodeTitle', 'nodeId', 'inputPath', 'outputFieldPath',
     'confidence', 'reason', 'advancedSettings', 'issues',
@@ -381,6 +553,10 @@ describe('guided workflow translations', () => {
       'COMFY_WORKFLOW_API_FORMAT_REQUIRED', 'COMFY_WORKFLOW_API_FORMAT_INVALID',
       'COMFY_WORKFLOW_OUTPUT_REQUIRED', 'COMFY_WORKFLOW_OUTPUT_AMBIGUOUS', 'unknown',
     ].sort())
+    expect(Object.keys(zhComfyui.workflows.mappingReasons).sort())
+      .toEqual(Object.keys(enComfyui.workflows.mappingReasons).sort())
+    expect(zhComfyui.workflows.mappingReasons.unknown).toBeTruthy()
+    expect(enComfyui.workflows.mappingReasons.unknown).toBeTruthy()
     expect(Object.keys(zh.types)).toEqual(canonicalKinds)
     expect(Object.keys(en.types)).toEqual(canonicalKinds)
     for (const kind of canonicalKinds) {

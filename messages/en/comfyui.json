@@ -106,6 +106,9 @@
       "outputName": "Output name",
       "missingRequiredInputs": "Required input still missing: {inputs}",
       "questionsTitle": "A few details need your confirmation",
+      "questionCandidate": "{question} ({candidate})",
+      "inputCandidate": "Input candidate {index}",
+      "inputCandidateNamed": "{name} · Input candidate {index}",
       "sourceRoleQuestion": "{media, select, video {What is this video used for in the workflow?} other {What is this image used for in the workflow?}}",
       "promptRoleQuestion": "Is this text the prompt or the negative prompt?",
       "inputRoleQuestion": "What is “{input}” used for in the workflow?",
@@ -176,7 +179,8 @@
       "COMFY_MAPPING_LAST_FRAME_LABEL": "Recognized from a last-frame loader.",
       "COMFY_MAPPING_SOURCE_VIDEO_LABEL": "Recognized from a source-video loader.",
       "COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS": "This image loader can have more than one role.",
-      "COMFY_MAPPING_VIDEO_ROLE_AMBIGUOUS": "This video loader role is not labeled."
+      "COMFY_MAPPING_VIDEO_ROLE_AMBIGUOUS": "This video loader role is not labeled.",
+      "unknown": "The technical basis for this mapping could not be recognized."
     },
     "importFile": "Import JSON file",
     "importPaste": "Paste API Format JSON",
