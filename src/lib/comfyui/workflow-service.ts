@@ -188,7 +188,9 @@ export async function archiveWorkflow(userId: string, workflowId: string) {
     const defaults = await tx.projectComfyBinding.count({
       where: { userId, OR: [{ imageWorkflowId: workflowId }, { videoWorkflowId: workflowId }] },
     })
-    if (defaults > 0) throw new ApiError('CONFLICT')
+    if (defaults > 0) {
+      throw new ApiError('CONFLICT', { reason: 'COMFY_WORKFLOW_PROJECT_DEFAULT_CONFLICT' })
+    }
     const result = await tx.comfyWorkflow.updateMany({
       where: { id: workflowId, userId, status: { not: 'archived' } },
       data: { status: 'archived' },

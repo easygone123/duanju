@@ -255,7 +255,7 @@ export async function analyzeWorkflowJson(
     body: JSON.stringify({ kind, apiFormatJson }),
   })
   const payload = await safeResponseJson(response)
-  if (!response.ok) throw workflowRequestErrorFromPayload(payload)
+  if (!response.ok) throw workflowRequestErrorFromPayload(payload, response.status)
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw malformedWorkflowResponse()
   }
@@ -282,7 +282,7 @@ export async function createWorkflowDraft(draft: WorkflowAuthorDraft): Promise<s
     body,
   })
   const payload = await safeResponseJson(response)
-  if (!response.ok) throw workflowRequestErrorFromPayload(payload)
+  if (!response.ok) throw workflowRequestErrorFromPayload(payload, response.status)
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw malformedWorkflowResponse()
   }

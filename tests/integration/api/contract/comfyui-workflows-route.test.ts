@@ -549,7 +549,12 @@ describe('ComfyUI workflow library', () => {
     prismaMock.projectComfyBinding.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0)
     const route = await import('@/app/api/comfyui/workflows/[workflowId]/route')
     const request = () => buildMockRequest({ path: '/api/comfyui/workflows/workflow-1', method: 'DELETE' })
-    expect((await route.DELETE(request(), { params: Promise.resolve({ workflowId: 'workflow-1' }) })).status).toBe(409)
+    const conflict = await route.DELETE(request(), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+    expect(conflict.status).toBe(409)
+    expect((await body(conflict)).error).toEqual(expect.objectContaining({
+      code: 'CONFLICT',
+      details: expect.objectContaining({ reason: 'COMFY_WORKFLOW_PROJECT_DEFAULT_CONFLICT' }),
+    }))
     expect((await route.DELETE(request(), { params: Promise.resolve({ workflowId: 'workflow-1' }) })).status).toBe(200)
     expect(prismaMock.comfyWorkflow.updateMany).toHaveBeenCalledWith({
       where: { id: 'workflow-1', userId: 'user-1', status: { not: 'archived' } },

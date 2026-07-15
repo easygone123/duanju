@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api-fetch'
@@ -31,7 +31,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(url, init)
   if (!response.ok) {
     const payload: unknown = await response.json().catch(() => null)
-    throw workflowRequestErrorFromPayload(payload)
+    throw workflowRequestErrorFromPayload(payload, response.status)
   }
   return response.json() as Promise<T>
 }
@@ -41,12 +41,16 @@ export default function WorkflowLibraryPanel() {
   const queryClient = useQueryClient()
   const [workflows, setWorkflows] = useState<WorkflowView[]>([])
   const [selectedId, setSelectedId] = useState<string | 'new'>('new')
+  const selectedIdRef = useRef<string | 'new'>('new')
+  const archiveInFlightRef = useRef<string | null>(null)
+  const newWorkflowButtonRef = useRef<HTMLButtonElement>(null)
   const [authorDraft, setAuthorDraft] = useState<WorkflowAuthorDraft>(emptyWorkflowDraft)
   const [savedVersion, setSavedVersion] = useState<WorkflowVersionView | null>(null)
   const [connectionId, setConnectionId] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ErrorKey | null>(null)
+  const [workflowDeleted, setWorkflowDeleted] = useState(false)
   const [compatibility, setCompatibility] = useState<WorkflowCompatibilityView[]>([])
   const [compatibilityCursor, setCompatibilityCursor] = useState<string | null>(null)
   const [compatibilityError, setCompatibilityError] = useState(false)
@@ -55,15 +59,20 @@ export default function WorkflowLibraryPanel() {
   const [testPayload, setTestPayload] = useState<WorkflowTestPayload | null>(emptyWorkflowTestPayload)
   const connectionsQuery = useComfyConnections()
 
+  const updateSelectedId = (id: string | 'new') => {
+    selectedIdRef.current = id
+    setSelectedId(id)
+  }
+
   const load = async (preferId?: string) => {
     setLoading(true)
     try {
       const payload = await requestJson<{ workflows: WorkflowView[] }>('/api/comfyui/workflows')
       setWorkflows(payload.workflows)
-      const selected = payload.workflows.find((item) => item.id === (preferId ?? selectedId))
+      const selected = payload.workflows.find((item) => item.id === (preferId ?? selectedIdRef.current))
       if (selected) {
         const version = selected.versions[0] ?? selected.currentVersion
-        setSelectedId(selected.id); setSavedVersion(version); setAuthorDraft(draftFromWorkflow(selected, version))
+        updateSelectedId(selected.id); setSavedVersion(version); setAuthorDraft(draftFromWorkflow(selected, version))
       }
       setError(null)
     } catch { setError('requestFailed') } finally { setLoading(false) }
@@ -71,7 +80,7 @@ export default function WorkflowLibraryPanel() {
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectWorkflow = (id: string | 'new') => {
-    setSelectedId(id); setError(null)
+    updateSelectedId(id); setError(null)
     if (id === 'new') { setSavedVersion(null); setAuthorDraft(emptyWorkflowDraft()); return }
     const workflow = workflows.find((item) => item.id === id)
     if (!workflow) return
@@ -104,23 +113,34 @@ export default function WorkflowLibraryPanel() {
     await load(selectedId)
   })
   const archiveSelectedWorkflow = async () => {
-    if (selectedId === 'new') return
-    const selected = workflows.find((workflow) => workflow.id === selectedId)
+    if (selectedId === 'new' || archiveInFlightRef.current) return
+    const targetId = selectedId
+    const selected = workflows.find((workflow) => workflow.id === targetId)
     if (!selected || !window.confirm(t('deleteWorkflowConfirm', { name: selected.name }))) return
-    setBusy(true); setError(null)
+    archiveInFlightRef.current = targetId
+    setBusy(true); setError(null); setWorkflowDeleted(false)
     try {
-      await requestJson(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}`, {
+      await requestJson(`/api/comfyui/workflows/${encodeURIComponent(targetId)}`, {
         method: 'DELETE',
       })
-      setSelectedId('new')
-      setSavedVersion(null)
-      setAuthorDraft(emptyWorkflowDraft())
+      setWorkflows((current) => current.filter((workflow) => workflow.id !== targetId))
+      setWorkflowDeleted(true)
+      if (selectedIdRef.current === targetId) {
+        updateSelectedId('new')
+        setSavedVersion(null)
+        setAuthorDraft(emptyWorkflowDraft())
+        newWorkflowButtonRef.current?.focus()
+      }
       await load()
     } catch (actionError) {
-      setError(actionError instanceof WorkflowRequestError && actionError.code === 'CONFLICT'
+      setError(actionError instanceof WorkflowRequestError
+        && actionError.status === 409
+        && actionError.code === 'CONFLICT'
+        && actionError.reason === 'COMFY_WORKFLOW_PROJECT_DEFAULT_CONFLICT'
         ? 'workflowProjectDefaultConflict'
         : safeWorkflowErrorKey(actionError))
     } finally {
+      if (archiveInFlightRef.current === targetId) archiveInFlightRef.current = null
       setBusy(false)
     }
   }
@@ -194,7 +214,7 @@ export default function WorkflowLibraryPanel() {
   return <section aria-labelledby="comfyui-workflow-library-heading" className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--glass-stroke-base)] px-5 py-4 sm:px-6">
       <div><h2 id="comfyui-workflow-library-heading" className="text-lg font-semibold">{t('title')}</h2><p className="mt-1 text-sm text-[var(--glass-text-secondary)]">{t('description')}</p></div>
-      <button type="button" className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm" onClick={() => selectWorkflow('new')}>{t('newWorkflow')}</button>
+      <button ref={newWorkflowButtonRef} type="button" className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm" onClick={() => selectWorkflow('new')}>{t('newWorkflow')}</button>
     </header>
     <div className="grid min-h-0 min-w-0 flex-1 gap-5 overflow-y-auto p-5 sm:p-6">
       <nav aria-label={t('library')} className="space-y-2">{loading && <p role="status" className="text-sm">{t('loading')}</p>}
@@ -215,6 +235,7 @@ export default function WorkflowLibraryPanel() {
             className="glass-btn-base glass-btn-tone-danger px-4 py-2 text-sm">{t('deleteWorkflow')}</button>}
         </div>
         {savedVersion && <WorkflowTestForm key={savedVersion.id} definitions={savedVersion.variableDefinitions} onChange={setTestPayload} onError={(key) => setError(key as ErrorKey)} />}
+        {workflowDeleted && <p role="status" className="text-sm text-[var(--glass-tone-success-fg)]">{t('workflowDeleted')}</p>}
         {error && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t(error)}</p>}
       <WorkflowCompatibilityTable issues={issues} compatibility={compatibility} />
       {compatibilityError && <p role="alert" className="text-xs text-[var(--glass-danger)]">{t('compatibilityLoadFailed')}</p>}

@@ -45,7 +45,7 @@ export default function WorkflowUploadStep({ disabled, onAnalyzed, onError }: Pr
         body: JSON.stringify({ kind, apiFormatJson }),
       })
       if (!response.ok) {
-        throw workflowRequestErrorFromPayload(await response.json().catch(() => null))
+        throw workflowRequestErrorFromPayload(await response.json().catch(() => null), response.status)
       }
       const payload = await response.json() as { analysis: WorkflowAutoMappingResult }
       onAnalyzed(sourceText, payload.analysis)

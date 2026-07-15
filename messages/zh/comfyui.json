@@ -234,6 +234,7 @@
     "saveDraft": "保存草稿",
     "deleteWorkflow": "删除工作流",
     "deleteWorkflowConfirm": "确定删除“{name}”吗？删除后它将不再显示在工作流库中。",
+    "workflowDeleted": "工作流已删除。",
     "publish": "发布",
     "test": "测试工作流",
     "testInstance": "测试节点",

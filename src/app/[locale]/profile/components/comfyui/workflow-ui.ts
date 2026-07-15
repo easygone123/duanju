@@ -300,6 +300,10 @@ export type WorkflowAnalysisErrorReason =
   | 'COMFY_WORKFLOW_API_FORMAT_REQUIRED'
   | 'COMFY_WORKFLOW_API_FORMAT_INVALID'
 
+export type WorkflowRequestErrorReason =
+  | WorkflowAnalysisErrorReason
+  | 'COMFY_WORKFLOW_PROJECT_DEFAULT_CONFLICT'
+
 export type WorkflowAnalysisErrorKey =
   | `guided.issues.${WorkflowAnalysisErrorReason}`
   | 'guided.issues.unknown'
@@ -316,13 +320,26 @@ function safeWorkflowAnalysisReason(value: unknown): WorkflowAnalysisErrorReason
     : undefined
 }
 
-export class WorkflowRequestError extends Error {
-  readonly reason?: WorkflowAnalysisErrorReason
+function safeWorkflowRequestReason(code: string, value: unknown): WorkflowRequestErrorReason | undefined {
+  if (code === 'INVALID_PARAMS') return safeWorkflowAnalysisReason(value)
+  if (code === 'CONFLICT' && value === 'COMFY_WORKFLOW_PROJECT_DEFAULT_CONFLICT') return value
+  return undefined
+}
 
-  constructor(readonly code: string, reason?: unknown) {
+export class WorkflowRequestError extends Error {
+  readonly reason?: WorkflowRequestErrorReason
+  readonly status?: number
+
+  constructor(readonly code: string, reason?: unknown, status?: number) {
     super('workflowRequestFailed')
     this.name = 'WorkflowRequestError'
-    this.reason = code === 'INVALID_PARAMS' ? safeWorkflowAnalysisReason(reason) : undefined
+    this.reason = safeWorkflowRequestReason(code, reason)
+    this.status = typeof status === 'number'
+      && Number.isInteger(status)
+      && status >= 100
+      && status <= 599
+      ? status
+      : undefined
   }
 }
 
@@ -338,8 +355,8 @@ const SAFE_WORKFLOW_API_ERRORS: Readonly<Record<string, WorkflowErrorKey>> = {
   EXTERNAL_ERROR: 'workflowExternalFailed',
 }
 
-export function workflowRequestErrorFromPayload(payload: unknown): WorkflowRequestError {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return new WorkflowRequestError('UNKNOWN')
+export function workflowRequestErrorFromPayload(payload: unknown, status?: number): WorkflowRequestError {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return new WorkflowRequestError('UNKNOWN', undefined, status)
   const record = payload as Record<string, unknown>
   const nested = record.error && typeof record.error === 'object' && !Array.isArray(record.error)
     ? record.error as Record<string, unknown>
@@ -350,7 +367,7 @@ export function workflowRequestErrorFromPayload(payload: unknown): WorkflowReque
   const details = nested?.details && typeof nested.details === 'object' && !Array.isArray(nested.details)
     ? nested.details as Record<string, unknown>
     : null
-  return new WorkflowRequestError(code, details?.reason)
+  return new WorkflowRequestError(code, details?.reason, status)
 }
 
 export function safeWorkflowErrorKey(error: unknown): WorkflowErrorKey {
@@ -362,8 +379,9 @@ export function safeWorkflowErrorKey(error: unknown): WorkflowErrorKey {
 }
 
 export function safeWorkflowAnalysisErrorKey(error: unknown): WorkflowErrorKey {
-  if (error instanceof WorkflowRequestError && error.reason) {
-    return `guided.issues.${error.reason}`
+  if (error instanceof WorkflowRequestError) {
+    const reason = safeWorkflowAnalysisReason(error.reason)
+    if (reason) return `guided.issues.${reason}`
   }
   return safeWorkflowErrorKey(error)
 }

@@ -7,7 +7,10 @@ import { NextIntlClientProvider } from 'next-intl'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import WorkflowLibraryPanel from '@/app/[locale]/profile/components/comfyui/WorkflowLibraryPanel'
-import type { WorkflowView } from '@/app/[locale]/profile/components/comfyui/workflow-ui'
+import {
+  workflowRequestErrorFromPayload,
+  type WorkflowView,
+} from '@/app/[locale]/profile/components/comfyui/workflow-ui'
 import enComfyui from '../../../messages/en/comfyui.json'
 
 ;(globalThis as typeof globalThis & { React: typeof React }).React = React
@@ -44,9 +47,23 @@ const workflow: WorkflowView = {
   currentVersionId: null, currentVersion: null, versions: [savedVersion],
   validation: { valid: true, issues: [] },
 }
+const workflowB: WorkflowView = {
+  ...workflow,
+  id: 'workflow-b',
+  name: 'Landscape',
+}
 
 function response(payload: unknown, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => payload } as Response
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((settle) => { resolve = settle })
+  return { promise, resolve }
 }
 
 function renderLibrary() {
@@ -125,6 +142,91 @@ describe('ComfyUI workflow library removal', () => {
     await waitFor(() => expect(listCalls).toBe(2))
     expect(view.queryByRole('button', { name: 'Delete workflow' })).toBeNull()
     expect(view.getByLabelText('draft-name').textContent).toBe('')
+    expect(document.activeElement).toBe(view.getByRole('button', { name: 'New workflow' }))
+    expect(view.getByText('Workflow deleted.')).toBeTruthy()
+  })
+
+  it('sends only one DELETE when removal is clicked twice before the request settles', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const deletion = deferred<Response>()
+    let listCalls = 0
+    apiFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/comfyui/workflows') {
+        listCalls += 1
+        return response({ workflows: listCalls === 1 ? [workflow] : [] })
+      }
+      if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
+      if (url === '/api/comfyui/workflows/workflow%2Fa%20b' && init?.method === 'DELETE') {
+        return deletion.promise
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const view = renderLibrary()
+    await selectSavedWorkflow(view)
+    const deleteButton = view.getByRole('button', { name: 'Delete workflow' })
+
+    fireEvent.click(deleteButton)
+    fireEvent.click(deleteButton)
+
+    expect(apiFetchMock.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1)
+    expect(window.confirm).toHaveBeenCalledTimes(1)
+    deletion.resolve(response({ success: true }))
+    await waitFor(() => expect(view.queryByRole('button', { name: 'Delete workflow' })).toBeNull())
+  })
+
+  it('does not reset a replacement selection when an earlier deletion finishes', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const deletion = deferred<Response>()
+    let listCalls = 0
+    apiFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/comfyui/workflows') {
+        listCalls += 1
+        return response({ workflows: listCalls === 1 ? [workflow, workflowB] : [workflowB] })
+      }
+      if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
+      if (url === '/api/comfyui/workflows/workflow%2Fa%20b' && init?.method === 'DELETE') {
+        return deletion.promise
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const view = renderLibrary()
+    await selectSavedWorkflow(view)
+
+    fireEvent.click(view.getByRole('button', { name: 'Delete workflow' }))
+    fireEvent.click(view.getByRole('button', { name: /Landscape/ }))
+    await waitFor(() => expect(view.getByLabelText('draft-name').textContent).toBe('Landscape'))
+    deletion.resolve(response({ success: true }))
+
+    await waitFor(() => expect(listCalls).toBe(2))
+    expect(view.getByLabelText('draft-name').textContent).toBe('Landscape')
+    expect(view.getByRole('button', { name: 'Delete workflow' })).toBeTruthy()
+    expect(view.queryByRole('button', { name: /Portrait/ })).toBeNull()
+  })
+
+  it('removes the archived workflow locally even when the follow-up reload fails', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let listCalls = 0
+    apiFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/comfyui/workflows') {
+        listCalls += 1
+        if (listCalls === 1) return response({ workflows: [workflow] })
+        return response({ error: { code: 'EXTERNAL_ERROR' } }, 503)
+      }
+      if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
+      if (url === '/api/comfyui/workflows/workflow%2Fa%20b' && init?.method === 'DELETE') {
+        return response({ success: true })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const view = renderLibrary()
+    await selectSavedWorkflow(view)
+
+    fireEvent.click(view.getByRole('button', { name: 'Delete workflow' }))
+
+    await waitFor(() => expect(listCalls).toBe(2))
+    expect(view.queryByRole('button', { name: /Portrait/ })).toBeNull()
+    expect(view.queryByRole('button', { name: 'Delete workflow' })).toBeNull()
+    expect(view.getByRole('alert').textContent).toBe('The workflow request failed.')
   })
 
   it('shows safe project-default guidance when archival returns 409', async () => {
@@ -134,7 +236,11 @@ describe('ComfyUI workflow library removal', () => {
       if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
       if (url === '/api/comfyui/workflows/workflow%2Fa%20b' && init?.method === 'DELETE') {
         return response({
-          error: { code: 'CONFLICT', message: '<script>private server detail</script>' },
+          error: {
+            code: 'CONFLICT',
+            message: '<script>private server detail</script>',
+            details: { reason: 'COMFY_WORKFLOW_PROJECT_DEFAULT_CONFLICT' },
+          },
         }, 409)
       }
       throw new Error(`Unexpected request: ${url}`)
@@ -148,5 +254,40 @@ describe('ComfyUI workflow library removal', () => {
       'This workflow is a project default. Clear that default before deleting it.',
     ))
     expect(view.getByRole('alert').textContent).not.toContain('private server detail')
+  })
+
+  it('uses generic conflict guidance when a 409 has no project-default reason', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    apiFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/comfyui/workflows') return response({ workflows: [workflow] })
+      if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
+      if (url === '/api/comfyui/workflows/workflow%2Fa%20b' && init?.method === 'DELETE') {
+        return response({ error: { code: 'CONFLICT' } }, 409)
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const view = renderLibrary()
+    await selectSavedWorkflow(view)
+
+    fireEvent.click(view.getByRole('button', { name: 'Delete workflow' }))
+
+    await waitFor(() => expect(view.getByRole('alert').textContent).toBe(
+      'The workflow changed or is currently in use. Refresh and try again.',
+    ))
+  })
+
+  it('preserves the HTTP status while safely parsing a recognized conflict reason', () => {
+    const error = workflowRequestErrorFromPayload({
+      error: {
+        code: 'CONFLICT',
+        details: { reason: 'COMFY_WORKFLOW_PROJECT_DEFAULT_CONFLICT' },
+      },
+    }, 409)
+
+    expect(error).toMatchObject({
+      code: 'CONFLICT',
+      status: 409,
+      reason: 'COMFY_WORKFLOW_PROJECT_DEFAULT_CONFLICT',
+    })
   })
 })
