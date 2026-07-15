@@ -765,6 +765,10 @@ describe('ComfyUI workflow library', () => {
     }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
 
     expect(response.status).toBe(200)
+    expect(authorizeComfyTargetMock).toHaveBeenCalledWith(
+      'http://example.com',
+      { mode: 'trusted', allowedHosts: [], allowedCidrs: [] },
+    )
     expect(clientConstructedMock).toHaveBeenCalledWith(expect.objectContaining({
       networkPolicy: { mode: 'trusted', allowedHosts: [], allowedCidrs: [] },
     }))

@@ -74,6 +74,26 @@ describe('requirements matrix integrity', () => {
       .toContain('unsafe redirects')
   })
 
+  it('warns multi-user operators about the trusted default and upgrade boundary in both languages', () => {
+    const zh = fs.readFileSync(path.resolve(process.cwd(), 'README.md'), 'utf8')
+    const en = fs.readFileSync(path.resolve(process.cwd(), 'README_en.md'), 'utf8')
+
+    expect(zh).toContain('任何存在非完全可信登录用户的部署都必须使用 `allowlist` 模式。')
+    expect(zh).toContain('升级警告：旧版本中未配置这两个变量的部署将从 disabled/allowlist 变为 enabled/trusted；升级前请评估风险并显式配置。')
+    expect(zh).toContain('`trusted` 仍允许用户提供的 URL 访问 loopback、LAN 上的其他 HTTP 服务；它不是目标地址隔离边界。')
+    expect(en).toContain('Any deployment with login users who are not fully trusted must use `allowlist` mode.')
+    expect(en).toContain('Upgrade warning: existing deployments that leave both variables unset will change from disabled/allowlist to enabled/trusted; assess the risk and configure them explicitly before upgrading.')
+    expect(en).toContain('`trusted` still lets user-supplied URLs reach other HTTP services on loopback or the LAN; it is not a destination-isolation boundary.')
+  })
+
+  it('marks the original ComfyUI provider defaults as superseded by the current design', () => {
+    const legacyDesign = fs.readFileSync(path.resolve(
+      process.cwd(),
+      'docs/superpowers/specs/2026-07-11-comfyui-provider-integration-design.md',
+    ), 'utf8')
+    expect(legacyDesign).toContain('Default-policy status: Superseded by [ComfyUI Default Enabled and Trusted Design](./2026-07-15-comfyui-default-enabled-trusted-design.md).')
+  })
+
   it('keeps protected targets blocked while documenting allowlist as the hardened override', () => {
     const requirement = REQUIREMENTS_MATRIX.find(({ id }) => id === 'REQ-COMFYUI-AC-09')
     expect(requirement?.userValue).toContain('默认 trusted')

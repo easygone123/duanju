@@ -126,6 +126,8 @@ COMFYUI_LEASE_TTL_MS=30000
 COMFYUI_OUTPUT_MAX_BYTES=536870912
 ```
 
+> ⚠️ **Multi-user security warning**: Any deployment with login users who are not fully trusted must use `allowlist` mode. Upgrade warning: existing deployments that leave both variables unset will change from disabled/allowlist to enabled/trusted; assess the risk and configure them explicitly before upgrading.
+
 Public multi-user deployments can explicitly switch to the stricter allowlist mode:
 
 ```env
@@ -134,7 +136,7 @@ COMFYUI_ALLOWED_HOSTS=comfy.example.com
 COMFYUI_ALLOWED_CIDRS=192.168.1.0/24
 ```
 
-`trusted` is the default network mode, so local and self-hosted deployments can add loopback or LAN instances directly. It is not a complete security bypass: cloud credential metadata endpoints, credentials embedded in URLs, and unsafe redirects remain blocked. `allowlist` is the explicit hardened override for public multi-user deployments; it rejects unauthorized destinations, and loopback/LAN targets require authorization through `COMFYUI_ALLOWED_CIDRS`. From a container, reach ComfyUI on the Docker host at `http://host.docker.internal:8188`; Linux Docker also needs a `host-gateway` mapping, plus the resolved address in an allowed CIDR when allowlist mode is used. Never embed credentials in the URL.
+`trusted` is the default network mode, so local and self-hosted deployments can add loopback or LAN instances directly. `trusted` still lets user-supplied URLs reach other HTTP services on loopback or the LAN; it is not a destination-isolation boundary. It is not a complete security bypass: cloud credential metadata endpoints, credentials embedded in URLs, and unsafe redirects remain blocked. `allowlist` rejects unauthorized destinations, and loopback/LAN targets require authorization through `COMFYUI_ALLOWED_CIDRS`. From a container, reach ComfyUI on the Docker host at `http://host.docker.internal:8188`; Linux Docker also needs a `host-gateway` mapping, plus the resolved address in an allowed CIDR when allowlist mode is used. Never embed credentials in the URL.
 
 Connections support no auth, a Bearer token, or Basic auth. Credentials are configured in Settings and stored encrypted. Only sanitized states are exposed: `online_idle`, `online_busy_owned`, `online_busy_external`, `offline`, `auth_failed`, and `workflow_incompatible`. `online_busy_external` means a manual or another client's prompt is active, so waoowaoo will not claim that instance.
 

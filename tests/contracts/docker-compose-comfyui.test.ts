@@ -23,6 +23,17 @@ const defaults: Readonly<Record<string, string>> = {
   COMFYUI_FAILURE_BACKOFF_MAX_MS: '60000',
 }
 
+function parseEnvExample(source: string) {
+  return Object.fromEntries(source
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && line.includes('='))
+    .map((line) => {
+      const separator = line.indexOf('=')
+      return [line.slice(0, separator), line.slice(separator + 1)]
+    }))
+}
+
 describe('Docker Compose ComfyUI environment contract', () => {
   it('builds the app from the checked-out source instead of silently running only the remote image', () => {
     const compose = fs.readFileSync(path.resolve(process.cwd(), 'docker-compose.yml'), 'utf8')
@@ -34,6 +45,12 @@ describe('Docker Compose ComfyUI environment contract', () => {
     for (const [name, fallback] of Object.entries(defaults)) {
       expect(compose).toContain(`${name}: "\${${name}:-${fallback}}"`)
     }
+  })
+
+  it('keeps the checked-in env example aligned with the enabled trusted defaults', () => {
+    const example = parseEnvExample(fs.readFileSync(path.resolve(process.cwd(), '.env.example'), 'utf8'))
+    expect(example.COMFYUI_ENABLED).toBe('true')
+    expect(example.COMFYUI_NETWORK_MODE).toBe('trusted')
   })
 
   it('expands explicit ComfyUI deployment values through docker compose config when CLI is available', () => {

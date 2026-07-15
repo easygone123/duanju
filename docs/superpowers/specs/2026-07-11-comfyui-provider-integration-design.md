@@ -2,6 +2,7 @@
 
 - Date: 2026-07-11
 - Status: Implemented and verified, including Docker-backed acceptance tests
+- Default-policy status: Superseded by [ComfyUI Default Enabled and Trusted Design](./2026-07-15-comfyui-default-enabled-trusted-design.md).
 - Target branch: `feat/comfyui-integration`
 
 ## 1. Summary
@@ -37,8 +38,8 @@ custom-node dependency.
    compatible instance is busy.
 10. Recover safely from waoowaoo restarts, ComfyUI restarts, WebSocket loss, and
     media-transfer failures without duplicate generation.
-11. Offer a secure allowlist network mode and an explicitly enabled trusted
-    self-hosted mode.
+11. Offer allowlist and trusted network modes; their current default and deployment
+    requirements are governed by the superseding 2026-07-15 default-policy design.
 
 ## 3. Non-goals
 
@@ -547,16 +548,23 @@ patterns.
 
 ### 11.1 Modes
 
-`COMFYUI_NETWORK_MODE=allowlist` is the secure default.
+The default-policy portion of this section is superseded by the
+[2026-07-15 design](./2026-07-15-comfyui-default-enabled-trusted-design.md).
+`COMFYUI_NETWORK_MODE=trusted` is now the default for fully trusted self-hosted
+deployments. It permits arbitrary user-supplied HTTP/HTTPS hosts, including other
+services on LAN and loopback addresses, so it is not a destination-isolation
+boundary.
+
+`COMFYUI_NETWORK_MODE=allowlist` must be used when any authenticated user is not
+fully trusted.
 
 - Allowed hosts come from `COMFYUI_ALLOWED_HOSTS`.
 - Allowed networks come from `COMFYUI_ALLOWED_CIDRS`.
 - Unapproved loopback, private, link-local, multicast, IPv4-mapped IPv6, and cloud
   metadata destinations are rejected.
 
-`COMFYUI_NETWORK_MODE=trusted` is an explicit self-hosted opt-in that permits
-arbitrary user-supplied HTTP/HTTPS hosts, including LAN and loopback targets. It
-does not disable ownership, scheme, redirect, timeout, or response-size controls.
+Trusted mode does not disable ownership, scheme, redirect, timeout, response-size,
+or protected cloud-credential-endpoint controls.
 
 Docker deployments can approve `host.docker.internal` or the relevant host-gateway
 CIDR in allowlist mode, or use trusted mode in a single-user environment.
@@ -748,8 +756,8 @@ A fake ComfyUI HTTP/WebSocket server covers:
    no waoowaoo work.
 8. Restart, disconnection, cancellation, and transfer failure do not cause duplicate
    workflow execution.
-9. Allowlist mode blocks unauthorized network destinations, and trusted mode is an
-   explicit deployment choice.
+9. Allowlist mode blocks unauthorized network destinations; trusted is the default
+   only for deployments whose authenticated users are fully trusted.
 10. Users cannot access another user's connections, workflows, tasks, or outputs.
 11. Existing providers and their regression tests remain functional.
 

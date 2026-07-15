@@ -138,6 +138,8 @@ COMFYUI_LEASE_TTL_MS=30000
 COMFYUI_OUTPUT_MAX_BYTES=536870912
 ```
 
+> ⚠️ **多用户安全警告**：任何存在非完全可信登录用户的部署都必须使用 `allowlist` 模式。升级警告：旧版本中未配置这两个变量的部署将从 disabled/allowlist 变为 enabled/trusted；升级前请评估风险并显式配置。
+
 公网多用户部署可显式切换到更严格的 allowlist 模式：
 
 ```env
@@ -146,7 +148,7 @@ COMFYUI_ALLOWED_HOSTS=comfy.example.com
 COMFYUI_ALLOWED_CIDRS=192.168.1.0/24
 ```
 
-`trusted` 是默认网络模式，方便本机和自托管部署直接添加环回或 LAN 实例，但它并未关闭全部防护：云凭证元数据端点、URL 内嵌凭据和危险重定向仍会被阻止。`allowlist` 是公网多用户部署的显式加固选项；它拒绝未授权目标，并且访问环回、LAN 等敏感地址时必须通过 `COMFYUI_ALLOWED_CIDRS` 明确授权。容器内连接宿主机 ComfyUI 时使用 `http://host.docker.internal:8188`；Linux Docker 还需要配置 `host-gateway`，使用 allowlist 时还需把解析地址加入允许网段。不要在 URL 中嵌入用户名或密码。
+`trusted` 是默认网络模式，方便本机和自托管部署直接添加环回或 LAN 实例。`trusted` 仍允许用户提供的 URL 访问 loopback、LAN 上的其他 HTTP 服务；它不是目标地址隔离边界。它并未关闭全部防护：云凭证元数据端点、URL 内嵌凭据和危险重定向仍会被阻止。`allowlist` 拒绝未授权目标，并且访问环回、LAN 等敏感地址时必须通过 `COMFYUI_ALLOWED_CIDRS` 明确授权。容器内连接宿主机 ComfyUI 时使用 `http://host.docker.internal:8188`；Linux Docker 还需要配置 `host-gateway`，使用 allowlist 时还需把解析地址加入允许网段。不要在 URL 中嵌入用户名或密码。
 
 连接支持无认证、Bearer token 和 Basic auth。凭证在设置中心配置并加密保存；状态只显示安全诊断：`online_idle`、`online_busy_owned`、`online_busy_external`、`offline`、`auth_failed`、`workflow_incompatible`。`online_busy_external` 表示实例正在执行手工或其他客户端提交的 prompt，waoowaoo 不会抢占它。
 
