@@ -25,12 +25,15 @@ export default function WorkflowAutoMappingTable({ analysis, roles, primaryOutpu
       {analysis.proposals.length === 0 && <p className="rounded-lg border border-[var(--glass-stroke-base)] p-3 text-sm">{t('noMappingsFound')}</p>}
       <div className="space-y-2">{analysis.proposals.map((proposal) => {
         const confidence = proposal.confidence
-        const selected = roles[proposal.id] || (confidence === 'ambiguous' ? '' : proposal.canonicalName)
+        const selected = roles[proposal.id]
+          || (confidence === 'ambiguous'
+            ? proposal.required ? '' : 'preserve_original'
+            : confidence === 'preserve_original' ? 'preserve_original' : proposal.canonicalName)
         return <div key={proposal.id} className="grid min-w-0 gap-2 rounded-xl border border-[var(--glass-stroke-base)] p-3 sm:grid-cols-2">
           <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-medium">{t(`canonicalInputs.${selected && selected !== 'preserve_original' ? selected : proposal.canonicalName}`)}</span><span data-confidence={confidence} className={`rounded-full px-2 py-0.5 text-[11px] ${confidence === 'high' ? 'bg-[var(--glass-tone-success-bg)] text-[var(--glass-tone-success-fg)]' : confidence === 'ambiguous' ? 'bg-[var(--glass-tone-warning-bg)] text-[var(--glass-tone-warning-fg)]' : confidence === 'blocking' ? 'bg-[var(--glass-tone-danger-bg)] text-[var(--glass-tone-danger-fg)]' : 'bg-[var(--glass-bg-muted)] text-[var(--glass-text-secondary)]'}`}>{t(`mappingConfidence.${confidence}`)}</span>{proposal.required && <span className="text-[11px] text-[var(--glass-tone-danger-fg)]">{t('required')}</span>}</div>
             <p className="mt-1 break-all text-xs text-[var(--glass-text-tertiary)]">{proposal.nodeTitle || proposal.nodeId} · {proposal.nodeId}.{proposal.inputPath}</p><p className="mt-1 text-xs text-[var(--glass-text-secondary)]">{t(`mappingReasons.${guidedMappingReasonKey(proposal.reasonCode)}`)}</p></div>
-          <label className="text-xs">{t('mappedRole')}<select disabled={disabled || confidence !== 'ambiguous'} value={selected} onChange={(event) => onRoleChange(proposal.id, event.target.value as CanonicalWorkflowInput | 'preserve_original')} className="mt-1 w-full min-w-0 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-2 py-2">
-            {confidence === 'ambiguous' && <option value="">{t('selectMappingRole')}</option>}
+          <label className="text-xs">{t('mappedRole')}<select disabled={disabled} value={selected} onChange={(event) => onRoleChange(proposal.id, event.target.value as CanonicalWorkflowInput | 'preserve_original')} className="mt-1 w-full min-w-0 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-2 py-2">
+            {confidence === 'ambiguous' && proposal.required && <option value="">{t('selectMappingRole')}</option>}
             {guidedCompatibleRoles(proposal).map((role) => <option key={role} value={role}>{t(`canonicalInputs.${role}`)}</option>)}
             {!proposal.required && <option value="preserve_original">{t('preserveOriginal')}</option>}
           </select></label>

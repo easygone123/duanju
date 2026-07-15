@@ -11,6 +11,7 @@ import type {
 import WorkflowAdvancedMappingInspector from './WorkflowAdvancedMappingInspector'
 import WorkflowAnalysisSummary from './WorkflowAnalysisSummary'
 import WorkflowJsonDropzone from './WorkflowJsonDropzone'
+import WorkflowManualMappingCorrections from './WorkflowManualMappingCorrections'
 import WorkflowMappingQuestions from './WorkflowMappingQuestions'
 import WorkflowTypePicker from './WorkflowTypePicker'
 import {
@@ -18,6 +19,10 @@ import {
   createWorkflowAnalysisCoordinator,
   isGuidedWorkflowReady,
 } from './guided-workflow-creation'
+import {
+  withManualWorkflowMappings,
+  type ManualWorkflowMappings,
+} from './manual-workflow-mapping'
 import {
   analyzeWorkflowJson,
   type WorkflowAnalysisResponse,
@@ -73,6 +78,7 @@ export default function WorkflowCreationWizard({
   const [sourceText, setSourceText] = useState('')
   const [analysis, setAnalysis] = useState<WorkflowAutoMappingResult | null>(null)
   const [roles, setRoles] = useState<Record<string, WorkflowRole>>({})
+  const [manualMappings, setManualMappings] = useState<ManualWorkflowMappings>({})
   const [selectedOutput, setSelectedOutput] = useState('')
   const [busy, setBusy] = useState<BusyOperation>(null)
   const [completed, setCompleted] = useState(false)
@@ -101,6 +107,7 @@ export default function WorkflowCreationWizard({
     setSourceText('')
     setAnalysis(null)
     setRoles({})
+    setManualMappings({})
     setSelectedOutput('')
     setError(null)
     setBusy(null)
@@ -113,6 +120,7 @@ export default function WorkflowCreationWizard({
     setSourceText('')
     setAnalysis(null)
     setRoles({})
+    setManualMappings({})
     setSelectedOutput('')
     setError(null)
     setBusy('analyzing')
@@ -136,6 +144,7 @@ export default function WorkflowCreationWizard({
       setSourceText('')
       setAnalysis(null)
       setRoles({})
+      setManualMappings({})
       setSelectedOutput('')
       setStage('upload')
       setError(safeWorkflowAnalysisErrorKey(analysisError))
@@ -145,14 +154,29 @@ export default function WorkflowCreationWizard({
     }
   }
 
-  const review = useMemo(() => kind && analysis
-    ? buildGuidedWorkflowReview(kind, analysis, roles, selectedOutput)
-    : null, [analysis, kind, roles, selectedOutput])
+  const mappingResolution = useMemo(() => {
+    if (!analysis) return { effectiveAnalysis: null, mappingInvalid: false }
+    try {
+      return {
+        effectiveAnalysis: withManualWorkflowMappings(analysis, manualMappings, roles),
+        mappingInvalid: false,
+      }
+    } catch (mappingError) {
+      if (!(mappingError instanceof Error) || mappingError.message !== 'workflowManualMappingInvalid') {
+        throw mappingError
+      }
+      return { effectiveAnalysis: analysis, mappingInvalid: true }
+    }
+  }, [analysis, manualMappings, roles])
+  const { effectiveAnalysis, mappingInvalid } = mappingResolution
+  const review = useMemo(() => kind && effectiveAnalysis
+    ? buildGuidedWorkflowReview(kind, effectiveAnalysis, roles, selectedOutput)
+    : null, [effectiveAnalysis, kind, roles, selectedOutput])
   const ready = Boolean(review && isGuidedWorkflowReady({
     name,
     review,
     busy: busy !== null,
-  }) && !completed)
+  }) && !mappingInvalid && !completed)
   const automaticPrimaryOutputNodeId = analysis?.outputs.find((output) => output.primary)?.nodeId
     || (analysis?.outputs.length === 1 ? analysis.outputs[0]?.nodeId : '')
     || ''
@@ -171,12 +195,12 @@ export default function WorkflowCreationWizard({
   }
 
   const create = async () => {
-    if (!analysis || !review || !ready || submissionRef.current !== 'idle') return
+    if (!analysis || !effectiveAnalysis || mappingInvalid || !review || !ready || submissionRef.current !== 'idle') return
     submissionRef.current = 'creating'
     setBusy('creating')
     setError(null)
     try {
-      const confirmed = confirmWorkflowAnalysis(analysis, {
+      const confirmed = confirmWorkflowAnalysis(effectiveAnalysis, {
         roles,
         primaryOutputNodeId: review.primaryOutputNodeId,
       })
@@ -201,6 +225,18 @@ export default function WorkflowCreationWizard({
       if (mountedRef.current) setError(safeWorkflowErrorKey(creationError))
     } finally {
       if (mountedRef.current) setBusy(null)
+    }
+  }
+
+  const changeRole = (id: string, value: WorkflowRole) => {
+    setRoles((current) => ({ ...current, [id]: value }))
+    if (value !== 'preserve_original') {
+      setManualMappings((current) => {
+        if (!current[value]) return current
+        const next = { ...current }
+        delete next[value]
+        return next
+      })
     }
   }
 
@@ -298,13 +334,23 @@ export default function WorkflowCreationWizard({
               outputCount={analysis.outputs.length}
               automaticPrimaryOutputNodeId={automaticPrimaryOutputNodeId}
             />
+            {mappingInvalid && <p role="alert" className="break-words text-sm text-[var(--glass-tone-danger-fg)]">
+              {t('manualCorrectionInvalid')}
+            </p>}
+            <WorkflowManualMappingCorrections
+              analysis={analysis}
+              missingRequiredInputs={review.missingRequiredInputs}
+              value={manualMappings}
+              disabled={busy === 'creating' || completed}
+              onChange={setManualMappings}
+            />
             <WorkflowMappingQuestions
               analysis={analysis}
               review={review}
               roles={roles}
               primaryOutputNodeId={selectedOutput}
               disabled={busy === 'creating' || completed}
-              onRoleChange={(id, value) => setRoles((current) => ({ ...current, [id]: value }))}
+              onRoleChange={changeRole}
               onPrimaryOutputChange={setSelectedOutput}
             />
             <WorkflowAdvancedMappingInspector
@@ -312,7 +358,7 @@ export default function WorkflowCreationWizard({
               roles={roles}
               primaryOutputNodeId={selectedOutput}
               disabled={busy === 'creating' || completed}
-              onRoleChange={(id, value) => setRoles((current) => ({ ...current, [id]: value }))}
+              onRoleChange={changeRole}
               onPrimaryOutputChange={setSelectedOutput}
             />
           </section>}
