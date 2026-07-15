@@ -15,6 +15,7 @@ import {
   emptyWorkflowDraft,
   mapWorkflowCompatibility,
   safeWorkflowErrorKey,
+  WorkflowRequestError,
   workflowRequestErrorFromPayload,
   workflowPayload,
   type WorkflowAuthorDraft,
@@ -102,6 +103,27 @@ export default function WorkflowLibraryPanel() {
     setSavedVersion(result.version)
     await load(selectedId)
   })
+  const archiveSelectedWorkflow = async () => {
+    if (selectedId === 'new') return
+    const selected = workflows.find((workflow) => workflow.id === selectedId)
+    if (!selected || !window.confirm(t('deleteWorkflowConfirm', { name: selected.name }))) return
+    setBusy(true); setError(null)
+    try {
+      await requestJson(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}`, {
+        method: 'DELETE',
+      })
+      setSelectedId('new')
+      setSavedVersion(null)
+      setAuthorDraft(emptyWorkflowDraft())
+      await load()
+    } catch (actionError) {
+      setError(actionError instanceof WorkflowRequestError && actionError.code === 'CONFLICT'
+        ? 'workflowProjectDefaultConflict'
+        : safeWorkflowErrorKey(actionError))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const savedVersionId = savedVersion?.id ?? null
   useEffect(() => {
@@ -189,6 +211,8 @@ export default function WorkflowLibraryPanel() {
           <label className="min-w-[12rem] text-xs">{t('testInstance')}<select value={connectionId} onChange={(event) => setConnectionId(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-2 py-2">
             <option value="">{t('selectInstance')}</option>{(connectionsQuery.data?.connections ?? []).filter((connection) => connection.enabled).map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label>
           <button type="button" onClick={() => void testVersion()} disabled={busy || !savedVersion || !connectionId || !testPayload} className="glass-btn-base px-4 py-2 text-sm">{t('test')}</button>
+          {selectedId !== 'new' && <button type="button" onClick={() => void archiveSelectedWorkflow()} disabled={busy}
+            className="glass-btn-base glass-btn-tone-danger px-4 py-2 text-sm">{t('deleteWorkflow')}</button>}
         </div>
         {savedVersion && <WorkflowTestForm key={savedVersion.id} definitions={savedVersion.variableDefinitions} onChange={setTestPayload} onError={(key) => setError(key as ErrorKey)} />}
         {error && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t(error)}</p>}

@@ -287,6 +287,7 @@ export type WorkflowErrorKey =
   | 'workflowTooLarge'
   | 'workflowRequestInvalid'
   | 'workflowConflict'
+  | 'workflowProjectDefaultConflict'
   | 'workflowNotFound'
   | 'workflowAccessDenied'
   | 'workflowMissingConfig'
