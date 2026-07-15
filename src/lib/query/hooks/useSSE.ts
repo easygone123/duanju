@@ -23,6 +23,7 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
   const targetStatesInvalidateTimerRef = useRef<number | null>(null)
   const stageRecoveryTimerRef = useRef<number | null>(null)
   const pendingStageRecoveriesRef = useRef(new Set<string>())
+  const viralReplicationInvalidateTimersRef = useRef(new Map<string, number>())
   const isGlobalAssetProject = projectId === 'global-asset-hub'
 
   const url = useMemo(() => {
@@ -38,6 +39,29 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
     const source = new EventSource(url)
     sourceRef.current = source
     const pendingStageRecoveries = pendingStageRecoveriesRef.current
+    const viralReplicationInvalidateTimers = viralReplicationInvalidateTimersRef.current
+
+    const invalidateViralReplication = (replicationId: string, immediate: boolean) => {
+      const existingTimer = viralReplicationInvalidateTimers.get(replicationId)
+      if (immediate) {
+        if (existingTimer !== undefined) window.clearTimeout(existingTimer)
+        viralReplicationInvalidateTimers.delete(replicationId)
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.viralReplication.detail(replicationId),
+          exact: true,
+        })
+        return
+      }
+      if (existingTimer !== undefined) return
+      const timer = window.setTimeout(() => {
+        viralReplicationInvalidateTimers.delete(replicationId)
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.viralReplication.detail(replicationId),
+          exact: true,
+        })
+      }, 250)
+      viralReplicationInvalidateTimers.set(replicationId, timer)
+    }
 
     const scheduleStageRecovery = (
       resolvedEpisodeId: string | null,
@@ -93,10 +117,15 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
 
     const recoverByTarget = (
       targetType: string | null,
+      targetId: string | null,
       taskType: string | null,
       resolvedEpisodeId: string | null,
       eventPayload: Record<string, unknown> | null,
     ) => {
+      if (targetType === 'ViralReplication' && targetId) {
+        invalidateViralReplication(targetId, true)
+        return
+      }
       if (isGlobalAssetProject) {
         if (targetType?.startsWith('GlobalCharacter')) {
           queryClient.invalidateQueries({ queryKey: queryKeys.globalAssets.characters() })
@@ -205,6 +234,18 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
           normalizedLifecycleType === TASK_EVENT_TYPE.COMPLETED ||
           normalizedLifecycleType === TASK_EVENT_TYPE.FAILED
 
+        if (
+          isLifecycleEvent
+          && targetType === 'ViralReplication'
+          && targetId
+          && (
+            normalizedLifecycleType === TASK_EVENT_TYPE.CREATED
+            || normalizedLifecycleType === TASK_EVENT_TYPE.PROCESSING
+          )
+        ) {
+          invalidateViralReplication(targetId, false)
+        }
+
         if (isLifecycleEvent && shouldInvalidateTasksList) {
           queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(projectId) })
         }
@@ -257,7 +298,8 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
         ) {
           if (
             normalizedLifecycleType === TASK_EVENT_TYPE.COMPLETED &&
-            resolvedEpisodeId
+            resolvedEpisodeId &&
+            targetType !== 'ViralReplication'
           ) {
             const result = applyWorkspaceTaskCompletion(queryClient, {
               projectId,
@@ -271,6 +313,7 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
           }
           recoverByTarget(
             targetType,
+            targetId,
             typeof payload.taskType === 'string' ? payload.taskType : null,
             resolvedEpisodeId,
             eventPayload,
@@ -306,6 +349,10 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
         stageRecoveryTimerRef.current = null
       }
       pendingStageRecoveries.clear()
+      for (const timer of viralReplicationInvalidateTimers.values()) {
+        window.clearTimeout(timer)
+      }
+      viralReplicationInvalidateTimers.clear()
       for (const listener of listeners) {
         source.removeEventListener(listener.type, listener.handler)
       }

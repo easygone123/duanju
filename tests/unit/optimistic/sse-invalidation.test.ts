@@ -227,4 +227,54 @@ describe('sse invalidation behavior', () => {
     })
     expect(hasInvalidation((arg) => arg.queryKey?.[0] === 'project-data')).toBe(false)
   })
+
+  it('refreshes only the exact viral replication detail and debounces progress', async () => {
+    const { useSSE } = await import('@/lib/query/hooks/useSSE')
+
+    useSSE({ projectId: 'project-1', episodeId: 'episode-1', enabled: true })
+    const source = FakeEventSource.instances[0]
+    const progress = {
+      type: TASK_SSE_EVENT_TYPE.LIFECYCLE,
+      taskId: 'task-viral-1',
+      taskType: 'viral_video_analysis',
+      targetType: 'ViralReplication',
+      targetId: 'rep-1',
+      episodeId: 'episode-1',
+      payload: { lifecycleType: TASK_EVENT_TYPE.PROCESSING, progress: 40 },
+    }
+    source.onmessage?.({ data: JSON.stringify(progress) } as MessageEvent)
+    source.onmessage?.({ data: JSON.stringify({
+      ...progress,
+      payload: { lifecycleType: TASK_EVENT_TYPE.PROGRESS, progress: 41 },
+    }) } as MessageEvent)
+
+    expect(hasInvalidation((arg) => arg.queryKey?.[0] === 'viral-replication')).toBe(false)
+    for (const cb of runtime.scheduledTimers.splice(0)) cb()
+    const progressInvalidations = runtime.queryClient.invalidateQueries.mock.calls.filter((call) =>
+      call[0]?.queryKey?.[0] === 'viral-replication')
+    expect(progressInvalidations).toHaveLength(1)
+    expect(progressInvalidations[0]?.[0]).toEqual({
+      queryKey: queryKeys.viralReplication.detail('rep-1'),
+      exact: true,
+    })
+
+    vi.clearAllMocks()
+    source.onmessage?.({ data: JSON.stringify({
+      ...progress,
+      payload: { lifecycleType: TASK_EVENT_TYPE.COMPLETED },
+    }) } as MessageEvent)
+
+    expect(hasInvalidation((arg) =>
+      arg.exact === true
+      && JSON.stringify(arg.queryKey) === JSON.stringify(queryKeys.viralReplication.detail('rep-1')),
+    )).toBe(true)
+    expect(hasInvalidation((arg) => {
+      const root = arg.queryKey?.[0]
+      return root === 'project-data'
+        || root === 'episode-data'
+        || root === 'episode-stages'
+        || root === 'global-assets'
+        || root === 'project-assets'
+    })).toBe(false)
+  })
 })

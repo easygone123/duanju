@@ -201,6 +201,13 @@ export {
     useSSE,
 } from './useSSE'
 export {
+    useViralReplication,
+    useCreateViralReplication,
+    usePatchViralReplicationBrief,
+    useRetryViralReplication,
+    useGenerateViralReplication,
+} from './useViralReplication'
+export {
     useStoryToScriptRunStream,
 } from './useStoryToScriptRunStream'
 export {

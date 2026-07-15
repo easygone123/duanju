@@ -12,6 +12,10 @@ const unifiedAssetsRoot = (
     : [...projectAssetsRoot(projectId ?? ''), 'unified'] as const
 
 export const queryKeys = {
+    viralReplication: {
+        detail: (replicationId: string) => ['viral-replication', replicationId] as const,
+    },
+
     assets: {
         all: (scope: 'global' | 'project', projectId?: string | null) =>
             unifiedAssetsRoot(scope, projectId),
