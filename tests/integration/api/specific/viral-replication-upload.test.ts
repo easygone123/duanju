@@ -191,6 +191,61 @@ describe('viral replication streamed upload with real database', () => {
     })
   })
 
+  it('compensates the requested storage key when upload partially succeeds and then throws', async () => {
+    let requestedStorageKey = ''
+    uploadObjectStreamMock.mockImplementationOnce(async (_streamFactory, key: string) => {
+      requestedStorageKey = key
+      throw new Error('connection reset after object write')
+    })
+    const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
+    await expect(uploadViralReplicationVideo({
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+    })).rejects.toThrow('connection reset after object write')
+    expect(requestedStorageKey).toMatch(new RegExp(`^viral-replications/${replicationId}/.+\\.mp4$`))
+    expect(deleteObjectMock).toHaveBeenCalledWith(requestedStorageKey)
+    expect(submitTaskMock).not.toHaveBeenCalled()
+    expect(await artifactCounts()).toEqual({ projects: 0, episodes: 0, media: 0 })
+    expect(await prisma.viralReplication.findUnique({ where: { id: replicationId } })).toMatchObject({
+      status: 'uploading', uploadLockToken: null, uploadLockExpiresAt: null,
+      projectId: null, episodeId: null, sourceVideoMediaId: null,
+    })
+  })
+
+  it('rolls back and compensates when the transaction-local analysis model disappears', async () => {
+    uploadObjectStreamMock.mockImplementationOnce(async () => {
+      await prisma.userPreference.update({ where: { userId }, data: { analysisModel: null } })
+      return storageState.key
+    })
+    const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
+    await expect(uploadViralReplicationVideo({
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+    })).rejects.toMatchObject({ code: 'INVALID_PARAMS', details: { code: 'ANALYSIS_MODEL_REQUIRED' } })
+    expect(deleteObjectMock).toHaveBeenCalledWith(storageState.key)
+    expect(submitTaskMock).not.toHaveBeenCalled()
+    expect(await artifactCounts()).toEqual({ projects: 0, episodes: 0, media: 0 })
+  })
+
+  it('uses the transaction-local model snapshot consistently when the preference changes', async () => {
+    uploadObjectStreamMock.mockImplementationOnce(async () => {
+      await prisma.userPreference.update({ where: { userId }, data: { analysisModel: 'openai::analysis-v2' } })
+      return storageState.key
+    })
+    const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
+    const result = await uploadViralReplicationVideo({
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+    })
+    const persisted = await prisma.viralReplication.findUnique({
+      where: { id: replicationId }, include: { project: { include: { novelPromotionData: true } } },
+    })
+    expect(persisted).toMatchObject({
+      analysisModelSnapshot: 'openai::analysis-v2',
+      project: { novelPromotionData: { analysisModel: 'openai::analysis-v2' } },
+    })
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: { sourceVideoMediaId: result.sourceVideoMediaId, analysisModelSnapshot: 'openai::analysis-v2' },
+    }))
+  })
+
   it('keeps the persisted project and source but marks failed when submission fails', async () => {
     submitTaskMock.mockRejectedValueOnce(new Error('queue unavailable'))
     const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
@@ -206,15 +261,74 @@ describe('viral replication streamed upload with real database', () => {
     expect(deleteObjectMock).not.toHaveBeenCalled()
   })
 
-  it('reports a normalized conflict when another upload owns the concurrency lock', async () => {
+  it('reports a normalized conflict while another upload lock is active', async () => {
+    const now = new Date('2026-07-15T09:00:00.000Z')
     await prisma.viralReplication.update({
-      where: { id: replicationId }, data: { errorMessage: '__viral_upload_lock__:existing' },
+      where: { id: replicationId },
+      data: { uploadLockToken: 'existing', uploadLockExpiresAt: new Date(now.getTime() + 60_000) },
+    })
+    const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
+    await expect(uploadViralReplicationVideo({
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot, now,
+    })).rejects.toMatchObject({ code: 'INVALID_PARAMS', details: { code: 'VIRAL_UPLOAD_CONFLICT' } })
+    expect(probeVideoMock).not.toHaveBeenCalled()
+    expect(uploadObjectStreamMock).not.toHaveBeenCalled()
+  })
+
+  it('atomically lets only one request take over an expired upload lock', async () => {
+    const now = new Date('2026-07-15T09:00:00.000Z')
+    await prisma.viralReplication.update({
+      where: { id: replicationId },
+      data: { uploadLockToken: 'expired-owner', uploadLockExpiresAt: new Date(now.getTime() - 1) },
+    })
+    let releaseUpload!: () => void
+    let markUploadStarted!: () => void
+    const uploadGate = new Promise<void>((resolve) => { releaseUpload = resolve })
+    const uploadStarted = new Promise<void>((resolve) => { markUploadStarted = resolve })
+    uploadObjectStreamMock.mockImplementationOnce(async () => {
+      markUploadStarted()
+      await uploadGate
+      return storageState.key
+    })
+    const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
+    const first = uploadViralReplicationVideo({
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+      now, lockTtlMs: 30_000,
+    })
+    await uploadStarted
+    const held = await prisma.viralReplication.findUniqueOrThrow({ where: { id: replicationId } })
+    const second = uploadViralReplicationVideo({
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+      now, lockTtlMs: 30_000,
+    })
+    await expect(second).rejects.toMatchObject({ code: 'INVALID_PARAMS', details: { code: 'VIRAL_UPLOAD_CONFLICT' } })
+    releaseUpload()
+    await expect(first).resolves.toMatchObject({ status: 'analyzing' })
+    expect(uploadObjectStreamMock).toHaveBeenCalledOnce()
+    expect(held.uploadLockToken).toEqual(expect.any(String))
+    expect(held.uploadLockToken).not.toBe('expired-owner')
+    expect(held.uploadLockExpiresAt).toEqual(new Date(now.getTime() + 30_000))
+  })
+
+  it('does not let an old token release a newer upload lock owner', async () => {
+    const now = new Date('2026-07-15T09:00:00.000Z')
+    const newerExpiry = new Date(now.getTime() + 120_000)
+    probeVideoMock.mockImplementationOnce(async () => {
+      const held = await prisma.viralReplication.findUniqueOrThrow({ where: { id: replicationId } })
+      expect(held.uploadLockToken).toEqual(expect.any(String))
+      await prisma.viralReplication.update({
+        where: { id: replicationId },
+        data: { uploadLockToken: 'new-owner', uploadLockExpiresAt: newerExpiry },
+      })
+      throw new Error('probe failed after lock takeover')
     })
     const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
     await expect(uploadViralReplicationVideo({
       id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
-    })).rejects.toMatchObject({ code: 'INVALID_PARAMS', details: { code: 'VIRAL_UPLOAD_CONFLICT' } })
-    expect(probeVideoMock).not.toHaveBeenCalled()
-    expect(uploadObjectStreamMock).not.toHaveBeenCalled()
+      now, lockTtlMs: 30_000,
+    })).rejects.toThrow()
+    expect(await prisma.viralReplication.findUnique({ where: { id: replicationId } })).toMatchObject({
+      status: 'uploading', uploadLockToken: 'new-owner', uploadLockExpiresAt: newerExpiry,
+    })
   })
 })

@@ -91,6 +91,21 @@ describe('api contract - viral replication routes', () => {
     expect(serviceMock.createViralReplication).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['malformed', '{]'],
+    ['null', 'null'],
+    ['array', '[]'],
+  ])('rejects %s JSON for POST without calling the service', async (_label, rawBody) => {
+    const { POST } = await import('@/app/api/viral-replications/route')
+    const request = new NextRequest('http://localhost:3000/api/viral-replications', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: rawBody,
+    })
+    const response = await POST(request, { params: Promise.resolve({}) })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: { code: 'INVALID_PARAMS' } })
+    expect(serviceMock.createViralReplication).not.toHaveBeenCalled()
+  })
+
   it('creates only an uploading session and returns 201', async () => {
     const { POST } = await import('@/app/api/viral-replications/route')
     const response = await POST(buildMockRequest({
@@ -130,6 +145,21 @@ describe('api contract - viral replication routes', () => {
       path: '/api/viral-replications/rep-1', method: 'PATCH', body: { brief: '方向', status: 'completed' },
     }), { params: Promise.resolve({ id: 'rep-1' }) })
     expect(response.status).toBe(400)
+    expect(serviceMock.updateViralReplicationBrief).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['malformed', '{]'],
+    ['null', 'null'],
+    ['array', '[]'],
+  ])('rejects %s JSON for PATCH without calling the service', async (_label, rawBody) => {
+    const { PATCH } = await import('@/app/api/viral-replications/[id]/route')
+    const request = new NextRequest('http://localhost:3000/api/viral-replications/rep-1', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: rawBody,
+    })
+    const response = await PATCH(request, { params: Promise.resolve({ id: 'rep-1' }) })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: { code: 'INVALID_PARAMS' } })
     expect(serviceMock.updateViralReplicationBrief).not.toHaveBeenCalled()
   })
 

@@ -3,12 +3,13 @@ import { isErrorResponse, requireUserAuth } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { ASPECT_RATIO_CONFIGS, isArtStyleValue } from '@/lib/constants'
 import { createViralReplication } from '@/lib/viral-replication/service'
+import { readJsonObject } from '@/lib/viral-replication/request-json'
 
 export const POST = apiHandler(async (request: NextRequest) => {
   const auth = await requireUserAuth()
   if (isErrorResponse(auth)) return auth
 
-  const body = await request.json() as Record<string, unknown>
+  const body = await readJsonObject(request)
   const brief = typeof body.brief === 'string' ? body.brief.trim() : ''
   if (!brief || brief.length > 2_000) {
     throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_BRIEF_INVALID', field: 'brief' })

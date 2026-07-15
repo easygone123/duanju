@@ -25,6 +25,7 @@ const BRIEF_MUTABLE_STATUSES = [
   VIRAL_REPLICATION_STATUS.FAILED,
 ]
 const SUBMIT_FAILURE_MESSAGE = '爆款复刻分析任务提交失败，请稍后重试'
+const DEFAULT_UPLOAD_LOCK_TTL_MS = 15 * 60 * 1_000
 
 type UploadVideoInput = {
   id: string
@@ -35,6 +36,7 @@ type UploadVideoInput = {
   maxBytes?: number
   tempRoot?: string
   now?: Date
+  lockTtlMs?: number
 }
 
 function formatTimestamp(date: Date): string {
@@ -53,7 +55,7 @@ function serializeDetail<T extends {
   const { sourceVideoMedia, errorMessage, ...rest } = replication
   return {
     ...rest,
-    errorMessage: errorMessage?.startsWith('__viral_upload_lock__:') ? null : (errorMessage ?? null),
+    errorMessage: errorMessage ?? null,
     sourceVideo: sourceVideoMedia
       ? {
           ...sourceVideoMedia,
@@ -104,8 +106,8 @@ export async function updateViralReplicationBrief(input: { id: string; userId: s
 async function releaseUploadLock(id: string, userId: string, lockToken: string): Promise<void> {
   try {
     await prisma.viralReplication.updateMany({
-      where: { id, userId, status: VIRAL_REPLICATION_STATUS.UPLOADING, errorMessage: lockToken },
-      data: { errorMessage: null },
+      where: { id, userId, status: VIRAL_REPLICATION_STATUS.UPLOADING, uploadLockToken: lockToken },
+      data: { uploadLockToken: null, uploadLockExpiresAt: null },
     })
   } catch {
     // Preserve the original upload failure; a stale lock can be repaired explicitly.
@@ -125,24 +127,30 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
     })
   }
 
-  const lockToken = `__viral_upload_lock__:${randomUUID()}`
+  const uploadNow = input.now ?? new Date()
+  const lockTtlMs = input.lockTtlMs ?? DEFAULT_UPLOAD_LOCK_TTL_MS
+  const lockToken = randomUUID()
+  const lockExpiresAt = new Date(uploadNow.getTime() + lockTtlMs)
   const acquired = await prisma.viralReplication.updateMany({
     where: {
       id: input.id,
       userId: input.userId,
       status: VIRAL_REPLICATION_STATUS.UPLOADING,
-      errorMessage: null,
       projectId: null,
       sourceVideoMediaId: null,
+      OR: [
+        { uploadLockToken: null },
+        { uploadLockExpiresAt: { lte: uploadNow } },
+      ],
     },
-    data: { errorMessage: lockToken },
+    data: { uploadLockToken: lockToken, uploadLockExpiresAt: lockExpiresAt },
   })
   if (acquired.count !== 1) {
     throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_UPLOAD_CONFLICT' })
   }
 
   let tempFile: Awaited<ReturnType<typeof writeRequestBodyToTempFile>> | null = null
-  let storageKey: string | null = null
+  let compensationStorageKey: string | null = null
   let committed = false
   let primaryFailure: unknown
 
@@ -193,19 +201,28 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
     const normalizedMime = input.mimeType.split(';', 1)[0].trim().toLowerCase()
     const extension = normalizedMime.includes('quicktime') || normalizedMime.endsWith('/mov') ? 'mov' : 'mp4'
     const requestedStorageKey = `viral-replications/${input.id}/${randomUUID()}.${extension}`
-    storageKey = await uploadObjectStream(
+    compensationStorageKey = requestedStorageKey
+    const storageKey = await uploadObjectStream(
       () => createReadStream(tempFile!.filePath),
       requestedStorageKey,
       tempFile.sizeBytes,
       normalizedMime,
     )
+    compensationStorageKey = storageKey
 
     const publicId = stablePublicIdFromStorageKey(storageKey)
     const created = await prisma.$transaction(async (tx) => {
+      const transactionPreference = await tx.userPreference.findUnique({ where: { userId: input.userId } })
+      if (!transactionPreference?.analysisModel) {
+        throw new ApiError('INVALID_PARAMS', {
+          code: 'ANALYSIS_MODEL_REQUIRED',
+          field: 'analysisModel',
+        })
+      }
       const media = await tx.mediaObject.create({
         data: {
           publicId,
-          storageKey: storageKey!,
+          storageKey,
           mimeType: normalizedMime,
           sizeBytes: BigInt(tempFile!.sizeBytes),
           width: metadata.width,
@@ -215,25 +232,25 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
       })
       const project = await tx.project.create({
         data: {
-          name: `爆款复刻-${formatTimestamp(input.now ?? new Date())}`,
+          name: `爆款复刻-${formatTimestamp(uploadNow)}`,
           userId: input.userId,
         },
       })
       const novelProject = await tx.novelPromotionProject.create({
         data: {
           projectId: project.id,
-          analysisModel: preference.analysisModel,
-          characterModel: preference.characterModel,
-          locationModel: preference.locationModel,
-          storyboardModel: preference.storyboardModel,
-          editModel: preference.editModel,
-          videoModel: preference.videoModel,
-          audioModel: preference.audioModel,
+          analysisModel: transactionPreference.analysisModel,
+          characterModel: transactionPreference.characterModel,
+          locationModel: transactionPreference.locationModel,
+          storyboardModel: transactionPreference.storyboardModel,
+          editModel: transactionPreference.editModel,
+          videoModel: transactionPreference.videoModel,
+          audioModel: transactionPreference.audioModel,
           videoRatio: replication.videoRatio,
-          videoResolution: preference.videoResolution,
-          imageResolution: preference.imageResolution,
+          videoResolution: transactionPreference.videoResolution,
+          imageResolution: transactionPreference.imageResolution,
           artStyle: replication.artStyle,
-          ttsRate: preference.ttsRate,
+          ttsRate: transactionPreference.ttsRate,
         },
       })
       const episode = await tx.novelPromotionEpisode.create({
@@ -248,7 +265,7 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
           id: input.id,
           userId: input.userId,
           status: VIRAL_REPLICATION_STATUS.UPLOADING,
-          errorMessage: lockToken,
+          uploadLockToken: lockToken,
           projectId: null,
           sourceVideoMediaId: null,
         },
@@ -256,16 +273,18 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
           projectId: project.id,
           episodeId: episode.id,
           sourceVideoMediaId: media.id,
-          analysisModelSnapshot: preference.analysisModel,
+          analysisModelSnapshot: transactionPreference.analysisModel,
           durationMs: metadata.durationMs,
           status: VIRAL_REPLICATION_STATUS.ANALYZING,
           errorMessage: null,
+          uploadLockToken: null,
+          uploadLockExpiresAt: null,
         },
       })
       if (linked.count !== 1) {
         throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_UPLOAD_CONFLICT' })
       }
-      return { project, episode, media }
+      return { project, episode, media, analysisModelSnapshot: transactionPreference.analysisModel }
     })
     committed = true
 
@@ -287,7 +306,7 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
         maxAttempts: 1,
         payload: {
           sourceVideoMediaId: created.media.id,
-          analysisModelSnapshot: preference.analysisModel,
+          analysisModelSnapshot: created.analysisModelSnapshot,
         },
       })
       return { ...baseResult, status: VIRAL_REPLICATION_STATUS.ANALYZING, taskId: task.taskId }
@@ -300,9 +319,9 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
     }
   } catch (error: unknown) {
     primaryFailure = error
-    if (storageKey && !committed) {
+    if (compensationStorageKey && !committed) {
       try {
-        await deleteObject(storageKey)
+        await deleteObject(compensationStorageKey)
       } catch {
         // Best-effort compensation must not mask the database/upload error.
       }
@@ -311,7 +330,13 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
     throw error
   } finally {
     if (tempFile) {
-      await cleanupUploadTempFile(tempFile.cleanup, committed || primaryFailure !== undefined)
+      const preserveExistingOutcome = committed || primaryFailure !== undefined
+      await cleanupUploadTempFile(tempFile.cleanup, preserveExistingOutcome, {
+        context: {
+          replicationId: input.id,
+          outcome: committed ? 'committed' : 'primary_failure',
+        },
+      })
     }
   }
 }
