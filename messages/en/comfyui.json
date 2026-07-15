@@ -104,6 +104,7 @@
       "create": "Create workflow",
       "analyzingStatus": "Analyzing workflow…",
       "creatingStatus": "Creating workflow…",
+      "completedStatus": "Workflow created.",
       "typeTitle": "What kind of workflow are you creating?",
       "typeHint": "Choose the option that best matches how this workflow will be used.",
       "jsonInput": "Workflow JSON file",

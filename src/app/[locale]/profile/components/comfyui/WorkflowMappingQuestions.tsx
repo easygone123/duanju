@@ -18,6 +18,7 @@ interface Props {
   review: GuidedWorkflowReview
   roles: Record<string, CanonicalWorkflowInput | 'preserve_original'>
   primaryOutputNodeId: string
+  disabled?: boolean
   onRoleChange(id: string, value: CanonicalWorkflowInput): void
   onPrimaryOutputChange(nodeId: string): void
 }
@@ -51,6 +52,7 @@ export default function WorkflowMappingQuestions({
   review,
   roles,
   primaryOutputNodeId,
+  disabled = false,
   onRoleChange,
   onPrimaryOutputChange,
 }: Props) {
@@ -99,6 +101,7 @@ export default function WorkflowMappingQuestions({
         >
           <input
             type="radio"
+            disabled={disabled}
             name={`${groupPrefix}-role-${questionIndex}`}
             checked={roles[proposal.id] === role}
             onChange={() => onRoleChange(proposal.id, role)}
@@ -129,6 +132,7 @@ export default function WorkflowMappingQuestions({
           <label className="flex min-w-0 items-center gap-2 text-sm">
             <input
               type="radio"
+              disabled={disabled}
               name={`${groupPrefix}-output`}
               checked={primaryOutputNodeId === output.nodeId}
               onChange={() => onPrimaryOutputChange(output.nodeId)}

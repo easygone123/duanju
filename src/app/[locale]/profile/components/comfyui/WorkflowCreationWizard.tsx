@@ -37,10 +37,18 @@ export interface WorkflowCreationWizardProps {
   onCancel(): void
   onCreate(draft: WorkflowAuthorDraft): Promise<string>
   onCreated(id: string): void
-  analyze?: (kind: WorkflowImportKind, file: File) => Promise<WorkflowAnalysisResponse>
+  analyze?: (
+    kind: WorkflowImportKind,
+    file: File,
+    signal?: AbortSignal,
+  ) => Promise<WorkflowAnalysisResponse>
 }
 
 const STAGES: WizardStage[] = ['type', 'upload', 'review']
+
+function isAbortError(error: unknown) {
+  return Boolean(error && typeof error === 'object' && 'name' in error && error.name === 'AbortError')
+}
 
 export default function WorkflowCreationWizard({
   onCancel,
@@ -53,6 +61,9 @@ export default function WorkflowCreationWizard({
   const coordinatorRef = useRef(createWorkflowAnalysisCoordinator())
   const lastFileRef = useRef<File | null>(null)
   const mountedRef = useRef(true)
+  const submissionRef = useRef<'idle' | 'creating' | 'completed'>('idle')
+  const analysisAbortRef = useRef<AbortController | null>(null)
+  const stageHeadingRef = useRef<HTMLHeadingElement | null>(null)
   const [stage, setStage] = useState<WizardStage>('type')
   const [kind, setKind] = useState<WorkflowImportKind | null>(null)
   const [name, setName] = useState('')
@@ -61,6 +72,7 @@ export default function WorkflowCreationWizard({
   const [roles, setRoles] = useState<Record<string, WorkflowRole>>({})
   const [selectedOutput, setSelectedOutput] = useState('')
   const [busy, setBusy] = useState<BusyOperation>(null)
+  const [completed, setCompleted] = useState(false)
   const [error, setError] = useState<WorkflowErrorKey | null>(null)
 
   useEffect(() => {
@@ -69,9 +81,15 @@ export default function WorkflowCreationWizard({
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      analysisAbortRef.current?.abort()
+      analysisAbortRef.current = null
       coordinator.dispose()
     }
   }, [])
+
+  useEffect(() => {
+    stageHeadingRef.current?.focus()
+  }, [stage])
 
   const clearGraphState = () => {
     setSourceText('')
@@ -93,8 +111,11 @@ export default function WorkflowCreationWizard({
     setError(null)
     setBusy('analyzing')
     const ticket = coordinatorRef.current.begin()
+    analysisAbortRef.current?.abort()
+    const controller = new AbortController()
+    analysisAbortRef.current = controller
     try {
-      const result = await analyze(kind, file)
+      const result = await analyze(kind, file, controller.signal)
       if (!coordinatorRef.current.isCurrent(ticket)) return
       const automaticOutput = result.analysis.outputs.find((output) => output.primary)?.nodeId
         || (result.analysis.outputs.length === 1 ? result.analysis.outputs[0]?.nodeId : '')
@@ -105,6 +126,7 @@ export default function WorkflowCreationWizard({
       setError(null)
     } catch (analysisError) {
       if (!coordinatorRef.current.isCurrent(ticket)) return
+      if (isAbortError(analysisError)) return
       setSourceText('')
       setAnalysis(null)
       setRoles({})
@@ -112,6 +134,7 @@ export default function WorkflowCreationWizard({
       setStage('upload')
       setError(safeWorkflowErrorKey(analysisError))
     } finally {
+      if (analysisAbortRef.current === controller) analysisAbortRef.current = null
       if (coordinatorRef.current.isCurrent(ticket)) setBusy(null)
     }
   }
@@ -123,13 +146,14 @@ export default function WorkflowCreationWizard({
     name,
     review,
     busy: busy !== null,
-  }))
+  }) && !completed)
   const automaticPrimaryOutputNodeId = analysis?.outputs.find((output) => output.primary)?.nodeId
     || (analysis?.outputs.length === 1 ? analysis.outputs[0]?.nodeId : '')
     || ''
 
   const create = async () => {
-    if (!analysis || !review || !ready) return
+    if (!analysis || !review || !ready || submissionRef.current !== 'idle') return
+    submissionRef.current = 'creating'
     setBusy('creating')
     setError(null)
     try {
@@ -145,8 +169,18 @@ export default function WorkflowCreationWizard({
         ...confirmed,
       }
       const id = await onCreate(draft)
-      if (mountedRef.current) onCreated(id)
+      submissionRef.current = 'completed'
+      if (mountedRef.current) {
+        setCompleted(true)
+        setBusy(null)
+        try {
+          onCreated(id)
+        } catch {
+          // Creation already succeeded. Consumer navigation errors must not make it retryable.
+        }
+      }
     } catch (creationError) {
+      submissionRef.current = 'idle'
       if (mountedRef.current) setError(safeWorkflowErrorKey(creationError))
     } finally {
       if (mountedRef.current) setBusy(null)
@@ -155,6 +189,8 @@ export default function WorkflowCreationWizard({
 
   const backToType = () => {
     coordinatorRef.current.begin()
+    analysisAbortRef.current?.abort()
+    analysisAbortRef.current = null
     lastFileRef.current = null
     clearGraphState()
     setName('')
@@ -162,16 +198,26 @@ export default function WorkflowCreationWizard({
   }
   const backToUpload = () => {
     coordinatorRef.current.begin()
+    analysisAbortRef.current?.abort()
+    analysisAbortRef.current = null
     clearGraphState()
     setStage('upload')
   }
 
-  return <main className="h-full min-h-0 min-w-0 overflow-hidden">
+  const cancel = () => {
+    coordinatorRef.current.begin()
+    analysisAbortRef.current?.abort()
+    analysisAbortRef.current = null
+    setBusy(null)
+    onCancel()
+  }
+
+  return <main aria-labelledby="workflow-wizard-title" className="h-full min-h-0 min-w-0 overflow-hidden">
     <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden">
       <div className="mx-auto w-full max-w-[60rem] min-w-0 px-4 py-6 sm:px-6">
         <header className="min-w-0 space-y-4">
           <div>
-            <h2 className="break-words text-xl font-semibold text-[var(--glass-text-primary)]">{t('wizardTitle')}</h2>
+            <h2 id="workflow-wizard-title" className="break-words text-xl font-semibold text-[var(--glass-text-primary)]">{t('wizardTitle')}</h2>
             <p className="mt-1 text-sm text-[var(--glass-text-secondary)]">{t('wizardHint')}</p>
           </div>
           <ol className="flex min-w-0 flex-wrap gap-2" aria-label={t('stepsLabel')}>
@@ -189,7 +235,7 @@ export default function WorkflowCreationWizard({
 
         <div className="mt-6 min-w-0">
           {stage === 'type' && <section className="min-w-0 space-y-4" aria-labelledby="workflow-wizard-type">
-            <h3 id="workflow-wizard-type" className="sr-only">{t('steps.type')}</h3>
+            <h3 ref={stageHeadingRef} tabIndex={-1} id="workflow-wizard-type" className="sr-only">{t('steps.type')}</h3>
             <WorkflowTypePicker value={kind} onSelect={(nextKind) => {
               if (nextKind !== kind) {
                 clearGraphState()
@@ -202,7 +248,7 @@ export default function WorkflowCreationWizard({
 
           {stage === 'upload' && <section className="min-w-0 space-y-4" aria-labelledby="workflow-wizard-upload">
             <div>
-              <h3 id="workflow-wizard-upload" className="font-semibold">{t('uploadTitle')}</h3>
+              <h3 ref={stageHeadingRef} tabIndex={-1} id="workflow-wizard-upload" className="font-semibold">{t('uploadTitle')}</h3>
               <p className="mt-1 text-sm text-[var(--glass-text-secondary)]">{t('uploadHint')}</p>
             </div>
             <WorkflowJsonDropzone
@@ -216,7 +262,7 @@ export default function WorkflowCreationWizard({
 
           {stage === 'review' && analysis && review && <section className="min-w-0 space-y-6" aria-labelledby="workflow-wizard-review">
             <div>
-              <h3 id="workflow-wizard-review" className="font-semibold">{t('reviewTitle')}</h3>
+              <h3 ref={stageHeadingRef} tabIndex={-1} id="workflow-wizard-review" className="font-semibold">{t('reviewTitle')}</h3>
               <p className="mt-1 text-sm text-[var(--glass-text-secondary)]">{t('reviewHint')}</p>
             </div>
             <label className="block min-w-0 text-sm text-[var(--glass-text-secondary)]">
@@ -225,7 +271,7 @@ export default function WorkflowCreationWizard({
                 type="text"
                 value={name}
                 maxLength={160}
-                disabled={busy === 'creating'}
+                disabled={busy === 'creating' || completed}
                 onChange={(event) => setName(event.target.value)}
                 className="glass-input mt-1 w-full min-w-0 px-3 py-2"
               />
@@ -240,6 +286,7 @@ export default function WorkflowCreationWizard({
               review={review}
               roles={roles}
               primaryOutputNodeId={selectedOutput}
+              disabled={busy === 'creating' || completed}
               onRoleChange={(id, value) => setRoles((current) => ({ ...current, [id]: value }))}
               onPrimaryOutputChange={setSelectedOutput}
             />
@@ -247,6 +294,7 @@ export default function WorkflowCreationWizard({
               analysis={analysis}
               roles={roles}
               primaryOutputNodeId={selectedOutput}
+              disabled={busy === 'creating' || completed}
               onRoleChange={(id, value) => setRoles((current) => ({ ...current, [id]: value }))}
               onPrimaryOutputChange={setSelectedOutput}
             />
@@ -254,16 +302,20 @@ export default function WorkflowCreationWizard({
         </div>
 
         <div className="mt-6 min-h-6 min-w-0">
-          {error && <p role="alert" aria-live="assertive" className="break-words text-sm text-[var(--glass-tone-danger-fg)]">
+          {error && <p role="alert" className="break-words text-sm text-[var(--glass-tone-danger-fg)]">
             {workflows(error)}
           </p>}
-          <p role="status" aria-live="polite" className="break-words text-sm text-[var(--glass-text-secondary)]">
-            {busy === 'analyzing' ? t('analyzingStatus') : busy === 'creating' ? t('creatingStatus') : ''}
+          <p role="status" className="break-words text-sm text-[var(--glass-text-secondary)]">
+            {busy === 'analyzing'
+              ? t('analyzingStatus')
+              : busy === 'creating'
+                ? t('creatingStatus')
+                : completed ? t('completedStatus') : ''}
           </p>
         </div>
 
         <footer className="mt-4 flex min-w-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--glass-stroke-base)] pt-4">
-          <button type="button" onClick={onCancel} disabled={busy === 'creating'} className="glass-btn-base px-4 py-2 text-sm disabled:opacity-50">
+          <button type="button" onClick={cancel} disabled={busy === 'creating' || completed} className="glass-btn-base px-4 py-2 text-sm disabled:opacity-50">
             {t('cancel')}
           </button>
           <div className="flex min-w-0 flex-wrap justify-end gap-2">
@@ -283,7 +335,7 @@ export default function WorkflowCreationWizard({
               >{t('retryAnalysis')}</button>}
             </>}
             {stage === 'review' && <>
-              <button type="button" disabled={busy === 'creating'} onClick={backToUpload} className="glass-btn-base px-4 py-2 text-sm disabled:opacity-50">{t('back')}</button>
+              <button type="button" disabled={busy === 'creating' || completed} onClick={backToUpload} className="glass-btn-base px-4 py-2 text-sm disabled:opacity-50">{t('back')}</button>
               <button
                 type="button"
                 disabled={!ready}

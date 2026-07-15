@@ -104,6 +104,7 @@
       "create": "创建工作流",
       "analyzingStatus": "正在分析工作流…",
       "creatingStatus": "正在创建工作流…",
+      "completedStatus": "工作流已创建。",
       "typeTitle": "你想创建哪种工作流？",
       "typeHint": "选择最符合这个工作流用途的类型。",
       "jsonInput": "工作流 JSON 文件",

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React from 'react'
+import React, { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -21,6 +21,7 @@ import type {
   WorkflowAutoMappingResult,
   WorkflowImportKind,
 } from '@/lib/comfyui/workflow-auto-mapping-types'
+import { validateWorkflowContract } from '@/lib/comfyui/workflow-schema'
 import enComfyui from '../../../messages/en/comfyui.json'
 
 afterEach(() => {
@@ -40,7 +41,12 @@ function deferred<T>() {
 
 function analysis(overrides: Partial<WorkflowAutoMappingResult> = {}): WorkflowAutoMappingResult {
   return {
-    graph: { '1': { class_type: 'CLIPTextEncode', inputs: { text: 'portrait' } } },
+    graph: {
+      '1': { class_type: 'CLIPTextEncode', inputs: { text: 'portrait' } },
+      '2': { class_type: 'LoadImage', inputs: { image: 'source.png' } },
+      '9': { class_type: 'SaveImage', inputs: { images: ['1', 0] } },
+      '10': { class_type: 'PreviewImage', inputs: { images: ['1', 0] } },
+    },
     mediaType: 'image',
     purpose: 'generation',
     referenceCapacity: 1,
@@ -61,6 +67,8 @@ function ambiguousAnalysis(): WorkflowAutoMappingResult {
       '1': { class_type: 'CLIPTextEncode', inputs: { text: 'portrait' } },
       '2': { class_type: 'LoadImage', inputs: { image: 'source.png' } },
       '3': { class_type: 'LoadImage', inputs: { image: 'optional.png' } },
+      '9': { class_type: 'SaveImage', inputs: { images: ['1', 0] } },
+      '10': { class_type: 'PreviewImage', inputs: { images: ['1', 0] } },
     },
     proposals: [
       {
@@ -86,7 +94,10 @@ function ambiguousAnalysis(): WorkflowAutoMappingResult {
   })
 }
 
-function renderWizard(overrides: Partial<React.ComponentProps<typeof WorkflowCreationWizard>> = {}) {
+function renderWizard(
+  overrides: Partial<React.ComponentProps<typeof WorkflowCreationWizard>> = {},
+  strict = false,
+) {
   const props = {
     onCancel: vi.fn(),
     onCreate: vi.fn<(_: WorkflowAuthorDraft) => Promise<string>>().mockResolvedValue('workflow-1'),
@@ -94,15 +105,16 @@ function renderWizard(overrides: Partial<React.ComponentProps<typeof WorkflowCre
     analyze: vi.fn().mockResolvedValue({ sourceText: '{}', analysis: analysis() }),
     ...overrides,
   }
-  return {
-    props,
-    view: render(<NextIntlClientProvider
+  const wizard = <NextIntlClientProvider
       locale="en"
       messages={{ comfyui: enComfyui }}
       timeZone="UTC"
     >
       <WorkflowCreationWizard {...props} />
-    </NextIntlClientProvider>),
+    </NextIntlClientProvider>
+  return {
+    props,
+    view: render(strict ? <StrictMode>{wizard}</StrictMode> : wizard),
   }
 }
 
@@ -138,10 +150,25 @@ describe('WorkflowCreationWizard', () => {
     expect(view.container.innerHTML).not.toMatch(/(?:min-)?w-\[\d+px\]/)
   })
 
+  it('names the main landmark, focuses each stage heading, and uses only one live-region mechanism', async () => {
+    const { view } = renderWizard()
+    expect(view.getByRole('main', { name: 'Create a ComfyUI workflow' })).toBeTruthy()
+    expect(view.getByRole('heading', { name: 'Choose type' })).toBe(document.activeElement)
+
+    selectKindAndAdvance(view)
+    expect(view.getByRole('heading', { name: 'Upload workflow' })).toBe(document.activeElement)
+    await act(async () => { upload(view, 'focused-review.json') })
+    expect(view.getByRole('heading', { name: 'Review and confirm' })).toBe(document.activeElement)
+
+    expect(view.getByRole('status').getAttribute('aria-live')).toBeNull()
+  })
+
   it('creates an existing WorkflowAuthorDraft from the analyzed source and confirmed review', async () => {
+    const analyzed = ambiguousAnalysis()
+    const sourceText = JSON.stringify(analyzed.graph, null, 2)
     const analyze = vi.fn().mockResolvedValue({
-      sourceText: '{\n  "original": true\n}',
-      analysis: ambiguousAnalysis(),
+      sourceText,
+      analysis: analyzed,
     })
     const onCreate = vi.fn<(_: WorkflowAuthorDraft) => Promise<string>>().mockResolvedValue('created-id')
     const onCreated = vi.fn()
@@ -163,7 +190,7 @@ describe('WorkflowCreationWizard', () => {
       name: 'Portrait Retouch',
       mediaType: 'image',
       purpose: 'generation',
-      apiFormatJson: '{\n  "original": true\n}',
+      apiFormatJson: sourceText,
       variableDefinitions: [
         { name: 'prompt', type: 'string', required: true },
         { name: 'sourceImage', type: 'image_ref', required: true },
@@ -177,6 +204,14 @@ describe('WorkflowCreationWizard', () => {
         { name: 'resultB', nodeId: '10', fieldPath: 'images', mediaType: 'image', primary: true },
       ],
     })
+    const createdDraft = onCreate.mock.calls[0]![0]
+    expect(validateWorkflowContract({
+      graph: JSON.parse(createdDraft.apiFormatJson),
+      purpose: createdDraft.purpose,
+      variableDefinitions: createdDraft.variableDefinitions,
+      bindings: createdDraft.bindings,
+      outputs: createdDraft.outputs,
+    })).toEqual([])
     expect(onCreated).toHaveBeenCalledWith('created-id')
   })
 
@@ -274,6 +309,73 @@ describe('WorkflowCreationWizard', () => {
     expect(props.onCreated).toHaveBeenCalledWith('retry-id')
   })
 
+  it('guards creation synchronously when two submit events occur in one render batch', async () => {
+    const pendingCreate = deferred<string>()
+    const onCreate = vi.fn(() => pendingCreate.promise)
+    const { view } = renderWizard({ onCreate })
+    selectKindAndAdvance(view)
+    await act(async () => { upload(view, 'single-submit.json') })
+
+    const create = view.getByRole('button', { name: 'Create workflow' })
+    act(() => {
+      fireEvent.click(create)
+      fireEvent.click(create)
+    })
+
+    expect(onCreate).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      pendingCreate.resolve('created-once')
+      await pendingCreate.promise
+    })
+  })
+
+  it('stays completed without exposing a retry when the success callback throws', async () => {
+    const onCreate = vi.fn<(_: WorkflowAuthorDraft) => Promise<string>>().mockResolvedValue('created-id')
+    const onCreated = vi.fn(() => { throw new Error('consumer navigation failed') })
+    const { view } = renderWizard({ onCreate, onCreated })
+    selectKindAndAdvance(view)
+    await act(async () => { upload(view, 'completed.json') })
+
+    await act(async () => {
+      fireEvent.click(view.getByRole('button', { name: 'Create workflow' }))
+    })
+
+    expect(onCreate).toHaveBeenCalledTimes(1)
+    expect(onCreated).toHaveBeenCalledWith('created-id')
+    expect(view.queryByRole('alert')).toBeNull()
+    expect(view.queryByRole('button', { name: 'Retry creation' })).toBeNull()
+    expect(view.getByRole('status').textContent).toBe('Workflow created.')
+    expect((view.getByRole('button', { name: 'Create workflow' }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(view.getByRole('button', { name: 'Create workflow' }))
+    expect(onCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables every mapping and output control while creation is pending', async () => {
+    const pendingCreate = deferred<string>()
+    const { view } = renderWizard({
+      onCreate: vi.fn(() => pendingCreate.promise),
+      analyze: vi.fn().mockResolvedValue({ sourceText: '{}', analysis: ambiguousAnalysis() }),
+    })
+    selectKindAndAdvance(view, 'Image editing')
+    await act(async () => { upload(view, 'locked-review.json') })
+    fireEvent.click(view.getByRole('radio', { name: 'Source image' }))
+    fireEvent.click(view.getByRole('radio', { name: 'resultA' }))
+    const advanced = view.getByText('Advanced Settings').closest('details') as HTMLDetailsElement
+    advanced.open = true
+    fireEvent(advanced, new Event('toggle'))
+
+    fireEvent.click(view.getByRole('button', { name: 'Create workflow' }))
+
+    expect(view.getAllByRole('radio').every((control) => (control as HTMLInputElement).disabled)).toBe(true)
+    expect(view.getAllByRole('combobox').every((control) => (control as HTMLSelectElement).disabled)).toBe(true)
+
+    await act(async () => {
+      pendingCreate.resolve('created-id')
+      await pendingCreate.promise
+    })
+  })
+
   it('keeps type and proposed name after analysis rejection, then accepts a replacement file', async () => {
     const rejected = deferred<{ sourceText: string; analysis: WorkflowAutoMappingResult }>()
     const analyze = vi.fn()
@@ -319,6 +421,42 @@ describe('WorkflowCreationWizard', () => {
     expect(coordinator.isCurrent(ticket)).toBe(false)
   })
 
+  it('aborts analysis on replacement, cancel, back, and unmount without surfacing an error', async () => {
+    const signals: AbortSignal[] = []
+    const analyze = vi.fn((
+      _kind: WorkflowImportKind,
+      _file: File,
+      signal?: AbortSignal,
+    ) => {
+      if (signal) signals.push(signal)
+      return new Promise<{ sourceText: string; analysis: WorkflowAutoMappingResult }>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+      })
+    })
+    const { view, props } = renderWizard({ analyze })
+    selectKindAndAdvance(view)
+
+    upload(view, 'first.json')
+    upload(view, 'replacement.json')
+    expect(signals).toHaveLength(2)
+    expect(signals[0]?.aborted).toBe(true)
+
+    fireEvent.click(view.getByRole('button', { name: 'Cancel' }))
+    expect(props.onCancel).toHaveBeenCalledTimes(1)
+    expect(signals[1]?.aborted).toBe(true)
+
+    upload(view, 'back.json')
+    fireEvent.click(view.getByRole('button', { name: 'Back' }))
+    expect(signals[2]?.aborted).toBe(true)
+
+    selectKindAndAdvance(view)
+    upload(view, 'unmount.json')
+    view.unmount()
+    expect(signals[3]?.aborted).toBe(true)
+    await act(async () => { await Promise.resolve() })
+    expect(view.queryByRole('alert')).toBeNull()
+  })
+
   it('reactivates a disposed coordinator for Strict Mode effect replay', () => {
     const coordinator = createWorkflowAnalysisCoordinator()
     const staleTicket = coordinator.begin()
@@ -328,6 +466,17 @@ describe('WorkflowCreationWizard', () => {
     coordinator.reset()
     const currentTicket = coordinator.begin()
     expect(coordinator.isCurrent(currentTicket)).toBe(true)
+  })
+
+  it('analyzes and reaches review under real Strict Mode effect replay', async () => {
+    const analyze = vi.fn().mockResolvedValue({ sourceText: '{}', analysis: analysis() })
+    const { view } = renderWizard({ analyze }, true)
+
+    selectKindAndAdvance(view)
+    await act(async () => { upload(view, 'strict.json') })
+
+    expect(analyze).toHaveBeenCalledTimes(1)
+    expect(view.getByRole('heading', { name: 'Review and confirm' })).toBeTruthy()
   })
 
   it('does not deliver a late creation result after unmount', async () => {
@@ -387,23 +536,20 @@ describe('WorkflowCreationWizard', () => {
 
 describe('workflow request helpers', () => {
   it('analyzes the bounded original JSON with authenticated apiFetch', async () => {
+    const graph = analysis().graph
+    const sourceText = JSON.stringify(graph)
     const apiFetch = vi.spyOn(apiFetchModule, 'apiFetch').mockResolvedValue(new Response(JSON.stringify({
-      analysis: analysis({
-        graph: {
-          '1': { class_type: 'X', inputs: {} },
-          node_alpha: { class_type: 'Y', inputs: {} },
-        },
-      }),
+      analysis: analysis({ graph }),
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-    const file = new File(['{"1":{"class_type":"X","inputs":{}}}'], 'graph.json', { type: 'application/json' })
-    Object.defineProperty(file, 'text', { value: () => Promise.resolve('{"1":{"class_type":"X","inputs":{}}}') })
+    const file = new File([sourceText], 'graph.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(sourceText) })
 
     const result = await analyzeWorkflowJson('image_generation', file)
 
-    expect(result.sourceText).toBe('{"1":{"class_type":"X","inputs":{}}}')
+    expect(result.sourceText).toBe(sourceText)
     expect(apiFetch).toHaveBeenCalledWith('/api/comfyui/workflows/analyze', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ kind: 'image_generation', apiFormatJson: { '1': { class_type: 'X', inputs: {} } } }),
+      body: JSON.stringify({ kind: 'image_generation', apiFormatJson: graph }),
     }))
   })
 
@@ -432,6 +578,19 @@ describe('workflow request helpers', () => {
     expect(safeWorkflowErrorKey(error)).toBe('workflowNetworkFailed')
     expect(String(error)).not.toContain('socket details')
     expect((error as Error & { cause?: unknown }).cause).toBeUndefined()
+  })
+
+  it('passes the analysis abort signal through and preserves AbortError', async () => {
+    const abortError = new DOMException('Aborted', 'AbortError')
+    const apiFetch = vi.spyOn(apiFetchModule, 'apiFetch').mockRejectedValue(abortError)
+    const file = new File(['{}'], 'graph.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve('{}') })
+    const controller = new AbortController()
+
+    await expect(analyzeWorkflowJson('image_generation', file, controller.signal)).rejects.toBe(abortError)
+    expect(apiFetch).toHaveBeenCalledWith('/api/comfyui/workflows/analyze', expect.objectContaining({
+      signal: controller.signal,
+    }))
   })
 
   it('does not mask client file parse errors as network failures', async () => {
@@ -491,6 +650,66 @@ describe('workflow request helpers', () => {
       apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ analysis: malformed }), {
         status: 200, headers: { 'Content-Type': 'application/json' },
       }))
+      const error = await analyzeWorkflowJson('image_generation', file).catch((reason: unknown) => reason)
+      expect(error, name).toMatchObject({ name: 'WorkflowRequestError', code: 'UNKNOWN' })
+    }
+  })
+
+  it('rejects successful analyses that violate shared graph or cross-field invariants', async () => {
+    const base = analysis()
+    const proposal = base.proposals[0]!
+    const output = base.outputs[0]!
+    const secondOutput = {
+      name: 'preview', nodeId: '10', fieldPath: 'images', mediaType: 'image' as const, primary: false,
+    }
+    const invalidGraph = {
+      ...base.graph,
+      '9': { class_type: 'SaveImage', inputs: { images: ['missing-node', 0] } },
+    }
+    const cases: Array<[string, WorkflowAutoMappingResult, unknown?]> = [
+      ['kind media mismatch', { ...base, mediaType: 'video' }],
+      ['kind purpose mismatch', { ...base, purpose: 'upscale' }],
+      ['returned graph mismatch', { ...base, graph: { ...base.graph, extra: { class_type: 'X', inputs: {} } } }],
+      ['shared graph invalid', { ...base, graph: invalidGraph }, invalidGraph],
+      ['proposal node missing', { ...base, proposals: [{ ...proposal, nodeId: 'missing-node' }] }],
+      ['proposal path unsafe', { ...base, proposals: [{ ...proposal, inputPath: 'constructor.value' }] }],
+      ['proposal path missing', { ...base, proposals: [{ ...proposal, inputPath: 'missing' }] }],
+      ['duplicate proposal id', { ...base, proposals: [proposal, {
+        ...proposal, nodeId: '2', inputPath: 'image', id: proposal.id,
+        canonicalName: 'sourceImage', valueType: 'image_ref', transform: 'filename',
+      }] }],
+      ['duplicate proposal target', { ...base, proposals: [proposal, {
+        ...proposal, id: 'second-prompt', canonicalName: 'negativePrompt',
+      }] }],
+      ['incompatible transform', { ...base, proposals: [{ ...proposal, transform: 'filename' }] }],
+      ['filename_at without index', { ...base, proposals: [{
+        ...proposal, canonicalName: 'referenceImages', nodeId: '2', inputPath: 'image',
+        valueType: 'image_ref_list', transform: 'filename_at',
+      }] }],
+      ['output node missing', { ...base, outputs: [{ ...output, nodeId: 'missing-node' }] }],
+      ['output path unsafe', { ...base, outputs: [{ ...output, fieldPath: '__proto__.images' }] }],
+      ['output media mismatch', { ...base, outputs: [{ ...output, mediaType: 'video' }] }],
+      ['duplicate output name', { ...base, outputs: [
+        { ...output, primary: true }, { ...secondOutput, name: output.name },
+      ] }],
+      ['duplicate output target', { ...base, outputs: [
+        { ...output, primary: true }, { ...secondOutput, nodeId: output.nodeId },
+      ] }],
+      ['multiple primary outputs', { ...base, outputs: [
+        { ...output, primary: true }, { ...secondOutput, primary: true },
+      ] }],
+      ['single output without primary', { ...base, outputs: [{ ...output, primary: false }] }],
+    ]
+    const apiFetch = vi.spyOn(apiFetchModule, 'apiFetch')
+
+    for (const [name, invalid, uploaded = base.graph] of cases) {
+      apiFetch.mockResolvedValueOnce(new Response(JSON.stringify({ analysis: invalid }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }))
+      const sourceText = JSON.stringify(uploaded)
+      const file = new File([sourceText], 'graph.json', { type: 'application/json' })
+      Object.defineProperty(file, 'text', { value: () => Promise.resolve(sourceText) })
+
       const error = await analyzeWorkflowJson('image_generation', file).catch((reason: unknown) => reason)
       expect(error, name).toMatchObject({ name: 'WorkflowRequestError', code: 'UNKNOWN' })
     }

@@ -534,7 +534,7 @@ describe('guided workflow translations', () => {
     'wizardTitle', 'wizardHint', 'stepsLabel', 'steps',
     'uploadTitle', 'uploadHint', 'reviewTitle', 'reviewHint',
     'next', 'back', 'cancel', 'retryAnalysis', 'retryCreate', 'create',
-    'analyzingStatus', 'creatingStatus',
+    'analyzingStatus', 'creatingStatus', 'completedStatus',
     'typeTitle', 'typeHint', 'jsonInput', 'dropTitle', 'dropHint',
     'chooseFile', 'analyzing', 'name', 'selected', 'summaryTitle',
     'recognizedInputs', 'recognizedInput', 'preservedDefaults', 'recognizedOutput',
