@@ -110,9 +110,12 @@ async function submit(params: { type: TaskType; maxAttempts?: number; suffix: st
     locale: 'en',
     projectId: `viral-project-${params.suffix}`,
     type: params.type,
-    targetType: 'ViralVideoReplication',
+    targetType: 'ViralReplication',
     targetId: `viral-replication-${params.suffix}`,
-    payload: { analysisModelSnapshot: 'test::analysis-model' },
+    payload: {
+      sourceVideoMediaId: `media-${params.suffix}`,
+      analysisModelSnapshot: 'test::analysis-model',
+    },
     ...(params.maxAttempts === undefined ? {} : { maxAttempts: params.maxAttempts }),
   })
   const task = dbState.tasks.get(result.taskId)
@@ -142,6 +145,15 @@ describe('chain contract - viral replication submission', () => {
     expect(queueCall).toMatchObject({
       queueName: QUEUE_NAME.VIRAL_REPLICATION,
       jobName: type,
+      data: {
+        targetType: 'ViralReplication',
+        targetId: `viral-replication-${suffix}`,
+        payload: {
+          sourceVideoMediaId: `media-${suffix}`,
+          analysisModelSnapshot: 'test::analysis-model',
+          meta: { locale: 'en' },
+        },
+      },
       options: { attempts: 1 },
     })
   })

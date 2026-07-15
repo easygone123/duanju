@@ -52,6 +52,32 @@ describe('api contract - viral replication routes', () => {
   })
 
   it.each([
+    ['GET', '/api/viral-replications/rep-1'],
+    ['PATCH', '/api/viral-replications/rep-1'],
+    ['PUT', '/api/viral-replications/rep-1/video'],
+  ] as const)('requires authentication for %s %s', async (method, path) => {
+    authState.authenticated = false
+    const context = { params: Promise.resolve({ id: 'rep-1' }) }
+    let response: Response
+    if (method === 'GET') {
+      const { GET } = await import('@/app/api/viral-replications/[id]/route')
+      response = await GET(buildMockRequest({ path, method }), context)
+    } else if (method === 'PATCH') {
+      const { PATCH } = await import('@/app/api/viral-replications/[id]/route')
+      response = await PATCH(buildMockRequest({ path, method, body: { brief: '方向' } }), context)
+    } else {
+      const { PUT } = await import('@/app/api/viral-replications/[id]/video/route')
+      response = await PUT(new NextRequest(`http://localhost:3000${path}`, {
+        method, headers: { 'content-type': 'video/mp4' }, body: Buffer.from('video'),
+      }), context)
+    }
+    expect(response.status).toBe(401)
+    expect(serviceMock.getOwnedViralReplicationDetail).not.toHaveBeenCalled()
+    expect(serviceMock.updateViralReplicationBrief).not.toHaveBeenCalled()
+    expect(serviceMock.uploadViralReplicationVideo).not.toHaveBeenCalled()
+  })
+
+  it.each([
     [{ brief: '', videoRatio: '9:16', artStyle: 'realistic' }, 'brief'],
     [{ brief: '方向', videoRatio: 'bad', artStyle: 'realistic' }, 'videoRatio'],
     [{ brief: '方向', videoRatio: '9:16', artStyle: 'unknown' }, 'artStyle'],

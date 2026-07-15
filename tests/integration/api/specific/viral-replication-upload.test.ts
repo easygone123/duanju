@@ -1,29 +1,18 @@
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { prisma } from '../../../helpers/prisma'
 
-const prismaMock = vi.hoisted(() => ({
-  viralReplication: { updateMany: vi.fn(), update: vi.fn(), findFirst: vi.fn() },
-  userPreference: { findUnique: vi.fn() },
-  $transaction: vi.fn(),
-}))
-const txMock = vi.hoisted(() => ({
-  mediaObject: { create: vi.fn() },
-  project: { create: vi.fn() },
-  novelPromotionProject: { create: vi.fn() },
-  novelPromotionEpisode: { create: vi.fn() },
-  viralReplication: { updateMany: vi.fn() },
-}))
 const probeVideoMock = vi.hoisted(() => vi.fn())
 const uploadObjectStreamMock = vi.hoisted(() => vi.fn())
 const deleteObjectMock = vi.hoisted(() => vi.fn())
 const submitTaskMock = vi.hoisted(() => vi.fn())
+const storageState = vi.hoisted(() => ({ key: '' }))
 
-vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/viral-replication/ffmpeg', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/viral-replication/ffmpeg')>()),
-  probeVideo: probeVideoMock,
+  ...(await importOriginal<typeof import('@/lib/viral-replication/ffmpeg')>()), probeVideo: probeVideoMock,
 }))
 vi.mock('@/lib/storage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/storage')>()),
@@ -43,153 +32,189 @@ function videoRequest(bytes: Buffer): Request {
   })
 }
 
-describe('viral replication streamed upload service', () => {
+describe('viral replication streamed upload with real database', () => {
   let tempRoot: string
+  let userId: string
+  let replicationId: string
+  let storagePrefix: string
+
+  async function artifactCounts() {
+    return {
+      projects: await prisma.project.count({ where: { userId } }),
+      episodes: await prisma.novelPromotionEpisode.count({
+        where: { novelPromotionProject: { project: { userId } } },
+      }),
+      media: await prisma.mediaObject.count({ where: { storageKey: { startsWith: storagePrefix } } }),
+    }
+  }
 
   beforeEach(async () => {
     vi.clearAllMocks()
-    tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'viral-upload-test-'))
-    prismaMock.userPreference.findUnique.mockResolvedValue({
-      analysisModel: 'openai::analysis-v1', characterModel: 'image::character', locationModel: 'image::location',
-      storyboardModel: 'image::storyboard', editModel: 'image::edit', videoModel: 'video::v1', audioModel: 'audio::v1',
-      videoRatio: '9:16', videoResolution: '720p', artStyle: 'realistic', ttsRate: '+50%', imageResolution: '2K',
+    const suffix = randomUUID().slice(0, 8)
+    storagePrefix = `viral-test/${suffix}/`
+    storageState.key = `${storagePrefix}source.mp4`
+    tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'viral-upload-db-test-'))
+    const user = await prisma.user.create({ data: { name: `viral_upload_${suffix}` } })
+    userId = user.id
+    await prisma.userPreference.create({
+      data: {
+        userId,
+        analysisModel: 'openai::analysis-v1',
+        characterModel: 'image::character',
+        locationModel: 'image::location',
+        storyboardModel: 'image::storyboard',
+        editModel: 'image::edit',
+        videoModel: 'video::v1',
+        audioModel: 'audio::v1',
+        videoRatio: '9:16',
+        videoResolution: '720p',
+        artStyle: 'realistic',
+        ttsRate: '+50%',
+        imageResolution: '2K',
+      },
     })
-    prismaMock.viralReplication.findFirst.mockResolvedValue({
-      id: 'rep-1', userId: 'user-1', status: 'uploading', videoRatio: '16:9', artStyle: 'japanese-anime',
-      brief: '原创方向', reportJson: null, reportVersion: 1, errorMessage: null, durationMs: null,
-      confirmedAt: null, createdAt: new Date(), updatedAt: new Date(), project: null, episode: null, sourceVideoMedia: null,
+    const replication = await prisma.viralReplication.create({
+      data: {
+        userId,
+        brief: '原创方向',
+        videoRatio: '16:9',
+        artStyle: 'japanese-anime',
+        status: 'uploading',
+      },
     })
-    prismaMock.viralReplication.updateMany.mockResolvedValue({ count: 1 })
-    prismaMock.viralReplication.update.mockResolvedValue({ id: 'rep-1', status: 'failed' })
+    replicationId = replication.id
     probeVideoMock.mockResolvedValue({
       durationMs: 30_000, formatName: 'mov,mp4,m4a,3gp,3g2,mj2', majorBrand: 'isom',
       videoStreamIndex: 0, width: 1080, height: 1920, hasVideo: true, hasAudio: false, hasSubtitles: false,
       videoStreams: [], audioStreams: [], subtitleStreams: [],
     })
-    uploadObjectStreamMock.mockResolvedValue('viral-replications/rep-1/source.mp4')
-    txMock.mediaObject.create.mockResolvedValue({ id: 'media-1' })
-    txMock.project.create.mockResolvedValue({ id: 'project-1' })
-    txMock.novelPromotionProject.create.mockResolvedValue({ id: 'novel-1' })
-    txMock.novelPromotionEpisode.create.mockResolvedValue({ id: 'episode-1' })
-    txMock.viralReplication.updateMany.mockResolvedValue({ count: 1 })
-    prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof txMock) => unknown) => callback(txMock))
-    submitTaskMock.mockResolvedValue({ taskId: 'task-1', success: true })
+    uploadObjectStreamMock.mockImplementation(async () => storageState.key)
+    submitTaskMock.mockResolvedValue({ taskId: `task-${suffix}`, success: true })
   })
 
   afterEach(async () => {
+    await prisma.user.deleteMany({ where: { id: userId } })
+    await prisma.mediaObject.deleteMany({ where: { storageKey: { startsWith: storagePrefix } } })
     await fs.rm(tempRoot, { recursive: true, force: true })
   })
 
-  it('cuts off an over-limit request before probing, storage, or project creation', async () => {
+  it('cuts off an over-limit request and persists zero project, episode, or media rows', async () => {
     const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
     await expect(uploadViralReplicationVideo({
-      id: 'rep-1', userId: 'user-1', request: videoRequest(mp4Bytes(64)), mimeType: 'video/mp4', locale: 'zh', maxBytes: 20, tempRoot,
-    })).rejects.toMatchObject({ code: 'INVALID_PARAMS', details: { code: 'VIRAL_VIDEO_TOO_LARGE', field: 'video' } })
+      id: replicationId, userId, request: videoRequest(mp4Bytes(64)), mimeType: 'video/mp4', locale: 'zh',
+      maxBytes: 20, tempRoot,
+    })).rejects.toMatchObject({ code: 'INVALID_PARAMS', details: { code: 'VIRAL_VIDEO_TOO_LARGE' } })
     expect(probeVideoMock).not.toHaveBeenCalled()
     expect(uploadObjectStreamMock).not.toHaveBeenCalled()
-    expect(prismaMock.$transaction).not.toHaveBeenCalled()
-    expect(txMock.project.create).not.toHaveBeenCalled()
-    expect(txMock.novelPromotionEpisode.create).not.toHaveBeenCalled()
+    expect(submitTaskMock).not.toHaveBeenCalled()
+    expect(await artifactCounts()).toEqual({ projects: 0, episodes: 0, media: 0 })
+    expect(await prisma.viralReplication.findUnique({ where: { id: replicationId } })).toMatchObject({
+      status: 'uploading', errorMessage: null, projectId: null, episodeId: null, sourceVideoMediaId: null,
+    })
     expect(await fs.readdir(tempRoot)).toEqual([])
   })
 
-  it('creates no project, episode, media, or task when FFprobe validation fails', async () => {
+  it('persists zero project, episode, or media rows when FFprobe validation fails', async () => {
     probeVideoMock.mockResolvedValueOnce({
       durationMs: 5_000, formatName: 'mov,mp4', majorBrand: 'isom', videoStreamIndex: 0, width: 100, height: 100,
-      hasVideo: true, hasAudio: false, hasSubtitles: false,
-      videoStreams: [], audioStreams: [], subtitleStreams: [],
+      hasVideo: true, hasAudio: false, hasSubtitles: false, videoStreams: [], audioStreams: [], subtitleStreams: [],
     })
     const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
     await expect(uploadViralReplicationVideo({
-      id: 'rep-1', userId: 'user-1', request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
-    })).rejects.toMatchObject({ code: 'INVALID_PARAMS', details: { code: 'INVALID_VIDEO_DURATION', field: 'video' } })
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+    })).rejects.toMatchObject({ code: 'INVALID_PARAMS', details: { code: 'INVALID_VIDEO_DURATION' } })
     expect(uploadObjectStreamMock).not.toHaveBeenCalled()
-    expect(prismaMock.$transaction).not.toHaveBeenCalled()
     expect(submitTaskMock).not.toHaveBeenCalled()
+    expect(await artifactCounts()).toEqual({ projects: 0, episodes: 0, media: 0 })
     expect(await fs.readdir(tempRoot)).toEqual([])
   })
 
-  it('rejects a missing current analysis model before locking or creating any draft records', async () => {
-    prismaMock.userPreference.findUnique.mockResolvedValueOnce({ analysisModel: null })
+  it('rejects a missing current analysis model before creating draft records', async () => {
+    await prisma.userPreference.update({ where: { userId }, data: { analysisModel: null } })
     const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
     await expect(uploadViralReplicationVideo({
-      id: 'rep-1', userId: 'user-1', request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
-    })).rejects.toBeDefined()
-    expect(prismaMock.viralReplication.updateMany).not.toHaveBeenCalled()
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+    })).rejects.toMatchObject({ code: 'INVALID_PARAMS', details: { code: 'ANALYSIS_MODEL_REQUIRED' } })
     expect(uploadObjectStreamMock).not.toHaveBeenCalled()
-    expect(prismaMock.$transaction).not.toHaveBeenCalled()
     expect(submitTaskMock).not.toHaveBeenCalled()
+    expect(await artifactCounts()).toEqual({ projects: 0, episodes: 0, media: 0 })
   })
 
-  it('creates source media, project settings, episode, and analyzing link exactly once before task submission', async () => {
+  it('persists every source and draft relation exactly once before submitting analysis', async () => {
     const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
     const result = await uploadViralReplicationVideo({
-      id: 'rep-1', userId: 'user-1', request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
       now: new Date('2026-07-15T08:09:10.000Z'),
     })
-    expect(result).toMatchObject({ status: 'analyzing', projectId: 'project-1', episodeId: 'episode-1', taskId: 'task-1' })
-    expect(uploadObjectStreamMock).toHaveBeenCalledTimes(1)
-    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
-    expect(txMock.mediaObject.create).toHaveBeenCalledTimes(1)
-    expect(txMock.mediaObject.create).toHaveBeenCalledWith({ data: expect.objectContaining({
-      storageKey: 'viral-replications/rep-1/source.mp4', durationMs: 30_000, width: 1080, height: 1920,
-    }) })
-    expect(txMock.project.create).toHaveBeenCalledWith({ data: expect.objectContaining({ userId: 'user-1', name: '爆款复刻-20260715-080910' }) })
-    expect(txMock.novelPromotionProject.create).toHaveBeenCalledWith({ data: expect.objectContaining({
-      projectId: 'project-1', analysisModel: 'openai::analysis-v1', videoRatio: '16:9', artStyle: 'japanese-anime',
-    }) })
-    expect(txMock.novelPromotionEpisode.create).toHaveBeenCalledWith({ data: { novelPromotionProjectId: 'novel-1', episodeNumber: 1, name: '第 1 集' } })
-    expect(txMock.viralReplication.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: 'analyzing', projectId: 'project-1', episodeId: 'episode-1', sourceVideoMediaId: 'media-1', analysisModelSnapshot: 'openai::analysis-v1', durationMs: 30_000 }),
-    }))
+    expect(result).toMatchObject({ id: replicationId, status: 'analyzing', taskId: expect.any(String) })
+    expect(await artifactCounts()).toEqual({ projects: 1, episodes: 1, media: 1 })
+
+    const persisted = await prisma.viralReplication.findUnique({
+      where: { id: replicationId },
+      include: { project: { include: { novelPromotionData: { include: { episodes: true } } } }, episode: true, sourceVideoMedia: true },
+    })
+    expect(persisted).toMatchObject({
+      status: 'analyzing', analysisModelSnapshot: 'openai::analysis-v1', durationMs: 30_000,
+      project: {
+        id: result.projectId,
+        name: '爆款复刻-20260715-080910',
+        novelPromotionData: {
+          analysisModel: 'openai::analysis-v1', videoRatio: '16:9', artStyle: 'japanese-anime',
+          episodes: [{ id: result.episodeId, episodeNumber: 1, name: '第 1 集' }],
+        },
+      },
+      episode: { id: result.episodeId },
+      sourceVideoMedia: {
+        id: result.sourceVideoMediaId, storageKey: storageState.key, mimeType: 'video/mp4',
+        sizeBytes: BigInt(mp4Bytes().length), width: 1080, height: 1920, durationMs: 30_000,
+      },
+    })
     expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
-      userId: 'user-1', projectId: 'project-1', episodeId: 'episode-1', type: 'viral_video_analysis',
-      targetType: 'ViralReplication', targetId: 'rep-1', maxAttempts: 1,
-      payload: expect.objectContaining({ sourceVideoMediaId: 'media-1', analysisModelSnapshot: 'openai::analysis-v1' }),
+      userId, projectId: result.projectId, episodeId: result.episodeId,
+      type: 'viral_video_analysis', targetType: 'ViralReplication', targetId: replicationId, maxAttempts: 1,
+      payload: { sourceVideoMediaId: result.sourceVideoMediaId, analysisModelSnapshot: 'openai::analysis-v1' },
     }))
     expect(await fs.readdir(tempRoot)).toEqual([])
   })
 
-  it('deletes the stored object best-effort when the database transaction fails', async () => {
-    prismaMock.$transaction.mockRejectedValueOnce(new Error('db unavailable'))
+  it('compensates storage and rolls back every database row when the transaction fails', async () => {
+    storageState.key = `${storagePrefix}${'x'.repeat(600)}`
     const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
     await expect(uploadViralReplicationVideo({
-      id: 'rep-1', userId: 'user-1', request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
-    })).rejects.toThrow('db unavailable')
-    expect(deleteObjectMock).toHaveBeenCalledWith(expect.stringMatching(/^viral-replications\/rep-1\/.+\.mp4$/))
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+    })).rejects.toBeDefined()
+    expect(deleteObjectMock).toHaveBeenCalledWith(storageState.key)
     expect(submitTaskMock).not.toHaveBeenCalled()
+    expect(await artifactCounts()).toEqual({ projects: 0, episodes: 0, media: 0 })
+    expect(await prisma.viralReplication.findUnique({ where: { id: replicationId } })).toMatchObject({
+      status: 'uploading', errorMessage: null, projectId: null, episodeId: null, sourceVideoMediaId: null,
+    })
   })
 
-  it('marks the replication failed but preserves its project and source when task submission fails', async () => {
+  it('keeps the persisted project and source but marks failed when submission fails', async () => {
     submitTaskMock.mockRejectedValueOnce(new Error('queue unavailable'))
     const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
     const result = await uploadViralReplicationVideo({
-      id: 'rep-1', userId: 'user-1', request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
     })
-    expect(result).toMatchObject({ status: 'failed', projectId: 'project-1', sourceVideoMediaId: 'media-1' })
-    expect(prismaMock.viralReplication.update).toHaveBeenCalledWith({
-      where: { id: 'rep-1' }, data: { status: 'failed', errorMessage: expect.any(String) },
+    expect(result).toMatchObject({ status: 'failed', projectId: expect.any(String), sourceVideoMediaId: expect.any(String) })
+    expect(await artifactCounts()).toEqual({ projects: 1, episodes: 1, media: 1 })
+    expect(await prisma.viralReplication.findUnique({ where: { id: replicationId } })).toMatchObject({
+      status: 'failed', projectId: result.projectId, episodeId: result.episodeId,
+      sourceVideoMediaId: result.sourceVideoMediaId, errorMessage: expect.any(String),
     })
     expect(deleteObjectMock).not.toHaveBeenCalled()
   })
 
-  it('allows only one concurrent caller to acquire an uploading session', async () => {
-    prismaMock.viralReplication.updateMany.mockResolvedValueOnce({ count: 0 })
+  it('reports a normalized conflict when another upload owns the concurrency lock', async () => {
+    await prisma.viralReplication.update({
+      where: { id: replicationId }, data: { errorMessage: '__viral_upload_lock__:existing' },
+    })
     const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
     await expect(uploadViralReplicationVideo({
-      id: 'rep-1', userId: 'user-1', request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
-    })).rejects.toBeDefined()
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+    })).rejects.toMatchObject({ code: 'INVALID_PARAMS', details: { code: 'VIRAL_UPLOAD_CONFLICT' } })
     expect(probeVideoMock).not.toHaveBeenCalled()
     expect(uploadObjectStreamMock).not.toHaveBeenCalled()
-  })
-
-  it('never exposes the internal concurrency lock as a user-facing error', async () => {
-    prismaMock.viralReplication.findFirst.mockResolvedValueOnce({
-      id: 'rep-1', status: 'uploading', brief: '方向', videoRatio: '9:16', artStyle: 'realistic',
-      reportJson: null, reportVersion: 1, errorMessage: '__viral_upload_lock__:private-token', durationMs: null,
-      confirmedAt: null, createdAt: new Date(), updatedAt: new Date(), project: null, episode: null, sourceVideoMedia: null,
-    })
-    const { getOwnedViralReplicationDetail } = await import('@/lib/viral-replication/service')
-    await expect(getOwnedViralReplicationDetail('rep-1', 'user-1')).resolves.toMatchObject({ errorMessage: null })
   })
 })

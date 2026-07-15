@@ -12,6 +12,7 @@ import { VIRAL_REPLICATION_STATUS } from './constants'
 import { FfmpegBoundaryError, probeVideo } from './ffmpeg'
 import { readOwnedViralReplication } from './ownership'
 import { writeRequestBodyToTempFile } from './temp-file'
+import { cleanupUploadTempFile } from './temp-cleanup'
 import {
   ViralUploadValidationError,
   validateViralUploadPrefix,
@@ -137,12 +138,13 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
     data: { errorMessage: lockToken },
   })
   if (acquired.count !== 1) {
-    throw new ApiError('NOT_FOUND')
+    throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_UPLOAD_CONFLICT' })
   }
 
   let tempFile: Awaited<ReturnType<typeof writeRequestBodyToTempFile>> | null = null
   let storageKey: string | null = null
   let committed = false
+  let primaryFailure: unknown
 
   try {
     try {
@@ -297,6 +299,7 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
       return { ...baseResult, status: VIRAL_REPLICATION_STATUS.FAILED, taskId: null }
     }
   } catch (error: unknown) {
+    primaryFailure = error
     if (storageKey && !committed) {
       try {
         await deleteObject(storageKey)
@@ -307,6 +310,8 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
     if (!committed) await releaseUploadLock(input.id, input.userId, lockToken)
     throw error
   } finally {
-    await tempFile?.cleanup()
+    if (tempFile) {
+      await cleanupUploadTempFile(tempFile.cleanup, committed || primaryFailure !== undefined)
+    }
   }
 }

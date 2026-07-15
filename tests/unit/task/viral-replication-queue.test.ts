@@ -181,7 +181,7 @@ describe('viral replication task queue registration', () => {
     {
       taskType: TASK_TYPE.VIRAL_VIDEO_ANALYSIS,
       layers: ['worker-unit', 'api-contract', 'chain'],
-      apiContractTest: 'tests/integration/api/contract/viral-replication-routes.test.ts',
+      apiContractTest: 'tests/integration/api/specific/viral-replication-upload.test.ts',
     },
     {
       taskType: TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
