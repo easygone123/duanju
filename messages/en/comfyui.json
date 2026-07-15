@@ -92,6 +92,7 @@
       "chooseFile": "Choose JSON file",
       "analyzing": "Analyzing…",
       "name": "Workflow name",
+      "selected": "Selected",
       "types": {
         "image_generation": { "title": "Image generation", "hint": "Create images from a written description." },
         "image_edit": { "title": "Image editing", "hint": "Modify an image using a written description." },

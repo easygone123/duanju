@@ -3,15 +3,12 @@
 import React from 'react'
 import { useTranslations } from 'next-intl'
 
-import type { WorkflowImportKind } from '@/lib/comfyui/workflow-auto-mapping-types'
+import {
+  WORKFLOW_IMPORT_KIND_META,
+  type WorkflowImportKind,
+} from '@/lib/comfyui/workflow-auto-mapping-types'
 
-const KINDS: WorkflowImportKind[] = [
-  'image_generation',
-  'image_edit',
-  'image_upscale',
-  'video_generation',
-  'video_to_video',
-]
+const KINDS = Object.keys(WORKFLOW_IMPORT_KIND_META) as WorkflowImportKind[]
 
 interface WorkflowTypePickerProps {
   value: WorkflowImportKind | null
@@ -39,6 +36,9 @@ export default function WorkflowTypePicker({ value, onSelect }: WorkflowTypePick
       >
         <span className="block font-medium text-[var(--glass-text-primary)]">{t(`types.${kind}.title`)}</span>
         <span className="mt-1 block text-sm text-[var(--glass-text-secondary)]">{t(`types.${kind}.hint`)}</span>
+        {value === kind && <span className="glass-badge mt-3 inline-flex rounded-full px-2 py-1 text-xs font-medium">
+          {t('selected')}
+        </span>}
       </button>)}
     </div>
   </section>

@@ -7,11 +7,16 @@ import { NextIntlClientProvider } from 'next-intl'
 
 import WorkflowJsonDropzone from '@/app/[locale]/profile/components/comfyui/WorkflowJsonDropzone'
 import WorkflowTypePicker from '@/app/[locale]/profile/components/comfyui/WorkflowTypePicker'
-import type { WorkflowImportKind } from '@/lib/comfyui/workflow-auto-mapping-types'
+import {
+  WORKFLOW_IMPORT_KIND_META,
+  type WorkflowImportKind,
+} from '@/lib/comfyui/workflow-auto-mapping-types'
 import enComfyui from '../../../messages/en/comfyui.json'
 import zhComfyui from '../../../messages/zh/comfyui.json'
 
 afterEach(cleanup)
+
+const canonicalKinds = Object.keys(WORKFLOW_IMPORT_KIND_META) as WorkflowImportKind[]
 
 function withZh(node: React.ReactNode) {
   return <NextIntlClientProvider
@@ -43,13 +48,7 @@ describe('guided ComfyUI workflow type selection', () => {
     const buttons = view.getAllByRole('button')
 
     expect(buttons).toHaveLength(5)
-    expect(buttons.map((button) => button.getAttribute('value'))).toEqual([
-      'image_generation',
-      'image_edit',
-      'image_upscale',
-      'video_generation',
-      'video_to_video',
-    ])
+    expect(buttons.map((button) => button.getAttribute('value'))).toEqual(canonicalKinds)
     expect(view.getByText('图片生成')).toBeTruthy()
     expect(view.getByText('图片编辑')).toBeTruthy()
     expect(view.getByText('图片放大')).toBeTruthy()
@@ -65,6 +64,15 @@ describe('guided ComfyUI workflow type selection', () => {
     expect(editButton?.getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(view.getByText('图片编辑'))
     expect(onSelect).toHaveBeenCalledWith('image_edit')
+  })
+
+  it('shows a localized non-color selected indicator only on the active card', () => {
+    const view = typePicker('image_edit')
+    const buttons = view.getAllByRole('button')
+    const selected = buttons.find((button) => button.getAttribute('aria-pressed') === 'true')
+
+    expect(selected?.textContent).toContain('已选择')
+    expect(buttons.filter((button) => button.textContent?.includes('已选择'))).toEqual([selected])
   })
 
   it('uses a responsive width-safe card grid', () => {
@@ -92,8 +100,16 @@ describe('guided ComfyUI workflow JSON upload', () => {
     expect(input.className).toContain('sr-only')
     expect(input.accept).toContain('.json')
     expect(input.accept).toContain('application/json')
+    let selectedValue = 'C:\\fakepath\\portrait.v2.json'
+    const resetValue = vi.fn((value: string) => { selectedValue = value })
+    Object.defineProperty(input, 'value', {
+      configurable: true,
+      get: () => selectedValue,
+      set: resetValue,
+    })
     fireEvent.change(input, { target: { files: [pickerFile] } })
     expect(onFile).toHaveBeenLastCalledWith(pickerFile, 'portrait.v2')
+    expect(resetValue).toHaveBeenCalledWith('')
     expect(input.value).toBe('')
 
     const droppedFile = new File(['{}'], 'cinematic.json', { type: 'application/json' })
@@ -116,9 +132,12 @@ describe('guided ComfyUI workflow JSON upload', () => {
 
   it('disables file selection and shows analyzing state while busy', () => {
     const view = dropzone({ busy: true })
+    const region = view.getByRole('region', { name: '上传工作流 JSON' })
 
+    expect(region.getAttribute('aria-busy')).toBe('true')
     expect((view.getByLabelText('工作流 JSON 文件') as HTMLInputElement).disabled).toBe(true)
     expect((view.getByRole('button', { name: '正在分析…' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(view.getByRole('status').textContent).toBe('正在分析…')
   })
 
   it('prevents default drag behavior and uses a bounded width-safe layout', () => {
@@ -138,10 +157,7 @@ describe('guided ComfyUI workflow JSON upload', () => {
 describe('guided workflow translations', () => {
   const requiredKeys = [
     'typeTitle', 'typeHint', 'jsonInput', 'dropTitle', 'dropHint',
-    'chooseFile', 'analyzing', 'name',
-  ]
-  const kinds: WorkflowImportKind[] = [
-    'image_generation', 'image_edit', 'image_upscale', 'video_generation', 'video_to_video',
+    'chooseFile', 'analyzing', 'name', 'selected',
   ]
 
   it('keeps the English and Chinese guided message objects structurally identical', () => {
@@ -150,9 +166,9 @@ describe('guided workflow translations', () => {
 
     expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort())
     expect(Object.keys(zh).sort()).toEqual([...requiredKeys, 'types'].sort())
-    expect(Object.keys(zh.types)).toEqual(kinds)
-    expect(Object.keys(en.types)).toEqual(kinds)
-    for (const kind of kinds) {
+    expect(Object.keys(zh.types)).toEqual(canonicalKinds)
+    expect(Object.keys(en.types)).toEqual(canonicalKinds)
+    for (const kind of canonicalKinds) {
       expect(Object.keys(zh.types[kind]).sort()).toEqual(['hint', 'title'])
       expect(Object.keys(en.types[kind]).sort()).toEqual(['hint', 'title'])
     }

@@ -92,6 +92,7 @@
       "chooseFile": "选择 JSON 文件",
       "analyzing": "正在分析…",
       "name": "工作流名称",
+      "selected": "已选择",
       "types": {
         "image_generation": { "title": "图片生成", "hint": "根据文字描述创建图片。" },
         "image_edit": { "title": "图片编辑", "hint": "根据图片和描述进行修改。" },

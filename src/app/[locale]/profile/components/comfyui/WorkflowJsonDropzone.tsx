@@ -24,9 +24,18 @@ export default function WorkflowJsonDropzone({
     if (file) onFile(file, deriveWorkflowName(file.name))
   }
   const preventDragDefault = (event: DragEvent<HTMLElement>) => event.preventDefault()
+  const fileButton = <button
+    type="button"
+    disabled={busy}
+    onClick={() => fileInputRef.current?.click()}
+    className="glass-btn-base glass-btn-tone-info mt-4 px-4 py-2 text-sm disabled:opacity-50"
+  >
+    {busy ? t('analyzing') : t('chooseFile')}
+  </button>
 
   return <section
     aria-label={t('dropTitle')}
+    aria-busy={busy}
     className="w-full max-w-3xl min-w-0 space-y-4"
     onDragEnter={preventDragDefault}
     onDragOver={preventDragDefault}
@@ -50,14 +59,7 @@ export default function WorkflowJsonDropzone({
           event.currentTarget.value = ''
         }}
       />
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => fileInputRef.current?.click()}
-        className="glass-btn-base glass-btn-tone-info mt-4 px-4 py-2 text-sm disabled:opacity-50"
-      >
-        {busy ? t('analyzing') : t('chooseFile')}
-      </button>
+      {busy ? <div role="status" aria-live="polite">{fileButton}</div> : fileButton}
     </div>
     <label className="block min-w-0 text-sm text-[var(--glass-text-secondary)]">
       <span>{t('name')}</span>

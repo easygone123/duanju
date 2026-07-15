@@ -24,7 +24,7 @@ export default defineConfig({
     },
     setupFiles: ['./tests/setup/env.ts'],
     globalSetup: ['./tests/setup/global-setup.ts'],
-    include: ['**/*.test.ts'],
+    include: ['**/*.test.{ts,tsx}'],
     testTimeout: 30_000,
     hookTimeout: 60_000,
     coverage: {
