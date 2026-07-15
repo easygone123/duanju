@@ -7,6 +7,32 @@
   "recentProjects": "最近项目",
   "viewAll": "查看全部项目",
   "noProjects": "还没有项目，从上方开始你的第一个创作吧",
+  "viralReplication": {
+    "trigger": "爆款复刻",
+    "title": "上传参考视频，生成原创分镜",
+    "subtitle": "AI 只提取节奏、构图和镜头方法，不复制人物、剧情或对白",
+    "close": "关闭",
+    "videoLabel": "参考视频",
+    "chooseVideo": "选择或拖入视频",
+    "videoHint": "支持 MP4、MOV，15 秒至 3 分钟，最大 500 MB",
+    "formatError": "仅支持 MP4 或 MOV 视频",
+    "sizeError": "视频不能超过 500 MB",
+    "briefLabel": "原创方向",
+    "briefPlaceholder": "例如：保留快节奏反转，但改成全新的都市职场故事",
+    "ratioLabel": "画面比例",
+    "styleLabel": "画面风格",
+    "styles": {
+      "american-comic": "漫画风",
+      "chinese-comic": "精致国漫",
+      "japanese-anime": "日系动漫风",
+      "realistic": "真人风格"
+    },
+    "uploadProgress": "上传进度",
+    "genericError": "上传或创建失败，请重试",
+    "retry": "重试",
+    "cancel": "取消",
+    "start": "开始分析"
+  },
   "ago": {
     "justNow": "刚刚",
     "minutesAgo": "{n}分钟前",

@@ -7,6 +7,32 @@
   "recentProjects": "Recent Projects",
   "viewAll": "View All Projects",
   "noProjects": "No projects yet. Start your first creation from above!",
+  "viralReplication": {
+    "trigger": "Viral Remix",
+    "title": "Upload a reference and create an original storyboard",
+    "subtitle": "AI transfers pacing, composition, and camera methods without copying characters, plot, or dialogue",
+    "close": "Close",
+    "videoLabel": "Reference video",
+    "chooseVideo": "Choose or drop a video",
+    "videoHint": "MP4 or MOV, 15 seconds to 3 minutes, up to 500 MB",
+    "formatError": "Only MP4 and MOV videos are supported",
+    "sizeError": "The video must not exceed 500 MB",
+    "briefLabel": "Original direction",
+    "briefPlaceholder": "For example: keep the fast reversals but create a new workplace story",
+    "ratioLabel": "Aspect ratio",
+    "styleLabel": "Visual style",
+    "styles": {
+      "american-comic": "Comic",
+      "chinese-comic": "Chinese animation",
+      "japanese-anime": "Japanese anime",
+      "realistic": "Realistic"
+    },
+    "uploadProgress": "Upload progress",
+    "genericError": "Creation or upload failed. Please try again.",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "start": "Start analysis"
+  },
   "ago": {
     "justNow": "Just now",
     "minutesAgo": "{n}m ago",

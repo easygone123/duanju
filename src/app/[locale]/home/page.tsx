@@ -20,6 +20,8 @@ import { createHomeProjectLaunch } from '@/lib/home/create-project-launch'
 import { formatDefaultProjectTimestamp } from '@/lib/projects/default-name'
 import { HOME_QUICK_START_MIN_ROWS } from '@/lib/ui/textarea-height'
 import AiWriteModal from '@/components/home/AiWriteModal'
+import ViralReplicationLauncher from '@/components/home/ViralReplicationLauncher'
+import { getProjectOpenPath } from '@/lib/viral-replication/navigation'
 
 interface ProjectStats {
   episodes: number
@@ -36,6 +38,7 @@ interface Project {
   createdAt: string
   updatedAt: string
   stats?: ProjectStats
+  viralReplication?: { id: string; status: string } | null
 }
 
 const RECENT_COUNT = 5
@@ -279,6 +282,8 @@ export default function HomePage() {
                 </button>
               )}
               secondaryActions={(
+                <>
+                <ViralReplicationLauncher />
                 <button
                   onClick={() => setAiWriteOpen(true)}
                   disabled={createLoading}
@@ -296,6 +301,7 @@ export default function HomePage() {
                     {t('aiWrite.trigger')}
                   </span>
                 </button>
+                </>
               )}
               footer={createError ? (
                 <p className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600">
@@ -349,7 +355,7 @@ export default function HomePage() {
             {projects.map((project) => (
               <Link
                 key={project.id}
-                href={{ pathname: `/workspace/${project.id}` }}
+                href={{ pathname: getProjectOpenPath(project) }}
                 className="glass-surface cursor-pointer group hover:border-[var(--glass-tone-info-fg)]/40 transition-all duration-300 overflow-hidden relative block"
               >
                 <div className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-blue-500/5 to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />

@@ -13,6 +13,7 @@ import { Link, useRouter } from '@/i18n/navigation'
 import { apiFetch } from '@/lib/api-fetch'
 import { readApiErrorMessage } from '@/lib/api/read-error-message'
 import { validateProjectDraft } from '@/lib/projects/validation'
+import { getProjectOpenPath } from '@/lib/viral-replication/navigation'
 
 interface ProjectStats {
   episodes: number
@@ -30,6 +31,7 @@ interface Project {
   updatedAt: string
   totalCost?: number  // 项目总费用（CNY）
   stats?: ProjectStats
+  viralReplication?: { id: string; status: string } | null
 }
 
 interface Pagination {
@@ -400,7 +402,7 @@ export default function WorkspacePage() {
             projects.map((project) => (
               <Link
                 key={project.id}
-                href={{ pathname: `/workspace/${project.id}` }}
+                href={{ pathname: getProjectOpenPath(project) }}
                 className="glass-surface cursor-pointer relative group block hover:border-[var(--glass-tone-info-fg)]/40 transition-all duration-300 overflow-hidden"
               >
                 {/* 悬停光效 */}

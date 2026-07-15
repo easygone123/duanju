@@ -17,6 +17,12 @@ const authState = vi.hoisted<AuthState>(() => ({
 }))
 
 const prismaMock = vi.hoisted(() => ({
+  project: {
+    count: vi.fn(),
+    findMany: vi.fn(),
+  },
+  usageCost: { groupBy: vi.fn() },
+  novelPromotionProject: { findMany: vi.fn() },
   globalCharacter: {
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -185,6 +191,14 @@ describe('api contract - crud routes (behavior)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     authState.authenticated = false
+    prismaMock.project.count.mockResolvedValue(1)
+    prismaMock.project.findMany.mockResolvedValue([{
+      id: 'project-1', name: 'Viral project', description: null, userId: 'user-1',
+      createdAt: new Date('2026-07-15T00:00:00.000Z'), updatedAt: new Date('2026-07-15T00:00:00.000Z'),
+      lastAccessedAt: null, viralReplication: { id: 'rep-1', status: 'review_ready' },
+    }])
+    prismaMock.usageCost.groupBy.mockResolvedValue([])
+    prismaMock.novelPromotionProject.findMany.mockResolvedValue([])
 
     prismaMock.globalCharacter.findUnique.mockResolvedValue({
       id: 'character-1',
@@ -267,6 +281,22 @@ describe('api contract - crud routes (behavior)', () => {
       props: JSON.stringify(['Bronze Dagger']),
     })
     prismaMock.novelPromotionPanel.count.mockResolvedValue(1)
+  })
+
+  it('projects viral replication status in the project list for re-entry routing', async () => {
+    authState.authenticated = true
+    const { GET } = await import('@/app/api/projects/route')
+    const response = await GET(buildMockRequest({ path: '/api/projects', method: 'GET' }), {
+      params: Promise.resolve({}),
+    })
+
+    expect(response.status).toBe(200)
+    expect(prismaMock.project.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      include: { viralReplication: { select: { id: true, status: true } } },
+    }))
+    expect(await response.json()).toMatchObject({
+      projects: [{ id: 'project-1', viralReplication: { id: 'rep-1', status: 'review_ready' } }],
+    })
   })
 
   it('crud route group exists', () => {

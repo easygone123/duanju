@@ -57,7 +57,10 @@ export const GET = apiHandler(async (request: NextRequest) => {
       where,
       orderBy: { updatedAt: 'desc' },  // 先按更新时间排序获取所有匹配项目
       skip: (page - 1) * pageSize,
-      take: pageSize
+      take: pageSize,
+      include: {
+        viralReplication: { select: { id: true, status: true } },
+      },
     })
   ])
 
