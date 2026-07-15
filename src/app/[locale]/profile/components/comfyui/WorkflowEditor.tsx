@@ -1,29 +1,20 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef } from 'react'
 import { useTranslations } from 'next-intl'
 import type { ComfyVariableDefinition, ComfyVariableType } from '@/lib/comfyui/types'
-import type {
-  CanonicalWorkflowInput,
-  WorkflowAutoMappingResult,
-} from '@/lib/comfyui/workflow-auto-mapping-types'
 import WorkflowMappingTable from './WorkflowMappingTable'
-import WorkflowAutoMappingTable from './WorkflowAutoMappingTable'
-import WorkflowUploadStep from './WorkflowUploadStep'
 import {
   MAX_WORKFLOW_JSON_BYTES,
   discoverPlaceholderNames,
   parseWorkflowImportText,
   readWorkflowImportFile,
-  confirmWorkflowAnalysis,
-  safeWorkflowErrorKey,
   type WorkflowAuthorDraft,
 } from './workflow-ui'
 
-interface Props { value: WorkflowAuthorDraft; disabled?: boolean; identityLocked?: boolean; onChange(value: WorkflowAuthorDraft): void; onImportError(key: string): void }
+interface Props { value: WorkflowAuthorDraft; disabled?: boolean; onChange(value: WorkflowAuthorDraft): void; onImportError(key: string): void }
 const VARIABLE_TYPES: ComfyVariableType[] = ['string', 'number', 'boolean', 'image_ref', 'image_ref_list', 'video_ref']
 const inputClass = 'w-full min-w-0 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm'
-type WorkflowEditorStage = 'upload' | 'mapping' | 'validate'
 
 function parseDefault(type: ComfyVariableType, raw: string) {
   if (!raw) return undefined
@@ -32,13 +23,9 @@ function parseDefault(type: ComfyVariableType, raw: string) {
   return raw
 }
 
-export default function WorkflowEditor({ value, disabled, identityLocked, onChange, onImportError }: Props) {
+export default function WorkflowEditor({ value, disabled, onChange, onImportError }: Props) {
   const t = useTranslations('comfyui.workflows')
   const fileRef = useRef<HTMLInputElement>(null)
-  const [stage, setStage] = useState<WorkflowEditorStage>(identityLocked ? 'validate' : 'upload')
-  const [analysis, setAnalysis] = useState<WorkflowAutoMappingResult | null>(null)
-  const [roles, setRoles] = useState<Record<string, CanonicalWorkflowInput | 'preserve_original'>>({})
-  const [primaryOutputNodeId, setPrimaryOutputNodeId] = useState('')
   const placeholders = useMemo(() => discoverPlaceholderNames(value.apiFormatJson), [value.apiFormatJson])
   const updateVariable = (index: number, patch: Partial<ComfyVariableDefinition>) => onChange({ ...value,
     variableDefinitions: value.variableDefinitions.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item),
@@ -47,50 +34,11 @@ export default function WorkflowEditor({ value, disabled, identityLocked, onChan
     try { parseWorkflowImportText(text); onChange({ ...value, apiFormatJson: text }) } catch (error) { onImportError(error instanceof Error ? error.message : 'workflowInvalidJson') }
   }
 
-  if (!identityLocked) {
-    const hasUnconfirmedAmbiguous = analysis?.proposals.some((proposal) => (
-      proposal.confidence === 'ambiguous' && !roles[proposal.id]
-    )) ?? false
-    const canConfirm = Boolean(analysis && analysis.outputs.length > 0 && primaryOutputNodeId && !hasUnconfirmedAmbiguous)
-    const confirmAnalysis = () => {
-      if (!analysis) return
-      try {
-        const overlay = confirmWorkflowAnalysis(analysis, { roles, primaryOutputNodeId })
-        onChange({
-          ...value,
-          mediaType: analysis.mediaType,
-          purpose: analysis.purpose,
-          apiFormatJson: JSON.stringify(analysis.graph, null, 2),
-          ...overlay,
-        })
-        setStage('validate')
-      } catch {
-        onImportError('workflowRequestInvalid')
-      }
-    }
-
-    return <fieldset disabled={disabled} className="min-w-0 space-y-5">
-      <legend className="sr-only">{t('editor')}</legend>
-      <label className="block text-sm">{t('name')}<input className={inputClass} value={value.name} maxLength={160} onChange={(event) => onChange({ ...value, name: event.target.value })} /></label>
-      {stage === 'upload' && <WorkflowUploadStep disabled={disabled} onError={(error) => onImportError(safeWorkflowErrorKey(error))} onAnalyzed={(_sourceText, nextAnalysis) => {
-        setAnalysis(nextAnalysis)
-        setRoles({})
-        setPrimaryOutputNodeId(nextAnalysis.outputs.find((output) => output.primary)?.nodeId || (nextAnalysis.outputs.length === 1 ? nextAnalysis.outputs[0]?.nodeId || '' : ''))
-        setStage('mapping')
-      }} />}
-      {stage === 'mapping' && analysis && <>
-        <WorkflowAutoMappingTable analysis={analysis} roles={roles} primaryOutputNodeId={primaryOutputNodeId} onRoleChange={(id, role) => setRoles((current) => ({ ...current, [id]: role }))} onPrimaryOutputChange={setPrimaryOutputNodeId} />
-        <div className="flex flex-wrap gap-2"><button type="button" className="glass-btn-base px-4 py-2 text-sm" onClick={() => { setAnalysis(null); setStage('upload') }}>{t('chooseAnotherFile')}</button><button type="button" disabled={!canConfirm} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50" onClick={confirmAnalysis}>{t('confirmMappings')}</button></div>
-      </>}
-      {stage === 'validate' && analysis && <section className="glass-surface-soft space-y-3 rounded-xl p-4"><div><h4 className="font-medium">{t('mappingConfirmed')}</h4><p className="text-xs text-[var(--glass-text-secondary)]">{t('mappingConfirmedHint', { inputs: value.bindings.length, outputs: value.outputs.length })}</p></div><button type="button" className="glass-btn-base px-3 py-1.5 text-xs" onClick={() => setStage('mapping')}>{t('reviewMappings')}</button></section>}
-    </fieldset>
-  }
-
   return <fieldset disabled={disabled} className="min-w-0 space-y-5">
     <legend className="sr-only">{t('editor')}</legend>
     <div className="grid gap-3 sm:grid-cols-3"><label className="text-sm">{t('name')}<input className={inputClass} value={value.name} maxLength={160} onChange={(event) => onChange({ ...value, name: event.target.value })} /></label>
-      <label className="text-sm">{t('mediaType')}<select disabled={identityLocked || value.purpose === 'upscale'} className={inputClass} value={value.mediaType} onChange={(event) => onChange({ ...value, mediaType: event.target.value as 'image' | 'video', outputs: value.outputs.map((output) => ({ ...output, mediaType: event.target.value as 'image' | 'video' })) })}><option value="image">{t('image')}</option><option value="video">{t('video')}</option></select>{identityLocked && <span className="mt-1 block text-xs text-[var(--glass-text-tertiary)]">{t('mediaTypeImmutable')}</span>}</label>
-      <label className="text-sm">{t('purpose')}<select disabled={identityLocked} className={inputClass} value={value.purpose} onChange={(event) => onChange({ ...value, purpose: event.target.value as 'generation' | 'upscale', mediaType: event.target.value === 'upscale' ? 'image' : value.mediaType, outputs: value.outputs.map((output) => ({ ...output, mediaType: event.target.value === 'upscale' ? 'image' : output.mediaType })) })}><option value="generation">{t('purposes.generation')}</option><option value="upscale">{t('purposes.upscale')}</option></select>{identityLocked && <span className="mt-1 block text-xs text-[var(--glass-text-tertiary)]">{t('purposeImmutable')}</span>}</label></div>
+      <label className="text-sm">{t('mediaType')}<select disabled className={inputClass} value={value.mediaType}><option value="image">{t('image')}</option><option value="video">{t('video')}</option></select><span className="mt-1 block text-xs text-[var(--glass-text-tertiary)]">{t('mediaTypeImmutable')}</span></label>
+      <label className="text-sm">{t('purpose')}<select disabled className={inputClass} value={value.purpose}><option value="generation">{t('purposes.generation')}</option><option value="upscale">{t('purposes.upscale')}</option></select><span className="mt-1 block text-xs text-[var(--glass-text-tertiary)]">{t('purposeImmutable')}</span></label></div>
     {value.purpose === 'upscale' && <p className="text-xs text-[var(--glass-text-secondary)]">{t('upscaleContractHint')}</p>}
     <section className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-2"><label htmlFor="api-format-json" className="font-medium">{t('apiFormat')}</label>
       <button type="button" className="glass-btn-base px-3 py-1.5 text-xs" onClick={() => fileRef.current?.click()}>{t('importFile')}</button></div>

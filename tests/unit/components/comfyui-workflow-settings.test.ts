@@ -229,13 +229,25 @@ describe('ComfyUI workflow settings UI contract', () => {
     }] }, { roles: { required: 'preserve_original' } })).toThrow('workflowMappingConfirmationRequired')
   })
 
-  it('exposes an upload-first automatic mapping wizard for new workflows', () => {
+  it('keeps creation in the guided wizard and saved editing out of the legacy upload stage', () => {
     const editor = read(`${base}/WorkflowEditor.tsx`)
-    expect(read(`${base}/WorkflowUploadStep.tsx`)).toContain('/api/comfyui/workflows/analyze')
-    expect(read(`${base}/WorkflowAutoMappingTable.tsx`)).toContain('confidence')
-    expect(editor).toContain("'upload'")
-    expect(editor).toContain("'mapping'")
-    expect(editor).toContain('confirmWorkflowAnalysis')
+    const settings = read(`${base}/ComfyUiSettings.tsx`)
+    expect(existsSync(`${base}/WorkflowUploadStep.tsx`)).toBe(false)
+    expect(settings).toContain('WorkflowCreationWizard')
+    expect(settings).toContain('createWorkflowDraft')
+    expect(editor).not.toContain('WorkflowUploadStep')
+    expect(editor).not.toContain('WorkflowEditorStage')
+    expect(editor).toContain('api-format-json')
+    expect(editor).toContain('WorkflowMappingTable')
+  })
+
+  it('keeps the workflow library saved-only and delegates new creation to its parent shell', () => {
+    const library = read(`${base}/WorkflowLibraryPanel.tsx`)
+    expect(library).toContain('initialWorkflowId')
+    expect(library).toContain('onCreateNew')
+    expect(library).not.toContain("selectedId === 'new'")
+    expect(library).not.toContain("method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...contract")
+    expect(library).not.toContain('emptyWorkflowDraft')
   })
 
   it('keeps the author form separate from saved versions and exposes draft actions', () => {

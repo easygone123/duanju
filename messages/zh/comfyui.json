@@ -83,6 +83,22 @@
     "selectMappingRole": "请选择角色",
     "preserveOriginal": "保留原始值",
     "primaryOutputMissing": "没有发现兼容的输出节点，请从 ComfyUI 导出包含保存或输出节点的 API Format 工作流。",
+    "activation": {
+      "title": "测试并启用",
+      "draft": "草稿",
+      "needsTest": "需要测试",
+      "readyToPublish": "可以发布",
+      "available": "已加入模型列表",
+      "noEnabledInstance": "当前没有已启用的 ComfyUI 实例。",
+      "instance": "测试实例",
+      "testAndEnable": "测试并启用",
+      "testing": "正在测试工作流…",
+      "publish": "发布工作流",
+      "retryPublish": "重试发布",
+      "testFailed": "实时测试失败，工作流没有发布。",
+      "publishFailed": "实时测试已通过，但发布失败；可以直接重试发布，无需再次测试。",
+      "close": "关闭启用流程"
+    },
     "guided": {
       "wizardTitle": "创建 ComfyUI 工作流",
       "wizardHint": "选择工作流类型，上传 API Format JSON，然后确认识别到的输入和输出。",

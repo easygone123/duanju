@@ -83,6 +83,22 @@
     "selectMappingRole": "Select a role",
     "preserveOriginal": "Preserve original value",
     "primaryOutputMissing": "No compatible output node was found. Export an API Format workflow with a save or output node.",
+    "activation": {
+      "title": "Test and enable",
+      "draft": "Draft",
+      "needsTest": "Needs test",
+      "readyToPublish": "Ready to publish",
+      "available": "Available as model",
+      "noEnabledInstance": "No enabled ComfyUI instance is available.",
+      "instance": "Test instance",
+      "testAndEnable": "Test and enable",
+      "testing": "Testing workflow…",
+      "publish": "Publish workflow",
+      "retryPublish": "Retry publish",
+      "testFailed": "The live test failed. Nothing was published.",
+      "publishFailed": "The live test passed, but publishing failed. Retry publishing without testing again.",
+      "close": "Close activation"
+    },
     "guided": {
       "wizardTitle": "Create a ComfyUI workflow",
       "wizardHint": "Choose a workflow type, upload its API Format JSON, then confirm the detected inputs and output.",

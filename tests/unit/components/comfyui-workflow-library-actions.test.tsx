@@ -32,6 +32,9 @@ vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowTestForm', () => ({
 vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowCompatibilityTable', () => ({
   default: () => null,
 }))
+vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowActivationPanel', () => ({
+  default: ({ workflowId }: { workflowId: string }) => <output aria-label="activation-workflow">{workflowId}</output>,
+}))
 
 const savedVersion = {
   id: 'version-1', version: 1, purpose: 'generation' as const,
@@ -66,12 +69,12 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function renderLibrary() {
+function renderLibrary(props: { initialWorkflowId?: string | null; activationWorkflowId?: string | null; onCreateNew?: () => void } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <NextIntlClientProvider locale="en" messages={{ comfyui: enComfyui }} timeZone="UTC">
-        <WorkflowLibraryPanel />
+        <WorkflowLibraryPanel initialWorkflowId={props.initialWorkflowId} activationWorkflowId={props.activationWorkflowId} onCreateNew={props.onCreateNew ?? vi.fn()} />
       </NextIntlClientProvider>
     </QueryClientProvider>,
   )
@@ -98,10 +101,40 @@ describe('ComfyUI workflow library removal', () => {
     vi.restoreAllMocks()
   })
 
-  it('does not offer workflow removal while authoring a new workflow', async () => {
+  it('does not offer saved-workflow actions until a workflow is selected', async () => {
     const view = renderLibrary()
 
     await waitFor(() => expect(view.getByRole('button', { name: /Portrait/ })).toBeTruthy())
+    expect(view.queryByRole('button', { name: 'Delete workflow' })).toBeNull()
+    expect(view.queryByRole('button', { name: 'Save draft' })).toBeNull()
+    expect(view.queryByRole('button', { name: 'Publish workflow' })).toBeNull()
+    expect(view.queryByLabelText('draft-name')).toBeNull()
+  })
+
+  it('opens the dedicated creation flow from New workflow', async () => {
+    const onCreateNew = vi.fn()
+    const view = renderLibrary({ onCreateNew })
+
+    await waitFor(() => expect(view.getByRole('button', { name: /Portrait/ })).toBeTruthy())
+    fireEvent.click(view.getByRole('button', { name: 'New workflow' }))
+
+    expect(onCreateNew).toHaveBeenCalledTimes(1)
+    expect(apiFetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+  })
+
+  it('selects the newly-created workflow when its initial id becomes available', async () => {
+    const view = renderLibrary({ initialWorkflowId: workflow.id })
+
+    await waitFor(() => expect(view.getByLabelText('draft-name').textContent).toBe('Portrait'))
+    expect(view.getByRole('button', { name: /Portrait/ }).getAttribute('aria-current')).toBe('page')
+    expect(view.getByRole('button', { name: 'Delete workflow' })).toBeTruthy()
+  })
+
+  it('renders activation only after the created workflow version has loaded', async () => {
+    const view = renderLibrary({ initialWorkflowId: workflow.id, activationWorkflowId: workflow.id })
+
+    await waitFor(() => expect(view.getByLabelText('activation-workflow').textContent).toBe(workflow.id))
+    expect(view.queryByRole('button', { name: 'Publish' })).toBeNull()
     expect(view.queryByRole('button', { name: 'Delete workflow' })).toBeNull()
   })
 
@@ -141,7 +174,7 @@ describe('ComfyUI workflow library removal', () => {
     ))
     await waitFor(() => expect(listCalls).toBe(2))
     expect(view.queryByRole('button', { name: 'Delete workflow' })).toBeNull()
-    expect(view.getByLabelText('draft-name').textContent).toBe('')
+    expect(view.queryByLabelText('draft-name')).toBeNull()
     expect(document.activeElement).toBe(view.getByRole('button', { name: 'New workflow' }))
     expect(view.getByText('Workflow deleted.')).toBeTruthy()
   })

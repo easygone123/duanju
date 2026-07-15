@@ -116,6 +116,13 @@ async function safeResponseJson(response: Response): Promise<unknown> {
   return response.json().catch(() => null)
 }
 
+export async function requestWorkflowAction<T = unknown>(url: string, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(url, init)
+  const payload = await safeResponseJson(response)
+  if (!response.ok) throw workflowRequestErrorFromPayload(payload, response.status)
+  return payload as T
+}
+
 function isWorkflowAnalysis(value: unknown): value is WorkflowAutoMappingResult {
   if (!isRecord(value)) return false
   const item = value

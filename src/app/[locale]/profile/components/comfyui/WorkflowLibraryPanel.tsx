@@ -6,13 +6,13 @@ import { useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api-fetch'
 import { invalidateUserModels } from '@/lib/query/hooks/useUserModels'
 import WorkflowCompatibilityTable, { type WorkflowCompatibilityView } from './WorkflowCompatibilityTable'
+import WorkflowActivationPanel from './WorkflowActivationPanel'
 import WorkflowEditor from './WorkflowEditor'
 import WorkflowTestForm, { emptyWorkflowTestPayload, type WorkflowTestPayload } from './WorkflowTestForm'
 import { useComfyConnections } from './hooks'
 import {
   draftFromWorkflow,
   createWorkflowCompatibilityCoordinator,
-  emptyWorkflowDraft,
   mapWorkflowCompatibility,
   safeWorkflowErrorKey,
   WorkflowRequestError,
@@ -36,15 +36,22 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export default function WorkflowLibraryPanel() {
+interface Props {
+  initialWorkflowId?: string | null
+  activationWorkflowId?: string | null
+  onCreateNew(): void
+  onActivationClosed?(): void
+}
+
+export default function WorkflowLibraryPanel({ initialWorkflowId, activationWorkflowId, onCreateNew, onActivationClosed }: Props) {
   const t = useTranslations('comfyui.workflows')
   const queryClient = useQueryClient()
   const [workflows, setWorkflows] = useState<WorkflowView[]>([])
-  const [selectedId, setSelectedId] = useState<string | 'new'>('new')
-  const selectedIdRef = useRef<string | 'new'>('new')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selectedIdRef = useRef<string | null>(null)
   const archiveInFlightRef = useRef<string | null>(null)
   const newWorkflowButtonRef = useRef<HTMLButtonElement>(null)
-  const [authorDraft, setAuthorDraft] = useState<WorkflowAuthorDraft>(emptyWorkflowDraft)
+  const [authorDraft, setAuthorDraft] = useState<WorkflowAuthorDraft | null>(null)
   const [savedVersion, setSavedVersion] = useState<WorkflowVersionView | null>(null)
   const [connectionId, setConnectionId] = useState('')
   const [loading, setLoading] = useState(true)
@@ -59,7 +66,7 @@ export default function WorkflowLibraryPanel() {
   const [testPayload, setTestPayload] = useState<WorkflowTestPayload | null>(emptyWorkflowTestPayload)
   const connectionsQuery = useComfyConnections()
 
-  const updateSelectedId = (id: string | 'new') => {
+  const updateSelectedId = (id: string | null) => {
     selectedIdRef.current = id
     setSelectedId(id)
   }
@@ -69,19 +76,21 @@ export default function WorkflowLibraryPanel() {
     try {
       const payload = await requestJson<{ workflows: WorkflowView[] }>('/api/comfyui/workflows')
       setWorkflows(payload.workflows)
-      const selected = payload.workflows.find((item) => item.id === (preferId ?? selectedIdRef.current))
+      const targetId = preferId ?? selectedIdRef.current
+      const selected = payload.workflows.find((item) => item.id === targetId)
       if (selected) {
         const version = selected.versions[0] ?? selected.currentVersion
         updateSelectedId(selected.id); setSavedVersion(version); setAuthorDraft(draftFromWorkflow(selected, version))
+      } else if (targetId && selectedIdRef.current === targetId) {
+        updateSelectedId(null); setSavedVersion(null); setAuthorDraft(null)
       }
       setError(null)
     } catch { setError('requestFailed') } finally { setLoading(false) }
   }
-  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(initialWorkflowId ?? undefined) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const selectWorkflow = (id: string | 'new') => {
+  const selectWorkflow = (id: string) => {
     updateSelectedId(id); setError(null)
-    if (id === 'new') { setSavedVersion(null); setAuthorDraft(emptyWorkflowDraft()); return }
     const workflow = workflows.find((item) => item.id === id)
     if (!workflow) return
     const version = workflow.versions[0] ?? workflow.currentVersion
@@ -92,14 +101,8 @@ export default function WorkflowLibraryPanel() {
     try { await operation() } catch (actionError) { setError(safeWorkflowErrorKey(actionError)) } finally { setBusy(false) }
   }
   const saveDraft = () => runAction(async () => {
+    if (!selectedId || !authorDraft) return
     const contract = workflowPayload(authorDraft)
-    if (selectedId === 'new') {
-      const result = await requestJson<{ workflow: WorkflowView }>('/api/comfyui/workflows', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...contract, name: authorDraft.name, mediaType: authorDraft.mediaType }),
-      })
-      await load(result.workflow.id)
-      return
-    }
     const current = workflows.find((workflow) => workflow.id === selectedId)
     if (current && current.name !== authorDraft.name.trim()) {
       await requestJson(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}`, {
@@ -113,7 +116,7 @@ export default function WorkflowLibraryPanel() {
     await load(selectedId)
   })
   const archiveSelectedWorkflow = async () => {
-    if (selectedId === 'new' || archiveInFlightRef.current) return
+    if (!selectedId || archiveInFlightRef.current) return
     const targetId = selectedId
     const selected = workflows.find((workflow) => workflow.id === targetId)
     if (!selected || !window.confirm(t('deleteWorkflowConfirm', { name: selected.name }))) return
@@ -126,9 +129,9 @@ export default function WorkflowLibraryPanel() {
       setWorkflows((current) => current.filter((workflow) => workflow.id !== targetId))
       setWorkflowDeleted(true)
       if (selectedIdRef.current === targetId) {
-        updateSelectedId('new')
+        updateSelectedId(null)
         setSavedVersion(null)
-        setAuthorDraft(emptyWorkflowDraft())
+        setAuthorDraft(null)
         newWorkflowButtonRef.current?.focus()
       }
       await load()
@@ -148,11 +151,11 @@ export default function WorkflowLibraryPanel() {
   const savedVersionId = savedVersion?.id ?? null
   useEffect(() => {
     const selection = compatibilityCoordinator.select(
-      selectedId === 'new' ? '' : selectedId,
+      selectedId ?? '',
       savedVersionId ?? '',
     )
     setCompatibility([]); setCompatibilityCursor(null); setCompatibilityError(false); setCompatibilityLoadingMore(false)
-    if (selectedId === 'new' || !savedVersionId) return () => compatibilityCoordinator.cancel(selection)
+    if (!selectedId || !savedVersionId) return () => compatibilityCoordinator.cancel(selection)
     const ticket = compatibilityCoordinator.beginInitial()
     if (!ticket) return () => compatibilityCoordinator.cancel(selection)
     requestJson<{ compatibility: WorkflowCompatibilityResponseItem[]; nextCursor: string | null }>(`/api/comfyui/workflows/${encodeURIComponent(ticket.workflowId)}/versions/${encodeURIComponent(ticket.versionId)}/compatibility?limit=20`, { signal: ticket.controller.signal })
@@ -167,7 +170,7 @@ export default function WorkflowLibraryPanel() {
     return () => compatibilityCoordinator.cancel(selection)
   }, [compatibilityCoordinator, savedVersionId, selectedId])
   const publishVersion = () => runAction(async () => {
-    if (selectedId === 'new' || !savedVersion?.validation.valid) return
+    if (!selectedId || !savedVersion?.validation.valid) return
     await requestJson(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/publish`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ versionId: savedVersion.id }),
     })
@@ -175,7 +178,7 @@ export default function WorkflowLibraryPanel() {
     await load(selectedId)
   })
   const testVersion = () => runAction(async () => {
-    if (selectedId === 'new' || !savedVersion || !connectionId) return
+    if (!selectedId || !savedVersion || !connectionId) return
     if (!testPayload) return
     await requestJson(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/test-run`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ versionId: savedVersion.id, connectionId, variables: testPayload.variables, uploads: testPayload.uploads }),
@@ -183,7 +186,7 @@ export default function WorkflowLibraryPanel() {
     await load(selectedId)
   })
   const loadMoreCompatibility = async () => {
-    if (selectedId === 'new' || !savedVersion || !compatibilityCursor || compatibilityLoadingMore) return
+    if (!selectedId || !savedVersion || !compatibilityCursor || compatibilityLoadingMore) return
     const ticket = compatibilityCoordinator.beginLoadMore(compatibilityCursor)
     if (!ticket) return
     setCompatibilityLoadingMore(true); setCompatibilityError(false)
@@ -210,37 +213,45 @@ export default function WorkflowLibraryPanel() {
   }
 
   const issues = savedVersion?.validation.issues ?? []
+  const activationOpen = Boolean(selectedId && savedVersion && activationWorkflowId === selectedId)
 
   return <section aria-labelledby="comfyui-workflow-library-heading" className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--glass-stroke-base)] px-5 py-4 sm:px-6">
       <div><h2 id="comfyui-workflow-library-heading" className="text-lg font-semibold">{t('title')}</h2><p className="mt-1 text-sm text-[var(--glass-text-secondary)]">{t('description')}</p></div>
-      <button ref={newWorkflowButtonRef} type="button" className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm" onClick={() => selectWorkflow('new')}>{t('newWorkflow')}</button>
+      <button ref={newWorkflowButtonRef} type="button" className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm" onClick={onCreateNew}>{t('newWorkflow')}</button>
     </header>
     <div className="grid min-h-0 min-w-0 flex-1 gap-5 overflow-y-auto p-5 sm:p-6">
       <nav aria-label={t('library')} className="space-y-2">{loading && <p role="status" className="text-sm">{t('loading')}</p>}
         {workflows.map((workflow) => <button key={workflow.id} type="button" onClick={() => selectWorkflow(workflow.id)} aria-current={selectedId === workflow.id ? 'page' : undefined}
           className="glass-surface-soft w-full rounded-xl p-3 text-left"><span className="block truncate font-medium">{workflow.name}</span><span className="text-xs text-[var(--glass-text-tertiary)]">{t(workflow.mediaType)} · {t(`purposes.${workflow.purpose}`)} · {t(`statuses.${workflow.status}`)}</span></button>)}</nav>
       <div className="min-w-0 space-y-6">
-        <WorkflowEditor key={selectedId} value={authorDraft} disabled={busy} identityLocked={selectedId !== 'new'} onChange={setAuthorDraft} onImportError={(key) => setError(key as ErrorKey)} />
+        {selectedId && authorDraft && <WorkflowEditor key={selectedId} value={authorDraft} disabled={busy || activationOpen} onChange={setAuthorDraft} onImportError={(key) => setError(key as ErrorKey)} />}
         {savedVersion && <div className="glass-surface-soft rounded-xl p-3 text-xs" aria-label={t('savedVersion')}>
           {t('savedVersion')} v{savedVersion.version} · {savedVersion.validation.valid ? t('staticValid') : t('staticInvalid')} · {savedVersion.lastSuccessfulTestAt ? t('tested') : t('notTested')}
         </div>}
-        <div className="flex flex-wrap items-end gap-2">
+        {activationOpen && selectedId && savedVersion && <WorkflowActivationPanel
+          key={savedVersion.id}
+          workflowId={selectedId}
+          version={savedVersion}
+          onClose={() => onActivationClosed?.()}
+          onActivated={() => load(selectedId)}
+        />}
+        {selectedId && authorDraft && !activationOpen && <div className="flex flex-wrap items-end gap-2">
           <button type="button" onClick={() => void saveDraft()} disabled={busy || !authorDraft.name || !authorDraft.apiFormatJson} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('saveDraft')}</button>
           <button type="button" onClick={() => void publishVersion()} disabled={busy || !savedVersion?.validation.valid} className="glass-btn-base px-4 py-2 text-sm">{t('publish')}</button>
           <label className="min-w-[12rem] text-xs">{t('testInstance')}<select value={connectionId} onChange={(event) => setConnectionId(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-2 py-2">
             <option value="">{t('selectInstance')}</option>{(connectionsQuery.data?.connections ?? []).filter((connection) => connection.enabled).map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label>
           <button type="button" onClick={() => void testVersion()} disabled={busy || !savedVersion || !connectionId || !testPayload} className="glass-btn-base px-4 py-2 text-sm">{t('test')}</button>
-          {selectedId !== 'new' && <button type="button" onClick={() => void archiveSelectedWorkflow()} disabled={busy}
-            className="glass-btn-base glass-btn-tone-danger px-4 py-2 text-sm">{t('deleteWorkflow')}</button>}
-        </div>
-        {savedVersion && <WorkflowTestForm key={savedVersion.id} definitions={savedVersion.variableDefinitions} onChange={setTestPayload} onError={(key) => setError(key as ErrorKey)} />}
+          <button type="button" onClick={() => void archiveSelectedWorkflow()} disabled={busy}
+            className="glass-btn-base glass-btn-tone-danger px-4 py-2 text-sm">{t('deleteWorkflow')}</button>
+        </div>}
+        {savedVersion && !activationOpen && <WorkflowTestForm key={savedVersion.id} definitions={savedVersion.variableDefinitions} onChange={setTestPayload} onError={(key) => setError(key as ErrorKey)} />}
         {workflowDeleted && <p role="status" className="text-sm text-[var(--glass-tone-success-fg)]">{t('workflowDeleted')}</p>}
         {error && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t(error)}</p>}
-      <WorkflowCompatibilityTable issues={issues} compatibility={compatibility} />
-      {compatibilityError && <p role="alert" className="text-xs text-[var(--glass-danger)]">{t('compatibilityLoadFailed')}</p>}
-      {compatibilityCursor && <button type="button" disabled={compatibilityLoadingMore} className="glass-btn-base px-3 py-2 text-xs disabled:opacity-50" onClick={() => void loadMoreCompatibility()}>{compatibilityLoadingMore ? t('loading') : t('loadMore')}</button>}
-        <p className="text-xs text-[var(--glass-text-tertiary)]">{t('defaultEligibility', { status: savedVersion?.lastSuccessfulTestAt ? t('eligible') : t('ineligible') })}</p>
+        {selectedId && <WorkflowCompatibilityTable issues={issues} compatibility={compatibility} />}
+        {selectedId && compatibilityError && <p role="alert" className="text-xs text-[var(--glass-danger)]">{t('compatibilityLoadFailed')}</p>}
+        {selectedId && compatibilityCursor && <button type="button" disabled={compatibilityLoadingMore} className="glass-btn-base px-3 py-2 text-xs disabled:opacity-50" onClick={() => void loadMoreCompatibility()}>{compatibilityLoadingMore ? t('loading') : t('loadMore')}</button>}
+        {selectedId && <p className="text-xs text-[var(--glass-text-tertiary)]">{t('defaultEligibility', { status: savedVersion?.lastSuccessfulTestAt ? t('eligible') : t('ineligible') })}</p>}
       </div>
     </div>
   </section>
