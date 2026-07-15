@@ -75,6 +75,7 @@ const contract: CreateVersionInput = {
   bindings: [],
   outputs: [{ name: 'image', nodeId: '2', fieldPath: 'images', mediaType: 'image', primary: true }],
 }
+const creationId = '123e4567-e89b-42d3-a456-426614174000'
 
 function workflow(overrides: Record<string, unknown> = {}) {
   return {
@@ -205,11 +206,12 @@ describe('ComfyUI workflow library', () => {
     }))
     const route = await import('@/app/api/comfyui/workflows/route')
     const response = await route.POST(buildMockRequest({
-      path: '/api/comfyui/workflows', method: 'POST', body: { name: ' Portrait ', mediaType: 'image', ...contract },
+      path: '/api/comfyui/workflows', method: 'POST',
+      body: { creationId, name: ' Portrait ', mediaType: 'image', ...contract },
     }), { params: Promise.resolve({}) })
     expect(response.status).toBe(201)
     expect(prismaMock.comfyWorkflow.create).toHaveBeenCalledWith({ data: expect.objectContaining({
-      userId: 'user-1', name: 'Portrait', status: 'draft',
+      id: creationId, userId: 'user-1', name: 'Portrait', status: 'draft',
       versions: { create: expect.objectContaining({ version: 1, requirements: expect.any(Object), contentHash: expect.stringMatching(/^[a-f0-9]{64}$/) }) },
     }), include: expect.any(Object) })
     expect(await body(response)).toEqual(expect.objectContaining({
@@ -220,12 +222,104 @@ describe('ComfyUI workflow library', () => {
     }))
   })
 
+  it('returns the committed workflow when the same owner retries the identical creation id', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    let committed: ReturnType<typeof workflow> | undefined
+    prismaMock.comfyWorkflow.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
+      if (committed) throw { code: 'P2002' }
+      committed = workflow({
+        ...data,
+        versions: [version({ ...(data.versions as { create: Record<string, unknown> }).create })],
+      })
+      return committed
+    })
+    prismaMock.comfyWorkflow.findFirst.mockImplementation(async () => committed)
+    const route = await import('@/app/api/comfyui/workflows/route')
+    const request = () => buildMockRequest({
+      path: '/api/comfyui/workflows', method: 'POST',
+      body: { creationId, name: ' Portrait ', mediaType: 'image', ...contract },
+    })
+
+    const first = await route.POST(request(), { params: Promise.resolve({}) })
+    const retry = await route.POST(request(), { params: Promise.resolve({}) })
+
+    expect(first.status).toBe(201)
+    expect(retry.status).toBe(201)
+    expect((await body(first)).workflow).toEqual(expect.objectContaining({ id: creationId }))
+    expect((await body(retry)).workflow).toEqual(expect.objectContaining({ id: creationId }))
+    expect(prismaMock.comfyWorkflow.create).toHaveBeenCalledTimes(2)
+    expect(prismaMock.comfyWorkflow.findFirst).toHaveBeenCalledWith({
+      where: { id: creationId, userId: 'user-1' },
+      include: { currentVersion: true, versions: { orderBy: { version: 'desc' } } },
+    })
+  })
+
+  it('rejects a retry whose stored contract differs even when its content hash is unchanged', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    let committed: ReturnType<typeof workflow> | undefined
+    prismaMock.comfyWorkflow.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
+      if (committed) throw { code: 'P2002' }
+      committed = workflow({
+        ...data,
+        versions: [version({ ...(data.versions as { create: Record<string, unknown> }).create })],
+      })
+      return committed
+    })
+    prismaMock.comfyWorkflow.findFirst.mockImplementation(async () => {
+      if (!committed) throw new Error('Expected the first request to commit the workflow.')
+      const saved = committed.versions[0] as Record<string, unknown>
+      return workflow({
+        ...committed,
+        versions: [{ ...saved, bindingSpec: [{ nodeId: 'other', inputPath: 'seed' }] }],
+      })
+    })
+    const route = await import('@/app/api/comfyui/workflows/route')
+    const request = () => buildMockRequest({
+      path: '/api/comfyui/workflows', method: 'POST',
+      body: { creationId, name: 'Portrait', mediaType: 'image', ...contract },
+    })
+
+    expect((await route.POST(request(), { params: Promise.resolve({}) })).status).toBe(201)
+    expect((await route.POST(request(), { params: Promise.resolve({}) })).status).toBe(409)
+  })
+
+  it.each([
+    ['another owner', null],
+    ['changed content', workflow({
+      id: creationId,
+      versions: [version({ contentHash: 'different-content' })],
+    })],
+  ])('returns a generic conflict for a creation id collision with %s', async (_case, existing) => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.create.mockRejectedValue({ code: 'P2002' })
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(existing)
+    const route = await import('@/app/api/comfyui/workflows/route')
+
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows', method: 'POST',
+      body: { creationId, name: 'Portrait', mediaType: 'image', ...contract },
+    }), { params: Promise.resolve({}) })
+
+    expect(response.status).toBe(409)
+    expect(await body(response)).toEqual(expect.objectContaining({
+      error: expect.objectContaining({ code: 'CONFLICT' }),
+    }))
+    expect(prismaMock.comfyWorkflow.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: creationId, userId: 'user-1' },
+    }))
+  })
+
   it('rejects an explicitly invalid purpose at the route boundary', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')
     const route = await import('@/app/api/comfyui/workflows/route')
     for (const purpose of ['thumbnail']) {
-      const payload = { name: 'Invalid purpose', mediaType: 'image', ...contract } as Record<string, unknown>
+      const payload = {
+        creationId, name: 'Invalid purpose', mediaType: 'image', ...contract,
+      } as Record<string, unknown>
       if (purpose === undefined) delete payload.purpose
       else payload.purpose = purpose
       const response = await route.POST(buildMockRequest({
@@ -244,7 +338,7 @@ describe('ComfyUI workflow library', () => {
       ...data,
       versions: [version({ ...(data.versions as { create: Record<string, unknown> }).create })],
     }))
-    const legacy = { name: 'Legacy', mediaType: 'image', ...contract } as Record<string, unknown>
+    const legacy = { creationId, name: 'Legacy', mediaType: 'image', ...contract } as Record<string, unknown>
     delete legacy.purpose
     const route = await import('@/app/api/comfyui/workflows/route')
     const response = await route.POST(buildMockRequest({
@@ -300,7 +394,8 @@ describe('ComfyUI workflow library', () => {
     }))
     const route = await import('@/app/api/comfyui/workflows/route')
     const response = await route.POST(buildMockRequest({
-      path: '/api/comfyui/workflows', method: 'POST', body: { name: 'Invalid', mediaType: 'image', ...invalid },
+      path: '/api/comfyui/workflows', method: 'POST',
+      body: { creationId, name: 'Invalid', mediaType: 'image', ...invalid },
     }), { params: Promise.resolve({}) })
     expect(response.status).toBe(201)
     expect((await body(response)).workflow).toEqual(expect.objectContaining({
@@ -918,7 +1013,7 @@ describe('ComfyUI workflow library', () => {
     const oversized = { '1': { class_type: 'Node', inputs: { value: 'x'.repeat(4 * 1024 * 1024) } } }
     const oversizedResponse = await route.POST(buildMockRequest({
       path: '/api/comfyui/workflows', method: 'POST',
-      body: { name: 'Huge', mediaType: 'image', ...contract, apiFormatJson: oversized },
+      body: { creationId, name: 'Huge', mediaType: 'image', ...contract, apiFormatJson: oversized },
     }), { params: Promise.resolve({}) })
     expect(oversizedResponse.status).toBe(400)
 
@@ -926,7 +1021,7 @@ describe('ComfyUI workflow library', () => {
     for (let index = 0; index < 80; index += 1) deep = { child: deep }
     const deepResponse = await route.POST(buildMockRequest({
       path: '/api/comfyui/workflows', method: 'POST',
-      body: { name: 'Deep', mediaType: 'image', ...contract, apiFormatJson: deep },
+      body: { creationId, name: 'Deep', mediaType: 'image', ...contract, apiFormatJson: deep },
     }), { params: Promise.resolve({}) })
     expect(deepResponse.status).toBe(400)
     expect(prismaMock.comfyWorkflow.create).not.toHaveBeenCalled()

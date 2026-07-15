@@ -32,6 +32,7 @@ export interface CreateVersionInput {
 }
 
 export interface CreateWorkflowInput extends CreateVersionInput {
+  creationId: string
   name: string
   mediaType: ComfyMediaType
 }
@@ -101,17 +102,31 @@ export async function updateOwnedWorkflowMetadata(userId: string, workflowId: st
 export async function createWorkflowDraft(userId: string, input: CreateWorkflowInput) {
   const purpose = input.purpose ?? 'generation'
   const prepared = prepareVersion({ ...input, purpose })
-  const record = await prisma.comfyWorkflow.create({
-    data: {
-      userId,
-      name: input.name.trim(),
-      mediaType: input.mediaType,
-      status: 'draft',
-      versions: { create: { version: 1, ...prepared.data } },
-    },
-    include: { currentVersion: true, versions: { orderBy: { version: 'desc' } } },
-  })
-  return toWorkflowDetail(record)
+  const include = { currentVersion: true, versions: { orderBy: { version: 'desc' as const } } }
+  try {
+    const record = await prisma.comfyWorkflow.create({
+      data: {
+        id: input.creationId,
+        userId,
+        name: input.name.trim(),
+        mediaType: input.mediaType,
+        status: 'draft',
+        versions: { create: { version: 1, ...prepared.data } },
+      },
+      include,
+    })
+    return toWorkflowDetail(record)
+  } catch (error) {
+    if (!isPrismaCode(error, 'P2002')) throw error
+    const existing = await prisma.comfyWorkflow.findFirst({
+      where: { id: input.creationId, userId },
+      include,
+    })
+    if (!existing || !matchesIdempotentCreation(existing, input, purpose, prepared.data)) {
+      throw new ApiError('CONFLICT')
+    }
+    return toWorkflowDetail(existing)
+  }
 }
 
 export async function createWorkflowVersion(
@@ -346,6 +361,22 @@ function prepareVersion(input: CreateVersionInput & { purpose: ComfyWorkflowPurp
       contentHash: canonicalWorkflowHash({ ...input, apiFormatJson: graph }),
     },
   }
+}
+
+function matchesIdempotentCreation(
+  record: Record<string, unknown>,
+  input: CreateWorkflowInput,
+  purpose: ComfyWorkflowPurpose,
+  prepared: ReturnType<typeof prepareVersion>['data'],
+) {
+  if (record.name !== input.name.trim() || record.mediaType !== input.mediaType) return false
+  const versions = Array.isArray(record.versions) ? record.versions : []
+  const version = versions.find((item) => isObject(item) && item.version === 1)
+  if (!version || version.purpose !== purpose || version.contentHash !== prepared.contentHash) return false
+  return stableJson(version.apiFormatJson) === stableJson(prepared.apiFormatJson)
+    && stableJson(version.variableDefinitions) === stableJson(prepared.variableDefinitions)
+    && stableJson(version.bindingSpec ?? version.bindings) === stableJson(prepared.bindingSpec)
+    && stableJson(version.outputSpec ?? version.outputs) === stableJson(prepared.outputSpec)
 }
 
 function validationForVersion(version: ComfyWorkflowVersion): WorkflowValidationIssue[] {

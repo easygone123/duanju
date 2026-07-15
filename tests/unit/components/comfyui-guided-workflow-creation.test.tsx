@@ -530,7 +530,7 @@ describe('guided workflow translations', () => {
   const requiredKeys = [
     'wizardTitle', 'wizardHint', 'stepsLabel', 'steps',
     'uploadTitle', 'uploadHint', 'reviewTitle', 'reviewHint',
-    'next', 'back', 'cancel', 'retryAnalysis', 'retryCreate', 'create',
+    'next', 'back', 'cancel', 'retryAnalysis', 'retryCreate', 'returnToLibrary', 'create',
     'analyzingStatus', 'creatingStatus', 'completedStatus',
     'typeTitle', 'typeHint', 'jsonInput', 'dropTitle', 'dropHint',
     'chooseFile', 'analyzing', 'name', 'selected', 'summaryTitle',

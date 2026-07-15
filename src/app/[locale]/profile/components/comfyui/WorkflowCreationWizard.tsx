@@ -36,8 +36,8 @@ type WorkflowRole = CanonicalWorkflowInput | 'preserve_original'
 
 export interface WorkflowCreationWizardProps {
   onCancel(): void
-  onCreate(draft: WorkflowAuthorDraft): Promise<string>
-  onCreated(id: string): void
+  onCreate(draft: WorkflowAuthorDraft, creationId: string): Promise<string>
+  onCreated(id: string): void | Promise<void>
   analyze?: (
     kind: WorkflowImportKind,
     file: File,
@@ -63,6 +63,8 @@ export default function WorkflowCreationWizard({
   const lastFileRef = useRef<File | null>(null)
   const mountedRef = useRef(true)
   const submissionRef = useRef<'idle' | 'creating' | 'completed'>('idle')
+  const creationIdRef = useRef<string | null>(null)
+  const createdWorkflowIdRef = useRef<string | null>(null)
   const analysisAbortRef = useRef<AbortController | null>(null)
   const stageHeadingRef = useRef<HTMLHeadingElement | null>(null)
   const [stage, setStage] = useState<WizardStage>('type')
@@ -74,6 +76,8 @@ export default function WorkflowCreationWizard({
   const [selectedOutput, setSelectedOutput] = useState('')
   const [busy, setBusy] = useState<BusyOperation>(null)
   const [completed, setCompleted] = useState(false)
+  const [navigationFailed, setNavigationFailed] = useState(false)
+  const [navigationBusy, setNavigationBusy] = useState(false)
   const [error, setError] = useState<WorkflowErrorKey | null>(null)
 
   useEffect(() => {
@@ -93,6 +97,7 @@ export default function WorkflowCreationWizard({
   }, [stage])
 
   const clearGraphState = () => {
+    creationIdRef.current = null
     setSourceText('')
     setAnalysis(null)
     setRoles({})
@@ -152,6 +157,19 @@ export default function WorkflowCreationWizard({
     || (analysis?.outputs.length === 1 ? analysis.outputs[0]?.nodeId : '')
     || ''
 
+  const navigateToCreatedWorkflow = async (id: string) => {
+    if (navigationBusy) return
+    setNavigationBusy(true)
+    setNavigationFailed(false)
+    try {
+      await Promise.resolve(onCreated(id))
+    } catch {
+      if (mountedRef.current) setNavigationFailed(true)
+    } finally {
+      if (mountedRef.current) setNavigationBusy(false)
+    }
+  }
+
   const create = async () => {
     if (!analysis || !review || !ready || submissionRef.current !== 'idle') return
     submissionRef.current = 'creating'
@@ -169,16 +187,14 @@ export default function WorkflowCreationWizard({
         apiFormatJson: sourceText,
         ...confirmed,
       }
-      const id = await onCreate(draft)
+      creationIdRef.current ??= crypto.randomUUID()
+      const id = await onCreate(draft, creationIdRef.current)
       submissionRef.current = 'completed'
+      createdWorkflowIdRef.current = id
       if (mountedRef.current) {
         setCompleted(true)
         setBusy(null)
-        try {
-          onCreated(id)
-        } catch {
-          // Creation already succeeded. Consumer navigation errors must not make it retryable.
-        }
+        await navigateToCreatedWorkflow(id)
       }
     } catch (creationError) {
       submissionRef.current = 'idle'
@@ -213,7 +229,7 @@ export default function WorkflowCreationWizard({
     onCancel()
   }
 
-  return <main aria-labelledby="workflow-wizard-title" className="h-full min-h-0 min-w-0 overflow-hidden">
+  return <section aria-labelledby="workflow-wizard-title" className="h-full min-h-0 min-w-0 overflow-hidden">
     <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden">
       <div className="mx-auto w-full max-w-[60rem] min-w-0 px-4 py-6 sm:px-6">
         <header className="min-w-0 space-y-4">
@@ -343,10 +359,20 @@ export default function WorkflowCreationWizard({
                 onClick={() => { void create() }}
                 className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50"
               >{error ? t('retryCreate') : t('create')}</button>
+              {completed && navigationFailed && <button
+                type="button"
+                disabled={navigationBusy}
+                onClick={() => {
+                  if (createdWorkflowIdRef.current) {
+                    void navigateToCreatedWorkflow(createdWorkflowIdRef.current)
+                  }
+                }}
+                className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50"
+              >{t('returnToLibrary')}</button>}
             </>}
           </div>
         </footer>
       </div>
     </div>
-  </main>
+  </section>
 }

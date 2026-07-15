@@ -12,7 +12,10 @@ import {
   validateWorkflowContract,
 } from '@/lib/comfyui/workflow-schema'
 import type { ComfyVariableType } from '@/lib/comfyui/types'
-import { unwrapComfyApiWorkflowPayload } from '@/lib/comfyui/workflow-auto-mapper'
+import {
+  analyzeComfyApiWorkflow,
+  unwrapComfyApiWorkflowPayload,
+} from '@/lib/comfyui/workflow-auto-mapper'
 import {
   parseWorkflowImportText,
   readWorkflowImportFile,
@@ -229,7 +232,12 @@ function isConsistentWorkflowAnalysis(
   const primaryCount = analysis.outputs.filter((output) => output.primary).length
   if (primaryCount > 1 || (analysis.outputs.length === 1 && primaryCount !== 1)) return false
 
-  return validatesSharedContract(analysis)
+  if (!validatesSharedContract(analysis)) return false
+  try {
+    return jsonEqual(analysis, analyzeComfyApiWorkflow({ graph: uploadedGraph, kind }))
+  } catch {
+    return false
+  }
 }
 
 async function workflowApiFetch(endpoint: string, init: RequestInit): Promise<Response> {
@@ -270,11 +278,15 @@ export async function analyzeWorkflowJson(
   }
 }
 
-export async function createWorkflowDraft(draft: WorkflowAuthorDraft): Promise<string> {
+export async function createWorkflowDraft(
+  draft: WorkflowAuthorDraft,
+  creationId: string,
+): Promise<string> {
   const body = JSON.stringify({
     ...workflowPayload(draft),
     name: draft.name,
     mediaType: draft.mediaType,
+    creationId,
   })
   const response = await workflowApiFetch(WORKFLOWS_ENDPOINT, {
     method: 'POST',

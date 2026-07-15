@@ -32,6 +32,7 @@ export const workflowContractSchema = z.object({
 }).strict()
 
 export const createWorkflowSchema = workflowContractSchema.extend({
+  creationId: z.string().uuid(),
   name: z.string().trim().min(1).max(160),
   mediaType: z.enum(['image', 'video']),
 }).strict()

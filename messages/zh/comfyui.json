@@ -101,6 +101,7 @@
       "cancel": "取消",
       "retryAnalysis": "重试分析",
       "retryCreate": "重试创建",
+      "returnToLibrary": "返回工作流库",
       "create": "创建工作流",
       "analyzingStatus": "正在分析工作流…",
       "creatingStatus": "正在创建工作流…",

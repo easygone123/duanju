@@ -101,6 +101,7 @@
       "cancel": "Cancel",
       "retryAnalysis": "Retry analysis",
       "retryCreate": "Retry creation",
+      "returnToLibrary": "Return to workflow library",
       "create": "Create workflow",
       "analyzingStatus": "Analyzing workflow…",
       "creatingStatus": "Creating workflow…",

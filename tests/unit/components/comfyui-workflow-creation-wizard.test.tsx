@@ -23,6 +23,7 @@ import type {
   WorkflowAutoMappingResult,
   WorkflowImportKind,
 } from '@/lib/comfyui/workflow-auto-mapping-types'
+import { analyzeComfyApiWorkflow } from '@/lib/comfyui/workflow-auto-mapper'
 import { validateWorkflowContract } from '@/lib/comfyui/workflow-schema'
 import enComfyui from '../../../messages/en/comfyui.json'
 
@@ -102,7 +103,8 @@ function renderWizard(
 ) {
   const props = {
     onCancel: vi.fn(),
-    onCreate: vi.fn<(_: WorkflowAuthorDraft) => Promise<string>>().mockResolvedValue('workflow-1'),
+    onCreate: vi.fn<(_: WorkflowAuthorDraft, creationId: string) => Promise<string>>()
+      .mockResolvedValue('workflow-1'),
     onCreated: vi.fn(),
     analyze: vi.fn().mockResolvedValue({ sourceText: '{}', analysis: analysis() }),
     ...overrides,
@@ -137,7 +139,7 @@ function upload(view: ReturnType<typeof render>, filename: string, text = '{}') 
 describe('WorkflowCreationWizard', () => {
   it('uses the bounded scroll layout, styles the active step, and renders only that step', () => {
     const { view } = renderWizard()
-    const root = view.container.querySelector('main') as HTMLElement
+    const root = view.getByRole('region', { name: 'Create a ComfyUI workflow' })
     const scroller = root.firstElementChild as HTMLElement
     const inner = scroller.firstElementChild as HTMLElement
     const activeStep = view.getByRole('listitem', { current: 'step' })
@@ -152,9 +154,10 @@ describe('WorkflowCreationWizard', () => {
     expect(view.container.innerHTML).not.toMatch(/(?:min-)?w-\[\d+px\]/)
   })
 
-  it('names the main landmark, focuses each stage heading, and uses only one live-region mechanism', async () => {
+  it('names the wizard region, focuses each stage heading, and uses only one live-region mechanism', async () => {
     const { view } = renderWizard()
-    expect(view.getByRole('main', { name: 'Create a ComfyUI workflow' })).toBeTruthy()
+    expect(view.getByRole('region', { name: 'Create a ComfyUI workflow' })).toBeTruthy()
+    expect(view.queryByRole('main', { name: 'Create a ComfyUI workflow' })).toBeNull()
     expect(view.getByRole('heading', { name: 'Choose type' })).toBe(document.activeElement)
 
     selectKindAndAdvance(view)
@@ -172,7 +175,8 @@ describe('WorkflowCreationWizard', () => {
       sourceText,
       analysis: analyzed,
     })
-    const onCreate = vi.fn<(_: WorkflowAuthorDraft) => Promise<string>>().mockResolvedValue('created-id')
+    const onCreate = vi.fn<(_: WorkflowAuthorDraft, creationId: string) => Promise<string>>()
+      .mockResolvedValue('created-id')
     const onCreated = vi.fn()
     const { view } = renderWizard({ analyze, onCreate, onCreated })
 
@@ -205,7 +209,7 @@ describe('WorkflowCreationWizard', () => {
         { name: 'resultA', nodeId: '9', fieldPath: 'images', mediaType: 'image', primary: false },
         { name: 'resultB', nodeId: '10', fieldPath: 'images', mediaType: 'image', primary: true },
       ],
-    })
+    }, expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i))
     const createdDraft = onCreate.mock.calls[0]![0]
     expect(validateWorkflowContract({
       graph: JSON.parse(createdDraft.apiFormatJson),
@@ -223,7 +227,8 @@ describe('WorkflowCreationWizard', () => {
     const analyze = vi.fn((_kind: WorkflowImportKind, file: File) => file.name === 'a.json'
       ? pendingA.promise
       : pendingB.promise)
-    const onCreate = vi.fn<(_: WorkflowAuthorDraft) => Promise<string>>().mockResolvedValue('workflow-b')
+    const onCreate = vi.fn<(_: WorkflowAuthorDraft, creationId: string) => Promise<string>>()
+      .mockResolvedValue('workflow-b')
     const { view } = renderWizard({ analyze, onCreate })
 
     selectKindAndAdvance(view)
@@ -253,7 +258,7 @@ describe('WorkflowCreationWizard', () => {
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
       name: 'b', apiFormatJson: '{"graph":"B"}',
       outputs: [expect.objectContaining({ nodeId: 'B', primary: true })],
-    }))
+    }), expect.any(String))
   })
 
   it('blocks creation only for required ambiguity and an unresolved multiple output', async () => {
@@ -286,7 +291,7 @@ describe('WorkflowCreationWizard', () => {
   })
 
   it('preserves the review after creation rejection and only shows a localized safe error', async () => {
-    const onCreate = vi.fn<(_: WorkflowAuthorDraft) => Promise<string>>()
+    const onCreate = vi.fn<(_: WorkflowAuthorDraft, creationId: string) => Promise<string>>()
       .mockRejectedValueOnce(new Error('<html>private server body</html>'))
       .mockResolvedValueOnce('retry-id')
     const { view, props } = renderWizard({
@@ -309,6 +314,7 @@ describe('WorkflowCreationWizard', () => {
     await act(async () => { fireEvent.click(view.getByRole('button', { name: 'Retry creation' })) })
     expect(onCreate).toHaveBeenCalledTimes(2)
     expect(onCreate.mock.calls[1]?.[0]).toEqual(onCreate.mock.calls[0]?.[0])
+    expect(onCreate.mock.calls[1]?.[1]).toBe(onCreate.mock.calls[0]?.[1])
     expect(props.onCreated).toHaveBeenCalledWith('retry-id')
   })
 
@@ -332,9 +338,12 @@ describe('WorkflowCreationWizard', () => {
     })
   })
 
-  it('stays completed without exposing a retry when the success callback throws', async () => {
-    const onCreate = vi.fn<(_: WorkflowAuthorDraft) => Promise<string>>().mockResolvedValue('created-id')
-    const onCreated = vi.fn(() => { throw new Error('consumer navigation failed') })
+  it('retries rejected async navigation without posting the completed workflow again', async () => {
+    const onCreate = vi.fn<(_: WorkflowAuthorDraft, creationId: string) => Promise<string>>()
+      .mockResolvedValue('created-id')
+    const onCreated = vi.fn<(_: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('consumer navigation failed'))
+      .mockResolvedValueOnce(undefined)
     const { view } = renderWizard({ onCreate, onCreated })
     selectKindAndAdvance(view)
     await act(async () => { upload(view, 'completed.json') })
@@ -350,8 +359,29 @@ describe('WorkflowCreationWizard', () => {
     expect(view.getByRole('status').textContent).toBe('Workflow created.')
     expect((view.getByRole('button', { name: 'Create workflow' }) as HTMLButtonElement).disabled).toBe(true)
 
-    fireEvent.click(view.getByRole('button', { name: 'Create workflow' }))
+    await act(async () => {
+      fireEvent.click(view.getByRole('button', { name: 'Return to workflow library' }))
+    })
     expect(onCreate).toHaveBeenCalledTimes(1)
+    expect(onCreated).toHaveBeenCalledTimes(2)
+    expect(onCreated).toHaveBeenLastCalledWith('created-id')
+  })
+
+  it('offers the same navigation recovery when the success callback throws synchronously', async () => {
+    const onCreate = vi.fn<(_: WorkflowAuthorDraft, creationId: string) => Promise<string>>()
+      .mockResolvedValue('created-id')
+    const onCreated = vi.fn(() => { throw new Error('consumer navigation failed') })
+    const { view } = renderWizard({ onCreate, onCreated })
+    selectKindAndAdvance(view)
+    await act(async () => { upload(view, 'completed-sync.json') })
+
+    await act(async () => {
+      fireEvent.click(view.getByRole('button', { name: 'Create workflow' }))
+    })
+
+    expect(view.getByRole('button', { name: 'Return to workflow library' })).toBeTruthy()
+    expect(onCreate).toHaveBeenCalledTimes(1)
+    expect(onCreated).toHaveBeenCalledWith('created-id')
   })
 
   it('disables every mapping and output control while creation is pending', async () => {
@@ -566,9 +596,10 @@ describe('WorkflowCreationWizard', () => {
 describe('workflow request helpers', () => {
   it('analyzes the bounded original JSON with authenticated apiFetch', async () => {
     const graph = analysis().graph
+    const expectedAnalysis = analyzeComfyApiWorkflow({ graph, kind: 'image_generation' })
     const sourceText = JSON.stringify(graph)
     const apiFetch = vi.spyOn(apiFetchModule, 'apiFetch').mockResolvedValue(new Response(JSON.stringify({
-      analysis: analysis({ graph }),
+      analysis: expectedAnalysis,
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     const file = new File([sourceText], 'graph.json', { type: 'application/json' })
     Object.defineProperty(file, 'text', { value: () => Promise.resolve(sourceText) })
@@ -584,11 +615,12 @@ describe('workflow request helpers', () => {
 
   it('normalizes a wrapped upload while retaining strengthened response validation', async () => {
     const graph = analysis().graph
+    const expectedAnalysis = analyzeComfyApiWorkflow({ graph, kind: 'image_generation' })
     const wrapped = { prompt: graph }
     const sourceText = JSON.stringify(wrapped)
     const apiFetch = vi.spyOn(apiFetchModule, 'apiFetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        analysis: analysis({ graph }),
+        analysis: expectedAnalysis,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         analysis: analysis({
@@ -606,6 +638,43 @@ describe('workflow request helpers', () => {
       name: 'WorkflowRequestError', code: 'UNKNOWN',
     })
     expect(apiFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    ['missing', (proposal: WorkflowAutoMappingResult['proposals'][number]) => {
+      const withoutTransform = { ...proposal }
+      delete withoutTransform.transform
+      return withoutTransform
+    }],
+    ['changed', (proposal: WorkflowAutoMappingResult['proposals'][number]) => ({
+      ...proposal, transform: 'image_ref' as const,
+    })],
+  ])('rejects a successful analysis with a %s deterministic transform', async (_name, mutate) => {
+    const graph = {
+      '1': {
+        class_type: 'LoadImage', inputs: { image: 'input.png' }, _meta: { title: 'Source Image' },
+      },
+      '9': { class_type: 'SaveImage', inputs: { images: ['1', 0] } },
+    }
+    const expected = analyzeComfyApiWorkflow({ graph, kind: 'image_edit' })
+    const proposalIndex = expected.proposals.findIndex((proposal) => proposal.transform === 'filename')
+    expect(proposalIndex).toBeGreaterThanOrEqual(0)
+    const mutated = {
+      ...expected,
+      proposals: expected.proposals.map((proposal, index) => (
+        index === proposalIndex ? mutate(proposal) : proposal
+      )),
+    }
+    vi.spyOn(apiFetchModule, 'apiFetch').mockResolvedValue(new Response(JSON.stringify({
+      analysis: mutated,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const sourceText = JSON.stringify(graph)
+    const file = new File([sourceText], 'image-edit.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(sourceText) })
+
+    await expect(analyzeWorkflowJson('image_edit', file)).rejects.toMatchObject({
+      name: 'WorkflowRequestError', code: 'UNKNOWN',
+    })
   })
 
   it('retains only allowlisted stable analysis reasons and safely maps unknown reasons', () => {
@@ -811,16 +880,17 @@ describe('workflow request helpers', () => {
       }))
       .mockRejectedValueOnce(new Error('private network diagnostics'))
 
-    await expect(createWorkflowDraft(draft)).resolves.toBe('created-id')
+    const creationId = '123e4567-e89b-42d3-a456-426614174000'
+    await expect(createWorkflowDraft(draft, creationId)).resolves.toBe('created-id')
     expect(apiFetch).toHaveBeenLastCalledWith('/api/comfyui/workflows', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({
         purpose: 'generation', apiFormatJson: {}, variableDefinitions: [], bindings: [], outputs: draft.outputs,
-        name: 'Portrait', mediaType: 'image',
+        name: 'Portrait', mediaType: 'image', creationId,
       }),
     }))
-    await expect(createWorkflowDraft(draft)).rejects.toMatchObject({ code: 'UNKNOWN' })
-    const networkError = await createWorkflowDraft(draft).catch((reason: unknown) => reason)
+    await expect(createWorkflowDraft(draft, creationId)).rejects.toMatchObject({ code: 'UNKNOWN' })
+    const networkError = await createWorkflowDraft(draft, creationId).catch((reason: unknown) => reason)
     expect(networkError).toMatchObject({
       name: 'WorkflowRequestError', code: 'NETWORK_ERROR', message: 'workflowRequestFailed',
     })
