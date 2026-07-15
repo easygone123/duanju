@@ -476,7 +476,7 @@ describe('system - ComfyUI executable acceptance evidence', () => {
     }
   })
 
-  it('REQ-COMFYUI-AC-09 blocks unauthorized allowlist targets and requires explicit trusted mode', async () => {
+  it('REQ-COMFYUI-AC-09 defaults to trusted while preserving allowlist and metadata protections', async () => {
     const server = new AcceptanceComfyServer()
     server.requiredAuthorization = 'Bearer required-token'
     await server.start()
@@ -485,8 +485,14 @@ describe('system - ComfyUI executable acceptance evidence', () => {
         .resolves.toMatchObject({ system: { comfyui_version: 'fake-1' } })
       await expect(server.client({ type: 'none' }).getSystemStats())
         .rejects.toMatchObject({ code: COMFY_ERROR_CODE.AUTH_FAILED })
-      expect(readComfyRuntimeConfig({ COMFYUI_ENABLED: 'false' }).networkPolicy.mode).toBe('allowlist')
-      expect(readComfyRuntimeConfig({ COMFYUI_ENABLED: 'true', COMFYUI_NETWORK_MODE: 'trusted' }).networkPolicy.mode).toBe('trusted')
+      expect(readComfyRuntimeConfig({})).toMatchObject({
+        enabled: true,
+        networkPolicy: { mode: 'trusted', allowedHosts: [], allowedCidrs: [] },
+      })
+      expect(readComfyRuntimeConfig({
+        COMFYUI_NETWORK_MODE: 'allowlist',
+        COMFYUI_ALLOWED_HOSTS: 'comfy.example.com',
+      }).networkPolicy.mode).toBe('allowlist')
       await expect(authorizeComfyTarget('http://127.0.0.1:8188', {
         mode: 'allowlist', allowedHosts: [], allowedCidrs: [],
       })).rejects.toMatchObject({ code: COMFY_ERROR_CODE.NETWORK_TARGET_BLOCKED })

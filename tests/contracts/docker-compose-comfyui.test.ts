@@ -4,8 +4,8 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const defaults: Readonly<Record<string, string>> = {
-  COMFYUI_ENABLED: 'false',
-  COMFYUI_NETWORK_MODE: 'allowlist',
+  COMFYUI_ENABLED: 'true',
+  COMFYUI_NETWORK_MODE: 'trusted',
   COMFYUI_ALLOWED_HOSTS: '',
   COMFYUI_ALLOWED_CIDRS: '',
   COMFYUI_HEALTH_INTERVAL_MS: '10000',

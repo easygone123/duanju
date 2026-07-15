@@ -32,6 +32,7 @@ const watchPromptMock = vi.hoisted(() => vi.fn())
 const getHistoryMock = vi.hoisted(() => vi.fn())
 const uploadImageMock = vi.hoisted(() => vi.fn())
 const authorizeComfyTargetMock = vi.hoisted(() => vi.fn())
+const clientConstructedMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/redis', () => ({ redis: redisMock }))
@@ -48,6 +49,7 @@ vi.mock('@/lib/comfyui/client', () => ({
     private readonly baseUrl: string
 
     constructor(options: { baseUrl: string }) {
+      clientConstructedMock(options)
       this.baseUrl = options.baseUrl
     }
 
@@ -739,6 +741,28 @@ describe('ComfyUI workflow library', () => {
     }))
     expect(getHistoryMock).toHaveBeenCalledWith('prompt-1')
     expect(redisMock.eval).toHaveBeenCalled()
+  })
+
+  it('live-tests with trusted network mode when network variables are absent', async () => {
+    delete process.env.COMFYUI_NETWORK_MODE
+    delete process.env.COMFYUI_ALLOWED_HOSTS
+    delete process.env.COMFYUI_ALLOWED_CIDRS
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version())
+    prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/test-run/route')
+
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/test-run', method: 'POST',
+      body: { versionId: 'version-1', connectionId: 'connection-1', variables: { seed: 11 } },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(clientConstructedMock).toHaveBeenCalledWith(expect.objectContaining({
+      networkPolicy: { mode: 'trusted', allowedHosts: [], allowedCidrs: [] },
+    }))
   })
 
   it('renews the owner-matched test lease and refuses success after lease loss', async () => {

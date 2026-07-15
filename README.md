@@ -127,23 +127,26 @@ npm run dev
 
 ## 🧩 ComfyUI 图片与视频生成
 
-ComfyUI 作为原生 provider 与现有云端图片、视频 provider 共存。部署方先显式启用运行时；每位用户再在设置中心添加自己的 ComfyUI URL，连接和工作流默认仅添加者本人可用。
+ComfyUI 作为原生 provider 与现有云端图片、视频 provider 共存。运行时默认启用；每位用户可直接在设置中心添加自己的 ComfyUI URL，连接和工作流默认仅添加者本人可用。
 
 ```env
 COMFYUI_ENABLED=true
-# 默认且推荐：只允许明确列出的主机或网段
+# 默认：允许用户添加可信的自托管 ComfyUI 实例
+COMFYUI_NETWORK_MODE=trusted
+# docker-compose.yml 也接受同名变量；未提供时使用以上默认值
+COMFYUI_LEASE_TTL_MS=30000
+COMFYUI_OUTPUT_MAX_BYTES=536870912
+```
+
+公网多用户部署可显式切换到更严格的 allowlist 模式：
+
+```env
 COMFYUI_NETWORK_MODE=allowlist
 COMFYUI_ALLOWED_HOSTS=comfy.example.com
 COMFYUI_ALLOWED_CIDRS=192.168.1.0/24
-# docker-compose.yml 也接受同名变量；未提供时使用安全默认值
-COMFYUI_LEASE_TTL_MS=30000
-COMFYUI_OUTPUT_MAX_BYTES=536870912
-
-# 仅适用于你完全信任的自托管网络；必须显式选择
-# COMFYUI_NETWORK_MODE=trusted
 ```
 
-`allowlist` 是默认网络模式；它拒绝未授权目标，并且访问环回、LAN 等敏感地址时必须通过 `COMFYUI_ALLOWED_CIDRS` 明确授权。`trusted` 是显式的部署选择，不等于关闭全部防护，云凭证元数据端点仍会被阻止。容器内连接宿主机 ComfyUI 时使用 `http://host.docker.internal:8188`；Linux Docker 还需要配置 `host-gateway`，并把解析地址加入允许网段。不要在 URL 中嵌入用户名或密码。
+`trusted` 是默认网络模式，方便本机和自托管部署直接添加环回或 LAN 实例，但它并未关闭全部防护：云凭证元数据端点、URL 内嵌凭据和危险重定向仍会被阻止。`allowlist` 是公网多用户部署的显式加固选项；它拒绝未授权目标，并且访问环回、LAN 等敏感地址时必须通过 `COMFYUI_ALLOWED_CIDRS` 明确授权。容器内连接宿主机 ComfyUI 时使用 `http://host.docker.internal:8188`；Linux Docker 还需要配置 `host-gateway`，使用 allowlist 时还需把解析地址加入允许网段。不要在 URL 中嵌入用户名或密码。
 
 连接支持无认证、Bearer token 和 Basic auth。凭证在设置中心配置并加密保存；状态只显示安全诊断：`online_idle`、`online_busy_owned`、`online_busy_external`、`offline`、`auth_failed`、`workflow_incompatible`。`online_busy_external` 表示实例正在执行手工或其他客户端提交的 prompt，waoowaoo 不会抢占它。
 
@@ -162,6 +165,7 @@ COMFYUI_OUTPUT_MAX_BYTES=536870912
 ```bash
 COMFYUI_CONTRACT_URL=http://127.0.0.1:8188 \
 COMFYUI_CONTRACT_WORKFLOW_FILE=/absolute/path/to/contract-workflow.json \
+COMFYUI_NETWORK_MODE=allowlist \
 COMFYUI_ALLOWED_CIDRS=127.0.0.1/32 \
 npm run check:comfyui-contract
 ```

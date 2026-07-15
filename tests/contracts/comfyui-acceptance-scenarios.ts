@@ -22,7 +22,7 @@ export const COMFYUI_ACCEPTANCE_SCENARIO_EVIDENCE: readonly AcceptanceScenarioEv
   { acId: 'REQ-COMFYUI-AC-06', scenarioId: 'all-busy-waoowaoo-wait', file: SYSTEM, testTitle: 'REQ-COMFYUI-AC-06 keeps requests in waoowaoo when all compatible instances are busy' },
   { acId: 'REQ-COMFYUI-AC-07', scenarioId: 'manual-prompt-external-busy', file: SYSTEM, testTitle: 'REQ-COMFYUI-AC-07 treats a manual prompt as external busy and makes no assignment' },
   { acId: 'REQ-COMFYUI-AC-08', scenarioId: 'restart-ws-cancel-transfer-recovery', file: SYSTEM, testTitle: 'REQ-COMFYUI-AC-08 avoids duplicate execution across restart, WS loss, cancel, and transfer failure' },
-  { acId: 'REQ-COMFYUI-AC-09', scenarioId: 'allowlist-trusted-ssrf', file: SYSTEM, testTitle: 'REQ-COMFYUI-AC-09 blocks unauthorized allowlist targets and requires explicit trusted mode' },
+  { acId: 'REQ-COMFYUI-AC-09', scenarioId: 'allowlist-trusted-ssrf', file: SYSTEM, testTitle: 'REQ-COMFYUI-AC-09 defaults to trusted while preserving allowlist and metadata protections' },
   { acId: 'REQ-COMFYUI-AC-10', scenarioId: 'cross-user-resource-isolation', file: SYSTEM, testTitle: 'REQ-COMFYUI-AC-10 denies cross-user connections, workflows, tasks, and outputs' },
   { acId: 'REQ-COMFYUI-AC-11', scenarioId: 'comfy-cloud-provider-coexistence', file: SYSTEM, testTitle: 'REQ-COMFYUI-AC-11 preserves strict ComfyUI and cloud provider coexistence without provider guessing' },
 ] as const

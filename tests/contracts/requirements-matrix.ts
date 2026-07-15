@@ -239,8 +239,8 @@ export const REQUIREMENTS_MATRIX: ReadonlyArray<RequirementCoverageEntry> = [
   },
   {
     id: 'REQ-COMFYUI-AC-09', feature: 'ComfyUI network security modes',
-    userValue: '默认 allowlist 阻止未授权目标且 trusted 必须显式启用',
-    risk: 'SSRF 访问内网或云凭证端点', priority: 'P0',
+    userValue: '默认 trusted 方便自托管实例接入，公网多用户部署可显式启用 allowlist 加固',
+    risk: 'SSRF 绕过模式边界访问云凭证端点或跟随危险重定向', priority: 'P0',
     tests: ['tests/system/comfyui-generation.system.test.ts', 'tests/integration/provider/comfyui-client.contract.test.ts'],
     scenarioIds: ['allowlist-trusted-ssrf'],
   },

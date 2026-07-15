@@ -64,5 +64,20 @@ describe('requirements matrix integrity', () => {
         'CC BY-NC-SA 4.0',
       ]) expect(readme, `${filename} -> ${requiredText}`).toContain(requiredText)
     }
+    expect(fs.readFileSync(path.resolve(process.cwd(), 'README.md'), 'utf8'))
+      .toContain('`trusted` 是默认网络模式')
+    expect(fs.readFileSync(path.resolve(process.cwd(), 'README.md'), 'utf8'))
+      .toContain('危险重定向')
+    expect(fs.readFileSync(path.resolve(process.cwd(), 'README_en.md'), 'utf8'))
+      .toContain('`trusted` is the default network mode')
+    expect(fs.readFileSync(path.resolve(process.cwd(), 'README_en.md'), 'utf8'))
+      .toContain('unsafe redirects')
+  })
+
+  it('keeps protected targets blocked while documenting allowlist as the hardened override', () => {
+    const requirement = REQUIREMENTS_MATRIX.find(({ id }) => id === 'REQ-COMFYUI-AC-09')
+    expect(requirement?.userValue).toContain('默认 trusted')
+    expect(requirement?.userValue).toContain('allowlist')
+    expect(requirement?.risk).toContain('云凭证端点')
   })
 })

@@ -115,23 +115,26 @@ After launching, go to **Settings** to configure your AI service API keys. A bui
 
 ## 🧩 ComfyUI Image and Video Generation
 
-ComfyUI is a native provider that coexists with every existing cloud image and video provider. The deployer explicitly enables the runtime, then each user adds their own ComfyUI URL in Settings. Connections and workflows are private to their creator by default.
+ComfyUI is a native provider that coexists with every existing cloud image and video provider. The runtime is enabled by default, and each user can add their own ComfyUI URL directly in Settings. Connections and workflows are private to their creator by default.
 
 ```env
 COMFYUI_ENABLED=true
-# Default and recommended: permit only explicitly listed hosts or networks
+# Default: let users add trusted self-hosted ComfyUI instances
+COMFYUI_NETWORK_MODE=trusted
+# docker-compose.yml accepts the same names and uses the defaults above when omitted
+COMFYUI_LEASE_TTL_MS=30000
+COMFYUI_OUTPUT_MAX_BYTES=536870912
+```
+
+Public multi-user deployments can explicitly switch to the stricter allowlist mode:
+
+```env
 COMFYUI_NETWORK_MODE=allowlist
 COMFYUI_ALLOWED_HOSTS=comfy.example.com
 COMFYUI_ALLOWED_CIDRS=192.168.1.0/24
-# docker-compose.yml accepts the same names and uses safe defaults when omitted
-COMFYUI_LEASE_TTL_MS=30000
-COMFYUI_OUTPUT_MAX_BYTES=536870912
-
-# Only for a self-hosted network you fully trust; this must be explicit
-# COMFYUI_NETWORK_MODE=trusted
 ```
 
-`allowlist` is the default network mode. It rejects unauthorized destinations, and loopback/LAN targets require explicit authorization through `COMFYUI_ALLOWED_CIDRS`. `trusted` is an explicit deployment choice rather than a complete security bypass: cloud credential metadata endpoints remain blocked. From a container, reach ComfyUI on the Docker host at `http://host.docker.internal:8188`; Linux Docker also needs a `host-gateway` mapping and the resolved address in an allowed CIDR. Never embed credentials in the URL.
+`trusted` is the default network mode, so local and self-hosted deployments can add loopback or LAN instances directly. It is not a complete security bypass: cloud credential metadata endpoints, credentials embedded in URLs, and unsafe redirects remain blocked. `allowlist` is the explicit hardened override for public multi-user deployments; it rejects unauthorized destinations, and loopback/LAN targets require authorization through `COMFYUI_ALLOWED_CIDRS`. From a container, reach ComfyUI on the Docker host at `http://host.docker.internal:8188`; Linux Docker also needs a `host-gateway` mapping, plus the resolved address in an allowed CIDR when allowlist mode is used. Never embed credentials in the URL.
 
 Connections support no auth, a Bearer token, or Basic auth. Credentials are configured in Settings and stored encrypted. Only sanitized states are exposed: `online_idle`, `online_busy_owned`, `online_busy_external`, `offline`, `auth_failed`, and `workflow_incompatible`. `online_busy_external` means a manual or another client's prompt is active, so waoowaoo will not claim that instance.
 
@@ -150,6 +153,7 @@ The authorized real-instance contract check is manually opt-in and excluded from
 ```bash
 COMFYUI_CONTRACT_URL=http://127.0.0.1:8188 \
 COMFYUI_CONTRACT_WORKFLOW_FILE=/absolute/path/to/contract-workflow.json \
+COMFYUI_NETWORK_MODE=allowlist \
 COMFYUI_ALLOWED_CIDRS=127.0.0.1/32 \
 npm run check:comfyui-contract
 ```
