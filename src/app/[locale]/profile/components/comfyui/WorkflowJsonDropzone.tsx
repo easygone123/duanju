@@ -76,10 +76,5 @@ export default function WorkflowJsonDropzone({
     </label>
   </section>
 
-  return <>
-    {processingRegion}
-    <div role="status" aria-live="polite" className="sr-only">
-      {busy ? t('analyzing') : ''}
-    </div>
-  </>
+  return processingRegion
 }

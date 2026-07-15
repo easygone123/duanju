@@ -191,17 +191,17 @@ describe('guided ComfyUI workflow JSON upload', () => {
     expect(onNameChange).toHaveBeenCalledWith('人像精修')
   })
 
-  it('disables file selection and shows analyzing state while busy', () => {
+  it('disables file selection without creating a second live status while busy', () => {
     const view = dropzone({ busy: true })
     const region = view.getByRole('region', { name: '上传工作流 JSON' })
 
     expect(region.getAttribute('aria-busy')).toBe('true')
     expect((view.getByLabelText('工作流 JSON 文件') as HTMLInputElement).disabled).toBe(true)
     expect((view.getByRole('button', { name: '正在分析…' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(view.getByRole('status').textContent).toBe('正在分析…')
+    expect(view.queryByRole('status')).toBeNull()
   })
 
-  it('keeps the focused file button and persistent live status stable when processing starts', () => {
+  it('keeps the focused file button stable when processing starts without adding a live status', () => {
     const props = {
       name: '初始名称',
       onFile: vi.fn(),
@@ -209,9 +209,8 @@ describe('guided ComfyUI workflow JSON upload', () => {
     }
     const view = render(withZh(createElement(WorkflowJsonDropzone, { ...props, busy: false })))
     const button = view.getByRole('button', { name: '选择 JSON 文件' })
-    const status = view.getByRole('status')
 
-    expect(status.textContent).toBe('')
+    expect(view.queryByRole('status')).toBeNull()
     button.focus()
     expect(document.activeElement).toBe(button)
 
@@ -219,11 +218,9 @@ describe('guided ComfyUI workflow JSON upload', () => {
 
     expect(view.getByRole('button', { name: '正在分析…' })).toBe(button)
     expect(document.activeElement).toBe(button)
-    expect(view.getByRole('status')).toBe(status)
-    expect(status.textContent).toBe('正在分析…')
+    expect(view.queryByRole('status')).toBeNull()
     const processingRegion = view.getByRole('region', { name: '上传工作流 JSON' })
     expect(processingRegion.getAttribute('aria-busy')).toBe('true')
-    expect(processingRegion.contains(status)).toBe(false)
   })
 
   it('prevents default drag behavior and uses a bounded width-safe layout', () => {

@@ -228,6 +228,7 @@ describe('WorkflowCreationWizard', () => {
     upload(view, 'a.json')
     upload(view, 'b.json')
     expect(view.getByText('Analyzing workflow…')).toBeTruthy()
+    expect(view.getAllByRole('status')).toHaveLength(1)
     expect(view.getByRole('region', { name: 'Upload workflow JSON' }).getAttribute('aria-busy')).toBe('true')
     expect((view.getByLabelText('Workflow JSON file') as HTMLInputElement).disabled).toBe(false)
 
