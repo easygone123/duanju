@@ -54,7 +54,7 @@ export function guidedCompatibleRoles(proposal: WorkflowMappingProposal): Canoni
   return [proposal.canonicalName]
 }
 
-function effectiveProposalRole(
+export function effectiveProposalRole(
   proposal: WorkflowMappingProposal,
   roles: Record<string, CanonicalWorkflowInput | 'preserve_original'>,
 ): CanonicalWorkflowInput | 'preserve_original' | null {
