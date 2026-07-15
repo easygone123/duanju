@@ -147,6 +147,23 @@ describe('ComfyUI workflow library', () => {
     expect(prismaMock.comfyWorkflow.findMany).not.toHaveBeenCalled()
   })
 
+  it('lists only active workflows owned by the authenticated user', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    const route = await import('@/app/api/comfyui/workflows/route')
+
+    const response = await route.GET(buildMockRequest({
+      path: '/api/comfyui/workflows', method: 'GET',
+    }), { params: Promise.resolve({}) })
+
+    expect(response.status).toBe(200)
+    expect(prismaMock.comfyWorkflow.findMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', status: { not: 'archived' } },
+      include: { currentVersion: true, versions: { orderBy: { version: 'desc' } } },
+      orderBy: { createdAt: 'asc' },
+    })
+  })
+
   it('round-trips an upscale purpose through owned list and get responses', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')

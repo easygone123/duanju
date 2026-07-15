@@ -73,7 +73,7 @@ export function canonicalWorkflowHash(input: CreateVersionInput): string {
 
 export async function listOwnedWorkflows(userId: string) {
   const records = await prisma.comfyWorkflow.findMany({
-    where: { userId },
+    where: { userId, status: { not: 'archived' } },
     include: { currentVersion: true, versions: { orderBy: { version: 'desc' } } },
     orderBy: { createdAt: 'asc' },
   })
