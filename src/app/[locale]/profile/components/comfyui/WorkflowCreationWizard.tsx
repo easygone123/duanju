@@ -1,0 +1,299 @@
+'use client'
+
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
+
+import type {
+  CanonicalWorkflowInput,
+  WorkflowAutoMappingResult,
+  WorkflowImportKind,
+} from '@/lib/comfyui/workflow-auto-mapping-types'
+import WorkflowAdvancedMappingInspector from './WorkflowAdvancedMappingInspector'
+import WorkflowAnalysisSummary from './WorkflowAnalysisSummary'
+import WorkflowJsonDropzone from './WorkflowJsonDropzone'
+import WorkflowMappingQuestions from './WorkflowMappingQuestions'
+import WorkflowTypePicker from './WorkflowTypePicker'
+import {
+  buildGuidedWorkflowReview,
+  createWorkflowAnalysisCoordinator,
+  isGuidedWorkflowReady,
+} from './guided-workflow-creation'
+import {
+  analyzeWorkflowJson,
+  type WorkflowAnalysisResponse,
+} from './workflow-requests'
+import {
+  confirmWorkflowAnalysis,
+  safeWorkflowErrorKey,
+  type WorkflowAuthorDraft,
+  type WorkflowErrorKey,
+} from './workflow-ui'
+
+type WizardStage = 'type' | 'upload' | 'review'
+type BusyOperation = 'analyzing' | 'creating' | null
+type WorkflowRole = CanonicalWorkflowInput | 'preserve_original'
+
+export interface WorkflowCreationWizardProps {
+  onCancel(): void
+  onCreate(draft: WorkflowAuthorDraft): Promise<string>
+  onCreated(id: string): void
+  analyze?: (kind: WorkflowImportKind, file: File) => Promise<WorkflowAnalysisResponse>
+}
+
+const STAGES: WizardStage[] = ['type', 'upload', 'review']
+
+export default function WorkflowCreationWizard({
+  onCancel,
+  onCreate,
+  onCreated,
+  analyze = analyzeWorkflowJson,
+}: WorkflowCreationWizardProps) {
+  const t = useTranslations('comfyui.workflows.guided')
+  const workflows = useTranslations('comfyui.workflows')
+  const coordinatorRef = useRef(createWorkflowAnalysisCoordinator())
+  const lastFileRef = useRef<File | null>(null)
+  const mountedRef = useRef(true)
+  const [stage, setStage] = useState<WizardStage>('type')
+  const [kind, setKind] = useState<WorkflowImportKind | null>(null)
+  const [name, setName] = useState('')
+  const [sourceText, setSourceText] = useState('')
+  const [analysis, setAnalysis] = useState<WorkflowAutoMappingResult | null>(null)
+  const [roles, setRoles] = useState<Record<string, WorkflowRole>>({})
+  const [selectedOutput, setSelectedOutput] = useState('')
+  const [busy, setBusy] = useState<BusyOperation>(null)
+  const [error, setError] = useState<WorkflowErrorKey | null>(null)
+
+  useEffect(() => {
+    const coordinator = coordinatorRef.current
+    coordinator.reset()
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      coordinator.dispose()
+    }
+  }, [])
+
+  const clearGraphState = () => {
+    setSourceText('')
+    setAnalysis(null)
+    setRoles({})
+    setSelectedOutput('')
+    setError(null)
+    setBusy(null)
+  }
+
+  const runAnalysis = async (file: File, derivedName?: string) => {
+    if (!kind) return
+    lastFileRef.current = file
+    if (derivedName !== undefined) setName(derivedName)
+    setSourceText('')
+    setAnalysis(null)
+    setRoles({})
+    setSelectedOutput('')
+    setError(null)
+    setBusy('analyzing')
+    const ticket = coordinatorRef.current.begin()
+    try {
+      const result = await analyze(kind, file)
+      if (!coordinatorRef.current.isCurrent(ticket)) return
+      const automaticOutput = result.analysis.outputs.find((output) => output.primary)?.nodeId
+        || (result.analysis.outputs.length === 1 ? result.analysis.outputs[0]?.nodeId : '')
+      setSourceText(result.sourceText)
+      setAnalysis(result.analysis)
+      setSelectedOutput(automaticOutput || '')
+      setStage('review')
+      setError(null)
+    } catch (analysisError) {
+      if (!coordinatorRef.current.isCurrent(ticket)) return
+      setSourceText('')
+      setAnalysis(null)
+      setRoles({})
+      setSelectedOutput('')
+      setStage('upload')
+      setError(safeWorkflowErrorKey(analysisError))
+    } finally {
+      if (coordinatorRef.current.isCurrent(ticket)) setBusy(null)
+    }
+  }
+
+  const review = useMemo(() => kind && analysis
+    ? buildGuidedWorkflowReview(kind, analysis, roles, selectedOutput)
+    : null, [analysis, kind, roles, selectedOutput])
+  const ready = Boolean(review && isGuidedWorkflowReady({
+    name,
+    review,
+    busy: busy !== null,
+  }))
+  const automaticPrimaryOutputNodeId = analysis?.outputs.find((output) => output.primary)?.nodeId
+    || (analysis?.outputs.length === 1 ? analysis.outputs[0]?.nodeId : '')
+    || ''
+
+  const create = async () => {
+    if (!analysis || !review || !ready) return
+    setBusy('creating')
+    setError(null)
+    try {
+      const confirmed = confirmWorkflowAnalysis(analysis, {
+        roles,
+        primaryOutputNodeId: review.primaryOutputNodeId,
+      })
+      const draft: WorkflowAuthorDraft = {
+        name: name.trim(),
+        mediaType: analysis.mediaType,
+        purpose: analysis.purpose,
+        apiFormatJson: sourceText,
+        ...confirmed,
+      }
+      const id = await onCreate(draft)
+      if (mountedRef.current) onCreated(id)
+    } catch (creationError) {
+      if (mountedRef.current) setError(safeWorkflowErrorKey(creationError))
+    } finally {
+      if (mountedRef.current) setBusy(null)
+    }
+  }
+
+  const backToType = () => {
+    coordinatorRef.current.begin()
+    lastFileRef.current = null
+    clearGraphState()
+    setName('')
+    setStage('type')
+  }
+  const backToUpload = () => {
+    coordinatorRef.current.begin()
+    clearGraphState()
+    setStage('upload')
+  }
+
+  return <main className="h-full min-h-0 min-w-0 overflow-hidden">
+    <div className="h-full min-w-0 overflow-y-auto overflow-x-hidden">
+      <div className="mx-auto w-full max-w-[60rem] min-w-0 px-4 py-6 sm:px-6">
+        <header className="min-w-0 space-y-4">
+          <div>
+            <h2 className="break-words text-xl font-semibold text-[var(--glass-text-primary)]">{t('wizardTitle')}</h2>
+            <p className="mt-1 text-sm text-[var(--glass-text-secondary)]">{t('wizardHint')}</p>
+          </div>
+          <ol className="flex min-w-0 flex-wrap gap-2" aria-label={t('stepsLabel')}>
+            {STAGES.map((item, index) => <li
+              key={item}
+              aria-current={stage === item ? 'step' : undefined}
+              className={`glass-badge min-w-0 rounded-full border px-3 py-1 text-xs ${stage === item
+                ? 'border-[var(--glass-stroke-focus)] text-[var(--glass-text-primary)]'
+                : 'border-[var(--glass-stroke-base)] text-[var(--glass-text-secondary)]'}`}
+            >
+              <span className="break-words">{index + 1}. {t(`steps.${item}`)}</span>
+            </li>)}
+          </ol>
+        </header>
+
+        <div className="mt-6 min-w-0">
+          {stage === 'type' && <section className="min-w-0 space-y-4" aria-labelledby="workflow-wizard-type">
+            <h3 id="workflow-wizard-type" className="sr-only">{t('steps.type')}</h3>
+            <WorkflowTypePicker value={kind} onSelect={(nextKind) => {
+              if (nextKind !== kind) {
+                clearGraphState()
+                setName('')
+                lastFileRef.current = null
+              }
+              setKind(nextKind)
+            }} />
+          </section>}
+
+          {stage === 'upload' && <section className="min-w-0 space-y-4" aria-labelledby="workflow-wizard-upload">
+            <div>
+              <h3 id="workflow-wizard-upload" className="font-semibold">{t('uploadTitle')}</h3>
+              <p className="mt-1 text-sm text-[var(--glass-text-secondary)]">{t('uploadHint')}</p>
+            </div>
+            <WorkflowJsonDropzone
+              name={name}
+              busy={busy === 'analyzing'}
+              allowReplacementWhileBusy
+              onNameChange={setName}
+              onFile={(file, derivedName) => { void runAnalysis(file, derivedName) }}
+            />
+          </section>}
+
+          {stage === 'review' && analysis && review && <section className="min-w-0 space-y-6" aria-labelledby="workflow-wizard-review">
+            <div>
+              <h3 id="workflow-wizard-review" className="font-semibold">{t('reviewTitle')}</h3>
+              <p className="mt-1 text-sm text-[var(--glass-text-secondary)]">{t('reviewHint')}</p>
+            </div>
+            <label className="block min-w-0 text-sm text-[var(--glass-text-secondary)]">
+              <span>{t('name')}</span>
+              <input
+                type="text"
+                value={name}
+                maxLength={160}
+                disabled={busy === 'creating'}
+                onChange={(event) => setName(event.target.value)}
+                className="glass-input mt-1 w-full min-w-0 px-3 py-2"
+              />
+            </label>
+            <WorkflowAnalysisSummary
+              review={review}
+              outputCount={analysis.outputs.length}
+              automaticPrimaryOutputNodeId={automaticPrimaryOutputNodeId}
+            />
+            <WorkflowMappingQuestions
+              analysis={analysis}
+              review={review}
+              roles={roles}
+              primaryOutputNodeId={selectedOutput}
+              onRoleChange={(id, value) => setRoles((current) => ({ ...current, [id]: value }))}
+              onPrimaryOutputChange={setSelectedOutput}
+            />
+            <WorkflowAdvancedMappingInspector
+              analysis={analysis}
+              roles={roles}
+              primaryOutputNodeId={selectedOutput}
+              onRoleChange={(id, value) => setRoles((current) => ({ ...current, [id]: value }))}
+              onPrimaryOutputChange={setSelectedOutput}
+            />
+          </section>}
+        </div>
+
+        <div className="mt-6 min-h-6 min-w-0">
+          {error && <p role="alert" aria-live="assertive" className="break-words text-sm text-[var(--glass-tone-danger-fg)]">
+            {workflows(error)}
+          </p>}
+          <p role="status" aria-live="polite" className="break-words text-sm text-[var(--glass-text-secondary)]">
+            {busy === 'analyzing' ? t('analyzingStatus') : busy === 'creating' ? t('creatingStatus') : ''}
+          </p>
+        </div>
+
+        <footer className="mt-4 flex min-w-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--glass-stroke-base)] pt-4">
+          <button type="button" onClick={onCancel} disabled={busy === 'creating'} className="glass-btn-base px-4 py-2 text-sm disabled:opacity-50">
+            {t('cancel')}
+          </button>
+          <div className="flex min-w-0 flex-wrap justify-end gap-2">
+            {stage === 'type' && <button
+              type="button"
+              disabled={!kind}
+              onClick={() => setStage('upload')}
+              className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50"
+            >{t('next')}</button>}
+            {stage === 'upload' && <>
+              <button type="button" onClick={backToType} className="glass-btn-base px-4 py-2 text-sm">{t('back')}</button>
+              {error && lastFileRef.current && <button
+                type="button"
+                disabled={busy === 'analyzing'}
+                onClick={() => { if (lastFileRef.current) void runAnalysis(lastFileRef.current) }}
+                className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50"
+              >{t('retryAnalysis')}</button>}
+            </>}
+            {stage === 'review' && <>
+              <button type="button" disabled={busy === 'creating'} onClick={backToUpload} className="glass-btn-base px-4 py-2 text-sm disabled:opacity-50">{t('back')}</button>
+              <button
+                type="button"
+                disabled={!ready}
+                onClick={() => { void create() }}
+                className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50"
+              >{error ? t('retryCreate') : t('create')}</button>
+            </>}
+          </div>
+        </footer>
+      </div>
+    </div>
+  </main>
+}

@@ -531,6 +531,10 @@ describe('guided ComfyUI workflow review', () => {
 
 describe('guided workflow translations', () => {
   const requiredKeys = [
+    'wizardTitle', 'wizardHint', 'stepsLabel', 'steps',
+    'uploadTitle', 'uploadHint', 'reviewTitle', 'reviewHint',
+    'next', 'back', 'cancel', 'retryAnalysis', 'retryCreate', 'create',
+    'analyzingStatus', 'creatingStatus',
     'typeTitle', 'typeHint', 'jsonInput', 'dropTitle', 'dropHint',
     'chooseFile', 'analyzing', 'name', 'selected', 'summaryTitle',
     'recognizedInputs', 'recognizedInput', 'preservedDefaults', 'recognizedOutput',
@@ -549,6 +553,8 @@ describe('guided workflow translations', () => {
     expect(Object.keys(zh).sort()).toEqual(Object.keys(en).sort())
     expect(Object.keys(zh).sort()).toEqual([...requiredKeys, 'types'].sort())
     expect(Object.keys(zh.issues).sort()).toEqual(Object.keys(en.issues).sort())
+    expect(Object.keys(zh.steps).sort()).toEqual(Object.keys(en.steps).sort())
+    expect(Object.keys(zh.steps).sort()).toEqual(['type', 'upload', 'review'].sort())
     expect(Object.keys(zh.issues).sort()).toEqual([
       'COMFY_WORKFLOW_API_FORMAT_REQUIRED', 'COMFY_WORKFLOW_API_FORMAT_INVALID',
       'COMFY_WORKFLOW_OUTPUT_REQUIRED', 'COMFY_WORKFLOW_OUTPUT_AMBIGUOUS', 'unknown',

@@ -111,7 +111,8 @@ export function buildGuidedWorkflowReview(
 }
 
 export function isGuidedWorkflowReady(input: { name: string; review: GuidedWorkflowReview; busy: boolean }) {
-  return Boolean(input.name.trim()) && !input.busy && input.review.questions.length === 0
+  return Boolean(input.name.trim()) && Boolean(input.review.primaryOutputNodeId)
+    && !input.busy && input.review.questions.length === 0
     && !input.review.needsPrimaryOutput && input.review.missingRequiredInputs.length === 0
     && input.review.blockingIssueCodes.length === 0
 }
@@ -122,6 +123,7 @@ export function createWorkflowAnalysisCoordinator() {
   return {
     begin: () => ({ generation: ++generation }),
     isCurrent: (ticket: { generation: number }) => !disposed && ticket.generation === generation,
+    reset: () => { disposed = false; generation += 1 },
     dispose: () => { disposed = true; generation += 1 },
   }
 }

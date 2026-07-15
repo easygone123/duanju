@@ -8,6 +8,7 @@ import { deriveWorkflowName } from './guided-workflow-creation'
 interface WorkflowJsonDropzoneProps {
   name: string
   busy: boolean
+  allowReplacementWhileBusy?: boolean
   onFile: (file: File, derivedName: string) => void
   onNameChange: (name: string) => void
 }
@@ -15,6 +16,7 @@ interface WorkflowJsonDropzoneProps {
 export default function WorkflowJsonDropzone({
   name,
   busy,
+  allowReplacementWhileBusy = false,
   onFile,
   onNameChange,
 }: WorkflowJsonDropzoneProps) {
@@ -23,14 +25,15 @@ export default function WorkflowJsonDropzone({
   const select = (file?: File) => {
     if (file) onFile(file, deriveWorkflowName(file.name))
   }
+  const selectionDisabled = busy && !allowReplacementWhileBusy
   const preventDragDefault = (event: DragEvent<HTMLElement>) => event.preventDefault()
   const fileButton = <button
     type="button"
-    disabled={busy}
+    disabled={selectionDisabled}
     onClick={() => fileInputRef.current?.click()}
     className="glass-btn-base glass-btn-tone-info mt-4 px-4 py-2 text-sm disabled:opacity-50"
   >
-    {busy ? t('analyzing') : t('chooseFile')}
+    {selectionDisabled ? t('analyzing') : t('chooseFile')}
   </button>
 
   const processingRegion = <section
@@ -41,7 +44,7 @@ export default function WorkflowJsonDropzone({
     onDragOver={preventDragDefault}
     onDrop={(event) => {
       event.preventDefault()
-      if (!busy) select(event.dataTransfer.files[0])
+      if (!selectionDisabled) select(event.dataTransfer.files[0])
     }}
   >
     <div className="glass-surface-soft min-w-0 rounded-2xl border border-dashed border-[var(--glass-stroke-base)] p-6 text-center">
@@ -53,7 +56,7 @@ export default function WorkflowJsonDropzone({
         accept=".json,application/json"
         className="sr-only"
         aria-label={t('jsonInput')}
-        disabled={busy}
+        disabled={selectionDisabled}
         onChange={(event) => {
           select(event.currentTarget.files?.[0])
           event.currentTarget.value = ''
