@@ -3,6 +3,8 @@
   "saving": "Saving...",
   "saved": "Saved",
   "saveFailed": "Save failed",
+  "comfyModelsLoading": "Loading local ComfyUI workflow models...",
+  "comfyModelsLoadFailed": "ComfyUI workflow models could not be loaded. Saved models are still available.",
   "connected": "Connected",
   "notConfigured": "Not configured",
   "configure": "Configure",

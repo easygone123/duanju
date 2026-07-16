@@ -3,6 +3,8 @@
   "saving": "保存中...",
   "saved": "已保存",
   "saveFailed": "保存失败",
+  "comfyModelsLoading": "正在加载本地 ComfyUI 工作流模型...",
+  "comfyModelsLoadFailed": "ComfyUI 工作流模型加载失败，当前仍可使用已保存模型。",
   "connected": "已连接",
   "notConfigured": "未配置 Key",
   "configure": "配置",

@@ -303,6 +303,24 @@ export function ApiConfigTabContainer() {
 
       <div className="flex-1 overflow-y-auto">
         <div className="space-y-6 p-6">
+          {userModels.isLoading && (
+            <p
+              role="status"
+              aria-live="polite"
+              className="text-sm text-[var(--glass-text-secondary)]"
+            >
+              {t('comfyModelsLoading')}
+            </p>
+          )}
+          {userModels.isError && (
+            <p
+              role="alert"
+              className="glass-surface-soft rounded-xl p-3 text-sm text-[var(--glass-danger)]"
+            >
+              {t('comfyModelsLoadFailed')}
+            </p>
+          )}
+
           <DefaultModelCards
             t={t}
             defaultModels={defaultModels}
