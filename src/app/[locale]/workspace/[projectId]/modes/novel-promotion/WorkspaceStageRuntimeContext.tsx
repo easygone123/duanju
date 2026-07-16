@@ -45,7 +45,7 @@ export interface WorkspaceStageRuntimeValue {
   onArtStyleChange: (value: string) => Promise<void>
   onStoryboardConfigChange: (key: StoryboardConfigKey, value: unknown) => Promise<boolean>
   onRunStoryToScript: () => Promise<void>
-  onClipUpdate: (clipId: string, data: unknown) => Promise<void>
+  onClipUpdate: (clipId: string, data: unknown) => Promise<boolean>
   onOpenAssetLibrary: () => void
   onRunScriptToStoryboard: () => Promise<void>
   onStageChange: (stage: string) => void

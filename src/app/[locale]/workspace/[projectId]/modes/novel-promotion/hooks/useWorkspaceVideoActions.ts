@@ -146,14 +146,16 @@ export function useWorkspaceVideoActions({
   const handleUpdateClip = async (clipId: string, data: unknown) => {
     if (!episodeId) {
       _ulogError('No episode selected for clip update')
-      return
+      return false
     }
     try {
       assertClipUpdateData(data)
       await updateProjectClipMutation.mutateAsync({ clipId, data, episodeId })
+      return true
     } catch (err: unknown) {
       _ulogError(`${t('execution.updateFailed')}:`, err)
       alert(`${t('execution.saveFailed')}: ${getErrorMessage(err)}`)
+      return false
     }
   }
 

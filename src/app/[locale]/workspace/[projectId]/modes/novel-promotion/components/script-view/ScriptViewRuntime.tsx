@@ -15,12 +15,16 @@ import ScriptViewScriptPanel from './ScriptViewScriptPanel'
 import ScriptViewAssetsPanel from './ScriptViewAssetsPanel'
 import { reuseStringArrayIfEqual, reuseStringSetIfEqual } from './selection-sync'
 import {
+  buildCharacterSelectionValue,
+  buildLocationSelectionValue,
+  buildPropSelectionValue,
   getPrimaryAppearance,
   getSelectedAppearances,
   processCharacterInClip,
   processLocationInClip,
   processPropInClip,
 } from './asset-state-utils'
+import type { ClipAssetSelectionCommit } from './asset-state-utils'
 import { PRIMARY_APPEARANCE_INDEX } from '@/lib/constants'
 
 interface Clip {
@@ -52,7 +56,7 @@ interface ScriptViewProps {
   clips: Clip[]
   storyboards?: Storyboard[]
   onClipEdit?: (clipId: string) => void
-  onClipUpdate?: (clipId: string, data: Partial<Clip>) => void
+  onClipUpdate?: (clipId: string, data: Partial<Clip>) => Promise<boolean>
   onClipDelete?: (clipId: string) => void
   onGenerateStoryboard?: () => void
   isSubmittingStoryboardBuild?: boolean
@@ -352,6 +356,64 @@ export default function ScriptView({
     }
   }
 
+  const handleCommitClipAssetSelection = async (
+    commit: ClipAssetSelectionCommit,
+  ): Promise<boolean> => {
+    if (!onClipUpdate || assetViewMode === 'all') return false
+    const clip = clips.find((item) => item.id === assetViewMode)
+    if (!clip) return false
+
+    if (
+      (commit.type === 'character' &&
+        !commit.items.every(
+          (item) => characters.some((character) => character.id === item.characterId) && !!item.appearanceName.trim(),
+        )) ||
+      (commit.type === 'location' &&
+        !commit.items.every((item) => locations.some((location) => location.id === item.locationId))) ||
+      (commit.type === 'prop' &&
+        !commit.propIds.every((propId) => props.some((prop) => prop.id === propId)))
+    ) {
+      return false
+    }
+
+    isManuallyEditingRef.current = true
+    if (manualEditTimeoutRef.current) clearTimeout(manualEditTimeoutRef.current)
+    manualEditTimeoutRef.current = setTimeout(() => {
+      isManuallyEditingRef.current = false
+      _ulogInfo('[ScriptView] manual editing lock released')
+    }, 1500)
+
+    if (commit.type === 'character') {
+      const charactersValue = buildCharacterSelectionValue({ clip, items: commit.items, characters })
+      const saved = await onClipUpdate(clip.id, { characters: charactersValue })
+      if (!saved) return false
+      setActiveCharIds(Array.from(new Set(commit.items.map((item) => item.characterId))))
+      setSelectedAppearanceKeys(
+        new Set(commit.items.map((item) => `${item.characterId}::${item.appearanceName.trim()}`)),
+      )
+      return true
+    }
+
+    if (commit.type === 'location') {
+      const locationValue = buildLocationSelectionValue({
+        clip,
+        items: commit.items,
+        locations,
+        fuzzyMatchLocation,
+      })
+      const saved = await onClipUpdate(clip.id, { location: locationValue })
+      if (!saved) return false
+      setActiveLocationIds(Array.from(new Set(commit.items.map((item) => item.locationId))))
+      return true
+    }
+
+    const propsValue = buildPropSelectionValue({ clip, propIds: commit.propIds, props })
+    const saved = await onClipUpdate(clip.id, { props: propsValue })
+    if (!saved) return false
+    setActivePropIds(Array.from(new Set(commit.propIds)))
+    return true
+  }
+
   const handleClipUpdateWithSaving = async (clipId: string, data: Partial<Clip>) => {
     if (!onClipUpdate) return
     setSavingClips((prev) => new Set(prev).add(clipId))
@@ -437,6 +499,7 @@ export default function ScriptView({
         activePropIds={activePropIds}
         selectedAppearanceKeys={selectedAppearanceKeys}
         onUpdateClipAssets={handleUpdateClipAssets}
+        onCommitClipAssetSelection={handleCommitClipAssetSelection}
         onOpenAssetLibrary={onOpenAssetLibrary}
         assetsLoading={assetsLoading}
         assetsLoadingState={assetsLoadingState}

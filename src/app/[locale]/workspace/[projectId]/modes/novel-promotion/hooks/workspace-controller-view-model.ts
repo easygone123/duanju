@@ -125,7 +125,7 @@ interface BuildWorkspaceControllerViewModelParams {
       field?: 'videoPrompt' | 'firstLastFramePrompt',
     ) => Promise<void>
     handleUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => Promise<void>
-    handleUpdateClip: (clipId: string, updates: Record<string, unknown>) => Promise<void>
+    handleUpdateClip: (clipId: string, updates: Record<string, unknown>) => Promise<boolean>
   }
   stageRuntime: WorkspaceStageRuntimeValue
   actionsState: {

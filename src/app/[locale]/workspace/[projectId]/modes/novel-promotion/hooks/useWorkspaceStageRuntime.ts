@@ -50,7 +50,7 @@ interface UseWorkspaceStageRuntimeParams {
   runWithRebuildConfirm: (action: 'storyToScript' | 'scriptToStoryboard', operation: () => Promise<void>) => Promise<void>
   runStoryToScriptFlow: () => Promise<void>
   runScriptToStoryboardFlow: () => Promise<void>
-  handleUpdateClip: (clipId: string, updates: Record<string, unknown>) => Promise<void>
+  handleUpdateClip: (clipId: string, updates: Record<string, unknown>) => Promise<boolean>
   openAssetLibrary: (characterId?: string | null, refreshAssets?: boolean) => void
   handleStageChange: (stage: string) => void
   handleGenerateVideo: (

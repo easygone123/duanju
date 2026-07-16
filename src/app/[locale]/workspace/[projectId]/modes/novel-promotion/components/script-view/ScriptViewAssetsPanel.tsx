@@ -9,6 +9,7 @@ import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import { SpotlightCharCard, SpotlightLocationCard, getSelectedLocationImage } from './SpotlightCards'
 import type { TaskPresentationState } from '@/lib/task/presentation'
 import { AppIcon } from '@/components/ui/icons'
+import type { ClipAssetSelectionCommit } from './asset-state-utils'
 
 interface Clip {
   id: string
@@ -34,6 +35,7 @@ interface ScriptViewAssetsPanelProps {
     id: string,
     optionLabel?: string,
   ) => Promise<void>
+  onCommitClipAssetSelection?: (commit: ClipAssetSelectionCommit) => Promise<boolean>
   onOpenAssetLibrary?: () => void
   assetsLoading: boolean
   assetsLoadingState: TaskPresentationState | null
@@ -131,6 +133,7 @@ export default function ScriptViewAssetsPanel({
   activePropIds,
   selectedAppearanceKeys,
   onUpdateClipAssets,
+  onCommitClipAssetSelection = () => Promise.resolve(false),
   onOpenAssetLibrary,
   assetsLoading,
   assetsLoadingState,
@@ -162,6 +165,7 @@ export default function ScriptViewAssetsPanel({
   const [isSavingLocationSelection, setIsSavingLocationSelection] = useState(false)
   const [pendingPropIds, setPendingPropIds] = useState<Set<string>>(new Set())
   const [isSavingPropSelection, setIsSavingPropSelection] = useState(false)
+  const [selectionSaveError, setSelectionSaveError] = useState(false)
   const hasInitializedCharDraftRef = useRef(false)
   const hasInitializedLocDraftRef = useRef(false)
   const hasInitializedPropDraftRef = useRef(false)
@@ -334,6 +338,7 @@ export default function ScriptViewAssetsPanel({
 
   const handleConfirmCharacterSelection = async () => {
     if (isSavingCharacterSelection) return
+    setSelectionSaveError(false)
     setIsSavingCharacterSelection(true)
     try {
       const currentKeys = new Set(initialAppearanceKeys)
@@ -356,6 +361,22 @@ export default function ScriptViewAssetsPanel({
         })
       })
 
+      if (!isAllClipsMode) {
+        const saved = await onCommitClipAssetSelection({
+          type: 'character',
+          items: desiredItems.map(({ characterId, appearanceName }) => ({
+            characterId,
+            appearanceName,
+          })),
+        })
+        if (saved) {
+          setShowAddChar(false)
+        } else {
+          setSelectionSaveError(true)
+        }
+        return
+      }
+
       for (const key of currentKeys) {
         if (desiredKeys.has(key)) continue
         const parsed = parseAppearanceKey(key)
@@ -376,9 +397,28 @@ export default function ScriptViewAssetsPanel({
 
   const handleConfirmLocationSelection = async () => {
     if (isSavingLocationSelection) return
+    setSelectionSaveError(false)
     setIsSavingLocationSelection(true)
     try {
       const currentIds = new Set(activeLocationIds)
+
+      if (!isAllClipsMode) {
+        const items = Array.from(pendingLocationIds).flatMap((locationId) => {
+          const location = locations.find((item) => item.id === locationId)
+          if (!location) return []
+          return [{
+            locationId,
+            label: readTrimmedLabel(pendingLocationLabels[locationId], location.name),
+          }]
+        })
+        const saved = await onCommitClipAssetSelection({ type: 'location', items })
+        if (saved) {
+          setShowAddLoc(false)
+        } else {
+          setSelectionSaveError(true)
+        }
+        return
+      }
 
       for (const locationId of currentIds) {
         if (pendingLocationIds.has(locationId)) continue
@@ -414,9 +454,23 @@ export default function ScriptViewAssetsPanel({
 
   const handleConfirmPropSelection = async () => {
     if (isSavingPropSelection) return
+    setSelectionSaveError(false)
     setIsSavingPropSelection(true)
     try {
       const currentIds = new Set(activePropIds)
+
+      if (!isAllClipsMode) {
+        const saved = await onCommitClipAssetSelection({
+          type: 'prop',
+          propIds: Array.from(pendingPropIds),
+        })
+        if (saved) {
+          setShowAddProp(false)
+        } else {
+          setSelectionSaveError(true)
+        }
+        return
+      }
 
       for (const propId of currentIds) {
         if (pendingPropIds.has(propId)) continue
@@ -486,6 +540,7 @@ export default function ScriptViewAssetsPanel({
               <button
                 ref={charEditorTriggerRef}
                 onClick={() => {
+                  setSelectionSaveError(false)
                   setShowAddChar((prev) => !prev)
                   setShowAddLoc(false)
                   setShowAddProp(false)
@@ -578,6 +633,11 @@ export default function ScriptViewAssetsPanel({
                 })}
               </div>
               <div className="mt-3 flex shrink-0 items-center justify-end gap-2 border-t border-[var(--glass-stroke-base)] pt-3">
+                {selectionSaveError && (
+                  <span role="alert" className="mr-auto text-xs text-[var(--glass-tone-danger-fg)]">
+                    {tScript('asset.selectionSaveFailed')}
+                  </span>
+                )}
                 <button
                   onClick={() => setShowAddChar(false)}
                   disabled={isSavingCharacterSelection}
@@ -642,6 +702,7 @@ export default function ScriptViewAssetsPanel({
               <button
                 ref={locEditorTriggerRef}
                 onClick={() => {
+                  setSelectionSaveError(false)
                   setShowAddLoc((prev) => !prev)
                   setShowAddChar(false)
                   setShowAddProp(false)
@@ -726,6 +787,11 @@ export default function ScriptViewAssetsPanel({
                 </div>
               </div>
               <div className="mt-3 flex shrink-0 items-center justify-end gap-2 border-t border-[var(--glass-stroke-base)] pt-3">
+                {selectionSaveError && (
+                  <span role="alert" className="mr-auto text-xs text-[var(--glass-tone-danger-fg)]">
+                    {tScript('asset.selectionSaveFailed')}
+                  </span>
+                )}
                 <button
                   onClick={() => setShowAddLoc(false)}
                   disabled={isSavingLocationSelection}
@@ -771,6 +837,7 @@ export default function ScriptViewAssetsPanel({
               <button
                 ref={propEditorTriggerRef}
                 onClick={() => {
+                  setSelectionSaveError(false)
                   setShowAddProp((prev) => !prev)
                   setShowAddChar(false)
                   setShowAddLoc(false)
@@ -829,6 +896,11 @@ export default function ScriptViewAssetsPanel({
                 </div>
               </div>
               <div className="mt-3 flex shrink-0 items-center justify-end gap-2 border-t border-[var(--glass-stroke-base)] pt-3">
+                {selectionSaveError && (
+                  <span role="alert" className="mr-auto text-xs text-[var(--glass-tone-danger-fg)]">
+                    {tScript('asset.selectionSaveFailed')}
+                  </span>
+                )}
                 <button
                   onClick={() => setShowAddProp(false)}
                   disabled={isSavingPropSelection}
