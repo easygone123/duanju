@@ -76,6 +76,7 @@ export default function StoryboardGroup({
   sixGridUpscaleWorkflow,
   isSixGridTaskRunning,
   sixGridTaskPanelId,
+  sixGridSheetError,
   onGenerateSixGridSheet,
   onUpscaleSixGridSheet,
   onCropSixGridSheet,
@@ -199,9 +200,10 @@ export default function StoryboardGroup({
         storyboard={storyboard}
         isTaskRunning={isSixGridGroupTaskRunning}
         upscaleWorkflow={sixGridUpscaleWorkflow}
-        onGenerateSheet={() => void onGenerateSixGridSheet()}
+        generationError={sixGridSheetError?.storyboardId === storyboard.id ? sixGridSheetError.message : null}
+        onGenerateSheet={onGenerateSixGridSheet}
         onPreviewSheet={onPreviewImage}
-        onUpscaleSheet={(workflow) => void onUpscaleSixGridSheet(workflow)}
+        onUpscaleSheet={onUpscaleSixGridSheet}
         onOpenCrop={() => setCropCellIndex(0)}
       />
 

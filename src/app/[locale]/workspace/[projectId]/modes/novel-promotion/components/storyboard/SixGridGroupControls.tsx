@@ -16,6 +16,7 @@ interface Props {
   storyboard: NovelPromotionStoryboard
   isTaskRunning: boolean
   upscaleWorkflow: SixGridUpscaleWorkflow | null
+  generationError?: string | null
   onGenerateSheet: () => void
   onPreviewSheet: (url: string) => void
   onUpscaleSheet: (workflow: SixGridUpscaleWorkflow) => void
@@ -23,7 +24,7 @@ interface Props {
 }
 
 export default function SixGridGroupControls({
-  storyboard, isTaskRunning, upscaleWorkflow, onGenerateSheet, onPreviewSheet, onUpscaleSheet, onOpenCrop,
+  storyboard, isTaskRunning, upscaleWorkflow, generationError, onGenerateSheet, onPreviewSheet, onUpscaleSheet, onOpenCrop,
 }: Props) {
   const t = useTranslations('storyboard.sixGrid')
   if (storyboard.layoutMode !== 'six_grid') return null
@@ -86,6 +87,11 @@ export default function SixGridGroupControls({
           {t('crop')}
         </button>
       </div>
+      {generationError && (
+        <p role="alert" className="mt-3 text-xs text-[var(--glass-tone-danger-fg)]">
+          {t('generationFailed', { message: generationError })}
+        </p>
+      )}
     </section>
   )
 }

@@ -387,6 +387,7 @@
         "title": "六宫格故事板",
         "generateSheet": "生成整张 3×2 故事板",
         "regenerateSheet": "重新生成整张 3×2 故事板",
+        "generationFailed": "生成失败：{message}",
         "previewOriginal": "查看原始整图",
         "upscaleSheet": "放大原始整图",
         "crop": "裁剪六个分镜",

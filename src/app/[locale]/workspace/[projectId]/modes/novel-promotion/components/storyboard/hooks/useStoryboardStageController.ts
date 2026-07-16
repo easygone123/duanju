@@ -22,7 +22,7 @@ import { useStoryboardStageUiState } from './useStoryboardStageUiState'
 import { useStoryboardStageStatus } from './useStoryboardStageStatus'
 import { useWorkspaceStageRuntime } from '../../../WorkspaceStageRuntimeContext'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
-import { useSixGridStoryboard } from '@/lib/query/hooks/useSixGridStoryboard'
+import { useSixGridStoryboard, type SixGridSheetError } from '@/lib/query/hooks/useSixGridStoryboard'
 import type { SixGridUpscaleWorkflow } from '../SixGridGroupControls'
 import type { CropEntry } from '../SixGridCropModal'
 
@@ -203,13 +203,21 @@ export function useStoryboardStageController({
     isTransitioning,
   })
 
-  const generateSixGridSheet = useCallback((storyboardId: string) => sixGridTasks.sheet.mutateAsync({
-    operation: 'generate', episodeId, storyboardId,
-  }), [episodeId, sixGridTasks.sheet])
-  const upscaleSixGridSheet = useCallback((storyboardId: string, workflow: SixGridUpscaleWorkflow) => sixGridTasks.sheet.mutateAsync({
-    operation: 'upscale', episodeId, storyboardId,
-    workflowId: workflow.workflowId, workflowVersionId: workflow.workflowVersionId,
-  }), [episodeId, sixGridTasks.sheet])
+  const sixGridSheetError: SixGridSheetError | null = sixGridTasks.sheet.error instanceof Error
+    ? {
+        storyboardId: sixGridTasks.sheet.variables?.storyboardId || null,
+        message: sixGridTasks.sheet.error.message,
+      }
+    : null
+  const generateSixGridSheet = useCallback((storyboardId: string) => {
+    sixGridTasks.sheet.mutate({ operation: 'generate', episodeId, storyboardId })
+  }, [episodeId, sixGridTasks.sheet])
+  const upscaleSixGridSheet = useCallback((storyboardId: string, workflow: SixGridUpscaleWorkflow) => {
+    sixGridTasks.sheet.mutate({
+      operation: 'upscale', episodeId, storyboardId,
+      workflowId: workflow.workflowId, workflowVersionId: workflow.workflowVersionId,
+    })
+  }, [episodeId, sixGridTasks.sheet])
   const cropSixGridSheet = useCallback((storyboardId: string, cropRects: CropEntry[]) => sixGridTasks.crop.mutateAsync({
     episodeId, storyboardId, cropRects,
   }), [episodeId, sixGridTasks.crop])
@@ -243,6 +251,7 @@ export function useStoryboardStageController({
     sixGridTaskPanelId: sixGridTasks.panelUpscale.isPending
       ? sixGridTasks.panelUpscale.variables?.panelId || null
       : sixGridTasks.undo.isPending ? sixGridTasks.undo.variables?.panelId || null : null,
+    sixGridSheetError,
     generateSixGridSheet, upscaleSixGridSheet, cropSixGridSheet, upscaleSixGridPanel, undoSixGridPanel,
   }
 }

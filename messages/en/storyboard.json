@@ -387,6 +387,7 @@
         "title": "Six-grid storyboard",
         "generateSheet": "Generate full 3×2 sheet",
         "regenerateSheet": "Regenerate full 3×2 sheet",
+        "generationFailed": "Generation failed: {message}",
         "previewOriginal": "Preview original sheet",
         "upscaleSheet": "Upscale original sheet",
         "crop": "Crop six panels",

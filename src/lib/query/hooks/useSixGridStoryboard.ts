@@ -13,6 +13,7 @@ type SheetTaskInput = {
   operation: 'generate' | 'upscale'; episodeId: string; storyboardId: string
   imageModel?: string; workflowId?: string; workflowVersionId?: string; prompt?: string
 }
+export type SixGridSheetError = { storyboardId: string | null; message: string }
 type CropTaskInput = { episodeId: string; storyboardId: string; cropRects: CropEntry[] }
 type PanelUpscaleInput = {
   episodeId: string; storyboardId: string; panelId: string

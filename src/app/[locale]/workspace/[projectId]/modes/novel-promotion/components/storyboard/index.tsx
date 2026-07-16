@@ -119,6 +119,7 @@ export default function StoryboardStage({
     sixGridUpscaleWorkflow,
     sixGridTaskStoryboardId,
     sixGridTaskPanelId,
+    sixGridSheetError,
     generateSixGridSheet,
     upscaleSixGridSheet,
     cropSixGridSheet,
@@ -227,6 +228,7 @@ export default function StoryboardStage({
           sixGridUpscaleWorkflow={sixGridUpscaleWorkflow}
           sixGridTaskStoryboardId={sixGridTaskStoryboardId}
           sixGridTaskPanelId={sixGridTaskPanelId}
+          sixGridSheetError={sixGridSheetError}
           onGenerateSixGridSheet={generateSixGridSheet}
           onUpscaleSixGridSheet={upscaleSixGridSheet}
           onCropSixGridSheet={cropSixGridSheet}

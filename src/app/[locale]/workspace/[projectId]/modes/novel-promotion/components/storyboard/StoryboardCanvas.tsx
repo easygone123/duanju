@@ -13,6 +13,7 @@ import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import type { SixGridUpscaleWorkflow } from './SixGridGroupControls'
 import type { CropEntry } from './SixGridCropModal'
 import { VirtualCardRange } from '@/components/virtualization/VirtualCardRange'
+import type { SixGridSheetError } from '@/lib/query/hooks/useSixGridStoryboard'
 
 interface StoryboardCanvasProps {
   sortedStoryboards: NovelPromotionStoryboard[]
@@ -77,8 +78,9 @@ interface StoryboardCanvasProps {
   sixGridUpscaleWorkflow: SixGridUpscaleWorkflow | null
   sixGridTaskStoryboardId: string | null
   sixGridTaskPanelId: string | null
-  onGenerateSixGridSheet: (storyboardId: string) => Promise<unknown>
-  onUpscaleSixGridSheet: (storyboardId: string, workflow: SixGridUpscaleWorkflow) => Promise<unknown>
+  sixGridSheetError: SixGridSheetError | null
+  onGenerateSixGridSheet: (storyboardId: string) => void
+  onUpscaleSixGridSheet: (storyboardId: string, workflow: SixGridUpscaleWorkflow) => void
   onCropSixGridSheet: (storyboardId: string, cropRects: CropEntry[]) => Promise<unknown>
   onUpscaleSixGridPanel: (storyboardId: string, panelId: string, workflow: SixGridUpscaleWorkflow) => Promise<unknown>
   onUndoSixGridPanel: (storyboardId: string, panelId: string, expectedCurrentMediaId: string, expectedPreviousMediaId: string) => Promise<unknown>
@@ -137,6 +139,7 @@ export default function StoryboardCanvas({
   sixGridUpscaleWorkflow,
   sixGridTaskStoryboardId,
   sixGridTaskPanelId,
+  sixGridSheetError,
   onGenerateSixGridSheet,
   onUpscaleSixGridSheet,
   onCropSixGridSheet,
@@ -254,6 +257,7 @@ export default function StoryboardCanvas({
               sixGridUpscaleWorkflow={sixGridUpscaleWorkflow}
               isSixGridTaskRunning={sixGridTaskStoryboardId === storyboard.id}
               sixGridTaskPanelId={sixGridTaskPanelId}
+              sixGridSheetError={sixGridSheetError}
               onGenerateSixGridSheet={() => onGenerateSixGridSheet(storyboard.id)}
               onUpscaleSixGridSheet={(workflow) => onUpscaleSixGridSheet(storyboard.id, workflow)}
               onCropSixGridSheet={(cropRects) => onCropSixGridSheet(storyboard.id, cropRects)}

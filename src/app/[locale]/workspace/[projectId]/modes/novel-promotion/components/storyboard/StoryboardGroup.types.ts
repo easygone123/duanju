@@ -6,6 +6,7 @@ import type { PanelSaveState } from './hooks/usePanelCrudActions'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import type { SixGridUpscaleWorkflow } from './SixGridGroupControls'
 import type { CropEntry } from './SixGridCropModal'
+import type { SixGridSheetError } from '@/lib/query/hooks/useSixGridStoryboard'
 
 export interface StoryboardGroupProps {
   storyboard: NovelPromotionStoryboard
@@ -70,8 +71,9 @@ export interface StoryboardGroupProps {
   sixGridUpscaleWorkflow: SixGridUpscaleWorkflow | null
   isSixGridTaskRunning: boolean
   sixGridTaskPanelId: string | null
-  onGenerateSixGridSheet: () => Promise<unknown>
-  onUpscaleSixGridSheet: (workflow: SixGridUpscaleWorkflow) => Promise<unknown>
+  sixGridSheetError: SixGridSheetError | null
+  onGenerateSixGridSheet: () => void
+  onUpscaleSixGridSheet: (workflow: SixGridUpscaleWorkflow) => void
   onCropSixGridSheet: (cropRects: CropEntry[]) => Promise<unknown>
   onUpscaleSixGridPanel: (panelId: string, workflow: SixGridUpscaleWorkflow) => Promise<unknown>
   onUndoSixGridPanel: (panelId: string, expectedCurrentMediaId: string, expectedPreviousMediaId: string) => Promise<unknown>
