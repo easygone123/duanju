@@ -7,6 +7,130 @@ interface ClipLike {
   props?: string | null
 }
 
+type StoredCharacter = string | { name: string; appearance?: string }
+
+export type ClipAssetSelectionCommit =
+  | { type: 'character'; items: Array<{ characterId: string; appearanceName: string }> }
+  | { type: 'location'; items: Array<{ locationId: string; label: string }> }
+  | { type: 'prop'; propIds: string[] }
+
+function normalizeAssetName(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function parseStoredCharacters(raw: string | null): StoredCharacter[] {
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item): item is StoredCharacter => {
+        if (typeof item === 'string') return !!item.trim()
+        return !!item && typeof item === 'object' && typeof (item as { name?: unknown }).name === 'string'
+      })
+    }
+  } catch {
+    // Fall back to the legacy comma-separated format.
+  }
+  return raw.split(',').map((item) => item.trim()).filter(Boolean)
+}
+
+function parseStoredNames(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean)
+    }
+  } catch {
+    // Fall back to the legacy comma-separated format.
+  }
+  return raw.split(',').map((item) => item.trim()).filter(Boolean)
+}
+
+function dedupeNames(names: string[]): string[] {
+  const seen = new Set<string>()
+  return names.filter((name) => {
+    const normalized = normalizeAssetName(name)
+    if (!normalized || seen.has(normalized)) return false
+    seen.add(normalized)
+    return true
+  })
+}
+
+export function buildCharacterSelectionValue(input: {
+  clip: ClipLike
+  items: Array<{ characterId: string; appearanceName: string }>
+  characters: Character[]
+}): string {
+  const managedNames = new Set(
+    input.characters.flatMap((character) =>
+      [character.name, ...character.name.split('/')]
+        .map(normalizeAssetName)
+        .filter(Boolean),
+    ),
+  )
+  const unmanaged = parseStoredCharacters(input.clip.characters).filter((item) => {
+    const name = typeof item === 'string' ? item : item.name
+    return !managedNames.has(normalizeAssetName(name))
+  })
+  const charactersById = new Map(input.characters.map((character) => [character.id, character]))
+  const seen = new Set<string>()
+  const desired: Array<{ name: string; appearance: string }> = []
+
+  input.items.forEach(({ characterId, appearanceName }) => {
+    const character = charactersById.get(characterId)
+    const label = appearanceName.trim()
+    if (!character || !label) return
+    const key = `${characterId}::${normalizeAssetName(label)}`
+    if (seen.has(key)) return
+    seen.add(key)
+    desired.push({ name: character.name, appearance: label })
+  })
+
+  return JSON.stringify([...unmanaged, ...desired])
+}
+
+export function buildLocationSelectionValue(input: {
+  clip: ClipLike
+  items: Array<{ locationId: string; label: string }>
+  locations: Location[]
+  fuzzyMatchLocation: (left: string, right: string) => boolean
+}): string {
+  const unmanaged = parseStoredNames(input.clip.location).filter(
+    (storedName) =>
+      !input.locations.some((location) => input.fuzzyMatchLocation(storedName, location.name)),
+  )
+  const locationsById = new Map(input.locations.map((location) => [location.id, location]))
+  const desired = input.items.flatMap(({ locationId, label }) => {
+    const location = locationsById.get(locationId)
+    if (!location) return []
+    return [label.trim() || location.name]
+  })
+
+  return dedupeNames([...unmanaged, ...desired]).join(',')
+}
+
+export function buildPropSelectionValue(input: {
+  clip: ClipLike
+  propIds: string[]
+  props: Prop[]
+}): string | null {
+  const managedNames = new Set(input.props.map((prop) => normalizeAssetName(prop.name)))
+  const unmanaged = parseStoredNames(input.clip.props).filter(
+    (storedName) => !managedNames.has(normalizeAssetName(storedName)),
+  )
+  const propsById = new Map(input.props.map((prop) => [prop.id, prop]))
+  const desired = input.propIds.flatMap((propId) => {
+    const prop = propsById.get(propId)
+    return prop ? [prop.name] : []
+  })
+  const finalNames = dedupeNames([...unmanaged, ...desired])
+
+  return finalNames.length > 0 ? JSON.stringify(finalNames) : null
+}
+
 export function getPrimaryAppearance(char: Character): CharacterAppearance | undefined {
   return char.appearances?.find((a) => a.appearanceIndex === PRIMARY_APPEARANCE_INDEX) || char.appearances?.[0]
 }
