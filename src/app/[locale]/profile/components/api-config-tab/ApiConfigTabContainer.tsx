@@ -314,7 +314,8 @@ export function ApiConfigTabContainer() {
           )}
           {userModels.isError && (
             <p
-              role="alert"
+              role="status"
+              aria-live="polite"
               className="glass-surface-soft rounded-xl p-3 text-sm text-[var(--glass-danger)]"
             >
               {t('comfyModelsLoadFailed')}
