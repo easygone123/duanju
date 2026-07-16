@@ -114,6 +114,8 @@ export interface ProjectModelConfig {
   audioModel: string | null
   comfyImageWorkflowVersionIdsByModelKey: Record<string, string>
   comfyVideoWorkflowVersionIdsByModelKey: Record<string, string>
+  comfyImageBindingInvalid: boolean
+  comfyVideoBindingInvalid: boolean
   comfyImageWorkflowVersionId: string | null
   comfyVideoWorkflowVersionId: string | null
   videoRatio: string | null
@@ -204,6 +206,10 @@ export async function getProjectModelConfig(
 
   const taskImageModel = strictTaskOverride(taskOverrides.imageModel, 'imageModel')
   const taskVideoModel = strictTaskOverride(taskOverrides.videoModel, 'videoModel')
+  const comfyImageBindingInvalid = !taskImageModel
+    && Boolean(comfyBinding?.imageWorkflowId) !== Boolean(comfyBinding?.imageWorkflowVersionId)
+  const comfyVideoBindingInvalid = !taskVideoModel
+    && Boolean(comfyBinding?.videoWorkflowId) !== Boolean(comfyBinding?.videoWorkflowVersionId)
   const comfyImageModel = workflowModelKey(
     comfyBinding?.imageWorkflowId, comfyBinding?.imageWorkflowVersionId,
   )
@@ -303,6 +309,8 @@ export async function getProjectModelConfig(
     ...effectiveModels,
     comfyImageWorkflowVersionIdsByModelKey: imageWorkflowVersionIdsByModelKey,
     comfyVideoWorkflowVersionIdsByModelKey: videoWorkflowVersionIdsByModelKey,
+    comfyImageBindingInvalid,
+    comfyVideoBindingInvalid,
     comfyImageWorkflowVersionId: uniqueImageWorkflowVersionIds.length === 1
       ? uniqueImageWorkflowVersionIds[0]
       : null,
@@ -388,11 +396,20 @@ async function resolveTrustedPinnedComfyWorkflowVersion(input: {
 export function resolveProjectComfyWorkflowVersion(
   projectModelConfig: Pick<
     ProjectModelConfig,
-    'comfyImageWorkflowVersionIdsByModelKey' | 'comfyVideoWorkflowVersionIdsByModelKey'
+    | 'comfyImageWorkflowVersionIdsByModelKey'
+    | 'comfyVideoWorkflowVersionIdsByModelKey'
+    | 'comfyImageBindingInvalid'
+    | 'comfyVideoBindingInvalid'
   >,
   modelKey: string | null | undefined,
   mediaType: 'image' | 'video',
 ): string | null {
+  const bindingInvalid = mediaType === 'image'
+    ? projectModelConfig.comfyImageBindingInvalid
+    : projectModelConfig.comfyVideoBindingInvalid
+  if (bindingInvalid) {
+    throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: ${mediaType}`)
+  }
   const parsed = parseModelKeyStrict(modelKey)
   if (!parsed || parsed.provider !== 'comfyui') return null
   const canonicalModelKey = composeModelKey(parsed.provider, parsed.modelId)

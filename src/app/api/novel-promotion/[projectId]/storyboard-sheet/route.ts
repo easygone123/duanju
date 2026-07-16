@@ -44,10 +44,10 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
   const prompt = body.prompt ?? storyboard.sheetPromptSnapshot
   if (!model || !prompt) throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_SHEET_SNAPSHOT_MISSING' })
   const parsedModel = parseModelKeyStrict(model)
+  const configuredWorkflowVersionId = operation === 'generate' && projectModelConfig
+    ? resolveProjectComfyWorkflowVersion(projectModelConfig, model, 'image') ?? undefined
+    : undefined
   if (operation === 'generate' && parsedModel?.provider === 'comfyui') {
-    const configuredWorkflowVersionId = projectModelConfig
-      ? resolveProjectComfyWorkflowVersion(projectModelConfig, model, 'image') ?? undefined
-      : undefined
     workflow = await loadOwnedPublishedGenerationWorkflow({
       userId: auth.session.user.id,
       workflowId: parsedModel.modelId,

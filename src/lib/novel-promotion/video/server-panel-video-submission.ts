@@ -2,6 +2,7 @@ import { ApiError } from '@/lib/api-errors'
 import {
   applyTrustedComfyVersionSnapshot,
   getProjectModelConfig,
+  resolveProjectComfyWorkflowVersion,
   resolveTrustedComfyWorkflowVersion,
 } from '@/lib/config-service'
 import { parseModelKeyStrict, type CapabilityValue } from '@/lib/model-config-contract'
@@ -144,11 +145,13 @@ async function loadAvailableVideoModel(input: {
   modelKey: string
   userId: string
   panel: VideoPanelRecord
+  trustedComfyWorkflowVersionId?: string | null
 }): Promise<AvailablePanelVideoModel> {
   const parsed = parseModelKeyStrict(input.modelKey)
   if (!parsed) throw new ApiError('INVALID_PARAMS', { code: VIDEO_MODEL_INVALID })
   const comfyWorkflowVersionId = parsed.provider === 'comfyui'
-    ? await resolveTrustedComfyWorkflowVersion(input.userId, input.modelKey, 'video')
+    ? input.trustedComfyWorkflowVersionId
+      ?? await resolveTrustedComfyWorkflowVersion(input.userId, input.modelKey, 'video')
     : null
   if (parsed.provider === 'comfyui' && !comfyWorkflowVersionId) {
     throw new ApiError('INVALID_PARAMS', { code: VIDEO_MODEL_INVALID })
@@ -160,15 +163,16 @@ async function loadAvailableVideoModel(input: {
     ? await prisma.comfyWorkflowVersion.findFirst({
       where: {
         id: comfyWorkflowVersionId,
+        purpose: 'generation',
         publishedAt: { not: null },
         lastSuccessfulTestAt: { not: null },
-        workflow: { userId: input.userId, mediaType: 'video', status: 'published', currentVersionId: comfyWorkflowVersionId },
+        workflow: { id: parsed.modelId, userId: input.userId, mediaType: 'video', status: 'published' },
         lastTestConnection: { userId: input.userId },
       },
-      select: { id: true, variableDefinitions: true },
+      select: { id: true, variableDefinitions: true, contentHash: true },
     })
     : null
-  if (comfyWorkflowVersionId && !comfyVersion) {
+  if (comfyWorkflowVersionId && (!comfyVersion || !comfyVersion.contentHash.trim())) {
     throw new ApiError('INVALID_PARAMS', { code: VIDEO_MODEL_INVALID })
   }
   return {
@@ -332,10 +336,16 @@ export async function resolveAuthoritativePanelPayload(input: {
   const automaticDialogueModel = panel.hasDialogue ? projectModels.dialogueVideoModel : null
   const selectedCandidate = explicitModel || automaticDialogueModel || projectModels.videoModel
   if (!selectedCandidate) throw new ApiError('INVALID_PARAMS', { code: VIDEO_MODEL_INVALID })
+  const projectDefaultComfyWorkflowVersionId = !explicitModel && !automaticDialogueModel
+    ? resolveProjectComfyWorkflowVersion(projectModels, selectedCandidate, 'video')
+    : null
   let models: AvailablePanelVideoModel[]
   try {
     models = [await loadAvailableVideoModel({
-      modelKey: selectedCandidate, userId: input.userId, panel,
+      modelKey: selectedCandidate,
+      userId: input.userId,
+      panel,
+      trustedComfyWorkflowVersionId: projectDefaultComfyWorkflowVersionId,
     })]
   } catch (error) {
     if (!explicitModel && automaticDialogueModel) {
