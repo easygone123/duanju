@@ -7,7 +7,7 @@ import { TASK_TYPE } from '@/lib/task/types'
 import { resolveRequiredTaskLocale } from '@/lib/task/resolve-locale'
 import { loadOwnedPublishedGenerationWorkflow, loadOwnedPublishedUpscaleWorkflow, loadOwnedSixGrid, finalizeSnapshot } from '@/lib/novel-promotion/six-grid/image-task-route'
 import { resolveSheetAspectRatio, type SixGridImageTaskSnapshot } from '@/lib/workers/handlers/storyboard-sheet-task-handler'
-import { resolveProjectImageTaskGenerationOptions } from '@/lib/config-service'
+import { getProjectModelConfig, resolveProjectImageTaskGenerationOptions } from '@/lib/config-service'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 
 const schema = z.object({
@@ -33,7 +33,14 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     if (!storyboard.sheetImageMedia) throw new ApiError('INVALID_PARAMS', { code: 'SHEET_IMAGE_REQUIRED', field: 'storyboardId' })
     workflow = await loadOwnedPublishedUpscaleWorkflow({ userId: auth.session.user.id, workflowId: body.workflowId, workflowVersionId: body.workflowVersionId })
   }
-  const model = operation === 'generate' ? (body.imageModel || storyboard.sheetModelSnapshot) : `comfyui::${workflow!.workflow.id}`
+  const projectModelConfig = operation === 'generate'
+    && !body.imageModel
+    && !storyboard.sheetModelSnapshot
+    ? await getProjectModelConfig(projectId, auth.session.user.id)
+    : null
+  const model = operation === 'generate'
+    ? body.imageModel || storyboard.sheetModelSnapshot || projectModelConfig?.storyboardModel
+    : `comfyui::${workflow!.workflow.id}`
   const prompt = body.prompt ?? storyboard.sheetPromptSnapshot
   if (!model || !prompt) throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_SHEET_SNAPSHOT_MISSING' })
   const parsedModel = parseModelKeyStrict(model)
