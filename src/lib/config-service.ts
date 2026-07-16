@@ -211,19 +211,6 @@ export async function getProjectModelConfig(
     comfyBinding?.videoWorkflowId, comfyBinding?.videoWorkflowVersionId,
   )
 
-  assertCompleteComfyBinding(
-    taskImageModel,
-    comfyBinding?.imageWorkflowId,
-    comfyBinding?.imageWorkflowVersionId,
-    'image',
-  )
-  assertCompleteComfyBinding(
-    taskVideoModel,
-    comfyBinding?.videoWorkflowId,
-    comfyBinding?.videoWorkflowVersionId,
-    'video',
-  )
-
   const [pinnedImageWorkflowVersionId, pinnedVideoWorkflowVersionId] = await Promise.all([
     !taskImageModel && comfyImageModel
       ? resolveTrustedPinnedComfyWorkflowVersion({
@@ -373,24 +360,12 @@ function workflowModelKey(
   return extractModelKey(composeModelKey('comfyui', workflowId))
 }
 
-function assertCompleteComfyBinding(
-  taskModel: string | null,
-  workflowId: string | null | undefined,
-  workflowVersionId: string | null | undefined,
-  mediaType: 'image' | 'video',
-) {
-  if (taskModel || (!workflowId && !workflowVersionId)) return
-  if (!workflowId || !workflowVersionId) {
-    throw new Error(`COMFY_WORKFLOW_BINDING_INVALID: ${mediaType}`)
-  }
-}
-
 async function resolveTrustedPinnedComfyWorkflowVersion(input: {
   userId: string
   workflowId: string
   workflowVersionId: string
   mediaType: 'image' | 'video'
-}): Promise<string> {
+}): Promise<string | null> {
   const version = await prisma.comfyWorkflowVersion.findFirst({
     where: {
       id: input.workflowVersionId,
@@ -407,10 +382,7 @@ async function resolveTrustedPinnedComfyWorkflowVersion(input: {
     },
     select: { id: true, contentHash: true },
   })
-  if (!version || !version.contentHash.trim()) {
-    throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: comfyui::${input.workflowId}`)
-  }
-  return version.id
+  return version?.contentHash.trim() ? version.id : null
 }
 
 export function resolveProjectComfyWorkflowVersion(
@@ -570,6 +542,7 @@ async function loadOwnedPublishedComfyAspectRatioOptions(input: {
   const version = await prisma.comfyWorkflowVersion.findFirst({
     where: {
       id: input.workflowVersionId,
+      purpose: 'generation',
       publishedAt: { not: null },
       lastSuccessfulTestAt: { not: null },
       lastTestConnection: { userId: input.userId },
@@ -577,12 +550,13 @@ async function loadOwnedPublishedComfyAspectRatioOptions(input: {
         userId: input.userId,
         mediaType: 'image',
         status: 'published',
-        currentVersionId: input.workflowVersionId,
       },
     },
-    select: { variableDefinitions: true },
+    select: { variableDefinitions: true, contentHash: true },
   })
-  return readComfyAspectRatioOptions(version?.variableDefinitions)
+  return version?.contentHash.trim()
+    ? readComfyAspectRatioOptions(version.variableDefinitions)
+    : []
 }
 
 export async function resolveProjectImageTaskGenerationOptions(input: {

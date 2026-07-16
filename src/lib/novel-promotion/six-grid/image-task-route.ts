@@ -36,7 +36,11 @@ export async function loadOwnedPublishedUpscaleWorkflow(input: {
   return loadOwnedPublishedTestedWorkflow({ ...input, purpose: 'upscale' })
 }
 
-export async function loadOwnedPublishedGenerationWorkflow(input: { userId: string; workflowId: string }) {
+export async function loadOwnedPublishedGenerationWorkflow(input: {
+  userId: string
+  workflowId: string
+  workflowVersionId?: string
+}) {
   return loadOwnedPublishedTestedWorkflow({ ...input, purpose: 'generation' })
 }
 
@@ -50,16 +54,26 @@ async function loadOwnedPublishedTestedWorkflow(input: {
   const workflow = await prisma.comfyWorkflow.findFirst({
     where: {
       id: input.workflowId, userId: input.userId, mediaType: 'image', status: 'published',
-      ...(input.workflowVersionId ? { currentVersionId: input.workflowVersionId } : {}),
+      ...(input.workflowVersionId && input.purpose === 'upscale'
+        ? { currentVersionId: input.workflowVersionId }
+        : {}),
     },
     include: { currentVersion: { include: { lastTestConnection: { select: { userId: true } } } } },
   })
-  const version = workflow?.currentVersion
+  const version = workflow && input.workflowVersionId && input.purpose === 'generation'
+    ? await prisma.comfyWorkflowVersion.findFirst({
+        where: { id: input.workflowVersionId, workflowId: workflow.id },
+        include: { lastTestConnection: { select: { userId: true } } },
+      })
+    : workflow?.currentVersion
   const field = input.purpose === 'generation' ? 'imageModel' : 'workflowVersionId'
-  if (!workflow || !version || workflow.currentVersionId !== version.id
+  const requiresCurrentVersion = !input.workflowVersionId || input.purpose === 'upscale'
+  if (!workflow || !version
+    || (requiresCurrentVersion && workflow.currentVersionId !== version.id)
     || (input.workflowVersionId && version.id !== input.workflowVersionId)) invalid(`${prefix}_WORKFLOW_NOT_FOUND`, field)
   if (version.purpose !== input.purpose) invalid(`${prefix}_WORKFLOW_PURPOSE_INVALID`, field)
   if (!version.publishedAt) invalid(`${prefix}_WORKFLOW_UNPUBLISHED`, field)
+  if (!version.contentHash.trim()) invalid(`${prefix}_WORKFLOW_UNPUBLISHED`, field)
   if (!version.lastSuccessfulTestAt || !version.lastTestConnection
     || version.lastTestConnection.userId !== input.userId) invalid(`${prefix}_WORKFLOW_NOT_VALIDATED`, field)
   const issues = validateWorkflowContract({
