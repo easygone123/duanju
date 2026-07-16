@@ -47,7 +47,7 @@ export const POST = apiHandler(async (
   body.imageModel = projectModels.characterModel
   applyTrustedComfyVersionSnapshot(
     body,
-    resolveProjectComfyWorkflowVersion(projectModels, projectModels.characterModel),
+    resolveProjectComfyWorkflowVersion(projectModels, projectModels.characterModel, 'image'),
   )
   body.comfyModelSnapshotVersion = 1
 

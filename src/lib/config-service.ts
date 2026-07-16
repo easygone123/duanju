@@ -112,7 +112,8 @@ export interface ProjectModelConfig {
   editModel: string | null
   videoModel: string | null
   audioModel: string | null
-  comfyWorkflowVersionIdsByModelKey: Record<string, string>
+  comfyImageWorkflowVersionIdsByModelKey: Record<string, string>
+  comfyVideoWorkflowVersionIdsByModelKey: Record<string, string>
   comfyImageWorkflowVersionId: string | null
   comfyVideoWorkflowVersionId: string | null
   videoRatio: string | null
@@ -223,6 +224,25 @@ export async function getProjectModelConfig(
     'video',
   )
 
+  const [pinnedImageWorkflowVersionId, pinnedVideoWorkflowVersionId] = await Promise.all([
+    !taskImageModel && comfyImageModel
+      ? resolveTrustedPinnedComfyWorkflowVersion({
+          userId,
+          workflowId: comfyBinding!.imageWorkflowId!,
+          workflowVersionId: comfyBinding!.imageWorkflowVersionId!,
+          mediaType: 'image',
+        })
+      : null,
+    !taskVideoModel && comfyVideoModel
+      ? resolveTrustedPinnedComfyWorkflowVersion({
+          userId,
+          workflowId: comfyBinding!.videoWorkflowId!,
+          workflowVersionId: comfyBinding!.videoWorkflowVersionId!,
+          mediaType: 'video',
+        })
+      : null,
+  ])
+
   const effectiveModels = {
     analysisModel: extractModelKey(projectData?.analysisModel) || extractModelKey(userPref?.analysisModel) || null,
     characterModel: taskImageModel || comfyImageModel || extractModelKey(projectData?.characterModel) || extractModelKey(userPref?.characterModel) || null,
@@ -232,23 +252,54 @@ export async function getProjectModelConfig(
     videoModel: taskVideoModel || comfyVideoModel || extractModelKey(projectData?.videoModel) || extractModelKey(userPref?.videoModel) || null,
     audioModel: extractModelKey(projectData?.audioModel) || extractModelKey(userPref?.audioModel) || null,
   }
-  const comfyValidation = await validateComfyDefaultModels(userId, effectiveModels)
-  const invalidComfyDefault = comfyValidation.invalidEntries[0]
-  if (invalidComfyDefault) {
-    throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: ${invalidComfyDefault.modelKey}`)
+  const modelsRequiringCurrentVersion = {
+    ...effectiveModels,
+    ...(!taskImageModel && comfyImageModel
+      ? { characterModel: null, locationModel: null, storyboardModel: null, editModel: null }
+      : {}),
+    ...(!taskVideoModel && comfyVideoModel ? { videoModel: null } : {}),
   }
-  assertCurrentBindingVersion(
-    taskImageModel,
-    comfyImageModel,
-    comfyBinding?.imageWorkflowVersionId,
-    comfyValidation.workflowVersionIdsByModelKey,
-  )
-  assertCurrentBindingVersion(
-    taskVideoModel,
-    comfyVideoModel,
-    comfyBinding?.videoWorkflowVersionId,
-    comfyValidation.workflowVersionIdsByModelKey,
-  )
+  const comfyValidation = await validateComfyDefaultModels(userId, modelsRequiringCurrentVersion)
+  const invalidComfyFields = new Set(comfyValidation.invalidEntries.map((entry) => entry.field))
+  const currentImageWorkflowVersionIdsByModelKey: Record<string, string> = {}
+  for (const field of ['characterModel', 'locationModel', 'storyboardModel', 'editModel'] as const) {
+    const modelKey = effectiveModels[field]
+    const workflowVersionId = modelKey
+      ? comfyValidation.workflowVersionIdsByModelKey[modelKey]
+      : null
+    if (modelKey && workflowVersionId && !invalidComfyFields.has(field)) {
+      currentImageWorkflowVersionIdsByModelKey[modelKey] = workflowVersionId
+    }
+  }
+  const currentVideoWorkflowVersionIdsByModelKey: Record<string, string> = {}
+  if (effectiveModels.videoModel && !invalidComfyFields.has('videoModel')) {
+    const workflowVersionId = comfyValidation.workflowVersionIdsByModelKey[effectiveModels.videoModel]
+    if (workflowVersionId) {
+      currentVideoWorkflowVersionIdsByModelKey[effectiveModels.videoModel] = workflowVersionId
+    }
+  }
+  if (taskImageModel
+    && parseModelKeyStrict(taskImageModel)?.provider === 'comfyui'
+    && !currentImageWorkflowVersionIdsByModelKey[taskImageModel]) {
+    throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: ${taskImageModel}`)
+  }
+  if (taskVideoModel
+    && parseModelKeyStrict(taskVideoModel)?.provider === 'comfyui'
+    && !currentVideoWorkflowVersionIdsByModelKey[taskVideoModel]) {
+    throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: ${taskVideoModel}`)
+  }
+  const imageWorkflowVersionIdsByModelKey = {
+    ...currentImageWorkflowVersionIdsByModelKey,
+    ...(comfyImageModel && pinnedImageWorkflowVersionId
+      ? { [comfyImageModel]: pinnedImageWorkflowVersionId }
+      : {}),
+  }
+  const videoWorkflowVersionIdsByModelKey = {
+    ...currentVideoWorkflowVersionIdsByModelKey,
+    ...(comfyVideoModel && pinnedVideoWorkflowVersionId
+      ? { [comfyVideoModel]: pinnedVideoWorkflowVersionId }
+      : {}),
+  }
   const imageWorkflowVersionIds = [
     effectiveModels.characterModel,
     effectiveModels.locationModel,
@@ -256,19 +307,20 @@ export async function getProjectModelConfig(
     effectiveModels.editModel,
   ].flatMap((modelKey) => {
     if (!modelKey) return []
-    const workflowVersionId = comfyValidation.workflowVersionIdsByModelKey[modelKey]
+    const workflowVersionId = imageWorkflowVersionIdsByModelKey[modelKey]
     return workflowVersionId ? [workflowVersionId] : []
   })
   const uniqueImageWorkflowVersionIds = [...new Set(imageWorkflowVersionIds)]
 
   return {
     ...effectiveModels,
-    comfyWorkflowVersionIdsByModelKey: comfyValidation.workflowVersionIdsByModelKey,
+    comfyImageWorkflowVersionIdsByModelKey: imageWorkflowVersionIdsByModelKey,
+    comfyVideoWorkflowVersionIdsByModelKey: videoWorkflowVersionIdsByModelKey,
     comfyImageWorkflowVersionId: uniqueImageWorkflowVersionIds.length === 1
       ? uniqueImageWorkflowVersionIds[0]
       : null,
     comfyVideoWorkflowVersionId: effectiveModels.videoModel
-      ? comfyValidation.workflowVersionIdsByModelKey[effectiveModels.videoModel] ?? null
+      ? videoWorkflowVersionIdsByModelKey[effectiveModels.videoModel] ?? null
       : null,
     videoRatio: projectData?.videoRatio || '16:9',
     artStyle: projectData?.artStyle || null,
@@ -333,26 +385,49 @@ function assertCompleteComfyBinding(
   }
 }
 
-function assertCurrentBindingVersion(
-  taskModel: string | null,
-  bindingModel: string | null,
-  bindingWorkflowVersionId: string | null | undefined,
-  workflowVersionIdsByModelKey: Readonly<Record<string, string>>,
-) {
-  if (taskModel || !bindingModel) return
-  if (workflowVersionIdsByModelKey[bindingModel] !== bindingWorkflowVersionId) {
-    throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: ${bindingModel}`)
+async function resolveTrustedPinnedComfyWorkflowVersion(input: {
+  userId: string
+  workflowId: string
+  workflowVersionId: string
+  mediaType: 'image' | 'video'
+}): Promise<string> {
+  const version = await prisma.comfyWorkflowVersion.findFirst({
+    where: {
+      id: input.workflowVersionId,
+      workflowId: input.workflowId,
+      purpose: 'generation',
+      publishedAt: { not: null },
+      lastSuccessfulTestAt: { not: null },
+      lastTestConnection: { userId: input.userId },
+      workflow: {
+        userId: input.userId,
+        mediaType: input.mediaType,
+        status: 'published',
+      },
+    },
+    select: { id: true, contentHash: true },
+  })
+  if (!version || !version.contentHash.trim()) {
+    throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: comfyui::${input.workflowId}`)
   }
+  return version.id
 }
 
 export function resolveProjectComfyWorkflowVersion(
-  projectModelConfig: Pick<ProjectModelConfig, 'comfyWorkflowVersionIdsByModelKey'>,
+  projectModelConfig: Pick<
+    ProjectModelConfig,
+    'comfyImageWorkflowVersionIdsByModelKey' | 'comfyVideoWorkflowVersionIdsByModelKey'
+  >,
   modelKey: string | null | undefined,
+  mediaType: 'image' | 'video',
 ): string | null {
   const parsed = parseModelKeyStrict(modelKey)
   if (!parsed || parsed.provider !== 'comfyui') return null
   const canonicalModelKey = composeModelKey(parsed.provider, parsed.modelId)
-  const workflowVersionId = projectModelConfig.comfyWorkflowVersionIdsByModelKey[canonicalModelKey]
+  const workflowVersionIdsByModelKey = mediaType === 'image'
+    ? projectModelConfig.comfyImageWorkflowVersionIdsByModelKey
+    : projectModelConfig.comfyVideoWorkflowVersionIdsByModelKey
+  const workflowVersionId = workflowVersionIdsByModelKey[canonicalModelKey]
   if (!workflowVersionId) {
     throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: ${canonicalModelKey}`)
   }
@@ -598,7 +673,7 @@ export async function buildImageBillingPayload(input: {
   const projectModelConfig = input.projectModelConfig
     ?? await getProjectModelConfig(projectId, userId)
   try {
-    comfyWorkflowVersionId = resolveProjectComfyWorkflowVersion(projectModelConfig, imageModel)
+    comfyWorkflowVersionId = resolveProjectComfyWorkflowVersion(projectModelConfig, imageModel, 'image')
     const parsedImageModel = parseModelKeyStrict(imageModel)
     const comfyAspectRatioOptions = input.taskSelections?.aspectRatio !== undefined
       && parsedImageModel?.provider === 'comfyui'

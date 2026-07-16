@@ -325,7 +325,7 @@ async function resolveImageGenerationSnapshot(
       config.editModel,
     ].includes(params.modelId)
     legacyVersionId = matchesCurrentImageModel
-      ? resolveProjectComfyWorkflowVersion(config, params.modelId) ?? undefined
+      ? resolveProjectComfyWorkflowVersion(config, params.modelId, 'image') ?? undefined
       : undefined
   }
   return resolveImageTaskSnapshot(payload, {
@@ -355,7 +355,7 @@ async function resolveVideoGenerationSnapshot(
   if (!legacyVersionId && parseModelKeyStrict(params.modelId)?.provider === 'comfyui') {
     const config = await getProjectModelConfig(job.data.projectId, job.data.userId)
     legacyVersionId = config.videoModel === params.modelId
-      ? resolveProjectComfyWorkflowVersion(config, params.modelId) ?? undefined
+      ? resolveProjectComfyWorkflowVersion(config, params.modelId, 'video') ?? undefined
       : undefined
   }
   return resolveVideoTaskSnapshot(payload, {
