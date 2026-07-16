@@ -3,10 +3,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
-import type {
-  CanonicalWorkflowInput,
-  WorkflowAutoMappingResult,
-  WorkflowImportKind,
+import {
+  WORKFLOW_IMPORT_KIND_META,
+  type CanonicalWorkflowInput,
+  type WorkflowAutoMappingResult,
+  type WorkflowImportKind,
 } from '@/lib/comfyui/workflow-auto-mapping-types'
 import WorkflowAdvancedMappingInspector from './WorkflowAdvancedMappingInspector'
 import WorkflowAnalysisSummary from './WorkflowAnalysisSummary'
@@ -195,7 +196,7 @@ export default function WorkflowCreationWizard({
   }
 
   const create = async () => {
-    if (!analysis || !effectiveAnalysis || mappingInvalid || !review || !ready || submissionRef.current !== 'idle') return
+    if (!kind || !analysis || !effectiveAnalysis || mappingInvalid || !review || !ready || submissionRef.current !== 'idle') return
     submissionRef.current = 'creating'
     setBusy('creating')
     setError(null)
@@ -203,6 +204,7 @@ export default function WorkflowCreationWizard({
       const confirmed = confirmWorkflowAnalysis(effectiveAnalysis, {
         roles,
         primaryOutputNodeId: review.primaryOutputNodeId,
+        requiredInputs: WORKFLOW_IMPORT_KIND_META[kind].requiredInputs,
       })
       const draft: WorkflowAuthorDraft = {
         name: name.trim(),

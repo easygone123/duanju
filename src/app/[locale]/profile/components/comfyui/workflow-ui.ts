@@ -148,6 +148,7 @@ export interface WorkflowAuthorDraft {
 export interface WorkflowMappingConfirmation {
   roles: Record<string, CanonicalWorkflowInput | 'preserve_original'>
   primaryOutputNodeId?: string
+  requiredInputs?: readonly CanonicalWorkflowInput[]
 }
 
 export function confirmWorkflowAnalysis(
@@ -158,7 +159,7 @@ export function confirmWorkflowAnalysis(
   const bindings: ComfyInputBinding[] = []
   let nextReferenceIndex = 0
 
-  for (const proposal of analysis.proposals) {
+  const resolvedProposals = analysis.proposals.map((proposal) => {
     const selectedRole = confirmation.roles[proposal.id]
     if (proposal.confidence === 'ambiguous' && proposal.required && (!selectedRole || selectedRole === 'preserve_original')) {
       throw new Error('workflowMappingConfirmationRequired')
@@ -167,12 +168,29 @@ export function confirmWorkflowAnalysis(
       || (proposal.confidence === 'ambiguous' || proposal.confidence === 'preserve_original'
         ? 'preserve_original'
         : proposal.canonicalName)
+    return { proposal, canonicalName }
+  })
+  const requiredInputs = confirmation.requiredInputs
+    ? new Set<CanonicalWorkflowInput>(confirmation.requiredInputs)
+    : null
+  const requiredByCanonical = new Map<CanonicalWorkflowInput, boolean>()
+  for (const { proposal, canonicalName } of resolvedProposals) {
+    if (canonicalName === 'preserve_original') continue
+    requiredByCanonical.set(
+      canonicalName,
+      requiredInputs
+        ? requiredInputs.has(canonicalName)
+        : Boolean(requiredByCanonical.get(canonicalName) || proposal.required),
+    )
+  }
+
+  for (const { proposal, canonicalName } of resolvedProposals) {
     if (canonicalName === 'preserve_original') continue
 
     const isReferenceList = canonicalName === 'referenceImages'
     const valueType = isReferenceList ? 'image_ref_list' : proposal.valueType
     const existing = definitions.get(canonicalName)
-    const required = Boolean(existing?.required || proposal.required)
+    const required = requiredByCanonical.get(canonicalName) ?? false
     const referenceIndex = isReferenceList
       ? (proposal.referenceIndex ?? nextReferenceIndex)
       : undefined

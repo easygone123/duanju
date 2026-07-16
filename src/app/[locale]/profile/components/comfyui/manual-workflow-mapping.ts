@@ -111,7 +111,6 @@ export function withManualWorkflowMappings(
   for (const proposal of analysis.proposals) {
     const role = effectiveProposalRole(proposal, roles)
     if (!role || role === 'preserve_original' || !MANUAL_SCALAR_ROLE_BY_NAME.has(role)) continue
-    if (analyzerScalarRoles.has(role)) invalidManualMapping()
     analyzerScalarRoles.add(role)
   }
   const manualPairs = new Set<string>()

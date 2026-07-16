@@ -18,6 +18,7 @@ The review stage keeps automatic mappings as defaults but treats them as suggest
 - The control lists compatible, currently unbound literal inputs from the uploaded API-format graph using a friendly node title and field name. Node ID and full input path remain available as technical details.
 - Selecting a candidate immediately removes the matching missing-input warning when the complete review becomes valid.
 - A field already assigned to another canonical input cannot be selected twice.
+- Multiple analyzer-detected fields may fan out from the same canonical input; they share one variable definition and keep separate bindings.
 - Users may clear a manual selection and choose another candidate before creation.
 
 The primary path remains guided. The existing advanced inspector stays available but is not required to fix a missing prompt.
@@ -50,9 +51,11 @@ Contract confirmation uses the same combined mapping set. It must reject:
 - a node or input path not present in the analyzed graph;
 - an incompatible value type;
 - duplicate effective node/path bindings;
-- duplicate canonical scalar definitions;
+- a manual canonical input that is already occupied by any effective analyzer mapping;
 - missing required inputs;
 - an invalid primary output.
+
+After role overrides, required status is derived from the final canonical input and the selected import kind. Fan-out bindings for one canonical input share one variable definition and the same missing-value policy.
 
 Manual mappings are reset when the file or workflow kind changes, analysis is retried or replaced, or the wizard returns to an earlier stage.
 

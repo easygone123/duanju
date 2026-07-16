@@ -52,12 +52,13 @@ export function manualWorkflowMappingCandidates(
 
 - [ ] **Step 3: Merge only verified candidates into analysis**
 
-Export `withManualWorkflowMappings(analysis, selected)`. Re-derive candidates from `analysis.graph`, reject a selection not present in the candidate set, reject duplicate node/path pairs and duplicate canonical scalar roles, and append verified synthetic high-confidence proposals with reason code `COMFY_MAPPING_MANUAL`.
+Export `withManualWorkflowMappings(analysis, selected, roles)`. Re-derive candidates from `analysis.graph`, reject a selection not present in the candidate set, reject duplicate node/path pairs, and reject a manual canonical role already occupied by any effective analyzer mapping. Multiple analyzer proposals may legally fan out from the same canonical role. Append verified synthetic high-confidence proposals with reason code `COMFY_MAPPING_MANUAL`.
 
 ```ts
 export function withManualWorkflowMappings(
   analysis: WorkflowAutoMappingResult,
   selected: ManualWorkflowMappings,
+  roles: Record<string, CanonicalWorkflowInput | 'preserve_original'>,
 ): WorkflowAutoMappingResult
 ```
 
@@ -111,7 +112,7 @@ In `WorkflowAutoMappingTable`, remove the `confidence !== 'ambiguous'` disable c
 
 - [ ] **Step 3: Integrate manual state into the wizard**
 
-Add `manualMappings` state, reset it in `clearGraphState` and before every replacement analysis, derive `effectiveAnalysis = withManualWorkflowMappings(analysis, manualMappings)`, and use that object for `buildGuidedWorkflowReview` and `confirmWorkflowAnalysis`. Render corrections before the mapping questions so the recovery control is visible without opening advanced settings.
+Add `manualMappings` state, reset it in `clearGraphState` and before every replacement analysis, derive `effectiveAnalysis = withManualWorkflowMappings(analysis, manualMappings, roles)`, and use that object for `buildGuidedWorkflowReview` and `confirmWorkflowAnalysis`. Pass the selected import kind's required inputs to confirmation so role overrides recompute required status from the final canonical role; fan-out bindings for one canonical role must share one definition and missing-value policy. Render corrections before the mapping questions so the recovery control is visible without opening advanced settings.
 
 - [ ] **Step 4: Add English and Chinese copy**
 
