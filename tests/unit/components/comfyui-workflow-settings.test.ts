@@ -135,7 +135,7 @@ describe('ComfyUI workflow settings UI contract', () => {
     expect(editor).toContain('defaultValue')
     expect(mapping).toContain('nodeId')
     expect(mapping).toContain('inputPath')
-    expect(mapping).toContain("['filename', 'image_ref', 'filename_list']")
+    expect(mapping).toContain("['filename', 'image_ref', 'filename_list', 'bernini_image_slots']")
     expect(mapping).toContain('setPrimaryOutput')
     expect(editor).toContain("value.purpose === 'upscale'")
     expect(editor).toContain('purposeImmutable')
@@ -173,6 +173,43 @@ describe('ComfyUI workflow settings UI contract', () => {
       ],
       outputs: [{ nodeId: '9', primary: true }],
     })
+  })
+
+  it('keeps Bernini dynamic slots optional with an empty-list default', () => {
+    const result = confirmWorkflowAnalysis({
+      graph: {
+        '30': { class_type: 'LoadImage', inputs: { image: 'placeholder.png' } },
+        '38': {
+          class_type: 'BerniniStudio',
+          inputs: { prompt: 'portrait', image0: ['30', 0] },
+        },
+        '51': { class_type: 'PreviewImage', inputs: { images: ['38', 0] } },
+      },
+      mediaType: 'image',
+      purpose: 'generation',
+      proposals: [{
+        id: '38:image0:referenceImages', canonicalName: 'referenceImages',
+        nodeId: '38', inputPath: 'image0', valueType: 'image_ref_list',
+        transform: 'bernini_image_slots', confidence: 'high',
+        reasonCode: 'COMFY_MAPPING_BERNINI_REFERENCE_SLOTS', required: false,
+        referenceIndex: 0,
+      }],
+      outputs: [{
+        name: 'output_51', nodeId: '51', fieldPath: 'images',
+        mediaType: 'image', primary: true,
+      }],
+      issues: [],
+      referenceCapacity: 8,
+    }, { roles: {} })
+
+    expect(result.variableDefinitions).toEqual([{
+      name: 'referenceImages', type: 'image_ref_list', required: false,
+      maxItems: 8, defaultValue: [],
+    }])
+    expect(result.bindings).toEqual([{
+      nodeId: '38', inputPath: 'image0', variable: 'referenceImages',
+      valueType: 'image_ref_list', transform: 'bernini_image_slots',
+    }])
   })
 
   it('expands reference capacity when ambiguous image inputs are confirmed as references', () => {

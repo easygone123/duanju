@@ -188,6 +188,7 @@ export function confirmWorkflowAnalysis(
     if (canonicalName === 'preserve_original') continue
 
     const isReferenceList = canonicalName === 'referenceImages'
+    const isBerniniSlots = proposal.transform === 'bernini_image_slots'
     const valueType = isReferenceList ? 'image_ref_list' : proposal.valueType
     const existing = definitions.get(canonicalName)
     const required = requiredByCanonical.get(canonicalName) ?? false
@@ -204,7 +205,9 @@ export function confirmWorkflowAnalysis(
       name: canonicalName,
       type: valueType,
       required,
-      ...(!required ? { missingValuePolicy: 'preserve_original' as const } : {}),
+      ...(!required && isBerniniSlots
+        ? { defaultValue: [] }
+        : !required ? { missingValuePolicy: 'preserve_original' as const } : {}),
       ...(isReferenceList ? { maxItems: referenceCapacity } : {}),
     })
     bindings.push({
@@ -213,12 +216,16 @@ export function confirmWorkflowAnalysis(
       variable: canonicalName,
       valueType,
       ...(isReferenceList
-        ? {
-          transform: proposal.transform === 'filename_list' ? 'filename_list' : 'filename_at',
-          ...(proposal.transform === 'filename_list' ? {} : { valueIndex: referenceIndex }),
-        }
+        ? proposal.transform === 'bernini_image_slots'
+          ? { transform: 'bernini_image_slots' as const }
+          : {
+            transform: proposal.transform === 'filename_list' ? 'filename_list' : 'filename_at',
+            ...(proposal.transform === 'filename_list' ? {} : { valueIndex: referenceIndex }),
+          }
         : proposal.transform ? { transform: proposal.transform } : {}),
-      ...(!required ? { missingValuePolicy: 'preserve_original' as const } : {}),
+      ...(!required && !isBerniniSlots
+        ? { missingValuePolicy: 'preserve_original' as const }
+        : {}),
     })
   }
 

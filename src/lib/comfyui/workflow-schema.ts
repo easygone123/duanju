@@ -17,7 +17,9 @@ const SAFE_PATH_SEGMENT = /^[A-Za-z0-9_-]+$/
 const VARIABLE_TYPES = new Set<ComfyVariableType>([
   'string', 'number', 'boolean', 'image_ref', 'image_ref_list', 'video_ref',
 ])
-const BINDING_TRANSFORMS = new Set(['filename', 'image_ref', 'filename_list', 'filename_at'])
+const BINDING_TRANSFORMS = new Set([
+  'filename', 'image_ref', 'filename_list', 'filename_at', 'bernini_image_slots',
+])
 
 export function validateComfyApiWorkflow(raw: unknown): ComfyApiWorkflow {
   const issues = collectFormatIssues(raw)
@@ -154,6 +156,15 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
         'COMFY_BINDING_TRANSFORM_TYPE_INVALID', `${path}.transform`,
         'Binding transform is incompatible with its variable type.',
       ))
+    }
+    if (binding.transform === 'bernini_image_slots' && nodeIdValid) {
+      const target = graph[binding.nodeId as string]
+      if (target?.class_type !== 'BerniniStudio' || binding.inputPath !== 'image0') {
+        issues.push(issue(
+          'COMFY_BINDING_TRANSFORM_TARGET_INVALID', `${path}.transform`,
+          'Bernini image slots require a BerniniStudio.image0 binding.',
+        ))
+      }
     }
     if (!missingPolicyValid) {
       issues.push(issue(
@@ -298,6 +309,7 @@ export function isComfyTransformCompatible(
 ): boolean {
   if (transform === 'filename_list') return type === 'image_ref_list'
   if (transform === 'filename_at') return type === 'image_ref_list'
+  if (transform === 'bernini_image_slots') return type === 'image_ref_list'
   return (transform === 'filename' || transform === 'image_ref')
     && (type === 'image_ref' || type === 'video_ref')
 }

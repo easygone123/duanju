@@ -325,4 +325,61 @@ describe('ComfyUI API workflow auto mapper', () => {
     }))
     expect(result.referenceCapacity).toBe(3)
   })
+
+  it('maps BerniniStudio prompts and one compact eight-slot reference family', () => {
+    const result = analyzeComfyApiWorkflow({
+      graph: {
+        '30': {
+          class_type: 'LoadImage',
+          inputs: { image: 'placeholder.png' },
+        },
+        '38': {
+          class_type: 'BerniniStudio',
+          inputs: {
+            prompt: 'image0 walks into a cafe',
+            negative_prompt: 'low quality',
+            image0: ['30', 0],
+          },
+        },
+        '51': { class_type: 'PreviewImage', inputs: { images: ['38', 0] } },
+      },
+      kind: 'image_generation',
+    })
+
+    expect(result.proposals).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        nodeId: '38', inputPath: 'prompt', canonicalName: 'prompt', confidence: 'high',
+      }),
+      expect.objectContaining({
+        nodeId: '38', inputPath: 'negative_prompt', canonicalName: 'negativePrompt',
+        confidence: 'high',
+      }),
+    ]))
+    expect(result.proposals.filter((proposal) => proposal.canonicalName === 'referenceImages'))
+      .toEqual([expect.objectContaining({
+        nodeId: '38', inputPath: 'image0', valueType: 'image_ref_list',
+        transform: 'bernini_image_slots', referenceIndex: 0, confidence: 'high',
+      })])
+    expect(result.referenceCapacity).toBe(8)
+    expect(result.proposals).not.toContainEqual(expect.objectContaining({ nodeId: '30' }))
+  })
+
+  it('offers Bernini dynamic references even when the authored graph has no image socket', () => {
+    const result = analyzeComfyApiWorkflow({
+      graph: {
+        '38': {
+          class_type: 'BerniniStudio',
+          inputs: { prompt: 'a quiet cafe', negative_prompt: 'low quality' },
+        },
+        '51': { class_type: 'PreviewImage', inputs: { images: ['38', 0] } },
+      },
+      kind: 'image_generation',
+    })
+
+    expect(result.proposals).toContainEqual(expect.objectContaining({
+      nodeId: '38', inputPath: 'image0', canonicalName: 'referenceImages',
+      transform: 'bernini_image_slots', confidence: 'high',
+    }))
+    expect(result.referenceCapacity).toBe(8)
+  })
 })

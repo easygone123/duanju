@@ -285,6 +285,54 @@ describe('ComfyUI request state machine', () => {
     expect(dependencies.resolveOwnedMedia).not.toHaveBeenCalled()
     expect(dependencies.create).not.toHaveBeenCalled()
   })
+
+  it('routes legacy input_images into a guided referenceImages contract', async () => {
+    const dependencies = requestDependenciesWithDefinitions([{
+      name: 'referenceImages', type: 'image_ref_list', required: false,
+      maxItems: 8, defaultValue: [],
+    }])
+    dependencies.resolveOwnedMedia.mockResolvedValue(true)
+
+    await createComfyGenerationRequest({
+      invocationKey: 'invoke-guided-references', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'image', workflowId: 'workflow-1',
+      variables: {
+        input_images: [{ storageKey: 'images/character.png' }],
+        aspect_ratio: '16:9',
+      },
+    }, dependencies)
+
+    expect(dependencies.create).toHaveBeenCalledWith(expect.objectContaining({
+      variableSnapshot: {
+        referenceImages: [{ storageKey: 'images/character.png' }],
+      },
+    }))
+  })
+
+  it('keeps input_images for legacy contracts and rejects an ambiguous dual declaration', async () => {
+    const legacy = requestDependenciesWithDefinitions([{
+      name: 'input_images', type: 'image_ref_list', required: false, maxItems: 8,
+    }])
+    legacy.resolveOwnedMedia.mockResolvedValue(true)
+    await createComfyGenerationRequest({
+      invocationKey: 'invoke-legacy-references', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'image', workflowId: 'workflow-1',
+      variables: { input_images: [{ storageKey: 'images/character.png' }] },
+    }, legacy)
+    expect(legacy.create).toHaveBeenCalledWith(expect.objectContaining({
+      variableSnapshot: { input_images: [{ storageKey: 'images/character.png' }] },
+    }))
+
+    const ambiguous = requestDependenciesWithDefinitions([
+      { name: 'input_images', type: 'image_ref_list', required: false, maxItems: 8 },
+      { name: 'referenceImages', type: 'image_ref_list', required: false, maxItems: 8 },
+    ])
+    await expect(createComfyGenerationRequest({
+      invocationKey: 'invoke-ambiguous-references', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'image', workflowId: 'workflow-1',
+      variables: {},
+    }, ambiguous)).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
+  })
 })
 
 function requestDependenciesWithDefinitions(variableDefinitions: unknown[]) {

@@ -33,7 +33,9 @@ const CANONICAL_INPUTS = new Set([
 ])
 const VARIABLE_TYPES = new Set(['string', 'number', 'boolean', 'image_ref', 'image_ref_list', 'video_ref'])
 const MAPPING_CONFIDENCE = new Set(['high', 'ambiguous', 'preserve_original', 'blocking'])
-const BINDING_TRANSFORMS = new Set(['filename', 'image_ref', 'filename_list', 'filename_at'])
+const BINDING_TRANSFORMS = new Set([
+  'filename', 'image_ref', 'filename_list', 'filename_at', 'bernini_image_slots',
+])
 const CANONICAL_VALUE_TYPES: Record<CanonicalWorkflowInput, ComfyVariableType> = {
   prompt: 'string',
   negativePrompt: 'string',
@@ -213,9 +215,13 @@ function isConsistentWorkflowAnalysis(
   if (hasDuplicate(analysis.proposals.map((proposal) => `${proposal.nodeId}\u0000${proposal.inputPath}`))) return false
   const referenceIndexes: number[] = []
   for (const proposal of analysis.proposals) {
+    const allowsSynthesizedInput = proposal.transform === 'bernini_image_slots'
+      && analysis.graph[proposal.nodeId]?.class_type === 'BerniniStudio'
+      && proposal.inputPath === 'image0'
     if (!Object.hasOwn(analysis.graph, proposal.nodeId)
       || !isSafeDottedPath(proposal.inputPath)
-      || !hasDottedInput(analysis.graph, proposal.nodeId, proposal.inputPath)
+      || (!allowsSynthesizedInput
+        && !hasDottedInput(analysis.graph, proposal.nodeId, proposal.inputPath))
       || proposal.valueType !== CANONICAL_VALUE_TYPES[proposal.canonicalName]
       || proposal.required !== meta.requiredInputs.includes(proposal.canonicalName)) return false
     if (proposal.transform && !isComfyTransformCompatible(proposal.transform, proposal.valueType)) return false

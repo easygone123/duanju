@@ -613,6 +613,28 @@ describe('workflow request helpers', () => {
     }))
   })
 
+  it('accepts a synthesized Bernini image0 mapping when the upload has no authored image socket', async () => {
+    const graph = {
+      '38': { class_type: 'BerniniStudio', inputs: { prompt: 'quiet cafe' } },
+      '51': { class_type: 'PreviewImage', inputs: { images: ['38', 0] } },
+    }
+    const expectedAnalysis = analyzeComfyApiWorkflow({ graph, kind: 'image_generation' })
+    const sourceText = JSON.stringify(graph)
+    vi.spyOn(apiFetchModule, 'apiFetch').mockResolvedValue(new Response(JSON.stringify({
+      analysis: expectedAnalysis,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const file = new File([sourceText], 'bernini.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(sourceText) })
+
+    await expect(analyzeWorkflowJson('image_generation', file)).resolves.toMatchObject({
+      analysis: {
+        proposals: expect.arrayContaining([expect.objectContaining({
+          inputPath: 'image0', transform: 'bernini_image_slots',
+        })]),
+      },
+    })
+  })
+
   it('normalizes a wrapped upload while retaining strengthened response validation', async () => {
     const graph = analysis().graph
     const expectedAnalysis = analyzeComfyApiWorkflow({ graph, kind: 'image_generation' })

@@ -412,6 +412,133 @@ describe('ComfyUI workflow compiler', () => {
     ]))
   })
 
+  it('accepts Bernini dynamic slots only on BerniniStudio.image0', () => {
+    const base = {
+      graph: {
+        '38': {
+          class_type: 'BerniniStudio',
+          inputs: { image0: ['30', 0] },
+        },
+        '30': { class_type: 'LoadImage', inputs: { image: 'placeholder.png' } },
+      },
+      variableDefinitions: [{
+        name: 'referenceImages', type: 'image_ref_list' as const, required: false,
+        maxItems: 8, defaultValue: [],
+      }],
+      bindings: [{
+        nodeId: '38', inputPath: 'image0', variable: 'referenceImages',
+        valueType: 'image_ref_list' as const, transform: 'bernini_image_slots' as const,
+      }],
+      outputs: [{
+        name: 'image', nodeId: '38', fieldPath: 'images',
+        mediaType: 'image' as const, primary: true,
+      }],
+    }
+
+    expect(validateWorkflowContract(base)).toEqual([])
+    expect(validateWorkflowContract({
+      ...base,
+      graph: { ...base.graph, '38': { ...base.graph['38'], class_type: 'OtherNode' } },
+    })).toContainEqual(expect.objectContaining({ code: 'COMFY_BINDING_TRANSFORM_TARGET_INVALID' }))
+    expect(validateWorkflowContract({
+      ...base,
+      bindings: [{ ...base.bindings[0], inputPath: 'image1' }],
+    })).toContainEqual(expect.objectContaining({ code: 'COMFY_BINDING_TRANSFORM_TARGET_INVALID' }))
+  })
+
+  it('clears the authored Bernini placeholder when no reference images are supplied', () => {
+    const graph = {
+      '30': { class_type: 'LoadImage', inputs: { image: 'placeholder.png' } },
+      '38': {
+        class_type: 'BerniniStudio',
+        inputs: { image0: ['30', 0], image3: ['30', 0], prompt: 'portrait' },
+      },
+    }
+    const rendered = renderComfyWorkflow({
+      graph,
+      variables: {},
+      variableDefinitions: [{
+        name: 'referenceImages', type: 'image_ref_list', required: false,
+        maxItems: 8, defaultValue: [],
+      }],
+      bindings: [{
+        nodeId: '38', inputPath: 'image0', variable: 'referenceImages',
+        valueType: 'image_ref_list', transform: 'bernini_image_slots',
+      }],
+      uploads: {},
+    })
+
+    expect(rendered['38'].inputs).toEqual({ prompt: 'portrait' })
+    expect(rendered['30']).toEqual(graph['30'])
+    expect(graph['38'].inputs).toHaveProperty('image0')
+  })
+
+  it('injects compact collision-free LoadImage nodes for actual Bernini uploads', () => {
+    const graph = {
+      '30': { class_type: 'LoadImage', inputs: { image: 'placeholder.png' } },
+      '38': { class_type: 'BerniniStudio', inputs: { image0: ['30', 0] } },
+      waoowaoo_bernini_38_0: { class_type: 'AuthoredNode', inputs: {} },
+    }
+    const files = ['character-1.png', 'scene.png', 'prop.png'].map((name) => ({
+      name, subfolder: 'waoowaoo/user/request', type: 'input',
+    }))
+    const variables = files.map((_, index) => ({ storageKey: `ref-${index}` }))
+    const rendered = renderComfyWorkflow({
+      graph,
+      variables: { referenceImages: variables },
+      variableDefinitions: [{
+        name: 'referenceImages', type: 'image_ref_list', required: false,
+        maxItems: 8, defaultValue: [],
+      }],
+      bindings: [{
+        nodeId: '38', inputPath: 'image0', variable: 'referenceImages',
+        valueType: 'image_ref_list', transform: 'bernini_image_slots',
+      }],
+      uploads: { referenceImages: files },
+    })
+
+    const expectedPaths = files.map((file) => `${file.subfolder}/${file.name}`)
+    const injected = Object.entries(rendered).filter(([, node]) => (
+      node.class_type === 'LoadImage' && expectedPaths.includes(String(node.inputs.image))
+    ))
+    expect(injected.map(([, node]) => node.inputs.image)).toEqual(expectedPaths)
+    expect(Object.keys(rendered)).toContain('waoowaoo_bernini_38_0')
+    expect(injected.map(([nodeId]) => nodeId)).not.toContain('waoowaoo_bernini_38_0')
+    expect(rendered['38'].inputs).toMatchObject(Object.fromEntries(
+      injected.map(([nodeId], index) => [`image${index}`, [nodeId, 0]]),
+    ))
+    expect(rendered['38'].inputs).not.toHaveProperty('image3')
+    expect(graph['38'].inputs).toEqual({ image0: ['30', 0] })
+    expect(files).toEqual(['character-1.png', 'scene.png', 'prop.png'].map((name) => ({
+      name, subfolder: 'waoowaoo/user/request', type: 'input',
+    })))
+  })
+
+  it('rejects Bernini reference values above the declared maximum', () => {
+    expect(() => renderComfyWorkflow({
+      graph: {
+        '30': { class_type: 'LoadImage', inputs: { image: 'placeholder.png' } },
+        '38': { class_type: 'BerniniStudio', inputs: { image0: ['30', 0] } },
+      },
+      variables: {
+        referenceImages: Array.from({ length: 9 }, (_, index) => ({ storageKey: `ref-${index}` })),
+      },
+      variableDefinitions: [{
+        name: 'referenceImages', type: 'image_ref_list', required: false,
+        maxItems: 8, defaultValue: [],
+      }],
+      bindings: [{
+        nodeId: '38', inputPath: 'image0', variable: 'referenceImages',
+        valueType: 'image_ref_list', transform: 'bernini_image_slots',
+      }],
+      uploads: {
+        referenceImages: Array.from({ length: 9 }, (_, index) => ({
+          name: `ref-${index}.png`, subfolder: '', type: 'input',
+        })),
+      },
+    })).toThrow('exceeds its configured maximum')
+  })
+
   it('rejects reference capacity above the bounded upload limit', () => {
     const issues = validateWorkflowContract({
       graph: { '1': { class_type: 'SaveImage', inputs: {} } },

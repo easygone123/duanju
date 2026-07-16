@@ -36,6 +36,7 @@ interface LocationImageLike {
 
 interface LocationLike {
   name: string
+  assetKind?: string | null
   images?: LocationImageLike[]
 }
 
@@ -49,12 +50,19 @@ interface PanelLike {
   sketchImageUrl?: string | null
   characters?: string | null
   location?: string | null
+  props?: string | null
 }
 
 export interface PanelCharacterReference {
   name: string
   appearance?: string
   slot?: string
+}
+
+export interface PanelReferenceImageEntry {
+  url: string
+  kind: 'character' | 'location' | 'prop' | 'sketch'
+  name: string
 }
 
 interface NovelDataDb {
@@ -227,11 +235,11 @@ export function findCharacterByName<T extends { name: string }>(characters: T[],
   return undefined
 }
 
-export async function collectPanelReferenceImages(projectData: NovelProjectData, panel: PanelLike) {
-  const refs: string[] = []
-
-  const sketch = toSignedUrlIfCos(panel.sketchImageUrl, 3600)
-  if (sketch) refs.push(sketch)
+export async function collectPanelReferenceImageEntries(
+  projectData: NovelProjectData,
+  panel: PanelLike,
+) {
+  const refs: PanelReferenceImageEntry[] = []
 
   const panelCharacters = parsePanelCharacterReferences(panel.characters)
   for (const item of panelCharacters) {
@@ -252,18 +260,39 @@ export async function collectPanelReferenceImages(projectData: NovelProjectData,
     const selectedUrl = selectedIndex !== null && selectedIndex !== undefined ? imageUrls[selectedIndex] : null
     const key = selectedUrl || imageUrls[0] || appearance.imageUrl
     const signed = toSignedUrlIfCos(key, 3600)
-    if (signed) refs.push(signed)
+    if (signed) refs.push({ url: signed, kind: 'character', name: character.name })
   }
 
   if (panel.location) {
-    const location = (projectData.locations || []).find((loc) => loc.name.toLowerCase() === panel.location!.toLowerCase())
+    const location = (projectData.locations || []).find((loc) => (
+      loc.assetKind !== 'prop'
+      && loc.name.toLowerCase() === panel.location!.toLowerCase()
+    ))
     if (location) {
       const images = location.images || []
       const selected = images.find((img) => img.isSelected) || images[0]
       const signed = toSignedUrlIfCos(selected?.imageUrl, 3600)
-      if (signed) refs.push(signed)
+      if (signed) refs.push({ url: signed, kind: 'location', name: location.name })
     }
   }
 
+  for (const propName of parseJsonStringArray(panel.props)) {
+    const prop = (projectData.locations || []).find((item) => (
+      item.assetKind === 'prop' && item.name.toLowerCase() === propName.toLowerCase()
+    ))
+    if (!prop) continue
+    const images = prop.images || []
+    const selected = images.find((image) => image.isSelected) || images[0]
+    const signed = toSignedUrlIfCos(selected?.imageUrl, 3600)
+    if (signed) refs.push({ url: signed, kind: 'prop', name: prop.name })
+  }
+
+  const sketch = toSignedUrlIfCos(panel.sketchImageUrl, 3600)
+  if (sketch) refs.push({ url: sketch, kind: 'sketch', name: 'storyboard sketch' })
+
   return refs
+}
+
+export async function collectPanelReferenceImages(projectData: NovelProjectData, panel: PanelLike) {
+  return (await collectPanelReferenceImageEntries(projectData, panel)).map((entry) => entry.url)
 }

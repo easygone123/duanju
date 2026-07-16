@@ -4,7 +4,7 @@ import { useTranslations } from 'next-intl'
 import type { ComfyInputBinding, ComfyOutputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
 import { removeWorkflowOutput, setPrimaryOutput } from './workflow-ui'
 
-const TRANSFORMS = ['filename', 'image_ref', 'filename_list'] as const
+const TRANSFORMS = ['filename', 'image_ref', 'filename_list', 'bernini_image_slots'] as const
 
 interface Props {
   variables: ComfyVariableDefinition[]

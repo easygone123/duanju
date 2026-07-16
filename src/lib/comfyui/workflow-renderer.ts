@@ -56,6 +56,10 @@ export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflo
   for (const binding of input.bindings) {
     const value = variables[binding.variable]
     if (value !== undefined) {
+      if (binding.transform === 'bernini_image_slots') {
+        applyBerniniImageSlots(rendered, binding, value, input.uploads)
+        continue
+      }
       const transformed = transformBindingValue(binding, value, input.uploads)
       if (transformed !== SKIP_BINDING) {
         setPath(rendered[binding.nodeId].inputs, binding.inputPath, transformed)
@@ -100,10 +104,68 @@ function assertSafeBinding(graph: ComfyApiWorkflow, binding: ComfyInputBinding):
   }
   if (
     binding.transform !== undefined
-    && !['filename', 'image_ref', 'filename_list', 'filename_at'].includes(binding.transform)
+    && ![
+      'filename', 'image_ref', 'filename_list', 'filename_at', 'bernini_image_slots',
+    ].includes(binding.transform)
   ) {
     throw bindingError(binding, `Unsupported transform "${String(binding.transform)}".`)
   }
+  if (binding.transform === 'bernini_image_slots'
+    && (graph[binding.nodeId].class_type !== 'BerniniStudio' || binding.inputPath !== 'image0')) {
+    throw bindingError(binding, 'Bernini image slots require a BerniniStudio.image0 binding.')
+  }
+}
+
+function applyBerniniImageSlots(
+  graph: ComfyApiWorkflow,
+  binding: ComfyInputBinding,
+  value: ComfyVariableValue,
+  uploads: RenderWorkflowInput['uploads'],
+) {
+  const upload = uploads[binding.variable]
+  if (!Array.isArray(value)) {
+    throw bindingError(binding, `Upload list for "${binding.variable}" is malformed.`)
+  }
+  if (value.length > 0 && (!Array.isArray(upload)
+    || upload.length !== value.length || !upload.every(isUploadedFile))) {
+    throw bindingError(
+      binding,
+      `Upload list for "${binding.variable}" is missing, partial, or malformed.`,
+    )
+  }
+  const files = value.length === 0 ? [] : upload as ComfyUploadedFile[]
+  const target = graph[binding.nodeId]
+  for (const inputName of Object.keys(target.inputs)) {
+    if (/^image[0-7]$/.test(inputName)) delete target.inputs[inputName]
+  }
+  files.forEach((file, index) => {
+    const loaderId = allocateBerniniLoaderId(graph, binding.nodeId, index)
+    graph[loaderId] = {
+      class_type: 'LoadImage',
+      inputs: { image: comfyUploadedImagePath(file) },
+      _meta: { title: `Waoowaoo Bernini Reference ${index}` },
+    }
+    target.inputs[`image${index}`] = [loaderId, 0]
+  })
+}
+
+function allocateBerniniLoaderId(
+  graph: ComfyApiWorkflow,
+  targetNodeId: string,
+  index: number,
+) {
+  const safeTarget = targetNodeId.replace(/[^A-Za-z0-9_-]+/g, '_') || 'node'
+  const base = `waoowaoo_bernini_${safeTarget}_${index}`
+  let candidate = base
+  let suffix = 1
+  while (Object.hasOwn(graph, candidate)) candidate = `${base}_${suffix++}`
+  return candidate
+}
+
+function comfyUploadedImagePath(file: ComfyUploadedFile) {
+  const subfolder = file.subfolder.replace(/^\/+|\/+$/g, '')
+  if (!subfolder || file.name.startsWith(`${subfolder}/`)) return file.name
+  return `${subfolder}/${file.name}`
 }
 
 function transformBindingValue(
@@ -190,6 +252,14 @@ function resolveVariables(
           COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
           `Workflow variable "${definition.name}" has the wrong type.`,
           { details: { variable: definition.name, reason: 'type' } },
+        )
+      }
+      if (definition.type === 'image_ref_list' && definition.maxItems !== undefined
+        && Array.isArray(value) && value.length > definition.maxItems) {
+        throw new ComfyError(
+          COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
+          `Workflow variable "${definition.name}" exceeds its configured maximum.`,
+          { details: { variable: definition.name, reason: 'max_items' } },
         )
       }
       continue

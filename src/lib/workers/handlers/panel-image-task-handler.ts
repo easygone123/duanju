@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getArtStylePrompt } from '@/lib/constants'
 import { createScopedLogger } from '@/lib/logging/core'
 import { type TaskJobData } from '@/lib/task/types'
+import { COMFY_REFERENCE_UPLOAD_LIMIT } from '@/lib/comfyui/types'
 import { reportTaskProgress } from '../shared'
 import {
   assertTaskActive,
@@ -14,8 +15,9 @@ import { normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-imag
 import {
   AnyObj,
   clampCount,
-  collectPanelReferenceImages,
+  collectPanelReferenceImageEntries,
   findCharacterByName,
+  type PanelReferenceImageEntry,
   parsePanelCharacterReferences,
   pickFirstString,
   resolveNovelData,
@@ -72,11 +74,13 @@ function buildPanelPromptContext(params: {
     videoPrompt: string | null
     location: string | null
     characters: string | null
+    props: string | null
     srtSegment: string | null
     photographyRules: string | null
     actingNotes: string | null
   }
   projectData: Awaited<ReturnType<typeof resolveNovelData>>
+  referenceImages: PanelReferenceImageEntry[]
 }) {
   const panelCharacters = parsePanelCharacterReferences(params.panel.characters)
   const characterContexts = panelCharacters.map((reference) => {
@@ -106,7 +110,8 @@ function buildPanelPromptContext(params: {
   const locationContext = (() => {
     if (!params.panel.location) return null
     const matchedLocation = (params.projectData.locations || []).find(
-      (item) => item.name.toLowerCase() === params.panel.location!.toLowerCase(),
+      (item) => item.assetKind !== 'prop'
+        && item.name.toLowerCase() === params.panel.location!.toLowerCase(),
     )
     if (!matchedLocation) return null
     const selectedImage = (matchedLocation.images || []).find((item) => item.isSelected) || matchedLocation.images?.[0]
@@ -127,6 +132,7 @@ function buildPanelPromptContext(params: {
       video_prompt: params.panel.videoPrompt || '',
       location: params.panel.location || '',
       characters: panelCharacters,
+      props: parseJsonUnknown(params.panel.props),
       source_text: params.panel.srtSegment || '',
       photography_rules: parseJsonUnknown(params.panel.photographyRules),
       acting_notes: parseJsonUnknown(params.panel.actingNotes),
@@ -134,6 +140,11 @@ function buildPanelPromptContext(params: {
     context: {
       character_appearances: characterContexts,
       location_reference: locationContext,
+      reference_image_mapping: params.referenceImages.map((entry, index) => ({
+        index: `image${index}`,
+        kind: entry.kind,
+        name: entry.name,
+      })),
     },
   }
 }
@@ -174,7 +185,9 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   if (!modelKey) throw new Error('Storyboard model not configured')
 
   const candidateCount = clampCount(payload.candidateCount ?? payload.count, 1, 4, 1)
-  const refs = await collectPanelReferenceImages(projectData, panel)
+  const referenceEntries = (await collectPanelReferenceImageEntries(projectData, panel))
+    .slice(0, COMFY_REFERENCE_UPLOAD_LIMIT)
+  const refs = referenceEntries.map((entry) => entry.url)
   const normalizedRefs = await normalizeReferenceImagesForGeneration(refs)
 
   const logger = createScopedLogger({
@@ -197,6 +210,7 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       normalizedUrls: normalizedRefs.map((u) => u.substring(0, 100)),
       panelCharacters: panel.characters,
       panelLocation: panel.location,
+      panelProps: panel.props,
       artStyle: modelConfig.artStyle,
     },
   })
@@ -222,11 +236,13 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       videoPrompt: panel.videoPrompt,
       location: panel.location,
       characters: panel.characters,
+      props: panel.props,
       srtSegment: panel.srtSegment,
       photographyRules: panel.photographyRules,
       actingNotes: panel.actingNotes,
     },
     projectData,
+    referenceImages: referenceEntries,
   })
   const contextJson = JSON.stringify(promptContext, null, 2)
   const prompt = buildPanelPrompt({

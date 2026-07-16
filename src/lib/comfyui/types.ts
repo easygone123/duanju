@@ -130,7 +130,12 @@ export interface ComfyVariableDefinition {
   maxItems?: number
 }
 
-export type ComfyBindingTransform = 'filename' | 'image_ref' | 'filename_list' | 'filename_at'
+export type ComfyBindingTransform =
+  | 'filename'
+  | 'image_ref'
+  | 'filename_list'
+  | 'filename_at'
+  | 'bernini_image_slots'
 
 export interface ComfyInputBinding {
   nodeId: string

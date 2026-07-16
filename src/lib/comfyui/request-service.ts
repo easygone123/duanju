@@ -143,8 +143,12 @@ export async function createComfyGenerationRequest(
           : workflow.currentVersionId === null || selectedVersion.id !== workflow.currentVersionId)) {
         throw new ApiError('NOT_FOUND')
       }
+      const normalizedVariables = normalizeReferenceImageVariables(
+        input.variables,
+        selectedVersion.variableDefinitions,
+      )
       const variableSnapshot = await sanitizeVariableSnapshot(
-        input.variables, selectedVersion.variableDefinitions, input.userId, input.projectId,
+        normalizedVariables, selectedVersion.variableDefinitions, input.userId, input.projectId,
         client.resolveOwnedMedia,
       )
       return client.create({
@@ -165,6 +169,28 @@ export async function createComfyGenerationRequest(
     if (raced) return raced
     throw new ApiError('CONFLICT')
   }
+}
+
+function normalizeReferenceImageVariables(
+  variables: Record<string, ComfyVariableValue>,
+  rawDefinitions: unknown,
+): Record<string, ComfyVariableValue> {
+  if (!Array.isArray(rawDefinitions)) throw new ApiError('INVALID_PARAMS')
+  const names = new Set(rawDefinitions.flatMap((definition) => (
+    isRecord(definition) && typeof definition.name === 'string' ? [definition.name] : []
+  )))
+  const declaresLegacy = names.has('input_images')
+  const declaresGuided = names.has('referenceImages')
+  if (declaresLegacy && declaresGuided) throw new ApiError('INVALID_PARAMS')
+  if (!declaresGuided || !Object.hasOwn(variables, 'input_images')) return variables
+  if (Object.hasOwn(variables, 'referenceImages')) throw new ApiError('INVALID_PARAMS')
+  const normalized: Record<string, ComfyVariableValue> = {
+    ...variables,
+    referenceImages: variables.input_images,
+  }
+  delete normalized.input_images
+  if (!names.has('aspect_ratio')) delete normalized.aspect_ratio
+  return normalized
 }
 
 export interface TransitionComfyGenerationRequestInput {

@@ -14,16 +14,26 @@ const utilsMock = vi.hoisted(() => ({
   getProjectModels: vi.fn(async () => ({ storyboardModel: 'storyboard-model-1', artStyle: 'realistic' })),
   resolveImageSourceFromGeneration: vi.fn(),
   uploadImageSourceToCos: vi.fn(),
+  toSignedUrlIfCos: vi.fn((value: string | null | undefined) => value || null),
 }))
 
 const sharedMock = vi.hoisted(() => ({
   collectPanelReferenceImages: vi.fn(async () => ['https://signed.example/ref-1.png']),
+  collectPanelReferenceImageEntries: vi.fn(async () => [{
+    url: 'https://signed.example/ref-1.png', kind: 'character', name: 'Hero',
+  }]),
   resolveNovelData: vi.fn(async () => ({
     videoRatio: '16:9',
     characters: [],
     locations: [
       {
         name: 'Old Town',
+        assetKind: 'prop',
+        images: [{ isSelected: true, description: '同名道具' }],
+      },
+      {
+        name: 'Old Town',
+        assetKind: 'location',
         images: [
           {
             isSelected: true,
@@ -39,11 +49,21 @@ const sharedMock = vi.hoisted(() => ({
 }))
 
 const outboundMock = vi.hoisted(() => ({
-  normalizeReferenceImagesForGeneration: vi.fn(async () => ['normalized-ref-1']),
+  normalizeReferenceImagesForGeneration: vi.fn(async (values: string[]) => {
+    void values
+    return ['normalized-ref-1']
+  }),
 }))
 
 const promptMock = vi.hoisted(() => ({
-  buildPrompt: vi.fn(() => 'panel-image-prompt'),
+  buildPrompt: vi.fn((input: {
+    promptId: string
+    locale: string
+    variables: Record<string, string>
+  }) => {
+    void input
+    return 'panel-image-prompt'
+  }),
 }))
 
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
@@ -68,6 +88,7 @@ vi.mock('@/lib/workers/handlers/image-task-handler-shared', async () => {
   return {
     ...actual,
     collectPanelReferenceImages: sharedMock.collectPanelReferenceImages,
+    collectPanelReferenceImageEntries: sharedMock.collectPanelReferenceImageEntries,
     resolveNovelData: sharedMock.resolveNovelData,
   }
 })
@@ -125,6 +146,49 @@ describe('worker panel-image-task-handler behavior', () => {
       .mockResolvedValueOnce('cos/panel-candidate-2.png')
   })
 
+  it('orders compact semantic references as characters, location, props, then sketch', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/workers/handlers/image-task-handler-shared')>(
+      '@/lib/workers/handlers/image-task-handler-shared',
+    )
+    const references = await actual.collectPanelReferenceImages({
+      characters: [
+        {
+          name: 'Hero',
+          appearances: [{
+            changeReason: 'default', imageUrls: JSON.stringify(['hero.png']),
+            imageUrl: null, selectedIndex: 0,
+          }],
+        },
+        {
+          name: 'Friend',
+          appearances: [{
+            changeReason: 'default', imageUrls: JSON.stringify(['friend.png']),
+            imageUrl: null, selectedIndex: 0,
+          }],
+        },
+      ],
+      locations: [
+        {
+          name: 'Cafe', assetKind: 'location',
+          images: [{ isSelected: true, imageUrl: 'cafe.png' }],
+        },
+        {
+          name: 'Milk', assetKind: 'prop',
+          images: [{ isSelected: true, imageUrl: 'milk.png' }],
+        },
+      ],
+    }, {
+      characters: JSON.stringify([{ name: 'Hero' }, { name: 'Missing' }, { name: 'Friend' }]),
+      location: 'Cafe',
+      props: JSON.stringify(['Missing Prop', 'Milk']),
+      sketchImageUrl: 'sketch.png',
+    })
+
+    expect(references).toEqual([
+      'hero.png', 'friend.png', 'cafe.png', 'milk.png', 'sketch.png',
+    ])
+  })
+
   it('missing panelId -> explicit error', async () => {
     const job = buildJob({}, '')
     await expect(handlePanelImageTask(job)).rejects.toThrow('panelId missing')
@@ -170,6 +234,16 @@ describe('worker panel-image-task-handler behavior', () => {
     expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
       variables: expect.objectContaining({
         storyboard_text_json_input: expect.stringContaining('"available_slots"'),
+      }),
+    }))
+    expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      variables: expect.objectContaining({
+        storyboard_text_json_input: expect.stringContaining('"description": "雨夜街道"'),
+      }),
+    }))
+    expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      variables: expect.objectContaining({
+        storyboard_text_json_input: expect.stringContaining('"index": "image0"'),
       }),
     }))
 
@@ -223,6 +297,31 @@ describe('worker panel-image-task-handler behavior', () => {
         candidateImages: JSON.stringify(['cos/panel-regenerated.png']),
       },
     })
+  })
+
+  it('uses one shared compact eight-image list for prompt and generation inputs', async () => {
+    const entries = Array.from({ length: 10 }, (_, index) => ({
+      url: `ref-${index}.png`, kind: 'character' as const, name: `Character ${index}`,
+    }))
+    sharedMock.collectPanelReferenceImageEntries.mockResolvedValueOnce(entries)
+    outboundMock.normalizeReferenceImagesForGeneration.mockImplementationOnce(async (values) => (
+      values.map((value) => `normalized-${value}`)
+    ))
+    utilsMock.resolveImageSourceFromGeneration.mockReset()
+    utilsMock.resolveImageSourceFromGeneration.mockResolvedValueOnce('generated-source-capped')
+    utilsMock.uploadImageSourceToCos.mockReset()
+    utilsMock.uploadImageSourceToCos.mockResolvedValueOnce('cos/capped.png')
+
+    await handlePanelImageTask(buildJob({ candidateCount: 1 }))
+
+    const generation = utilsMock.resolveImageSourceFromGeneration.mock.calls[0]?.[1]
+    expect(generation.comfyReferenceImages).toEqual(entries.slice(0, 8).map((entry) => entry.url))
+    expect(generation.options.referenceImages).toEqual(
+      entries.slice(0, 8).map((entry) => `normalized-${entry.url}`),
+    )
+    const promptPayload = promptMock.buildPrompt.mock.calls[0]?.[0]
+    expect(promptPayload.variables.storyboard_text_json_input).toContain('"index": "image7"')
+    expect(promptPayload.variables.storyboard_text_json_input).not.toContain('"index": "image8"')
   })
 
   it('uses the validated task capability snapshot for the generator call', async () => {

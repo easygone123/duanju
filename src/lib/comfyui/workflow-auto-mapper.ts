@@ -127,8 +127,7 @@ function inferScalarProposals(
   const proposals: WorkflowMappingProposal[] = []
   for (const [nodeId, node] of Object.entries(graph)) {
     const title = nodeTitle(node)
-    const promptProposal = inferPromptProposal(nodeId, node, title, requiredInputs)
-    if (promptProposal) proposals.push(promptProposal)
+    proposals.push(...inferPromptProposals(nodeId, node, title, requiredInputs))
 
     for (const rule of SCALAR_RULES) {
       if (rule.mediaType && rule.mediaType !== mediaType) continue
@@ -152,22 +151,38 @@ function inferScalarProposals(
   return proposals
 }
 
-function inferPromptProposal(
+function inferPromptProposals(
   nodeId: string,
   node: ComfyApiWorkflowNode,
   title: string,
   requiredInputs: readonly CanonicalWorkflowInput[],
-): WorkflowMappingProposal | null {
-  if (!Object.hasOwn(node.inputs, 'text') || typeof node.inputs.text !== 'string') return null
+): WorkflowMappingProposal[] {
+  if (node.class_type === 'BerniniStudio') {
+    const proposals: WorkflowMappingProposal[] = []
+    if (typeof node.inputs.prompt === 'string') {
+      proposals.push(promptFieldProposal(
+        nodeId, 'prompt', 'prompt', requiredInputs, title,
+        'COMFY_MAPPING_PROMPT_POSITIVE_LABEL',
+      ))
+    }
+    if (typeof node.inputs.negative_prompt === 'string') {
+      proposals.push(promptFieldProposal(
+        nodeId, 'negative_prompt', 'negativePrompt', requiredInputs, title,
+        'COMFY_MAPPING_PROMPT_NEGATIVE_LABEL',
+      ))
+    }
+    return proposals
+  }
+  if (!Object.hasOwn(node.inputs, 'text') || typeof node.inputs.text !== 'string') return []
   const evidence = normalize(`${node.class_type} ${title}`)
   const canonicalName = evidence.includes('negative') ? 'negativePrompt' : 'prompt'
   const hasPolarityEvidence = evidence.includes('negative')
     || evidence.includes('positive')
     || normalize(title).includes('prompt')
   const isTextEncoder = normalize(node.class_type).includes('textencode')
-  if (!hasPolarityEvidence && !isTextEncoder) return null
+  if (!hasPolarityEvidence && !isTextEncoder) return []
   const confidence = hasPolarityEvidence ? 'high' : 'ambiguous'
-  return {
+  return [{
     id: `${nodeId}:text:${canonicalName}`,
     canonicalName,
     nodeId,
@@ -181,6 +196,27 @@ function inferPromptProposal(
         : 'COMFY_MAPPING_PROMPT_NEGATIVE_LABEL',
     required: requiredInputs.includes(canonicalName),
     ...(title ? { nodeTitle: title } : {}),
+  }]
+}
+
+function promptFieldProposal(
+  nodeId: string,
+  inputPath: string,
+  canonicalName: 'prompt' | 'negativePrompt',
+  requiredInputs: readonly CanonicalWorkflowInput[],
+  title: string,
+  reasonCode: string,
+): WorkflowMappingProposal {
+  return {
+    id: `${nodeId}:${inputPath}:${canonicalName}`,
+    canonicalName,
+    nodeId,
+    inputPath,
+    valueType: 'string',
+    confidence: 'high',
+    reasonCode,
+    required: requiredInputs.includes(canonicalName),
+    ...(title ? { nodeTitle: title } : {}),
   }
 }
 
@@ -190,6 +226,8 @@ function inferMediaProposals(
   requiredInputs: readonly CanonicalWorkflowInput[],
 ): { proposals: WorkflowMappingProposal[]; referenceCapacity: number } {
   const proposals: WorkflowMappingProposal[] = []
+  const bernini = findBerniniReferenceFamilies(graph, requiredInputs)
+  proposals.push(...bernini.proposals)
   const referenceCandidates: Array<{
     nodeId: string
     inputPath: string
@@ -201,6 +239,7 @@ function inferMediaProposals(
 
   const nodes = Object.entries(graph).sort(([left], [right]) => compareNodeIds(left, right))
   for (const [nodeId, node] of nodes) {
+    if (node.class_type === 'BerniniStudio' || bernini.consumedLoaderNodeIds.has(nodeId)) continue
     const title = nodeTitle(node)
     const imageInput = findImageLoaderInput(node)
     if (imageInput) {
@@ -251,7 +290,7 @@ function inferMediaProposals(
     })
   }
 
-  let referenceCapacity = 0
+  let referenceCapacity = bernini.referenceCapacity
   for (const candidate of referenceCandidates) {
     const listCapacity = candidate.listCapacity
     proposals.push({
@@ -273,6 +312,50 @@ function inferMediaProposals(
   }
 
   return { proposals, referenceCapacity }
+}
+
+function findBerniniReferenceFamilies(
+  graph: ComfyApiWorkflow,
+  requiredInputs: readonly CanonicalWorkflowInput[],
+): {
+  proposals: WorkflowMappingProposal[]
+  consumedLoaderNodeIds: Set<string>
+  referenceCapacity: number
+} {
+  const proposals: WorkflowMappingProposal[] = []
+  const consumedLoaderNodeIds = new Set<string>()
+  let referenceCapacity = 0
+  const nodes = Object.entries(graph).sort(([left], [right]) => compareNodeIds(left, right))
+  for (const [nodeId, node] of nodes) {
+    if (node.class_type !== 'BerniniStudio') continue
+    const imageInputs = Object.entries(node.inputs)
+      .filter(([name, value]) => /^image[0-7]$/.test(name) && isWorkflowLink(value))
+      .sort(([left], [right]) => compareNodeIds(left.slice(5), right.slice(5)))
+    for (const [, value] of imageInputs) consumedLoaderNodeIds.add((value as [string, number])[0])
+    proposals.push({
+      id: `${nodeId}:image0:referenceImages`,
+      canonicalName: 'referenceImages',
+      nodeId,
+      inputPath: 'image0',
+      valueType: 'image_ref_list',
+      transform: 'bernini_image_slots',
+      confidence: 'high',
+      reasonCode: 'COMFY_MAPPING_BERNINI_REFERENCE_SLOTS',
+      required: requiredInputs.includes('referenceImages'),
+      referenceIndex: 0,
+      ...(nodeTitle(node) ? { nodeTitle: nodeTitle(node) } : {}),
+    })
+    referenceCapacity = Math.max(referenceCapacity, 8)
+  }
+  return { proposals, consumedLoaderNodeIds, referenceCapacity }
+}
+
+function isWorkflowLink(value: unknown): value is [string, number] {
+  return Array.isArray(value)
+    && value.length === 2
+    && typeof value[0] === 'string'
+    && Number.isInteger(value[1])
+    && value[1] >= 0
 }
 
 function findImageLoaderInput(node: ComfyApiWorkflowNode): {
