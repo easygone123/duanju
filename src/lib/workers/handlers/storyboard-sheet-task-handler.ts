@@ -4,10 +4,11 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
 import { getObjectBuffer } from '@/lib/storage'
-import { assertTaskActive, resolveImageSourceFromGeneration, uploadImageSourceToCos } from '@/lib/workers/utils'
+import { assertTaskActive, resolveImageSourceFromGeneration, toSignedUrlIfCos, uploadImageSourceToCos } from '@/lib/workers/utils'
 import { normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-image'
 import type { TaskJobData } from '@/lib/task/types'
 import type { NormalizedCropRect, SixGridCellAspectRatio, SixGridProcessingOrder } from '@/lib/novel-promotion/six-grid/contracts'
+import { COMFY_REFERENCE_UPLOAD_LIMIT } from '@/lib/comfyui/types'
 
 const rectSchema = z.object({
   x: z.number().finite().min(0).max(1),
@@ -29,6 +30,15 @@ const snapshotSchema = z.object({
   promptSnapshot: z.string(), modelSnapshot: z.string().min(1), optionsSnapshot: z.record(z.unknown()),
   imageModel: z.string().min(1).optional(), generationOptions: z.record(z.unknown()).optional(),
   comfyWorkflowVersionId: z.string().min(1).optional(), comfyModelSnapshotVersion: z.literal(1).optional(),
+  referenceImages: z.array(z.union([z.object({
+    source: z.string().min(1),
+    kind: z.enum(['character', 'location', 'prop', 'sketch']),
+    name: z.string().min(1),
+  }).strict(), z.object({
+    url: z.string().min(1),
+    kind: z.enum(['character', 'location', 'prop', 'sketch']),
+    name: z.string().min(1),
+  }).strict().transform((entry) => ({ source: entry.url, kind: entry.kind, name: entry.name }))])).max(COMFY_REFERENCE_UPLOAD_LIMIT).optional(),
   locale: z.enum(['zh', 'en']),
 }).strip()
 
@@ -42,6 +52,7 @@ export type SixGridImageTaskSnapshot = {
   cropRects?: Array<{ cellIndex: number; normalizedCropRect: NormalizedCropRect }>
   promptSnapshot: string; modelSnapshot: string; optionsSnapshot: Record<string, unknown>; locale: 'zh' | 'en'
   imageModel?: string; generationOptions?: Record<string, unknown>; comfyWorkflowVersionId?: string; comfyModelSnapshotVersion?: 1
+  referenceImages?: Array<{ source: string; kind: 'character' | 'location' | 'prop' | 'sketch'; name: string }>
 }
 
 export function parseSixGridImageTaskSnapshot(value: unknown): SixGridImageTaskSnapshot {
@@ -85,6 +96,7 @@ export function buildSixGridTaskDedupeKey(snapshot: SixGridImageTaskSnapshot) {
     cropRects: snapshot.cropRects ? [...snapshot.cropRects].sort((a, b) => a.cellIndex - b.cellIndex) : undefined,
     promptSnapshot: snapshot.promptSnapshot, modelSnapshot: snapshot.modelSnapshot,
     options: snapshot.optionsSnapshot, generationOptions: snapshot.generationOptions,
+    referenceImages: snapshot.referenceImages,
     expectedSheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
   }
   return `six-grid:${snapshot.operation}:${createHash('sha256').update(stable(identity)).digest('hex')}`
@@ -119,18 +131,34 @@ export async function handleStoryboardSheetTask(job: Job<TaskJobData>) {
   if (snapshot.operation === 'sheet_upscale' && (!storyboard.sheetImageMedia || !sourceMatchesSnapshot(storyboard.sheetImageMedia, snapshot))) throw new Error('SIX_GRID_SOURCE_STALE')
   const sourceMedia = snapshot.operation === 'sheet_upscale' ? storyboard.sheetImageMedia : null
   const references = sourceMedia ? await prepareVerifiedSourceReferences(sourceMedia, snapshot.modelSnapshot.startsWith('comfyui::')) : null
+  const sheetReferences = snapshot.operation === 'generate' && snapshot.referenceImages?.length
+    ? await prepareSheetReferences(snapshot.referenceImages)
+    : null
+  const prompt = sheetReferences
+    ? `${snapshot.promptSnapshot}\nREFERENCE_IMAGE_MAPPING=${JSON.stringify(sheetReferences.mapping)}`
+    : snapshot.promptSnapshot
+  const isComfyModel = snapshot.modelSnapshot.startsWith('comfyui::')
   await assertTaskActive(job, 'six_grid_sheet_before_provider')
   const generated = await resolveImageSourceFromGeneration(job, {
     userId: job.data.userId, modelId: snapshot.modelSnapshot,
     invocationKey: `${job.data.taskId}:${lineage}`, comfyWorkflowVersionId: snapshot.workflowVersionId,
-    prompt: snapshot.promptSnapshot,
-    options: { ...snapshot.optionsSnapshot, aspectRatio: resolveSheetAspectRatio(snapshot.cellAspectRatio), ...(references ? { referenceImages: references.remote } : {}) },
+    prompt,
+    options: {
+      ...snapshot.optionsSnapshot,
+      aspectRatio: resolveSheetAspectRatio(snapshot.cellAspectRatio),
+      ...(references ? { referenceImages: references.remote } : {}),
+      ...(sheetReferences ? { referenceImages: sheetReferences.remote } : {}),
+    },
     ...(references ? { comfyReferenceImages: references.comfy } : {}),
+    ...(sheetReferences ? { comfyReferenceImages: sheetReferences.comfy } : {}),
     allowTaskExternalIdResume: !snapshot.modelSnapshot.startsWith('comfyui::'),
+    preferComfyStorageKey: isComfyModel,
   })
   await assertTaskActive(job, 'six_grid_sheet_after_provider')
   await assertTaskActive(job, 'six_grid_sheet_before_upload')
-  const key = await uploadImageSourceToCos(generated, snapshot.operation === 'generate' ? 'storyboard-sheet' : 'storyboard-sheet-upscale', storyboard.id)
+  const key = isComfyStoredOutputKey(generated)
+    ? generated
+    : await uploadImageSourceToCos(generated, snapshot.operation === 'generate' ? 'storyboard-sheet' : 'storyboard-sheet-upscale', storyboard.id)
   await assertTaskActive(job, 'six_grid_sheet_after_upload')
   const media = await ensureMediaObjectFromStorageKey(key)
   const options = JSON.stringify({ ...snapshot.optionsSnapshot, lineage })
@@ -210,6 +238,25 @@ async function prepareVerifiedSourceReferences(media: { storageKey: string | nul
     remote: comfy ? [] : await normalizeReferenceImagesForGeneration([media.storageKey]),
     comfy: [media.storageKey],
   }
+}
+
+async function prepareSheetReferences(
+  references: NonNullable<SixGridImageTaskSnapshot['referenceImages']>,
+) {
+  const comfy = references.map((entry) => toSignedUrlIfCos(entry.source)).filter((value): value is string => Boolean(value))
+  return {
+    comfy,
+    remote: await normalizeReferenceImagesForGeneration(comfy),
+    mapping: references.map((entry, index) => ({
+      index: `image${index}`,
+      kind: entry.kind,
+      name: entry.name,
+    })),
+  }
+}
+
+function isComfyStoredOutputKey(value: string): boolean {
+  return value.startsWith('comfyui/') && !value.includes('..') && !value.includes('\\')
 }
 
 type SheetUpscaleHistoryEntry = {

@@ -113,6 +113,8 @@ export interface ComfyPollResult {
   imageUrl?: string
   videoUrl?: string
   resultUrls?: string[]
+  resultStorageKey?: string
+  resultStorageKeys?: string[]
   stage: ComfyProgressStage
   waitingForCapacity: boolean
   error?: string
@@ -148,11 +150,14 @@ export async function pollComfyGenerationRequest(input: {
     }
   }
   const resultUrls = outputs.map((output) => output.url)
+  const resultStorageKeys = outputs.map((output) => output.storageKey)
   return {
     status: 'completed', stage, waitingForCapacity: false,
     resultUrl: primary.url,
+    resultStorageKey: primary.storageKey,
     ...(input.mediaType === 'image' ? { imageUrl: primary.url } : { videoUrl: primary.url }),
     resultUrls,
+    resultStorageKeys,
   }
 }
 

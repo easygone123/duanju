@@ -37,6 +37,8 @@ export interface PollResult {
     error?: string
     stage?: ComfyProgressStage
     resultUrls?: string[]
+    resultStorageKey?: string
+    resultStorageKeys?: string[]
     waitingForCapacity?: boolean
 }
 

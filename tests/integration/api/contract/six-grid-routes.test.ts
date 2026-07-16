@@ -15,6 +15,10 @@ const projectModelConfigMock = vi.hoisted(() => vi.fn(async () => ({
   storyboardModel: 'comfyui::workflow-1', capabilityDefaults: {}, capabilityOverrides: {},
 })))
 const projectWorkflowVersionMock = vi.hoisted(() => vi.fn(() => null))
+const referenceInputMock = vi.hoisted(() => vi.fn(async () => ([
+  { source: 'images/characters/hero.png', kind: 'character', name: 'Hero' },
+  { source: 'images/locations/cafe.png', kind: 'location', name: 'Cafe' },
+])))
 
 vi.mock('bullmq', () => ({
   Queue: class { add() { return Promise.resolve({ id: 'job' }) } getJob() { return Promise.resolve(null) } },
@@ -30,6 +34,9 @@ vi.mock('@/lib/config-service', () => ({
   getProjectModelConfig: projectModelConfigMock,
   resolveProjectComfyWorkflowVersion: projectWorkflowVersionMock,
   resolveProjectImageTaskGenerationOptions: capabilityMock,
+}))
+vi.mock('@/lib/novel-promotion/six-grid/reference-inputs', () => ({
+  collectSixGridReferenceInputs: referenceInputMock,
 }))
 import { TASK_TYPE } from '@/lib/task/types'
 import { getQueueTypeByTaskType } from '@/lib/task/queues'
@@ -55,6 +62,10 @@ describe('six-grid route/task registration contract', () => {
       storyboardModel: 'comfyui::workflow-1', capabilityDefaults: {}, capabilityOverrides: {},
     })
     projectWorkflowVersionMock.mockReturnValue(null)
+    referenceInputMock.mockResolvedValue([
+      { source: 'images/characters/hero.png', kind: 'character', name: 'Hero' },
+      { source: 'images/locations/cafe.png', kind: 'location', name: 'Cafe' },
+    ])
   })
   it('registers all four operations as image tasks with stable intents and labels', () => {
     const tasks = [
@@ -197,6 +208,26 @@ describe('six-grid route/task registration contract', () => {
       payload: expect.objectContaining({
         imageModel: 'comfyui::workflow-1', workflowId: 'workflow-1', workflowVersionId: 'version-1',
         workflowPurpose: 'generation', comfyWorkflowVersionId: 'version-1', comfyModelSnapshotVersion: 1,
+      }),
+    }))
+  })
+
+  it('snapshots six-grid character and location references into the generation task', async () => {
+    const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-sheet/route')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValueOnce(workflowFixture({ purpose: 'generation' }))
+    const response = await callRoute(route.POST, 'POST', {
+      operation: 'generate', episodeId: 'episode-1', storyboardId: 'storyboard-1', imageModel: 'comfyui::workflow-1', locale: 'zh',
+    }, { params: { projectId: 'project-1' } })
+    expect(response.status).toBe(200)
+    expect(referenceInputMock).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'project-1', panels: storyboardFixture().panels,
+    }))
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        referenceImages: [
+          { source: 'images/characters/hero.png', kind: 'character', name: 'Hero' },
+          { source: 'images/locations/cafe.png', kind: 'location', name: 'Cafe' },
+        ],
       }),
     }))
   })

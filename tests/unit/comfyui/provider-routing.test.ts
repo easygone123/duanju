@@ -253,8 +253,10 @@ describe('ComfyUI native provider routing', () => {
       stage: 'comfy_transferring_outputs',
       waitingForCapacity: false,
       resultUrl: 'https://store/two.png',
+      resultStorageKey: 'two',
       imageUrl: 'https://store/two.png',
       resultUrls: ['https://store/one.png', 'https://store/two.png'],
+      resultStorageKeys: ['one', 'two'],
     })
     expect(generationFindFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'request-1', userId: 'user-1', mediaType: 'image' },

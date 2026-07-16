@@ -25,6 +25,12 @@ const generatorApiMock = vi.hoisted(() => ({
 const configServiceMock = vi.hoisted(() => ({
   getProjectModelConfig: vi.fn(),
   getUserModelConfig: vi.fn(),
+  resolveProjectComfyWorkflowVersion: vi.fn((config: {
+    comfyImageWorkflowVersionId?: string
+    comfyVideoWorkflowVersionId?: string
+  }, _modelKey: string, mediaType: 'image' | 'video') => (
+    mediaType === 'image' ? config.comfyImageWorkflowVersionId : config.comfyVideoWorkflowVersionId
+  )),
   resolveProjectModelCapabilityGenerationOptions: vi.fn(async () => ({})),
 }))
 
@@ -149,6 +155,27 @@ describe('worker utils video generation resume', () => {
     })
     expect(result).toBe('https://store/same.png')
     expect(generatorApiMock.generateImage).toHaveBeenCalledTimes(1)
+  })
+
+  it('can return the already-durable ComfyUI storage key instead of an internal HTTP URL', async () => {
+    generatorApiMock.generateImage.mockResolvedValueOnce({
+      success: true,
+      async: true,
+      externalId: 'COMFY:IMAGE:same-invocation',
+    })
+    asyncPollMock.pollAsyncTask.mockResolvedValueOnce({
+      status: 'completed',
+      resultUrl: '/api/storage/sign?key=comfyui%2Fresult.png',
+      resultStorageKey: 'comfyui/user-1/project-1/result.png',
+    })
+
+    const result = await resolveImageSourceFromGeneration(buildJob(), {
+      userId: 'user-1', modelId: 'comfyui::wf-image',
+      invocationKey: 'task-1:sheet:1', prompt: 'six-grid',
+      preferComfyStorageKey: true,
+    })
+
+    expect(result).toBe('comfyui/user-1/project-1/result.png')
   })
 
   it('backfills the trusted pin for an old unmarked Comfy image task when current selection is unchanged', async () => {

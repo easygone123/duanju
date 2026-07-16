@@ -380,6 +380,7 @@ export async function resolveImageSourceFromGeneration(
       provider?: string
     }
     allowTaskExternalIdResume?: boolean
+    preferComfyStorageKey?: boolean
     comfyReferenceImages?: string[]
     pollProgress?: { start?: number; end?: number }
   },
@@ -493,7 +494,9 @@ export async function resolveImageSourceFromGeneration(
       externalId,
     },
   })
-  return polled.url
+  return isComfyInvocation && params.preferComfyStorageKey && polled.status.resultStorageKey
+    ? polled.status.resultStorageKey
+    : polled.url
 }
 
 /**

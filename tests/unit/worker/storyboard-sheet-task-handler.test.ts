@@ -25,6 +25,7 @@ vi.mock('@/lib/workers/utils', () => ({
   resolveImageSourceFromGeneration: generationMock.resolve,
   uploadImageSourceToCos: generationMock.upload,
   assertTaskActive: generationMock.assertActive,
+  toSignedUrlIfCos: (value: string) => value,
 }))
 vi.mock('@/lib/media/service', () => ({ ensureMediaObjectFromStorageKey: generationMock.ensureMedia }))
 vi.mock('@/lib/storage', () => ({
@@ -153,6 +154,83 @@ describe('six-grid sheet and panel execution', () => {
       where: { id: 'storyboard-1', sheetArtifactVersion: 3 },
       data: expect.objectContaining({ sheetImageMediaId: 'output-media', sheetArtifactVersion: { increment: 1 } }),
     }))
+  })
+
+  it('passes the snapshotted character and location references into complete-sheet generation', async () => {
+    const task = snapshot({
+      operation: 'generate', sourceMediaId: undefined, sourceChecksum: undefined, sourceVersion: undefined,
+      referenceImages: [
+        { source: '/api/storage/sign?key=characters%2Fhero.png', kind: 'character', name: 'Hero' },
+        { source: '/api/storage/sign?key=locations%2Fcafe.png', kind: 'location', name: 'Cafe' },
+      ],
+    })
+    prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce({
+      id: 'storyboard-1', sheetArtifactVersion: 3, sheetGenerationOptionsSnapshot: null,
+      sheetImageMedia: null, upscaledSheetImageMedia: null,
+    })
+
+    await handleStoryboardSheetTask(job(task, TASK_TYPE.STORYBOARD_SHEET_GENERATE))
+
+    expect(generationMock.normalize).toHaveBeenCalledWith([
+      '/api/storage/sign?key=characters%2Fhero.png',
+      '/api/storage/sign?key=locations%2Fcafe.png',
+    ])
+    expect(generationMock.resolve).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      prompt: expect.stringContaining('REFERENCE_IMAGE_MAPPING='),
+      comfyReferenceImages: [
+        '/api/storage/sign?key=characters%2Fhero.png',
+        '/api/storage/sign?key=locations%2Fcafe.png',
+      ],
+      options: expect.objectContaining({
+        referenceImages: [
+          'normalized:/api/storage/sign?key=characters%2Fhero.png',
+          'normalized:/api/storage/sign?key=locations%2Fcafe.png',
+        ],
+      }),
+    }))
+  })
+
+  it('reuses the durable ComfyUI sheet output instead of downloading it through the app', async () => {
+    const task = snapshot({
+      operation: 'generate', modelSnapshot: 'comfyui::workflow-1', imageModel: 'comfyui::workflow-1',
+      workflowId: 'workflow-1', workflowVersionId: 'version-old', workflowPurpose: 'generation',
+      comfyWorkflowVersionId: 'version-old', comfyModelSnapshotVersion: 1,
+      sourceMediaId: undefined, sourceChecksum: undefined, sourceVersion: undefined,
+    })
+    prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce({
+      id: 'storyboard-1', sheetArtifactVersion: 3, sheetGenerationOptionsSnapshot: null,
+      sheetImageMedia: null, upscaledSheetImageMedia: null,
+    })
+    generationMock.resolve.mockResolvedValueOnce('comfyui/user-1/project-1/result.png')
+
+    await handleStoryboardSheetTask(job(task, TASK_TYPE.STORYBOARD_SHEET_GENERATE))
+
+    expect(generationMock.resolve).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      preferComfyStorageKey: true,
+    }))
+    expect(generationMock.upload).not.toHaveBeenCalled()
+    expect(generationMock.ensureMedia).toHaveBeenCalledWith('comfyui/user-1/project-1/result.png')
+  })
+
+  it('uploads a ComfyUI URL fallback instead of persisting it as a storage key', async () => {
+    const task = snapshot({
+      operation: 'generate', modelSnapshot: 'comfyui::workflow-1', imageModel: 'comfyui::workflow-1',
+      workflowId: 'workflow-1', workflowVersionId: 'version-old', workflowPurpose: 'generation',
+      comfyWorkflowVersionId: 'version-old', comfyModelSnapshotVersion: 1,
+      sourceMediaId: undefined, sourceChecksum: undefined, sourceVersion: undefined,
+    })
+    prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce({
+      id: 'storyboard-1', sheetArtifactVersion: 3, sheetGenerationOptionsSnapshot: null,
+      sheetImageMedia: null, upscaledSheetImageMedia: null,
+    })
+    generationMock.resolve.mockResolvedValueOnce('https://store.example/result.png')
+
+    await handleStoryboardSheetTask(job(task, TASK_TYPE.STORYBOARD_SHEET_GENERATE))
+
+    expect(generationMock.upload).toHaveBeenCalledWith(
+      'https://store.example/result.png', 'storyboard-sheet', 'storyboard-1',
+    )
+    expect(generationMock.ensureMedia).toHaveBeenCalledWith('images/output.png')
   })
 
   it('upscales only the selected panel and rejects a stale crop source', async () => {

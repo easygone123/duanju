@@ -74,7 +74,7 @@ export async function handleCharacterImageTask(job: Job<TaskJobData>) {
   const projectId = job.data.projectId
   const userId = job.data.userId
   const models = await getProjectModels(projectId, userId)
-  const modelId = models.characterModel
+  const modelId = pickFirstString(payload.imageModel, models.characterModel)
   if (!modelId) throw new Error('Character model not configured')
 
   const appearanceId = pickFirstString(job.data.targetId, payload.appearanceId)

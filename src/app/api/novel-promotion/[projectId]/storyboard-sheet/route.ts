@@ -9,6 +9,7 @@ import { loadOwnedPublishedGenerationWorkflow, loadOwnedPublishedUpscaleWorkflow
 import { resolveSheetAspectRatio, type SixGridImageTaskSnapshot } from '@/lib/workers/handlers/storyboard-sheet-task-handler'
 import { getProjectModelConfig, resolveProjectComfyWorkflowVersion, resolveProjectImageTaskGenerationOptions } from '@/lib/config-service'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
+import { collectSixGridReferenceInputs } from '@/lib/novel-promotion/six-grid/reference-inputs'
 
 const schema = z.object({
   operation: z.enum(['generate', 'upscale']), episodeId: z.string().trim().min(1).max(200), storyboardId: z.string().trim().min(1).max(200),
@@ -78,6 +79,9 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
       throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_SHEET_RATIO_UNSUPPORTED', field: 'generationOptions.aspectRatio', details: { message: error instanceof Error ? error.message : String(error) } })
     }
   }
+  const referenceImages = operation === 'generate'
+    ? await collectSixGridReferenceInputs({ projectId, panels: storyboard.panels })
+    : []
   const snapshot: SixGridImageTaskSnapshot = {
     operation, projectId, episodeId: body.episodeId, storyboardId: storyboard.id, groupSequence: storyboard.groupSequence ?? 0,
     ...(source ? { sourceMediaId: source.id, sourceChecksum: source.sha256 || `media:${source.id}`, sourceVersion: source.updatedAt.toISOString() } : {}),
@@ -86,6 +90,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     expectedSheetArtifactVersion: storyboard.sheetArtifactVersion, promptSnapshot: prompt, modelSnapshot: model,
     optionsSnapshot: operation === 'generate' ? resolvedGenerationOptions : {}, locale,
     imageModel: model, generationOptions: operation === 'generate' ? resolvedGenerationOptions : {},
+    ...(referenceImages.length > 0 ? { referenceImages } : {}),
     ...(workflow ? { comfyWorkflowVersionId: workflow.version.id, comfyModelSnapshotVersion: 1 as const } : {}),
   }
   const { dedupeKey } = finalizeSnapshot(snapshot)

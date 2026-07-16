@@ -193,6 +193,22 @@ export default function LocationCard({
 
     const selectionHeaderActions = (
       <>
+        <button
+          onClick={onEdit}
+          className="w-6 h-6 rounded hover:bg-[var(--glass-bg-muted)] flex items-center justify-center transition-colors"
+          title={t(`${assetKey}.edit`)}
+        >
+          <AppIcon name="edit" className="w-4 h-4 text-[var(--glass-text-secondary)]" />
+        </button>
+        {!isTaskRunning && currentImageUrl && selectedIndex !== null && onImageEdit && (
+          <button
+            onClick={() => onImageEdit(location.id, selectedIndex)}
+            className={`w-6 h-6 rounded flex items-center justify-center transition-all active:scale-95 ${AI_EDIT_BUTTON_CLASS}`}
+            title={t('image.edit')}
+          >
+            <AISparklesIcon className={`w-4 h-4 ${AI_EDIT_ICON_CLASS}`} />
+          </button>
+        )}
         <ImageGenerationInlineCountButton
           prefix={isGroupTaskRunning ? (
             <>

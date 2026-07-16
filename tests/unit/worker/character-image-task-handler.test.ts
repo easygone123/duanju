@@ -26,6 +26,8 @@ const prismaMock = vi.hoisted(() => ({
 
 const sharedMock = vi.hoisted(() => ({
   generateProjectLabeledImageToStorage: vi.fn<(input: {
+    job: Job<TaskJobData>
+    modelId: string
     prompt: string
     label: string
     options?: { referenceImages?: string[]; aspectRatio?: string }
@@ -90,6 +92,25 @@ describe('worker character-image-task-handler behavior', () => {
   it('characterModel not configured -> explicit error', async () => {
     utilsMock.getProjectModels.mockResolvedValueOnce({ characterModel: '', artStyle: 'realistic' })
     await expect(handleCharacterImageTask(buildJob({}))).rejects.toThrow('Character model not configured')
+  })
+
+  it('uses the queued ComfyUI snapshot when the current character model is no longer configured', async () => {
+    utilsMock.getProjectModels.mockResolvedValueOnce({ characterModel: '', artStyle: 'realistic' })
+    const job = buildJob({
+      imageIndex: 0,
+      imageModel: 'comfyui::character-workflow',
+      comfyWorkflowVersionId: 'character-version-1',
+      comfyModelSnapshotVersion: 1,
+    })
+
+    await handleCharacterImageTask(job)
+
+    expect(sharedMock.generateProjectLabeledImageToStorage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        job,
+        modelId: 'comfyui::character-workflow',
+      }),
+    )
   })
 
   it('success path -> uses primary appearance as reference and persists imageUrls', async () => {

@@ -60,6 +60,7 @@ export interface PanelCharacterReference {
 }
 
 export interface PanelReferenceImageEntry {
+  source: string
   url: string
   kind: 'character' | 'location' | 'prop' | 'sketch'
   name: string
@@ -260,7 +261,7 @@ export async function collectPanelReferenceImageEntries(
     const selectedUrl = selectedIndex !== null && selectedIndex !== undefined ? imageUrls[selectedIndex] : null
     const key = selectedUrl || imageUrls[0] || appearance.imageUrl
     const signed = toSignedUrlIfCos(key, 3600)
-    if (signed) refs.push({ url: signed, kind: 'character', name: character.name })
+    if (signed && key) refs.push({ source: key, url: signed, kind: 'character', name: character.name })
   }
 
   if (panel.location) {
@@ -272,7 +273,7 @@ export async function collectPanelReferenceImageEntries(
       const images = location.images || []
       const selected = images.find((img) => img.isSelected) || images[0]
       const signed = toSignedUrlIfCos(selected?.imageUrl, 3600)
-      if (signed) refs.push({ url: signed, kind: 'location', name: location.name })
+      if (signed && selected?.imageUrl) refs.push({ source: selected.imageUrl, url: signed, kind: 'location', name: location.name })
     }
   }
 
@@ -284,11 +285,11 @@ export async function collectPanelReferenceImageEntries(
     const images = prop.images || []
     const selected = images.find((image) => image.isSelected) || images[0]
     const signed = toSignedUrlIfCos(selected?.imageUrl, 3600)
-    if (signed) refs.push({ url: signed, kind: 'prop', name: prop.name })
+    if (signed && selected?.imageUrl) refs.push({ source: selected.imageUrl, url: signed, kind: 'prop', name: prop.name })
   }
 
   const sketch = toSignedUrlIfCos(panel.sketchImageUrl, 3600)
-  if (sketch) refs.push({ url: sketch, kind: 'sketch', name: 'storyboard sketch' })
+  if (sketch && panel.sketchImageUrl) refs.push({ source: panel.sketchImageUrl, url: sketch, kind: 'sketch', name: 'storyboard sketch' })
 
   return refs
 }
