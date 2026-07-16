@@ -16,6 +16,7 @@ interface CharacterProfileDialogProps {
     isOpen: boolean
     characterName: string
     profileData: CharacterProfileData
+    profileConfirmed?: boolean
     onClose: () => void
     onSave: (profileData: CharacterProfileData) => void
     isSaving?: boolean
@@ -28,6 +29,7 @@ export default function CharacterProfileDialog({
     isOpen,
     characterName,
     profileData,
+    profileConfirmed = false,
     onClose,
     onSave,
     isSaving = false
@@ -36,9 +38,9 @@ export default function CharacterProfileDialog({
     const savingState = isSaving
         ? resolveTaskPresentationState({
             phase: 'processing',
-            intent: 'build',
-            resource: 'image',
-            hasOutput: false,
+            intent: profileConfirmed ? 'modify' : 'build',
+            resource: profileConfirmed ? 'text' : 'image',
+            hasOutput: profileConfirmed,
         })
         : null
     const [formData, setFormData] = useState<CharacterProfileData>(profileData)
@@ -275,7 +277,9 @@ export default function CharacterProfileDialog({
                         className="px-6 py-2 bg-[var(--glass-accent-from)] text-white rounded-lg hover:bg-[var(--glass-accent-to)] transition-colors disabled:opacity-50 flex items-center gap-2"
                     >
                         {isSaving && <TaskStatusInline state={savingState} className="text-white [&>span]:sr-only [&_svg]:text-white" />}
-                        {t('characterProfile.confirmAndGenerate')}
+                        {profileConfirmed
+                            ? t('characterProfile.saveChanges')
+                            : t('characterProfile.confirmAndGenerate')}
                     </button>
                 </div>
             </div>

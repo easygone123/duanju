@@ -329,6 +329,7 @@ export default function AssetsStage({
     editingProfile,
     handleEditProfile,
     handleConfirmProfile,
+    handleSaveProfile,
     handleBatchConfirm,
     handleDeleteProfile,
     setEditingProfile
@@ -522,7 +523,7 @@ export default function AssetsStage({
         handleVoiceDesignSave={handleVoiceDesignSave}
         handleCloseCopyPicker={handleCloseCopyPicker}
         handleConfirmCopyFromGlobal={handleConfirmCopyFromGlobal}
-        handleConfirmProfile={handleConfirmProfile}
+        handleSaveProfile={handleSaveProfile}
         closeEditingAppearance={closeEditingAppearance}
         closeEditingLocation={closeEditingLocation}
         closeEditingProp={closeEditingProp}

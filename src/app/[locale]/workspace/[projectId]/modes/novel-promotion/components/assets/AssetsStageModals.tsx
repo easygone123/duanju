@@ -57,6 +57,7 @@ interface EditingProfileState {
   characterId: string
   characterName: string
   profileData: CharacterProfileData
+  profileConfirmed: boolean
 }
 
 interface AssetsStageModalsProps {
@@ -72,7 +73,11 @@ interface AssetsStageModalsProps {
   handleVoiceDesignSave: (voiceId: string, audioBase64: string) => Promise<void>
   handleCloseCopyPicker: () => void
   handleConfirmCopyFromGlobal: (globalAssetId: string) => Promise<void>
-  handleConfirmProfile: (characterId: string, updatedProfileData?: CharacterProfileData) => Promise<void>
+  handleSaveProfile: (
+    characterId: string,
+    updatedProfileData: CharacterProfileData,
+    profileConfirmedSnapshot: boolean,
+  ) => Promise<void>
   closeEditingAppearance: () => void
   closeEditingLocation: () => void
   closeEditingProp: () => void
@@ -111,7 +116,7 @@ export default function AssetsStageModals({
   handleVoiceDesignSave,
   handleCloseCopyPicker,
   handleConfirmCopyFromGlobal,
-  handleConfirmProfile,
+  handleSaveProfile,
   closeEditingAppearance,
   closeEditingLocation,
   closeEditingProp,
@@ -253,8 +258,13 @@ export default function AssetsStageModals({
           isOpen={!!editingProfile}
           characterName={editingProfile.characterName}
           profileData={editingProfile.profileData}
+          profileConfirmed={editingProfile.profileConfirmed}
           onClose={() => setEditingProfile(null)}
-          onSave={(profileData) => handleConfirmProfile(editingProfile.characterId, profileData)}
+          onSave={(profileData) => handleSaveProfile(
+            editingProfile.characterId,
+            profileData,
+            editingProfile.profileConfirmed,
+          )}
           isSaving={isConfirmingCharacter(editingProfile.characterId)}
         />
       )}

@@ -57,6 +57,9 @@ const messages = {
       copyFromGlobal: '从资产中心导入',
       delete: '删除角色',
     },
+    characterProfile: {
+      editProfile: '编辑档案',
+    },
   },
 } as const
 
@@ -139,5 +142,61 @@ describe('CharacterSection actions', () => {
     expect(html).toContain('删除角色')
     expect(html).toContain('data-icon="arrowDownCircle"')
     expect(html).toContain('flex flex-col items-end gap-1.5')
+  })
+
+  it('keeps a profile edit action after confirmation even when no appearance exists yet', () => {
+    Reflect.set(globalThis, 'React', React)
+    useProjectAssetsMock.mockReturnValue({
+      data: {
+        characters: [
+          {
+            id: 'character-confirmed',
+            name: '林夏',
+            profileConfirmed: true,
+            profileData: null,
+            appearances: [],
+          },
+        ],
+      },
+    })
+
+    const html = renderWithIntl(
+      createElement(CharacterSection, {
+        projectId: 'project-1',
+        activeTaskKeys: new Set<string>(),
+        onClearTaskKey: () => undefined,
+        onRegisterTransientTaskKey: () => undefined,
+        isAnalyzingAssets: false,
+        onAddCharacter: () => undefined,
+        onDeleteCharacter: () => undefined,
+        onDeleteAppearance: () => undefined,
+        onEditAppearance: () => undefined,
+        handleGenerateImage: async () => undefined,
+        onSelectImage: () => undefined,
+        onConfirmSelection: () => undefined,
+        onRegenerateSingle: async () => undefined,
+        onRegenerateGroup: async () => undefined,
+        onUndo: () => undefined,
+        onImageClick: () => undefined,
+        onImageEdit: () => undefined,
+        onVoiceChange: () => undefined,
+        onVoiceDesign: () => undefined,
+        onVoiceSelectFromHub: () => undefined,
+        onCopyFromGlobal: () => undefined,
+        getAppearances: (character) => character.appearances,
+        unconfirmedCharacters: [],
+        isConfirmingCharacter: () => false,
+        deletingCharacterId: null,
+        batchConfirming: false,
+        batchConfirmingState: null,
+        onBatchConfirm: () => undefined,
+        onEditProfile: () => undefined,
+        onConfirmProfile: () => undefined,
+        onUseExistingProfile: () => undefined,
+        onDeleteProfile: () => undefined,
+      }),
+    )
+
+    expect(html).toContain('编辑档案')
   })
 })

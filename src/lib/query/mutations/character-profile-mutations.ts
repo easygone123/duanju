@@ -252,6 +252,25 @@ export function useConfirmProjectCharacterProfile(projectId: string) {
     })
 }
 
+export function useUpdateProjectCharacterProfile(projectId: string) {
+    const queryClient = useQueryClient()
+    const invalidateProjectAssets = () =>
+        invalidateQueryTemplates(queryClient, [queryKeys.projectAssets.all(projectId)])
+    return useMutation({
+        mutationFn: async (payload: { characterId: string; profileData: unknown }) =>
+            await requestJsonWithError(
+                `/api/novel-promotion/${projectId}/character-profile/confirm`,
+                {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                },
+                '更新角色档案失败',
+            ),
+        onSettled: invalidateProjectAssets,
+    })
+}
+
 /**
  * 批量确认角色档案
  */

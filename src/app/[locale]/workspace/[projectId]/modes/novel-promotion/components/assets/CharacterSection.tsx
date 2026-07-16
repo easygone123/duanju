@@ -289,6 +289,15 @@ export default function CharacterSection({
                                     </span>
                                 </div>
                                 <div className="flex flex-col items-end gap-1.5">
+                                    {character.profileConfirmed && (
+                                        <button
+                                            onClick={() => onEditProfile(character.id, character.name)}
+                                            className="text-xs text-[var(--glass-text-secondary)] hover:text-[var(--glass-text-primary)] flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--glass-bg-muted)] transition-colors"
+                                        >
+                                            <AppIcon name="edit" className="w-4 h-4" />
+                                            {t('characterProfile.editProfile')}
+                                        </button>
+                                    )}
                                     {/* 从资产中心导入按钮 */}
                                     <button
                                         onClick={() => onCopyFromGlobal(character.id)}

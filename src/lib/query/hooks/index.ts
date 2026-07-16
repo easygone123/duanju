@@ -129,6 +129,7 @@ export {
     useConfirmProjectCharacterSelection,
     useConfirmProjectLocationSelection,
     useConfirmProjectCharacterProfile,
+    useUpdateProjectCharacterProfile,
     useBatchConfirmProjectCharacterProfiles,
     useUpdateProjectCharacterVoiceSettings,
     useSaveProjectDesignedVoice,

@@ -9,18 +9,36 @@
 
 import { useState, useCallback, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import { CharacterProfileData, parseProfileData } from '@/types/character-profile'
+import { CharacterProfileData, parseProfileData, validateProfileData } from '@/types/character-profile'
 import {
     useProjectAssets,
     useRefreshProjectAssets,
     useDeleteProjectCharacter,
     useConfirmProjectCharacterProfile,
+    useUpdateProjectCharacterProfile,
     useBatchConfirmProjectCharacterProfiles,
 } from '@/lib/query/hooks'
 
 interface UseProfileManagementProps {
     projectId: string
     showToast?: (message: string, type: 'success' | 'warning' | 'error') => void
+}
+
+function createFallbackProfileData(characterName: string): CharacterProfileData {
+    return {
+        role_level: 'C',
+        archetype: characterName,
+        personality_tags: [],
+        era_period: 'unknown',
+        social_class: 'unknown',
+        occupation: '',
+        costume_tier: 1,
+        suggested_colors: [],
+        primary_identifier: '',
+        visual_keywords: [],
+        gender: 'unknown',
+        age_range: 'unknown',
+    }
 }
 
 export function useProfileManagement({
@@ -36,6 +54,7 @@ export function useProfileManagement({
     const refreshAssets = useRefreshProjectAssets(projectId)
     const deleteCharacterMutation = useDeleteProjectCharacter(projectId)
     const confirmCharacterProfileMutation = useConfirmProjectCharacterProfile(projectId)
+    const updateCharacterProfileMutation = useUpdateProjectCharacterProfile(projectId)
     const batchConfirmProfilesMutation = useBatchConfirmProjectCharacterProfiles(projectId)
 
     // 🔥 修复：使用 Set 支持同时确认多个角色（即时反馈用；刷新后由 profileConfirmTaskRunning 接替）
@@ -46,6 +65,7 @@ export function useProfileManagement({
         characterId: string
         characterName: string
         profileData: CharacterProfileData
+        profileConfirmed: boolean
     } | null>(null)
 
     // 获取未确认的角色
@@ -73,15 +93,25 @@ export function useProfileManagement({
     // 打开编辑对话框
     const handleEditProfile = useCallback((characterId: string, characterName: string) => {
         const character = characters.find(c => c.id === characterId)
-        if (!character?.profileData) return
+        if (!character) return
 
-        const profileData = parseProfileData(character.profileData)
+        const parsedProfile = parseProfileData(character.profileData ?? null)
+        const profileData = parsedProfile && validateProfileData(parsedProfile)
+            ? parsedProfile
+            : character.profileConfirmed
+                ? createFallbackProfileData(characterName)
+                : null
         if (!profileData) {
             showToast?.(t('characterProfile.parseFailed'), 'error')
             return
         }
 
-        setEditingProfile({ characterId, characterName, profileData })
+        setEditingProfile({
+            characterId,
+            characterName,
+            profileData,
+            profileConfirmed: character.profileConfirmed === true,
+        })
     }, [characters, showToast, t])
 
     // 确认单个角色
@@ -113,6 +143,37 @@ export function useProfileManagement({
             setEditingProfile(null)
         }
     }, [confirmCharacterProfileMutation, refreshAssets, showToast, t])
+
+    const handleSaveProfile = useCallback(async (
+        characterId: string,
+        updatedProfileData: CharacterProfileData,
+        profileConfirmedSnapshot: boolean,
+    ) => {
+        if (!profileConfirmedSnapshot) {
+            await handleConfirmProfile(characterId, updatedProfileData)
+            return
+        }
+
+        setConfirmingCharacterIds(prev => new Set(prev).add(characterId))
+        try {
+            await updateCharacterProfileMutation.mutateAsync({
+                characterId,
+                profileData: updatedProfileData,
+            })
+            showToast?.(t('characterProfile.updateSuccess'), 'success')
+            refreshAssets()
+            setEditingProfile(null)
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : t('common.unknownError')
+            showToast?.(t('characterProfile.updateFailed', { error: message }), 'error')
+        } finally {
+            setConfirmingCharacterIds(prev => {
+                const next = new Set(prev)
+                next.delete(characterId)
+                return next
+            })
+        }
+    }, [handleConfirmProfile, refreshAssets, showToast, t, updateCharacterProfileMutation])
 
     // 批量确认所有角色
     const handleBatchConfirm = useCallback(async () => {
@@ -169,6 +230,7 @@ export function useProfileManagement({
         editingProfile,
         handleEditProfile,
         handleConfirmProfile,
+        handleSaveProfile,
         handleBatchConfirm,
         handleDeleteProfile,
         setEditingProfile
