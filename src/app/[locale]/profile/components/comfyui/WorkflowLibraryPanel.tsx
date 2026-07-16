@@ -48,6 +48,11 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   const queryClient = useQueryClient()
   const [workflows, setWorkflows] = useState<WorkflowView[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [localActivationWorkflowId, setLocalActivationWorkflowId] = useState<string | null>(null)
+  const activationWorkflowIdRef = useRef(activationWorkflowId)
+  const activationOwnershipEpochRef = useRef(0)
+  const onActivationClosedRef = useRef(onActivationClosed)
+  const parentActivationCloseRequestedRef = useRef<{ workflowId: string; epoch: number } | null>(null)
   const selectedIdRef = useRef<string | null>(null)
   const selectionRevisionRef = useRef(0)
   const archiveInFlightRef = useRef<string | null>(null)
@@ -67,6 +72,31 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   const [testPayload, setTestPayload] = useState<WorkflowTestPayload | null>(emptyWorkflowTestPayload)
   const connectionsQuery = useComfyConnections()
 
+  if (activationWorkflowIdRef.current !== activationWorkflowId) {
+    activationWorkflowIdRef.current = activationWorkflowId
+    activationOwnershipEpochRef.current += 1
+  }
+  onActivationClosedRef.current = onActivationClosed
+
+  useEffect(() => {
+    if (activationWorkflowId) setLocalActivationWorkflowId(null)
+  }, [activationWorkflowId])
+
+  const closeActivationForSelection = (
+    nextId?: string | null,
+    expectedEpoch = activationOwnershipEpochRef.current,
+  ) => {
+    setLocalActivationWorkflowId(null)
+    const currentParentId = activationWorkflowIdRef.current
+    const currentEpoch = activationOwnershipEpochRef.current
+    if (expectedEpoch !== currentEpoch) return
+    if (!currentParentId || currentParentId === nextId) return
+    const requested = parentActivationCloseRequestedRef.current
+    if (requested?.workflowId === currentParentId && requested.epoch === currentEpoch) return
+    parentActivationCloseRequestedRef.current = { workflowId: currentParentId, epoch: currentEpoch }
+    onActivationClosedRef.current?.()
+  }
+
   const updateSelectedId = (id: string | null) => {
     selectedIdRef.current = id
     setSelectedId(id)
@@ -74,6 +104,7 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
 
   const load = async (preferId?: string) => {
     const selectionRevision = selectionRevisionRef.current
+    const activationEpoch = activationOwnershipEpochRef.current
     setLoading(true)
     try {
       const payload = await requestJson<{ workflows: WorkflowView[] }>('/api/comfyui/workflows')
@@ -82,9 +113,11 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
       const targetId = preferId ?? selectedIdRef.current
       const selected = payload.workflows.find((item) => item.id === targetId) ?? payload.workflows[0]
       if (selected) {
+        if (selected.id !== selectedIdRef.current) closeActivationForSelection(selected.id, activationEpoch)
         const version = selected.versions[0] ?? selected.currentVersion
         updateSelectedId(selected.id); setSavedVersion(version); setAuthorDraft(draftFromWorkflow(selected, version))
       } else if (selectedIdRef.current === targetId) {
+        closeActivationForSelection(null, activationEpoch)
         updateSelectedId(null); setSavedVersion(null); setAuthorDraft(null)
       }
       setError(null)
@@ -94,6 +127,7 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
 
   const selectWorkflow = (id: string) => {
     selectionRevisionRef.current += 1
+    if (id !== selectedIdRef.current) closeActivationForSelection(id)
     updateSelectedId(id); setError(null)
     const workflow = workflows.find((item) => item.id === id)
     if (!workflow) return
@@ -131,6 +165,7 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
         method: 'DELETE',
       })
       setWorkflows((current) => current.filter((workflow) => workflow.id !== targetId))
+      closeActivationForSelection(null)
       setWorkflowDeleted(true)
       if (selectedIdRef.current === targetId) {
         updateSelectedId(null)
@@ -217,7 +252,16 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   }
 
   const issues = savedVersion?.validation.issues ?? []
-  const activationOpen = Boolean(selectedId && savedVersion && activationWorkflowId === selectedId)
+  const activeActivationWorkflowId = activationWorkflowId ?? localActivationWorkflowId
+  const activationOpen = Boolean(selectedId && savedVersion && activeActivationWorkflowId === selectedId)
+  const openSelectedWorkflowActivation = () => {
+    if (!selectedId) return
+    closeActivationForSelection(selectedId)
+    setLocalActivationWorkflowId(selectedId)
+  }
+  const closeSelectedWorkflowActivation = () => {
+    closeActivationForSelection(null)
+  }
 
   return <section aria-labelledby="comfyui-workflow-library-heading" className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--glass-stroke-base)] px-5 py-4 sm:px-6">
@@ -237,11 +281,12 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
           key={savedVersion.id}
           workflowId={selectedId}
           version={savedVersion}
-          onClose={() => onActivationClosed?.()}
+          onClose={closeSelectedWorkflowActivation}
           onActivated={() => load(selectedId)}
         />}
         {selectedId && authorDraft && !activationOpen && <div className="flex flex-wrap items-end gap-2">
           <button type="button" onClick={() => void saveDraft()} disabled={busy || !authorDraft.name || !authorDraft.apiFormatJson} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('saveDraft')}</button>
+          <button type="button" onClick={openSelectedWorkflowActivation} disabled={busy || !savedVersion} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('testAndEnable')}</button>
           <button type="button" onClick={() => void publishVersion()} disabled={busy || !savedVersion?.validation.valid} className="glass-btn-base px-4 py-2 text-sm">{t('publish')}</button>
           <label className="min-w-[12rem] text-xs">{t('testInstance')}<select value={connectionId} onChange={(event) => setConnectionId(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-2 py-2">
             <option value="">{t('selectInstance')}</option>{(connectionsQuery.data?.connections ?? []).filter((connection) => connection.enabled).map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label>

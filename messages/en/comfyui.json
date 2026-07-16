@@ -257,6 +257,7 @@
     "tested": "Live test passed",
     "notTested": "Not live-tested",
     "saveDraft": "Save draft",
+    "testAndEnable": "Test and enable",
     "deleteWorkflow": "Delete workflow",
     "deleteWorkflowConfirm": "Delete “{name}”? This removes it from the workflow library.",
     "workflowDeleted": "Workflow deleted.",

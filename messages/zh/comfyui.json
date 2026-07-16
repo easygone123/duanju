@@ -257,6 +257,7 @@
     "tested": "实时测试通过",
     "notTested": "尚未实时测试",
     "saveDraft": "保存草稿",
+    "testAndEnable": "测试并启用",
     "deleteWorkflow": "删除工作流",
     "deleteWorkflowConfirm": "确定删除“{name}”吗？删除后它将不再显示在工作流库中。",
     "workflowDeleted": "工作流已删除。",
