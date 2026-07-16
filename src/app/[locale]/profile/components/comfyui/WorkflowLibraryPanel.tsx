@@ -222,6 +222,7 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
     await requestJson(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/test-run`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ versionId: savedVersion.id, connectionId, variables: testPayload.variables, uploads: testPayload.uploads }),
     })
+    await Promise.resolve(invalidateUserModels(queryClient)).catch(() => undefined)
     await load(selectedId)
   })
   const loadMoreCompatibility = async () => {

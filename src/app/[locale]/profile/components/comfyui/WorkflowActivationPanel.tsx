@@ -146,6 +146,8 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
       return
     }
     if (!isCurrentOperation(epoch)) return
+    await Promise.resolve(invalidateUserModels(queryClient)).catch(() => undefined)
+    if (!isCurrentOperation(epoch)) return
     transition('test_succeeded')
     await publishExactVersion(epoch)
   }
