@@ -15,6 +15,7 @@ import { initializeFonts, createLabelSVG } from '@/lib/fonts'
 import { processMediaResult } from '@/lib/media-process'
 import {
   getProjectModelConfig,
+  resolveProjectComfyWorkflowVersion,
   getUserModelConfig,
   resolveProjectModelCapabilityGenerationOptions,
 } from '@/lib/config-service'
@@ -324,7 +325,7 @@ async function resolveImageGenerationSnapshot(
       config.editModel,
     ].includes(params.modelId)
     legacyVersionId = matchesCurrentImageModel
-      ? config.comfyImageWorkflowVersionId ?? undefined
+      ? resolveProjectComfyWorkflowVersion(config, params.modelId) ?? undefined
       : undefined
   }
   return resolveImageTaskSnapshot(payload, {
@@ -354,7 +355,7 @@ async function resolveVideoGenerationSnapshot(
   if (!legacyVersionId && parseModelKeyStrict(params.modelId)?.provider === 'comfyui') {
     const config = await getProjectModelConfig(job.data.projectId, job.data.userId)
     legacyVersionId = config.videoModel === params.modelId
-      ? config.comfyVideoWorkflowVersionId ?? undefined
+      ? resolveProjectComfyWorkflowVersion(config, params.modelId) ?? undefined
       : undefined
   }
   return resolveVideoTaskSnapshot(payload, {

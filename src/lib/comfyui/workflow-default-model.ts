@@ -24,6 +24,7 @@ export interface InvalidComfyDefaultModel {
 
 export interface ComfyDefaultModelValidation {
   validModelKeys: Set<string>
+  workflowVersionIdsByModelKey: Record<string, string>
   invalidEntries: InvalidComfyDefaultModel[]
 }
 
@@ -92,6 +93,7 @@ export async function validateComfyDefaultModels(
     : []
   const workflowById = new Map(workflows.map((workflow) => [workflow.id, workflow]))
   const validModelKeys = new Set<string>()
+  const workflowVersionIdsByModelKey: Record<string, string> = {}
   const invalidEntries: InvalidComfyDefaultModel[] = []
 
   for (const reference of references) {
@@ -103,12 +105,13 @@ export async function validateComfyDefaultModels(
       && workflow.currentVersion?.purpose === 'generation'
       && isExecutableOwnedWorkflow(workflow, userId)
 
-    if (isValid) {
+    if (isValid && workflow?.currentVersion) {
       validModelKeys.add(reference.modelKey)
+      workflowVersionIdsByModelKey[reference.modelKey] = workflow.currentVersion.id
     } else {
       invalidEntries.push({ field: reference.field, modelKey: reference.modelKey })
     }
   }
 
-  return { validModelKeys, invalidEntries }
+  return { validModelKeys, workflowVersionIdsByModelKey, invalidEntries }
 }

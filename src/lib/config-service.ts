@@ -25,6 +25,7 @@ import type {
   SixGridProcessingOrder,
   StoryboardGenerationMode,
 } from '@/lib/novel-promotion/six-grid/contracts'
+import { validateComfyDefaultModels } from '@/lib/comfyui/workflow-default-model'
 
 export type ParsedModelKey = { provider: string, modelId: string }
 
@@ -111,6 +112,7 @@ export interface ProjectModelConfig {
   editModel: string | null
   videoModel: string | null
   audioModel: string | null
+  comfyWorkflowVersionIdsByModelKey: Record<string, string>
   comfyImageWorkflowVersionId: string | null
   comfyVideoWorkflowVersionId: string | null
   videoRatio: string | null
@@ -201,10 +203,6 @@ export async function getProjectModelConfig(
 
   const taskImageModel = strictTaskOverride(taskOverrides.imageModel, 'imageModel')
   const taskVideoModel = strictTaskOverride(taskOverrides.videoModel, 'videoModel')
-  const [taskImageVersionId, taskVideoVersionId] = await Promise.all([
-    resolveTrustedComfyWorkflowVersion(userId, taskImageModel, 'image'),
-    resolveTrustedComfyWorkflowVersion(userId, taskVideoModel, 'video'),
-  ])
   const comfyImageModel = workflowModelKey(
     comfyBinding?.imageWorkflowId, comfyBinding?.imageWorkflowVersionId,
   )
@@ -212,7 +210,20 @@ export async function getProjectModelConfig(
     comfyBinding?.videoWorkflowId, comfyBinding?.videoWorkflowVersionId,
   )
 
-  return {
+  assertCompleteComfyBinding(
+    taskImageModel,
+    comfyBinding?.imageWorkflowId,
+    comfyBinding?.imageWorkflowVersionId,
+    'image',
+  )
+  assertCompleteComfyBinding(
+    taskVideoModel,
+    comfyBinding?.videoWorkflowId,
+    comfyBinding?.videoWorkflowVersionId,
+    'video',
+  )
+
+  const effectiveModels = {
     analysisModel: extractModelKey(projectData?.analysisModel) || extractModelKey(userPref?.analysisModel) || null,
     characterModel: taskImageModel || comfyImageModel || extractModelKey(projectData?.characterModel) || extractModelKey(userPref?.characterModel) || null,
     locationModel: taskImageModel || comfyImageModel || extractModelKey(projectData?.locationModel) || extractModelKey(userPref?.locationModel) || null,
@@ -220,8 +231,45 @@ export async function getProjectModelConfig(
     editModel: taskImageModel || comfyImageModel || extractModelKey(projectData?.editModel) || extractModelKey(userPref?.editModel) || null,
     videoModel: taskVideoModel || comfyVideoModel || extractModelKey(projectData?.videoModel) || extractModelKey(userPref?.videoModel) || null,
     audioModel: extractModelKey(projectData?.audioModel) || extractModelKey(userPref?.audioModel) || null,
-    comfyImageWorkflowVersionId: taskImageModel ? taskImageVersionId : comfyBinding?.imageWorkflowVersionId ?? null,
-    comfyVideoWorkflowVersionId: taskVideoModel ? taskVideoVersionId : comfyBinding?.videoWorkflowVersionId ?? null,
+  }
+  const comfyValidation = await validateComfyDefaultModels(userId, effectiveModels)
+  const invalidComfyDefault = comfyValidation.invalidEntries[0]
+  if (invalidComfyDefault) {
+    throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: ${invalidComfyDefault.modelKey}`)
+  }
+  assertCurrentBindingVersion(
+    taskImageModel,
+    comfyImageModel,
+    comfyBinding?.imageWorkflowVersionId,
+    comfyValidation.workflowVersionIdsByModelKey,
+  )
+  assertCurrentBindingVersion(
+    taskVideoModel,
+    comfyVideoModel,
+    comfyBinding?.videoWorkflowVersionId,
+    comfyValidation.workflowVersionIdsByModelKey,
+  )
+  const imageWorkflowVersionIds = [
+    effectiveModels.characterModel,
+    effectiveModels.locationModel,
+    effectiveModels.storyboardModel,
+    effectiveModels.editModel,
+  ].flatMap((modelKey) => {
+    if (!modelKey) return []
+    const workflowVersionId = comfyValidation.workflowVersionIdsByModelKey[modelKey]
+    return workflowVersionId ? [workflowVersionId] : []
+  })
+  const uniqueImageWorkflowVersionIds = [...new Set(imageWorkflowVersionIds)]
+
+  return {
+    ...effectiveModels,
+    comfyWorkflowVersionIdsByModelKey: comfyValidation.workflowVersionIdsByModelKey,
+    comfyImageWorkflowVersionId: uniqueImageWorkflowVersionIds.length === 1
+      ? uniqueImageWorkflowVersionIds[0]
+      : null,
+    comfyVideoWorkflowVersionId: effectiveModels.videoModel
+      ? comfyValidation.workflowVersionIdsByModelKey[effectiveModels.videoModel] ?? null
+      : null,
     videoRatio: projectData?.videoRatio || '16:9',
     artStyle: projectData?.artStyle || null,
     storyboardGenerationMode: projectData?.storyboardGenerationMode === 'six_grid'
@@ -249,21 +297,13 @@ export async function resolveTrustedComfyWorkflowVersion(
   if (!modelKey) return null
   const parsed = parseModelKeyStrict(modelKey)
   if (!parsed || parsed.provider !== 'comfyui') return null
-  const workflow = await prisma.comfyWorkflow.findFirst({
-    where: {
-      id: parsed.modelId,
-      userId,
-      mediaType,
-      status: 'published',
-      currentVersionId: { not: null },
-      currentVersion: { publishedAt: { not: null } },
-    },
-    select: { currentVersionId: true },
-  })
-  if (!workflow?.currentVersionId) {
+  const field = mediaType === 'image' ? 'storyboardModel' : 'videoModel'
+  const validation = await validateComfyDefaultModels(userId, { [field]: parsed.modelKey })
+  const workflowVersionId = validation.workflowVersionIdsByModelKey[parsed.modelKey]
+  if (!workflowVersionId || validation.invalidEntries.length > 0) {
     throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: ${modelKey}`)
   }
-  return workflow.currentVersionId
+  return workflowVersionId
 }
 
 function strictTaskOverride(value: string | null | undefined, field: keyof TaskModelOverrides): string | null {
@@ -279,6 +319,44 @@ function workflowModelKey(
 ): string | null {
   if (!workflowId || !workflowVersionId) return null
   return extractModelKey(composeModelKey('comfyui', workflowId))
+}
+
+function assertCompleteComfyBinding(
+  taskModel: string | null,
+  workflowId: string | null | undefined,
+  workflowVersionId: string | null | undefined,
+  mediaType: 'image' | 'video',
+) {
+  if (taskModel || (!workflowId && !workflowVersionId)) return
+  if (!workflowId || !workflowVersionId) {
+    throw new Error(`COMFY_WORKFLOW_BINDING_INVALID: ${mediaType}`)
+  }
+}
+
+function assertCurrentBindingVersion(
+  taskModel: string | null,
+  bindingModel: string | null,
+  bindingWorkflowVersionId: string | null | undefined,
+  workflowVersionIdsByModelKey: Readonly<Record<string, string>>,
+) {
+  if (taskModel || !bindingModel) return
+  if (workflowVersionIdsByModelKey[bindingModel] !== bindingWorkflowVersionId) {
+    throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: ${bindingModel}`)
+  }
+}
+
+export function resolveProjectComfyWorkflowVersion(
+  projectModelConfig: Pick<ProjectModelConfig, 'comfyWorkflowVersionIdsByModelKey'>,
+  modelKey: string | null | undefined,
+): string | null {
+  const parsed = parseModelKeyStrict(modelKey)
+  if (!parsed || parsed.provider !== 'comfyui') return null
+  const canonicalModelKey = composeModelKey(parsed.provider, parsed.modelId)
+  const workflowVersionId = projectModelConfig.comfyWorkflowVersionIdsByModelKey[canonicalModelKey]
+  if (!workflowVersionId) {
+    throw new Error(`COMFY_WORKFLOW_NOT_AVAILABLE: ${canonicalModelKey}`)
+  }
+  return workflowVersionId
 }
 
 /**
@@ -516,15 +594,17 @@ export async function buildImageBillingPayload(input: {
   if (!imageModel) return basePayload
 
   let capabilityOptions: Record<string, CapabilityValue> = {}
+  let comfyWorkflowVersionId: string | null = null
   const projectModelConfig = input.projectModelConfig
     ?? await getProjectModelConfig(projectId, userId)
   try {
+    comfyWorkflowVersionId = resolveProjectComfyWorkflowVersion(projectModelConfig, imageModel)
     const parsedImageModel = parseModelKeyStrict(imageModel)
     const comfyAspectRatioOptions = input.taskSelections?.aspectRatio !== undefined
       && parsedImageModel?.provider === 'comfyui'
       ? await loadOwnedPublishedComfyAspectRatioOptions({
         userId,
-        workflowVersionId: projectModelConfig.comfyImageWorkflowVersionId,
+        workflowVersionId: comfyWorkflowVersionId,
       })
       : undefined
     capabilityOptions = resolveImageTaskGenerationOptions({
@@ -541,9 +621,7 @@ export async function buildImageBillingPayload(input: {
   return {
     ...applyTrustedComfyVersionSnapshot(
       { ...basePayload },
-      parseModelKeyStrict(imageModel)?.provider === 'comfyui'
-        ? projectModelConfig.comfyImageWorkflowVersionId
-        : null,
+      comfyWorkflowVersionId,
     ),
     imageModel,
     comfyModelSnapshotVersion: 1,
