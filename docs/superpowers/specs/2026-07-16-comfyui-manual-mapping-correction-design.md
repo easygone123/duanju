@@ -30,7 +30,7 @@ Manual candidates are derived from the analyzed API graph, not from arbitrary us
 - `prompt` and `negativePrompt` accept literal string inputs.
 - Numeric canonical inputs accept finite literal number inputs.
 - Boolean canonical inputs accept literal boolean inputs when supported by the contract.
-- Media canonical inputs accept analyzer-recognized compatible media inputs; this change does not invent arbitrary upload paths.
+- Media canonical inputs accept analyzer-recognized compatible media inputs; list-valued image references map only to `referenceImages`, while single-image references may map to a compatible single-image role or `referenceImages`. This change does not invent arbitrary upload paths.
 - Graph-link arrays, objects, output references, and fields already bound by an effective mapping are excluded.
 - Candidate ordering is deterministic: node order, then input-path order.
 

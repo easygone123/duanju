@@ -49,7 +49,8 @@ export const deriveWorkflowName = (filename: string) => filename.trim().replace(
 
 export function guidedCompatibleRoles(proposal: WorkflowMappingProposal): CanonicalWorkflowInput[] {
   if (proposal.valueType === 'video_ref') return ['sourceVideo']
-  if (proposal.valueType === 'image_ref' || proposal.valueType === 'image_ref_list') return ['sourceImage', 'referenceImages', 'firstFrame', 'lastFrame']
+  if (proposal.valueType === 'image_ref_list') return ['referenceImages']
+  if (proposal.valueType === 'image_ref') return ['sourceImage', 'referenceImages', 'firstFrame', 'lastFrame']
   if (proposal.canonicalName === 'prompt' || proposal.canonicalName === 'negativePrompt') return ['prompt', 'negativePrompt']
   return [proposal.canonicalName]
 }
