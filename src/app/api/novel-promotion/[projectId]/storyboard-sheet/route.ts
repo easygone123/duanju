@@ -34,9 +34,11 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     workflow = await loadOwnedPublishedUpscaleWorkflow({ userId: auth.session.user.id, workflowId: body.workflowId, workflowVersionId: body.workflowVersionId })
   }
   const projectModelConfig = operation === 'generate'
-    && !body.imageModel
-    && !storyboard.sheetModelSnapshot
-    ? await getProjectModelConfig(projectId, auth.session.user.id)
+    ? await getProjectModelConfig(
+        projectId,
+        auth.session.user.id,
+        body.imageModel ? { imageModel: body.imageModel } : undefined,
+      )
     : null
   const model = operation === 'generate'
     ? body.imageModel || storyboard.sheetModelSnapshot || projectModelConfig?.storyboardModel
@@ -44,6 +46,13 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
   const prompt = body.prompt ?? storyboard.sheetPromptSnapshot
   if (!model || !prompt) throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_SHEET_SNAPSHOT_MISSING' })
   const parsedModel = parseModelKeyStrict(model)
+  if (operation === 'generate'
+    && !body.imageModel
+    && storyboard.sheetModelSnapshot
+    && parsedModel?.provider === 'comfyui'
+    && parsedModel.modelKey !== parseModelKeyStrict(projectModelConfig?.storyboardModel)?.modelKey) {
+    throw new ApiError('INVALID_PARAMS', { code: 'GENERATION_WORKFLOW_NOT_FOUND', field: 'imageModel' })
+  }
   const configuredWorkflowVersionId = operation === 'generate' && projectModelConfig
     ? resolveProjectComfyWorkflowVersion(projectModelConfig, model, 'image') ?? undefined
     : undefined
