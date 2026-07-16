@@ -41,6 +41,10 @@ import type {
   OpenAICompatMediaTemplateSource,
 } from '@/lib/openai-compat-media-template'
 import { validateOpenAICompatMediaTemplate } from '@/lib/user-api/model-template/validator'
+import {
+  validateComfyDefaultModels,
+  type InvalidComfyDefaultModel,
+} from '@/lib/comfyui/workflow-default-model'
 
 type ApiModeType = 'gemini-sdk' | 'openai-official'
 type GatewayRouteType = 'official' | 'openai-compat'
@@ -1324,13 +1328,17 @@ function normalizeWorkflowConcurrencyInput(rawWorkflowConcurrency: unknown): Wor
   return normalized
 }
 
-function validateDefaultModelPricing(defaultModels: DefaultModelsPayload) {
+function validateDefaultModelPricing(
+  defaultModels: DefaultModelsPayload,
+  validatedComfyModelKeys: ReadonlySet<string>,
+) {
   for (const field of DEFAULT_MODEL_FIELDS) {
     const modelKey = defaultModels[field]
     if (!modelKey) continue
 
     const parsed = parseModelKeyStrict(modelKey)
     if (!parsed) continue
+    if (parsed.provider === 'comfyui' && validatedComfyModelKeys.has(parsed.modelKey)) continue
     if (OPTIONAL_PRICING_PROVIDER_KEYS.has(getProviderKey(parsed.provider))) continue
     const apiType = DEFAULT_FIELD_TO_PRICING_API_TYPE[field]
 
@@ -1357,7 +1365,10 @@ function sanitizeModelsForBilling(models: StoredModel[]): StoredModel[] {
   return models.filter((model) => isModelPricedForBilling(model))
 }
 
-function sanitizeDefaultModelsForBilling(defaultModels: DefaultModelsPayload): DefaultModelsPayload {
+function sanitizeDefaultModelsForBilling(
+  defaultModels: DefaultModelsPayload,
+  validatedComfyModelKeys: ReadonlySet<string>,
+): DefaultModelsPayload {
   const sanitized: DefaultModelsPayload = {}
 
   for (const field of DEFAULT_MODEL_FIELDS) {
@@ -1374,6 +1385,10 @@ function sanitizeDefaultModelsForBilling(defaultModels: DefaultModelsPayload): D
       sanitized[field] = ''
       continue
     }
+    if (parsed.provider === 'comfyui') {
+      sanitized[field] = validatedComfyModelKeys.has(parsed.modelKey) ? parsed.modelKey : ''
+      continue
+    }
     if (OPTIONAL_PRICING_PROVIDER_KEYS.has(getProviderKey(parsed.provider))) {
       sanitized[field] = parsed.modelKey
       continue
@@ -1385,6 +1400,17 @@ function sanitizeDefaultModelsForBilling(defaultModels: DefaultModelsPayload): D
       : ''
   }
 
+  return sanitized
+}
+
+function clearInvalidComfyDefaults(
+  defaultModels: DefaultModelsPayload,
+  invalidEntries: InvalidComfyDefaultModel[],
+): DefaultModelsPayload {
+  const sanitized = { ...defaultModels }
+  for (const invalid of invalidEntries) {
+    sanitized[invalid.field] = ''
+  }
   return sanitized
 }
 
@@ -1738,9 +1764,17 @@ export const GET = apiHandler(async () => {
     lipSyncModel: pref?.lipSyncModel || DEFAULT_LIPSYNC_MODEL_KEY,
     voiceDesignModel: pref?.voiceDesignModel || '',
   }
+  const comfyDefaultValidation = await validateComfyDefaultModels(userId, rawDefaults)
+  const defaultsWithValidComfyReferences = clearInvalidComfyDefaults(
+    rawDefaults,
+    comfyDefaultValidation.invalidEntries,
+  )
   const defaultModels = billingMode === 'OFF'
-    ? rawDefaults
-    : sanitizeDefaultModelsForBilling(rawDefaults)
+    ? defaultsWithValidComfyReferences
+    : sanitizeDefaultModelsForBilling(
+        defaultsWithValidComfyReferences,
+        comfyDefaultValidation.validModelKeys,
+      )
   const capabilityDefaults = sanitizeCapabilitySelectionsAgainstModels(
     parseStoredCapabilitySelections(pref?.capabilityDefaults, 'capabilityDefaults'),
     [...models, ...disabledPresets],
@@ -1844,8 +1878,17 @@ export const PUT = apiHandler(async (request: NextRequest) => {
   }
 
   if (normalizedDefaults !== undefined) {
+    const comfyDefaultValidation = await validateComfyDefaultModels(userId, normalizedDefaults)
+    const invalidComfyDefault = comfyDefaultValidation.invalidEntries[0]
+    if (invalidComfyDefault) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'COMFY_DEFAULT_MODEL_NOT_EXECUTABLE',
+        field: `defaultModels.${invalidComfyDefault.field}`,
+        modelKey: invalidComfyDefault.modelKey,
+      })
+    }
     if (billingMode !== 'OFF') {
-      validateDefaultModelPricing(normalizedDefaults)
+      validateDefaultModelPricing(normalizedDefaults, comfyDefaultValidation.validModelKeys)
     }
     if (normalizedDefaults.analysisModel !== undefined) {
       updateData.analysisModel = normalizedDefaults.analysisModel || null
