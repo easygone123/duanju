@@ -309,6 +309,61 @@ describe('ComfyUI request state machine', () => {
     }))
   })
 
+  it('converts an undeclared guided aspect ratio into dynamic width and height without reference images', async () => {
+    const dependencies = requestDependenciesWithDefinitions([
+      { name: 'prompt', type: 'string', required: true },
+      { name: 'width', type: 'number', required: false, defaultValue: 832 },
+      { name: 'height', type: 'number', required: false, defaultValue: 480 },
+      {
+        name: 'referenceImages', type: 'image_ref_list', required: false,
+        maxItems: 8, defaultValue: [],
+      },
+    ])
+
+    await createComfyGenerationRequest({
+      invocationKey: 'invoke-guided-ratio', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'image', workflowId: 'workflow-1',
+      variables: { prompt: 'six grid', aspect_ratio: '8:3' },
+    }, dependencies)
+
+    expect(dependencies.create).toHaveBeenCalledWith(expect.objectContaining({
+      variableSnapshot: {
+        prompt: 'six grid', width: 1024, height: 384, referenceImages: [],
+      },
+    }))
+  })
+
+  it('converts aspect ratio for a dynamic-dimension workflow without a reference-image contract', async () => {
+    const dependencies = requestDependenciesWithDefinitions([
+      { name: 'prompt', type: 'string', required: true },
+      { name: 'width', type: 'number', required: false, defaultValue: 832 },
+      { name: 'height', type: 'number', required: false, defaultValue: 480 },
+    ])
+    await createComfyGenerationRequest({
+      invocationKey: 'invoke-dynamic-ratio', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'image', workflowId: 'workflow-1',
+      variables: { prompt: 'wide sheet', aspect_ratio: '8:3' },
+    }, dependencies)
+    expect(dependencies.create).toHaveBeenCalledWith(expect.objectContaining({
+      variableSnapshot: { prompt: 'wide sheet', width: 1024, height: 384 },
+    }))
+  })
+
+  it('maps the system aspect_ratio key onto an explicitly declared aspectRatio variable', async () => {
+    const dependencies = requestDependenciesWithDefinitions([
+      { name: 'prompt', type: 'string', required: true },
+      { name: 'aspectRatio', type: 'string', required: true, options: ['16:9', '9:16'] },
+    ])
+    await createComfyGenerationRequest({
+      invocationKey: 'invoke-explicit-ratio', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'image', workflowId: 'workflow-1',
+      variables: { prompt: 'portrait', aspect_ratio: '9:16' },
+    }, dependencies)
+    expect(dependencies.create).toHaveBeenCalledWith(expect.objectContaining({
+      variableSnapshot: { prompt: 'portrait', aspectRatio: '9:16' },
+    }))
+  })
+
   it('keeps input_images for legacy contracts and rejects an ambiguous dual declaration', async () => {
     const legacy = requestDependenciesWithDefinitions([{
       name: 'input_images', type: 'image_ref_list', required: false, maxItems: 8,

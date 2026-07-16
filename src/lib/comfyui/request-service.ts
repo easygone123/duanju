@@ -19,6 +19,7 @@ import {
   resolveOwnedComfyMedia,
   type OwnedComfyMediaInput,
 } from './media-ownership'
+import { resolveComfyDimensionsForAspectRatio } from './aspect-ratio'
 
 export const ALLOWED_COMFY_REQUEST_TRANSITIONS: Record<
   ComfyRequestStatus,
@@ -176,20 +177,55 @@ function normalizeReferenceImageVariables(
   rawDefinitions: unknown,
 ): Record<string, ComfyVariableValue> {
   if (!Array.isArray(rawDefinitions)) throw new ApiError('INVALID_PARAMS')
-  const names = new Set(rawDefinitions.flatMap((definition) => (
-    isRecord(definition) && typeof definition.name === 'string' ? [definition.name] : []
-  )))
+  const definitions = rawDefinitions.filter((definition): definition is Record<string, unknown> => (
+    isRecord(definition) && typeof definition.name === 'string'
+  ))
+  const names = new Set(definitions.map((definition) => definition.name as string))
   const declaresLegacy = names.has('input_images')
   const declaresGuided = names.has('referenceImages')
   if (declaresLegacy && declaresGuided) throw new ApiError('INVALID_PARAMS')
-  if (!declaresGuided || !Object.hasOwn(variables, 'input_images')) return variables
-  if (Object.hasOwn(variables, 'referenceImages')) throw new ApiError('INVALID_PARAMS')
-  const normalized: Record<string, ComfyVariableValue> = {
-    ...variables,
-    referenceImages: variables.input_images,
+  const normalized: Record<string, ComfyVariableValue> = { ...variables }
+  if (declaresGuided && Object.hasOwn(normalized, 'input_images')) {
+    if (Object.hasOwn(normalized, 'referenceImages')) throw new ApiError('INVALID_PARAMS')
+    normalized.referenceImages = normalized.input_images
+    delete normalized.input_images
   }
-  delete normalized.input_images
-  if (!names.has('aspect_ratio')) delete normalized.aspect_ratio
+  const aspectDefinition = definitions.find((definition) => (
+    String(definition.name).replace(/[-_]/g, '').toLowerCase() === 'aspectratio'
+  ))
+  if (Object.hasOwn(normalized, 'aspect_ratio') && aspectDefinition) {
+    const aspectVariableName = aspectDefinition.name as string
+    if (aspectVariableName !== 'aspect_ratio') {
+      if (Object.hasOwn(normalized, aspectVariableName)) throw new ApiError('INVALID_PARAMS')
+      normalized[aspectVariableName] = normalized.aspect_ratio
+      delete normalized.aspect_ratio
+    }
+  } else if (Object.hasOwn(normalized, 'aspect_ratio')) {
+    const widthDefinition = definitions.find((definition) => (
+      String(definition.name).replace(/[-_]/g, '').toLowerCase() === 'width'
+      && definition.type === 'number'
+    ))
+    const heightDefinition = definitions.find((definition) => (
+      String(definition.name).replace(/[-_]/g, '').toLowerCase() === 'height'
+      && definition.type === 'number'
+    ))
+    const dimensions = widthDefinition && heightDefinition
+      ? resolveComfyDimensionsForAspectRatio({
+          aspectRatio: normalized.aspect_ratio,
+          defaultWidth: widthDefinition.defaultValue,
+          defaultHeight: heightDefinition.defaultValue,
+        })
+      : null
+    delete normalized.aspect_ratio
+    if (dimensions && widthDefinition && heightDefinition) {
+      const widthVariableName = widthDefinition.name as string
+      const heightVariableName = heightDefinition.name as string
+      if (!Object.hasOwn(normalized, widthVariableName) && !Object.hasOwn(normalized, heightVariableName)) {
+        normalized[widthVariableName] = dimensions.width
+        normalized[heightVariableName] = dimensions.height
+      }
+    }
+  }
   return normalized
 }
 

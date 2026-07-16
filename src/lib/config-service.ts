@@ -26,6 +26,9 @@ import type {
   StoryboardGenerationMode,
 } from '@/lib/novel-promotion/six-grid/contracts'
 import { validateComfyDefaultModels } from '@/lib/comfyui/workflow-default-model'
+import { readComfyAspectRatioOptions } from '@/lib/comfyui/aspect-ratio'
+
+export { readComfyAspectRatioOptions } from '@/lib/comfyui/aspect-ratio'
 
 export type ParsedModelKey = { provider: string, modelId: string }
 
@@ -537,18 +540,6 @@ export function resolveImageTaskGenerationOptions(input: {
     ...capabilityOptions,
     ...(aspectRatio !== undefined ? { aspectRatio } : {}),
   }
-}
-
-function readComfyAspectRatioOptions(variableDefinitions: unknown): string[] {
-  if (!Array.isArray(variableDefinitions)) return []
-  for (const raw of variableDefinitions) {
-    if (!isRecord(raw) || typeof raw.name !== 'string') continue
-    const canonicalName = raw.name.replace(/[-_]/g, '').toLowerCase()
-    if (canonicalName !== 'aspectratio') continue
-    if (!Array.isArray(raw.options)) return []
-    return raw.options.filter((value): value is string => typeof value === 'string')
-  }
-  return []
 }
 
 async function loadOwnedPublishedComfyAspectRatioOptions(input: {

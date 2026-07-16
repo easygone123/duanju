@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveImageTaskGenerationOptions } from '@/lib/config-service'
+import { readComfyAspectRatioOptions, resolveImageTaskGenerationOptions } from '@/lib/config-service'
 
 describe('image task capability overrides', () => {
   const projectModelConfig = {
@@ -50,5 +50,19 @@ describe('image task capability overrides', () => {
       taskSelections: { aspectRatio: '999:999' },
       comfyAspectRatioOptions: ['1:1', '16:9'],
     })).toThrow(/CAPABILITY_VALUE_NOT_ALLOWED/)
+  })
+
+  it('allows six-grid ratios when the Comfy workflow exposes dynamic width and height', () => {
+    const options = readComfyAspectRatioOptions([
+      { name: 'width', type: 'number', required: false, defaultValue: 832 },
+      { name: 'height', type: 'number', required: false, defaultValue: 480 },
+    ])
+    expect(options).toEqual(expect.arrayContaining(['8:3', '27:32']))
+    expect(resolveImageTaskGenerationOptions({
+      imageModel: 'comfyui::workflow-1',
+      projectModelConfig: { capabilityDefaults: {}, capabilityOverrides: {} },
+      taskSelections: { aspectRatio: '8:3' },
+      comfyAspectRatioOptions: options,
+    })).toEqual({ aspectRatio: '8:3' })
   })
 })

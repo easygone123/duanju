@@ -11,6 +11,10 @@ const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
 }))
 const capabilityMock = vi.hoisted(() => vi.fn(async () => ({ aspectRatio: '8:3' })))
+const projectModelConfigMock = vi.hoisted(() => vi.fn(async () => ({
+  storyboardModel: 'comfyui::workflow-1', capabilityDefaults: {}, capabilityOverrides: {},
+})))
+const projectWorkflowVersionMock = vi.hoisted(() => vi.fn(() => null))
 
 vi.mock('bullmq', () => ({
   Queue: class { add() { return Promise.resolve({ id: 'job' }) } getJob() { return Promise.resolve(null) } },
@@ -22,7 +26,11 @@ vi.mock('@/lib/api-auth', () => ({
   requireProjectAuthLight: authMock,
   isErrorResponse: (value: unknown) => value instanceof Response,
 }))
-vi.mock('@/lib/config-service', () => ({ resolveProjectImageTaskGenerationOptions: capabilityMock }))
+vi.mock('@/lib/config-service', () => ({
+  getProjectModelConfig: projectModelConfigMock,
+  resolveProjectComfyWorkflowVersion: projectWorkflowVersionMock,
+  resolveProjectImageTaskGenerationOptions: capabilityMock,
+}))
 import { TASK_TYPE } from '@/lib/task/types'
 import { getQueueTypeByTaskType } from '@/lib/task/queues'
 import { resolveTaskIntent } from '@/lib/task/intent'
@@ -43,6 +51,10 @@ describe('six-grid route/task registration contract', () => {
     prismaMock.novelPromotionPanel.updateMany.mockResolvedValue({ count: 1 })
     prismaMock.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => callback(prismaMock))
     capabilityMock.mockResolvedValue({ aspectRatio: '8:3' })
+    projectModelConfigMock.mockResolvedValue({
+      storyboardModel: 'comfyui::workflow-1', capabilityDefaults: {}, capabilityOverrides: {},
+    })
+    projectWorkflowVersionMock.mockReturnValue(null)
   })
   it('registers all four operations as image tasks with stable intents and labels', () => {
     const tasks = [
@@ -233,7 +245,7 @@ function workflowFixture(overrides: Record<string, unknown> = {}) {
   return {
     id: 'workflow-1', userId: 'user-1', mediaType: 'image', status: 'published', currentVersionId: 'version-1',
     currentVersion: {
-      id: 'version-1', workflowId: 'workflow-1', purpose: 'upscale', publishedAt: new Date(), lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' },
+      id: 'version-1', workflowId: 'workflow-1', purpose: 'upscale', contentHash: 'hash-1', publishedAt: new Date(), lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' },
       apiFormatJson: {
         source: { class_type: 'LoadImage', inputs: { image: 'input.png' } },
         save: { class_type: 'SaveImage', inputs: { images: ['source', 0] } },
