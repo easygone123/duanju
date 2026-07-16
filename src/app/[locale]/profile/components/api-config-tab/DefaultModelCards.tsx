@@ -7,9 +7,9 @@ import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapa
 import type { CapabilityValue, ModelCapabilities } from '@/lib/model-config-contract'
 
 // ---------- types ----------
-type ModelType = 'llm' | 'image' | 'video' | 'audio' | 'lipsync' | 'voicedesign'
+export type ModelType = 'llm' | 'image' | 'video' | 'audio' | 'lipsync' | 'voicedesign'
 
-interface ModelOption {
+export interface ModelOption {
     modelKey: string
     name: string
     provider: string

@@ -1,11 +1,15 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useLocale, useTranslations } from 'next-intl'
 import { GlassModalShell } from '@/components/ui/primitives'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import type { CapabilityValue } from '@/lib/model-config-contract'
 import { apiFetch } from '@/lib/api-fetch'
+import {
+  useUserModels,
+  type UserModelOption,
+} from '@/lib/query/hooks/useUserModels'
 import {
   encodeModelKey,
   getProviderDisplayName,
@@ -14,7 +18,11 @@ import {
 } from '../api-config'
 import { ApiConfigToolbar } from './ApiConfigToolbar'
 import { ApiConfigProviderList } from './ApiConfigProviderList'
-import { DefaultModelCards } from './DefaultModelCards'
+import {
+  DefaultModelCards,
+  type ModelOption,
+  type ModelType,
+} from './DefaultModelCards'
 import { useApiConfigFilters } from './hooks/useApiConfigFilters'
 import { AppIcon } from '@/components/ui/icons'
 
@@ -91,6 +99,7 @@ function toCapabilityFieldLabel(field: string): string {
 
 export function ApiConfigTabContainer() {
   const locale = useLocale()
+  const userModels = useUserModels()
   const {
     providers,
     models,
@@ -138,6 +147,43 @@ export function ApiConfigTabContainer() {
     providers,
     models,
   })
+
+  const comfyGenerationModels = useMemo(() => {
+    const toModelOptions = (options: UserModelOption[] | undefined): ModelOption[] =>
+      (options ?? [])
+        .filter((option) => option.provider === 'comfyui' && option.workflowPurpose === 'generation')
+        .map((option) => ({
+          modelKey: option.value,
+          name: option.label,
+          provider: 'comfyui',
+          providerName: option.providerName || 'ComfyUI',
+          capabilities: option.capabilities,
+        }))
+
+    return {
+      image: toModelOptions(userModels.data?.image),
+      video: toModelOptions(userModels.data?.video),
+    }
+  }, [userModels.data])
+
+  const getEnabledDefaultModelsByType = useCallback((type: ModelType): ModelOption[] => {
+    const storedOptions = getEnabledModelsByType(type)
+    const dynamicOptions = type === 'image' || type === 'video'
+      ? comfyGenerationModels[type]
+      : []
+
+    if (dynamicOptions.length === 0) return storedOptions
+
+    const seenModelKeys = new Set(storedOptions.map((option) => option.modelKey))
+    return [
+      ...storedOptions,
+      ...dynamicOptions.filter((option) => {
+        if (seenModelKeys.has(option.modelKey)) return false
+        seenModelKeys.add(option.modelKey)
+        return true
+      }),
+    ]
+  }, [comfyGenerationModels, getEnabledModelsByType])
 
   const [showAddGeminiProvider, setShowAddGeminiProvider] = useState(false)
   const [newGeminiProvider, setNewGeminiProvider] = useState<{
@@ -260,7 +306,7 @@ export function ApiConfigTabContainer() {
           <DefaultModelCards
             t={t}
             defaultModels={defaultModels}
-            getEnabledModelsByType={getEnabledModelsByType}
+            getEnabledModelsByType={getEnabledDefaultModelsByType}
             parseModelKey={parseModelKey}
             encodeModelKey={encodeModelKey}
             getProviderDisplayName={getProviderDisplayName}
