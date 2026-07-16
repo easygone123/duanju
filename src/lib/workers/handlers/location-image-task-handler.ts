@@ -15,6 +15,7 @@ import {
 } from './image-task-handler-shared'
 import { buildLocationImagePromptCore } from '@/lib/location-image-prompt'
 import { buildPropImagePromptCore } from '@/lib/prop-image-prompt'
+import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
 
 function resolvePayloadArtStyle(payload: AnyObj): ArtStyleValue | undefined {
   if (!Object.prototype.hasOwnProperty.call(payload, 'artStyle')) return undefined
@@ -177,9 +178,10 @@ export async function handleLocationImageTask(job: Job<TaskJobData>) {
     })
 
     await assertTaskActive(job, 'persist_location_image')
+    const imageMedia = await ensureMediaObjectFromStorageKey(imageKey)
     await db.locationImage.update({
       where: { id: item.id },
-      data: { imageUrl: imageKey },
+      data: { imageUrl: imageKey, imageMediaId: imageMedia.id },
     })
   }
 

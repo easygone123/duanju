@@ -38,11 +38,13 @@ export async function resolveOwnedComfyMedia(
 export interface ResolveOwnedComfyMediaRefDependencies {
   resolveStorageKey(value: unknown): Promise<string | null>
   findFirst(input: Record<string, unknown>): Promise<unknown>
+  repairLegacyOwnedAsset?(input: OwnedComfyMediaInput): Promise<unknown>
 }
 
 const defaultRefDependencies: ResolveOwnedComfyMediaRefDependencies = {
   resolveStorageKey: resolveComfyStorageKeyFromMediaValue,
   findFirst: defaultStore.findFirst,
+  repairLegacyOwnedAsset: repairLegacyOwnedProjectAsset,
 }
 
 export async function resolveComfyStorageKeyFromMediaValue(value: unknown): Promise<string | null> {
@@ -68,15 +70,66 @@ export async function resolveOwnedComfyMediaRefFromValue(
   const dependencies = { ...defaultRefDependencies, ...overrides }
   const storageKey = await dependencies.resolveStorageKey(input.value)
   if (!storageKey || !isOpaqueStorageKey(storageKey)) return null
-  const record = await dependencies.findFirst({
+  let record = await dependencies.findFirst({
     where: ownedMediaWhere({ ...input, storageKey }),
     select: { storageKey: true, mimeType: true },
   })
+  const repairLegacyOwnedAsset = overrides.repairLegacyOwnedAsset
+    ?? (overrides.findFirst ? undefined : defaultRefDependencies.repairLegacyOwnedAsset)
+  if (!isOwnedMediaRecord(record, storageKey, input.mediaType) && repairLegacyOwnedAsset) {
+    record = await repairLegacyOwnedAsset({
+      userId: input.userId,
+      projectId: input.projectId,
+      storageKey,
+      mediaType: input.mediaType,
+    })
+  }
   if (!isOwnedMediaRecord(record, storageKey, input.mediaType)) return null
   return {
     storageKey: record.storageKey,
     ...(record.mimeType ? { mimeType: record.mimeType } : {}),
   }
+}
+
+async function repairLegacyOwnedProjectAsset(input: OwnedComfyMediaInput) {
+  if (input.mediaType !== 'image') return null
+  const media = await prisma.mediaObject.findFirst({
+    where: {
+      storageKey: input.storageKey,
+      mimeType: { startsWith: 'image/' },
+    },
+    select: { id: true, storageKey: true, mimeType: true },
+  })
+  if (!media || !isOwnedMediaRecord(media, input.storageKey, input.mediaType)) return null
+
+  const [characterResult, locationResult] = await prisma.$transaction([
+    prisma.characterAppearance.updateMany({
+      where: {
+        imageUrl: input.storageKey,
+        character: {
+          novelPromotionProject: {
+            projectId: input.projectId,
+            project: { userId: input.userId },
+          },
+        },
+      },
+      data: { imageMediaId: media.id },
+    }),
+    prisma.locationImage.updateMany({
+      where: {
+        imageUrl: input.storageKey,
+        location: {
+          novelPromotionProject: {
+            projectId: input.projectId,
+            project: { userId: input.userId },
+          },
+        },
+      },
+      data: { imageMediaId: media.id },
+    }),
+  ])
+  const repaired = characterResult.count + locationResult.count
+  return repaired > 0 ? media : null
 }
 
 function parseInternalSignedStorageRoute(value: string): string | null {

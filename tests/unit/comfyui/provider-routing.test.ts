@@ -195,6 +195,32 @@ describe('ComfyUI native provider routing', () => {
     })).resolves.toBeNull()
   })
 
+  it('repairs an exact same-project legacy asset link before returning the ComfyUI ref', async () => {
+    const repairLegacyOwnedAsset = vi.fn(async () => ({
+      storageKey: 'images/legacy-owned.png', mimeType: 'image/png',
+    }))
+    await expect(resolveOwnedComfyMediaRefFromValue({
+      userId: 'user-1', projectId: 'project-1', mediaType: 'image',
+      value: '/api/storage/sign?key=images%2Flegacy-owned.png&expires=3600',
+    }, {
+      findFirst: vi.fn(async () => null),
+      repairLegacyOwnedAsset,
+    })).resolves.toEqual({ storageKey: 'images/legacy-owned.png', mimeType: 'image/png' })
+    expect(repairLegacyOwnedAsset).toHaveBeenCalledWith({
+      userId: 'user-1', projectId: 'project-1', storageKey: 'images/legacy-owned.png', mediaType: 'image',
+    })
+  })
+
+  it('keeps failing closed when no same-project legacy asset link can be repaired', async () => {
+    await expect(resolveOwnedComfyMediaRefFromValue({
+      userId: 'user-1', projectId: 'project-1', mediaType: 'image',
+      value: '/api/storage/sign?key=images%2Fcross-project.png&expires=3600',
+    }, {
+      findFirst: vi.fn(async () => null),
+      repairLegacyOwnedAsset: vi.fn(async () => null),
+    })).resolves.toBeNull()
+  })
+
   it.each([
     '/api/storage/sign',
     '/api/storage/sign?key=one.png&key=two.png',

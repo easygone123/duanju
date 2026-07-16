@@ -34,8 +34,13 @@ const sharedMock = vi.hoisted(() => ({
   }) => Promise<string>>(async () => 'cos/character-generated-0.png'),
 }))
 
+const ensureMediaObjectMock = vi.hoisted(() => vi.fn(async () => ({
+  id: 'media-character-generated',
+})))
+
 vi.mock('@/lib/workers/utils', () => utilsMock)
 vi.mock('@/lib/media/outbound-image', () => outboundMock)
+vi.mock('@/lib/media/service', () => ({ ensureMediaObjectFromStorageKey: ensureMediaObjectMock }))
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/workers/shared', () => ({ reportTaskProgress: vi.fn(async () => undefined) }))
 vi.mock('@/lib/workers/handlers/image-task-handler-shared', async () => {
@@ -145,6 +150,7 @@ describe('worker character-image-task-handler behavior', () => {
       data: {
         imageUrls: JSON.stringify(['cos/character-generated-0.png']),
         imageUrl: 'cos/character-generated-0.png',
+        imageMediaId: 'media-character-generated',
       },
     })
   })
@@ -193,6 +199,7 @@ describe('worker character-image-task-handler behavior', () => {
           'cos/character-generated-4.png',
         ]),
         imageUrl: 'cos/character-generated-0.png',
+        imageMediaId: 'media-character-generated',
       },
     })
   })

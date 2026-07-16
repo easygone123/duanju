@@ -11,7 +11,7 @@ const prismaMock = vi.hoisted(() => ({
     upsert: vi.fn(),
     update: vi.fn(),
   },
-  novelPromotionLocation: { findUnique: vi.fn(), update: vi.fn() },
+  novelPromotionLocation: { findFirst: vi.fn(), update: vi.fn() },
   locationImage: { update: vi.fn(), create: vi.fn() },
 }))
 
@@ -33,6 +33,10 @@ const sharpMock = vi.hoisted(() => vi.fn(() => ({
   toBuffer: vi.fn(async () => Buffer.from('processed')),
 })))
 
+const ensureMediaObjectMock = vi.hoisted(() => vi.fn(async () => ({
+  id: 'media-manual-character',
+})))
+
 vi.mock('@/lib/api-auth', () => ({
   requireProjectAuthLight: vi.fn(async () => ({
     session: { user: { id: 'user-1' } },
@@ -43,6 +47,7 @@ vi.mock('@/lib/api-auth', () => ({
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/storage', () => storageMock)
 vi.mock('@/lib/fonts', () => fontMock)
+vi.mock('@/lib/media/service', () => ({ ensureMediaObjectFromStorageKey: ensureMediaObjectMock }))
 vi.mock('sharp', () => ({ default: sharpMock }))
 
 describe('api specific - pending character manual image upload', () => {
@@ -84,7 +89,10 @@ describe('api specific - pending character manual image upload', () => {
     }))
     expect(prismaMock.characterAppearance.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'appearance-1' },
-      data: expect.objectContaining({ imageUrl: 'manual-character.jpg' }),
+      data: expect.objectContaining({
+        imageUrl: 'manual-character.jpg',
+        imageMediaId: 'media-manual-character',
+      }),
     }))
     expect(prismaMock.novelPromotionCharacter.update).toHaveBeenCalledWith({
       where: { id: 'character-1' },
@@ -95,5 +103,33 @@ describe('api specific - pending character manual image upload', () => {
       appearanceId: 'appearance-1',
       imageKey: 'manual-character.jpg',
     })
+  })
+
+  it('rejects a location outside the authenticated project before uploading bytes', async () => {
+    prismaMock.novelPromotionLocation.findFirst.mockResolvedValue(null)
+    const formData = new FormData()
+    formData.append('file', new File([Buffer.from('image')], 'location.png', { type: 'image/png' }))
+    formData.append('type', 'location')
+    formData.append('id', 'location-from-another-project')
+    formData.append('labelText', '错误项目场景')
+    const request = new NextRequest(
+      'http://localhost/api/novel-promotion/project-1/upload-asset-image',
+      { method: 'POST', body: formData },
+    )
+    const mod = await import('@/app/api/novel-promotion/[projectId]/upload-asset-image/route')
+
+    const response = await mod.POST(request, {
+      params: Promise.resolve({ projectId: 'project-1' }),
+    })
+
+    expect(response.status).toBe(404)
+    expect(prismaMock.novelPromotionLocation.findFirst).toHaveBeenCalledWith({
+      where: { id: 'location-from-another-project', novelPromotionProject: { projectId: 'project-1' } },
+      include: { images: { orderBy: { imageIndex: 'asc' } } },
+    })
+    expect(storageMock.uploadObject).not.toHaveBeenCalled()
+    expect(ensureMediaObjectMock).not.toHaveBeenCalled()
+    expect(prismaMock.locationImage.update).not.toHaveBeenCalled()
+    expect(prismaMock.locationImage.create).not.toHaveBeenCalled()
   })
 })

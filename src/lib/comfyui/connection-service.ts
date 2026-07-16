@@ -12,7 +12,13 @@ import {
   readComfyNetworkPolicy,
   type ComfyNetworkPolicyConfig,
 } from './network-policy'
-import type { ComfyAuthType, ComfyConnectionAuth, ComfyDeviceSummary, ComfyHealthSummary } from './types'
+import {
+  COMFY_ACTIVE_REQUEST_STATUSES,
+  type ComfyAuthType,
+  type ComfyConnectionAuth,
+  type ComfyDeviceSummary,
+  type ComfyHealthSummary,
+} from './types'
 import { acquireComfyLease, releaseComfyLease, startComfyLeaseGuard } from './test-lease'
 
 const TERMINAL_REQUEST_STATUSES = ['completed', 'failed', 'canceled'] as const
@@ -322,7 +328,7 @@ async function collectProbe(
     const [systemStats, queue, ownedNonterminalCount] = await Promise.all([
       client.getSystemStats(),
       client.getQueue(),
-      countOwnedNonterminal(record.id, userId),
+      countOwnedActiveLease(record.id, userId, checkedAt),
     ])
     summary = deriveComfyHealth({ checkedAt, systemStats, queue, ownedNonterminalCount })
   } catch (error) {
@@ -367,12 +373,27 @@ async function countOwnedNonterminal(connectionId: string, userId: string) {
   })
 }
 
+async function countOwnedActiveLease(connectionId: string, userId: string, now: Date) {
+  return prisma.comfyGenerationRequest.count({
+    where: {
+      connectionId,
+      userId,
+      status: { in: [...COMFY_ACTIVE_REQUEST_STATUSES] },
+      leaseId: { not: null },
+      leaseExpiresAt: { gt: now },
+    },
+  })
+}
+
 async function findOwnedActiveRequest(connectionId: string, userId: string) {
+  const now = new Date()
   const request = await prisma.comfyGenerationRequest.findFirst({
     where: {
       connectionId,
       userId,
-      status: { notIn: [...TERMINAL_REQUEST_STATUSES] },
+      status: { in: [...COMFY_ACTIVE_REQUEST_STATUSES] },
+      leaseId: { not: null },
+      leaseExpiresAt: { gt: now },
     },
     orderBy: { createdAt: 'asc' },
     select: { id: true, taskId: true, status: true },

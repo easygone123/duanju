@@ -11,6 +11,7 @@ import {
   toSignedUrlIfCos,
 } from '../utils'
 import { normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-image'
+import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
 import {
   AnyObj,
   generateProjectLabeledImageToStorage,
@@ -180,11 +181,13 @@ export async function handleCharacterImageTask(job: Job<TaskJobData>) {
     : fallbackMain
 
   await assertTaskActive(job, 'persist_character_image')
+  const imageMedia = mainImage ? await ensureMediaObjectFromStorageKey(mainImage) : null
   await db.characterAppearance.update({
     where: { id: appearance.id },
     data: {
       imageUrls: encodeImageUrls(nextImageUrls),
       imageUrl: mainImage || null,
+      imageMediaId: imageMedia?.id || null,
     },
   })
 

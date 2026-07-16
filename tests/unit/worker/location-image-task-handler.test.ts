@@ -23,8 +23,13 @@ const sharedMock = vi.hoisted(() => ({
   generateProjectLabeledImageToStorage: vi.fn(async () => 'cos/location-generated-1.png'),
 }))
 
+const ensureMediaObjectMock = vi.hoisted(() => vi.fn(async () => ({
+  id: 'media-location-generated',
+})))
+
 vi.mock('@/lib/workers/utils', () => utilsMock)
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
+vi.mock('@/lib/media/service', () => ({ ensureMediaObjectFromStorageKey: ensureMediaObjectMock }))
 vi.mock('@/lib/workers/shared', () => ({ reportTaskProgress: vi.fn(async () => undefined) }))
 vi.mock('@/lib/workers/handlers/image-task-handler-shared', async () => {
   const actual = await vi.importActual<typeof import('@/lib/workers/handlers/image-task-handler-shared')>(
@@ -131,7 +136,10 @@ describe('worker location-image-task-handler behavior', () => {
 
     expect(prismaMock.locationImage.update).toHaveBeenCalledWith({
       where: { id: 'location-image-1' },
-      data: { imageUrl: 'cos/location-generated-1.png' },
+      data: {
+        imageUrl: 'cos/location-generated-1.png',
+        imageMediaId: 'media-location-generated',
+      },
     })
   })
 
@@ -173,7 +181,10 @@ describe('worker location-image-task-handler behavior', () => {
     expect(prismaMock.locationImage.update).toHaveBeenCalledTimes(1)
     expect(prismaMock.locationImage.update).toHaveBeenCalledWith({
       where: { id: 'location-image-1' },
-      data: { imageUrl: 'cos/location-generated-1.png' },
+      data: {
+        imageUrl: 'cos/location-generated-1.png',
+        imageMediaId: 'media-location-generated',
+      },
     })
   })
 

@@ -7,6 +7,7 @@ import { decodeImageUrlsFromDb, encodeImageUrls } from '@/lib/contracts/image-ur
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { PRIMARY_APPEARANCE_INDEX } from '@/lib/constants'
+import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
 
 interface CharacterAppearanceRecord {
   id: string
@@ -39,7 +40,7 @@ interface UploadAssetImageDb {
     update(args: Record<string, unknown>): Promise<unknown>
   }
   novelPromotionLocation: {
-    findUnique(args: Record<string, unknown>): Promise<LocationRecord | null>
+    findFirst(args: Record<string, unknown>): Promise<LocationRecord | null>
     update(args: Record<string, unknown>): Promise<unknown>
   }
   locationImage: {
@@ -75,12 +76,13 @@ export const POST = apiHandler(async (
   const imageIndex = formData.get('imageIndex') as string | null
   const labelText = formData.get('labelText') as string // 文字标识符
 
-  if (!file || !type || !id || !labelText) {
+  if (!file || !id || !labelText || (type !== 'character' && type !== 'location')) {
     throw new ApiError('INVALID_PARAMS')
   }
 
   let character: Awaited<ReturnType<UploadAssetImageDb['novelPromotionCharacter']['findFirst']>> = null
   let targetAppearance: CharacterAppearanceRecord | null = null
+  let location: LocationRecord | null = null
   const confirmsPendingProfile = type === 'character' && !appearanceId
   if (type === 'character') {
     character = await db.novelPromotionCharacter.findFirst({
@@ -116,6 +118,12 @@ export const POST = apiHandler(async (
         },
       })
     if (!targetAppearance) throw new ApiError('NOT_FOUND')
+  } else {
+    location = await db.novelPromotionLocation.findFirst({
+      where: { id, novelPromotionProject: { projectId } },
+      include: { images: { orderBy: { imageIndex: 'asc' } } },
+    })
+    if (!location) throw new ApiError('NOT_FOUND')
   }
 
   // 读取文件
@@ -146,6 +154,7 @@ export const POST = apiHandler(async (
     : `loc-${id}-upload`
   const key = generateUniqueKey(keyPrefix, 'jpg')
   await uploadObject(processed, key)
+  const imageMedia = await ensureMediaObjectFromStorageKey(key, { mimeType: 'image/jpeg' })
 
   // 更新数据库
   if (type === 'character' && targetAppearance) {
@@ -178,6 +187,7 @@ export const POST = apiHandler(async (
 
     if (shouldUpdateImageUrl) {
       updateData.imageUrl = key
+      updateData.imageMediaId = imageMedia.id
     }
 
     // 更新数据库
@@ -200,17 +210,7 @@ export const POST = apiHandler(async (
       imageIndex: targetIndex
     })
 
-  } else if (type === 'location') {
-    // 更新场景图片
-    const location = await db.novelPromotionLocation.findUnique({
-      where: { id },
-      include: { images: { orderBy: { imageIndex: 'asc' } } }
-    })
-
-    if (!location) {
-      throw new ApiError('NOT_FOUND')
-    }
-
+  } else if (type === 'location' && location) {
     // 如果指定了imageIndex，更新对应的图片记录
     if (imageIndex !== null) {
       const targetImageIndex = parseInt(imageIndex)
@@ -219,7 +219,7 @@ export const POST = apiHandler(async (
       if (existingImage) {
         const updated = await db.locationImage.update({
           where: { id: existingImage.id },
-          data: { imageUrl: key }
+          data: { imageUrl: key, imageMediaId: imageMedia.id }
         })
         if (!location.selectedImageId) {
           await prisma.novelPromotionLocation.update({
@@ -233,6 +233,7 @@ export const POST = apiHandler(async (
             locationId: id,
             imageIndex: targetImageIndex,
             imageUrl: key,
+            imageMediaId: imageMedia.id,
             description: labelText,
             isSelected: targetImageIndex === 0
           }
@@ -258,6 +259,7 @@ export const POST = apiHandler(async (
           locationId: id,
           imageIndex: maxIndex,
           imageUrl: key,
+          imageMediaId: imageMedia.id,
           description: labelText,
           isSelected: maxIndex === 0
         }

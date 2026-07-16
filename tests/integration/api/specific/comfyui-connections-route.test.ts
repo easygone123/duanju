@@ -705,12 +705,43 @@ describe('ComfyUI private connection routes', () => {
     expect(prismaMock.comfyGenerationRequest.findFirst).toHaveBeenCalledWith({
       where: {
         connectionId: 'owned', userId: 'user-1',
-        status: { notIn: ['completed', 'failed', 'canceled'] },
+        status: { in: [
+          'leased', 'uploading', 'submitting', 'submitted', 'running', 'transferring', 'reconciling',
+        ] },
+        leaseId: { not: null },
+        leaseExpiresAt: { gt: expect.any(Date) },
       },
       orderBy: { createdAt: 'asc' },
       select: { id: true, taskId: true, status: true },
     })
     expect(JSON.stringify(body)).not.toContain('must-not-leak')
+  })
+
+  it('reports idle when ComfyUI is empty and only an expired durable request remains', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyConnection.findMany.mockResolvedValue([connection({ id: 'stale-owned' })])
+    prismaMock.comfyGenerationRequest.count.mockImplementation(async (input: {
+      where?: { leaseExpiresAt?: unknown }
+    }) => input.where?.leaseExpiresAt ? 0 : 1)
+    prismaMock.comfyGenerationRequest.findFirst.mockImplementation(async (input: {
+      where?: { leaseExpiresAt?: unknown }
+    }) => input.where?.leaseExpiresAt ? null : ({
+      id: 'stale-request', taskId: 'task-stale', status: 'running',
+    }))
+    getSystemStatsMock.mockResolvedValue({ system: { comfyui_version: '0.3.50' } })
+    getQueueMock.mockResolvedValue({ running: [], pending: [] })
+
+    const route = await import('@/app/api/comfyui/connections/status/route')
+    const response = await route.GET(buildMockRequest({
+      path: '/api/comfyui/connections/status', method: 'GET',
+    }), collectionContext)
+
+    expect(response.status).toBe(200)
+    expect(await responseJson(response)).toEqual({ statuses: [expect.objectContaining({
+      connectionId: 'stale-owned', state: 'online_idle', ownedTask: null,
+      runningCount: 0, pendingCount: 0,
+    })] })
   })
 
   it('returns disabled connections with fresh owned-task state without DNS or ComfyUI traffic', async () => {
