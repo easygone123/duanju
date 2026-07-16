@@ -1,5 +1,6 @@
 'use client'
 
+import { useRef, useState } from 'react'
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api-fetch'
 import { resolveTaskErrorMessage } from '@/lib/task/error-message'
@@ -13,7 +14,6 @@ type SheetTaskInput = {
   operation: 'generate' | 'upscale'; episodeId: string; storyboardId: string
   imageModel?: string; workflowId?: string; workflowVersionId?: string; prompt?: string
 }
-export type SixGridSheetError = { storyboardId: string | null; message: string }
 type CropTaskInput = { episodeId: string; storyboardId: string; cropRects: CropEntry[] }
 type PanelUpscaleInput = {
   episodeId: string; storyboardId: string; panelId: string
@@ -30,6 +30,13 @@ const PANEL_IMAGE_LINEAGE_KEYS = [
 ] as const
 
 type PanelRecord = Record<string, unknown>
+
+function clearStoryboardError(errors: Record<string, string>, storyboardId: string) {
+  if (!(storyboardId in errors)) return errors
+  const next = { ...errors }
+  delete next[storyboardId]
+  return next
+}
 
 export function isSixGridPanelBusy(
   localPanelId: string | null,
@@ -165,6 +172,8 @@ function rollbackPanelImageIfStillOptimistic(
 
 export function useSixGridStoryboard(projectId: string, episodeId: string) {
   const queryClient = useQueryClient()
+  const [generationErrorsByStoryboardId, setGenerationErrorsByStoryboardId] = useState<Record<string, string>>({})
+  const generationAttemptByStoryboardId = useRef<Record<string, number>>({})
   const refreshGroup = (storyboardId: string) => Promise.all([
     queryClient.invalidateQueries({ queryKey: sixGridStoryboardQueryKeys.group(projectId, episodeId, storyboardId), exact: true }),
     invalidateEpisodeStageQueries(queryClient, projectId, episodeId),
@@ -174,12 +183,36 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
 
   const sheet = useMutation({
     mutationFn: (input: SheetTaskInput) => submitTask(buildSheetTaskRequest(projectId, input)),
-    onMutate: (input) => upsertTaskTargetOverlay(queryClient, {
-      projectId, targetType: 'NovelPromotionStoryboard', targetId: input.storyboardId,
-      intent: input.operation === 'generate' ? 'generate' : 'process',
-    }),
-    onError: (_error, input) => clearOverlay('NovelPromotionStoryboard', input.storyboardId),
-    onSuccess: (_data, input) => refreshGroup(input.storyboardId),
+    onMutate: (input) => {
+      let generationAttempt: number | undefined
+      if (input.operation === 'generate') {
+        generationAttempt = (generationAttemptByStoryboardId.current[input.storyboardId] ?? 0) + 1
+        generationAttemptByStoryboardId.current[input.storyboardId] = generationAttempt
+        setGenerationErrorsByStoryboardId((errors) => clearStoryboardError(errors, input.storyboardId))
+      }
+      upsertTaskTargetOverlay(queryClient, {
+        projectId, targetType: 'NovelPromotionStoryboard', targetId: input.storyboardId,
+        intent: input.operation === 'generate' ? 'generate' : 'process',
+      })
+      return { generationAttempt }
+    },
+    onError: (error, input, context) => {
+      clearOverlay('NovelPromotionStoryboard', input.storyboardId)
+      if (input.operation === 'generate'
+        && context?.generationAttempt === generationAttemptByStoryboardId.current[input.storyboardId]) {
+        setGenerationErrorsByStoryboardId((errors) => ({
+          ...errors,
+          [input.storyboardId]: error instanceof Error ? error.message : String(error),
+        }))
+      }
+    },
+    onSuccess: (_data, input, context) => {
+      if (input.operation === 'generate'
+        && context?.generationAttempt === generationAttemptByStoryboardId.current[input.storyboardId]) {
+        setGenerationErrorsByStoryboardId((errors) => clearStoryboardError(errors, input.storyboardId))
+      }
+      return refreshGroup(input.storyboardId)
+    },
   })
   const crop = useMutation({
     mutationFn: (input: CropTaskInput) => submitTask(buildSheetCropRequest(projectId, input)),
@@ -202,7 +235,7 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
   })
   const undo = useMutation(createPanelUndoMutationOptions(queryClient, projectId, episodeId))
 
-  return { sheet, crop, panelUpscale, undo }
+  return { sheet, crop, panelUpscale, undo, generationErrorsByStoryboardId }
 }
 
 export function swapPanelImageWithPrevious(value: unknown, panelId: string): unknown {

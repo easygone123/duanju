@@ -438,8 +438,10 @@ export async function resolveProjectImageTaskGenerationOptions(input: {
   imageModel: string
   taskSelections: ImageTaskCapabilityOverrides
   comfyWorkflowVersionId?: string
+  projectModelConfig?: ProjectModelConfig
 }) {
-  const projectModelConfig = await getProjectModelConfig(input.projectId, input.userId)
+  const projectModelConfig = input.projectModelConfig
+    ?? await getProjectModelConfig(input.projectId, input.userId)
   const parsed = parseModelKeyStrict(input.imageModel)
   const comfyAspectRatioOptions = parsed?.provider === 'comfyui'
     ? await loadOwnedPublishedComfyAspectRatioOptions({

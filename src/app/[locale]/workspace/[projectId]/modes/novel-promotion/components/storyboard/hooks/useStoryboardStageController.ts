@@ -22,7 +22,7 @@ import { useStoryboardStageUiState } from './useStoryboardStageUiState'
 import { useStoryboardStageStatus } from './useStoryboardStageStatus'
 import { useWorkspaceStageRuntime } from '../../../WorkspaceStageRuntimeContext'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
-import { useSixGridStoryboard, type SixGridSheetError } from '@/lib/query/hooks/useSixGridStoryboard'
+import { useSixGridStoryboard } from '@/lib/query/hooks/useSixGridStoryboard'
 import type { SixGridUpscaleWorkflow } from '../SixGridGroupControls'
 import type { CropEntry } from '../SixGridCropModal'
 
@@ -203,12 +203,6 @@ export function useStoryboardStageController({
     isTransitioning,
   })
 
-  const sixGridSheetError: SixGridSheetError | null = sixGridTasks.sheet.error instanceof Error
-    ? {
-        storyboardId: sixGridTasks.sheet.variables?.storyboardId || null,
-        message: sixGridTasks.sheet.error.message,
-      }
-    : null
   const generateSixGridSheet = useCallback((storyboardId: string) => {
     sixGridTasks.sheet.mutate({ operation: 'generate', episodeId, storyboardId })
   }, [episodeId, sixGridTasks.sheet])
@@ -251,7 +245,7 @@ export function useStoryboardStageController({
     sixGridTaskPanelId: sixGridTasks.panelUpscale.isPending
       ? sixGridTasks.panelUpscale.variables?.panelId || null
       : sixGridTasks.undo.isPending ? sixGridTasks.undo.variables?.panelId || null : null,
-    sixGridSheetError,
+    sixGridGenerationErrors: sixGridTasks.generationErrorsByStoryboardId,
     generateSixGridSheet, upscaleSixGridSheet, cropSixGridSheet, upscaleSixGridPanel, undoSixGridPanel,
   }
 }

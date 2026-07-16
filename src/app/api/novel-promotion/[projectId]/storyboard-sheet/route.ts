@@ -56,6 +56,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
         projectId, userId: auth.session.user.id, imageModel: model,
         taskSelections: { aspectRatio: sheetAspectRatio },
         comfyWorkflowVersionId: workflow?.version.id,
+        projectModelConfig: projectModelConfig ?? undefined,
       })
     } catch (error) {
       throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_SHEET_RATIO_UNSUPPORTED', field: 'generationOptions.aspectRatio', details: { message: error instanceof Error ? error.message : String(error) } })

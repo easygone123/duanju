@@ -13,7 +13,6 @@ import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import type { SixGridUpscaleWorkflow } from './SixGridGroupControls'
 import type { CropEntry } from './SixGridCropModal'
 import { VirtualCardRange } from '@/components/virtualization/VirtualCardRange'
-import type { SixGridSheetError } from '@/lib/query/hooks/useSixGridStoryboard'
 
 interface StoryboardCanvasProps {
   sortedStoryboards: NovelPromotionStoryboard[]
@@ -78,7 +77,7 @@ interface StoryboardCanvasProps {
   sixGridUpscaleWorkflow: SixGridUpscaleWorkflow | null
   sixGridTaskStoryboardId: string | null
   sixGridTaskPanelId: string | null
-  sixGridSheetError: SixGridSheetError | null
+  sixGridGenerationErrors: Record<string, string>
   onGenerateSixGridSheet: (storyboardId: string) => void
   onUpscaleSixGridSheet: (storyboardId: string, workflow: SixGridUpscaleWorkflow) => void
   onCropSixGridSheet: (storyboardId: string, cropRects: CropEntry[]) => Promise<unknown>
@@ -139,7 +138,7 @@ export default function StoryboardCanvas({
   sixGridUpscaleWorkflow,
   sixGridTaskStoryboardId,
   sixGridTaskPanelId,
-  sixGridSheetError,
+  sixGridGenerationErrors,
   onGenerateSixGridSheet,
   onUpscaleSixGridSheet,
   onCropSixGridSheet,
@@ -257,7 +256,7 @@ export default function StoryboardCanvas({
               sixGridUpscaleWorkflow={sixGridUpscaleWorkflow}
               isSixGridTaskRunning={sixGridTaskStoryboardId === storyboard.id}
               sixGridTaskPanelId={sixGridTaskPanelId}
-              sixGridSheetError={sixGridSheetError}
+              sixGridGenerationError={sixGridGenerationErrors[storyboard.id] ?? null}
               onGenerateSixGridSheet={() => onGenerateSixGridSheet(storyboard.id)}
               onUpscaleSixGridSheet={(workflow) => onUpscaleSixGridSheet(storyboard.id, workflow)}
               onCropSixGridSheet={(cropRects) => onCropSixGridSheet(storyboard.id, cropRects)}
