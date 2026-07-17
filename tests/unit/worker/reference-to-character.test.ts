@@ -72,6 +72,10 @@ const workersSharedMock = vi.hoisted(() => ({
   reportTaskProgress: vi.fn(async () => {}),
 }))
 
+const mediaServiceMock = vi.hoisted(() => ({
+  ensureMediaObjectFromStorageKey: vi.fn(async () => ({ id: 'media-reference-generated' })),
+}))
+
 const workersUtilsMock = vi.hoisted(() => ({
   assertTaskActive: vi.fn(async () => {}),
   resolveImageSourceFromGeneration: vi.fn<(
@@ -115,6 +119,7 @@ vi.mock('@/lib/config-service', () => configServiceMock)
 vi.mock('@/lib/media/outbound-image', () => ({
   normalizeReferenceImagesForGeneration: vi.fn(async (values: string[]) => values),
 }))
+vi.mock('@/lib/media/service', () => mediaServiceMock)
 vi.mock('@/lib/llm-client', () => llmClientMock)
 vi.mock('@/lib/storage', () => cosMock)
 vi.mock('@/lib/fonts', () => fontsMock)
@@ -230,8 +235,38 @@ describe('worker reference-to-character', () => {
     const updateData = updateArg?.data || {}
     expect(updateArg?.where).toEqual({ id: 'appearance-1' })
     expect(updateData.description).toBe('AI_EXTRACTED_DESCRIPTION')
+    expect(updateData.descriptions).toBe(JSON.stringify(Array(3).fill('AI_EXTRACTED_DESCRIPTION')))
     expect(typeof updateData.imageUrls).toBe('string')
     expect(updateData.imageUrl).toMatch(/^cos\/reference-key-\d+\.jpg$/)
+    expect(updateData.imageMediaId).toBe('media-reference-generated')
+    expect(mediaServiceMock.ensureMediaObjectFromStorageKey).toHaveBeenCalledWith(updateData.imageUrl)
+  })
+
+  it('persists canonical descriptions and media relation for project background conversion', async () => {
+    const job = buildJob(
+      {
+        referenceImageUrl: 'https://example.com/ref-a.png',
+        isBackgroundJob: true,
+        characterId: 'character-1',
+        appearanceId: 'appearance-project-1',
+        characterName: 'Hero',
+        count: 2,
+      },
+      TASK_TYPE.REFERENCE_TO_CHARACTER,
+    )
+
+    await handleReferenceToCharacterTask(job)
+
+    const updateArg = prismaMock.characterAppearance.update.mock.calls[0]?.[0] as {
+      data?: Record<string, unknown>
+      where?: Record<string, unknown>
+    } | undefined
+    const updateData = updateArg?.data || {}
+    expect(updateArg?.where).toEqual({ id: 'appearance-project-1' })
+    expect(updateData.description).toBe('AI_EXTRACTED_DESCRIPTION')
+    expect(updateData.descriptions).toBe(JSON.stringify(Array(2).fill('AI_EXTRACTED_DESCRIPTION')))
+    expect(updateData.imageMediaId).toBe('media-reference-generated')
+    expect(mediaServiceMock.ensureMediaObjectFromStorageKey).toHaveBeenCalledWith(updateData.imageUrl)
   })
 
   it('uses requested count when generating reference character sheets', async () => {

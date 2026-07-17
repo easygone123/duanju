@@ -19,6 +19,7 @@ import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
 import { normalizeImageGenerationCount } from '@/lib/image-generation/count'
 import { normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-image'
+import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
 import {
   parseReferenceImages,
   readBoolean,
@@ -237,22 +238,31 @@ export async function handleReferenceToCharacterTask(job: Job<TaskJobData>) {
 
   await assertTaskActive(job, 'reference_to_character_persist')
   if (isBackgroundJob && appearanceId) {
+    const mainImageKey = successfulCosKeys[0]
+    const mainImageMedia = await ensureMediaObjectFromStorageKey(mainImageKey)
+    const descriptions = description
+      ? JSON.stringify(successfulCosKeys.map(() => description))
+      : undefined
     if (isAssetHub) {
       await prisma.globalCharacterAppearance.update({
         where: { id: appearanceId },
         data: {
-          imageUrl: successfulCosKeys[0],
+          imageUrl: mainImageKey,
           imageUrls: encodeImageUrls(successfulCosKeys),
+          imageMediaId: mainImageMedia.id,
           description: description || undefined,
+          descriptions,
         },
       })
     } else {
       await prisma.characterAppearance.update({
         where: { id: appearanceId },
         data: {
-          imageUrl: successfulCosKeys[0],
+          imageUrl: mainImageKey,
           imageUrls: encodeImageUrls(successfulCosKeys),
+          imageMediaId: mainImageMedia.id,
           description: description || undefined,
+          descriptions,
         },
       })
     }
