@@ -95,14 +95,10 @@ function mapSixGridUploadError(error: SixGridUploadError): ApiError {
 }
 
 function logUnexpectedUploadError(input: {
-  error: unknown
   request: NextRequest
   projectId: string
   userId?: string
 }): void {
-  const maybeCode = input.error instanceof Error
-    ? (input.error as Error & { code?: unknown }).code
-    : undefined
   createScopedLogger({
     module: 'api.novel-promotion.six-grid-upload',
     action: 'six_grid.upload.internal_error',
@@ -112,14 +108,7 @@ function logUnexpectedUploadError(input: {
   }).error({
     message: 'six-grid sheet upload failed',
     errorCode: 'INTERNAL_ERROR',
-    error: input.error instanceof Error
-      ? {
-          name: input.error.name,
-          message: input.error.message,
-          stack: input.error.stack,
-          code: typeof maybeCode === 'string' ? maybeCode : undefined,
-        }
-      : { message: String(input.error) },
+    error: { name: 'UnexpectedUploadError' },
   })
 }
 
@@ -226,7 +215,7 @@ export const POST = apiHandler(async (
   } catch (error) {
     if (error instanceof ApiError) throw error
     if (error instanceof SixGridUploadError) throw mapSixGridUploadError(error)
-    logUnexpectedUploadError({ error, request, projectId, userId })
+    logUnexpectedUploadError({ request, projectId, userId })
     throw new ApiError('INTERNAL_ERROR')
   }
 })

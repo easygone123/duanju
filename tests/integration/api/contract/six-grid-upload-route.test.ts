@@ -413,14 +413,24 @@ describe('POST six-grid storyboard sheet upload', () => {
     ['replacement', replaceSheetMock],
   ])('sanitizes an unknown %s infrastructure error', async (label, boundary) => {
     const sentinel = `SECRET_${label.replaceAll(' ', '_').toUpperCase()}_/private/path/P2034`
-    boundary.mockRejectedValueOnce(new Error(sentinel))
+    const failure = new Error(`${sentinel}_MESSAGE`) as Error & { code: string }
+    failure.name = `${sentinel}_NAME`
+    failure.code = `${sentinel}_CODE`
+    boundary.mockRejectedValueOnce(failure)
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    const response = await callUpload(validForm(makeFile(await image('png'))))
-    const responseText = await response.text()
+    try {
+      const response = await callUpload(validForm(makeFile(await image('png'))))
+      const responseText = await response.text()
+      const loggedText = errorLog.mock.calls.flat().map(String).join('\n')
 
-    expect(response.status).toBe(500)
-    expect(JSON.parse(responseText)).toMatchObject({ error: { code: 'INTERNAL_ERROR' } })
-    expect(responseText).not.toContain(sentinel)
+      expect(response.status).toBe(500)
+      expect(JSON.parse(responseText)).toMatchObject({ error: { code: 'INTERNAL_ERROR' } })
+      expect(responseText).not.toContain(sentinel)
+      expect(loggedText).not.toContain(sentinel)
+    } finally {
+      errorLog.mockRestore()
+    }
   })
 
   it('stores normalized bytes under a scoped safe WebP key and returns only public fields', async () => {
