@@ -14,6 +14,12 @@ type SheetTaskInput = {
   operation: 'generate' | 'upscale'; episodeId: string; storyboardId: string
   imageModel?: string; workflowId?: string; workflowVersionId?: string; prompt?: string
 }
+export type SheetUploadInput = {
+  file: File
+  episodeId: string
+  storyboardId: string
+  expectedSheetArtifactVersion: number
+}
 type CropTaskInput = { episodeId: string; storyboardId: string; cropRects: CropEntry[] }
 type PanelUpscaleInput = {
   episodeId: string; storyboardId: string; panelId: string
@@ -58,8 +64,32 @@ export const sixGridStoryboardQueryKeys = {
     ['six-grid-storyboard', projectId, episodeId, storyboardId, panelId] as const,
 }
 
+function refreshStoryboardGroupQueries(
+  queryClient: QueryClient,
+  projectId: string,
+  episodeId: string,
+  storyboardId: string,
+) {
+  return Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: sixGridStoryboardQueryKeys.group(projectId, episodeId, storyboardId),
+      exact: true,
+    }),
+    invalidateEpisodeStageQueries(queryClient, projectId, episodeId),
+  ])
+}
+
 export function buildSheetTaskRequest(projectId: string, body: SheetTaskInput) {
   return { endpoint: `/api/novel-promotion/${projectId}/storyboard-sheet`, body }
+}
+
+export function buildSheetUploadRequest(projectId: string, input: SheetUploadInput) {
+  const body = new FormData()
+  body.set('file', input.file)
+  body.set('episodeId', input.episodeId)
+  body.set('storyboardId', input.storyboardId)
+  body.set('expectedSheetArtifactVersion', String(input.expectedSheetArtifactVersion))
+  return { endpoint: `/api/novel-promotion/${projectId}/storyboard-sheet/upload`, body }
 }
 
 export function buildSheetCropRequest(projectId: string, body: CropTaskInput) {
@@ -89,6 +119,42 @@ async function submitTask(request: { endpoint: string; method?: 'POST' | 'PATCH'
     throw new Error(resolveTaskErrorMessage(error, 'Failed to submit six-grid task'))
   }
   return response.json()
+}
+
+async function submitSheetUpload(request: { endpoint: string; body: FormData }) {
+  const response = await apiFetch(request.endpoint, { method: 'POST', body: request.body })
+  if (!response.ok) {
+    const error = await response.json().catch(() => null)
+    throw new Error(resolveTaskErrorMessage(error, 'Failed to upload six-grid sheet'))
+  }
+  return response.json()
+}
+
+export function createSheetUploadMutationOptions(
+  queryClient: QueryClient,
+  projectId: string,
+  episodeId: string,
+) {
+  return {
+    mutationFn: (input: SheetUploadInput) => submitSheetUpload(buildSheetUploadRequest(projectId, input)),
+    onMutate: (input: SheetUploadInput) => upsertTaskTargetOverlay(queryClient, {
+      projectId,
+      targetType: 'NovelPromotionStoryboard',
+      targetId: input.storyboardId,
+      intent: 'process',
+    }),
+    onSuccess: (_data: unknown, input: SheetUploadInput) => refreshStoryboardGroupQueries(
+      queryClient,
+      projectId,
+      episodeId,
+      input.storyboardId,
+    ),
+    onSettled: (_data: unknown, _error: Error | null, input: SheetUploadInput) => clearTaskTargetOverlay(queryClient, {
+      projectId,
+      targetType: 'NovelPromotionStoryboard',
+      targetId: input.storyboardId,
+    }),
+  }
 }
 
 export function createPanelUndoMutationOptions(
@@ -174,10 +240,12 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
   const queryClient = useQueryClient()
   const [generationErrorsByStoryboardId, setGenerationErrorsByStoryboardId] = useState<Record<string, string>>({})
   const generationAttemptByStoryboardId = useRef<Record<string, number>>({})
-  const refreshGroup = (storyboardId: string) => Promise.all([
-    queryClient.invalidateQueries({ queryKey: sixGridStoryboardQueryKeys.group(projectId, episodeId, storyboardId), exact: true }),
-    invalidateEpisodeStageQueries(queryClient, projectId, episodeId),
-  ])
+  const refreshGroup = (storyboardId: string) => refreshStoryboardGroupQueries(
+    queryClient,
+    projectId,
+    episodeId,
+    storyboardId,
+  )
   const clearOverlay = (targetType: string, targetId: string) =>
     clearTaskTargetOverlay(queryClient, { projectId, targetType, targetId })
 
@@ -233,9 +301,10 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
       invalidateEpisodeStageQueries(queryClient, projectId, episodeId),
     ]),
   })
+  const upload = useMutation(createSheetUploadMutationOptions(queryClient, projectId, episodeId))
   const undo = useMutation(createPanelUndoMutationOptions(queryClient, projectId, episodeId))
 
-  return { sheet, crop, panelUpscale, undo, generationErrorsByStoryboardId }
+  return { sheet, crop, panelUpscale, upload, undo, generationErrorsByStoryboardId }
 }
 
 export function swapPanelImageWithPrevious(value: unknown, panelId: string): unknown {
