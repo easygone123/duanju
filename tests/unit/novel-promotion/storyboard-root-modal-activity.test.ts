@@ -182,11 +182,11 @@ describe('storyboard root inactive modal cleanup', () => {
     const view = render(renderRoot(true))
     fireEvent.click(view.getByRole('button', { name: 'open image preview' }))
     await waitFor(() => expect(document.body.style.overflow).toBe('hidden'))
-    expect(document.body.textContent).toContain('common.viewOriginal')
+    expect(view.getByAltText('common.preview')).toBeTruthy()
 
     view.rerender(renderRoot(false))
 
-    await waitFor(() => expect(document.body.textContent).not.toContain('common.viewOriginal'))
+    await waitFor(() => expect(view.queryByAltText('common.preview')).toBeNull())
     expect(document.body.style.overflow).toBe('unset')
     expect(removeDocumentListener).toHaveBeenCalledWith('keydown', expect.any(Function))
   })
