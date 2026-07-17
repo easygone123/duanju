@@ -66,23 +66,29 @@ export function normalizeGridPersistenceGroups(
   const errorPrefix = gridSpec.mode === 'six_grid' ? 'SIX_GRID' : 'GRID'
   const seenGroupKeys = new Set<string>()
   const seenGroupIds = new Set<string>()
+  const seenSequences = new Set<number>()
   return normalized.map((group, index) => {
     const source = input[index]
     const groupId = readRequiredText(source.groupId, `${errorPrefix}_GROUP_ID_INVALID`)
     const groupKey = readRequiredText(source.groupKey, `${errorPrefix}_GROUP_KEY_INVALID`)
     const groupSequence = source.groupSequence
-    if (groupSequence !== index + 1) throw new Error(`${errorPrefix}_GROUP_SEQUENCE_INVALID`)
-    if (seenGroupIds.has(groupId) || seenGroupKeys.has(groupKey)) {
+    if (!Number.isInteger(groupSequence) || Number(groupSequence) <= 0) {
+      throw new Error(`${errorPrefix}_GROUP_SEQUENCE_INVALID`)
+    }
+    if (seenGroupIds.has(groupId)
+      || seenGroupKeys.has(groupKey)
+      || seenSequences.has(groupSequence as number)) {
       throw new Error(`${errorPrefix}_GROUP_IDENTITY_DUPLICATE`)
     }
     seenGroupIds.add(groupId)
     seenGroupKeys.add(groupKey)
+    seenSequences.add(groupSequence as number)
     return {
       ...group,
       clipIndex: source.clipIndex,
       groupId,
       groupKey,
-      groupSequence,
+      groupSequence: groupSequence as number,
     }
   })
 }

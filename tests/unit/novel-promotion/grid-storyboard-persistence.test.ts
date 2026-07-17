@@ -72,6 +72,11 @@ import {
   stableGridStoryboardId,
 } from '@/lib/novel-promotion/grid-storyboard/persistence'
 import { persistSixGridStoryboardOutputs } from '@/lib/novel-promotion/six-grid/persistence'
+import {
+  normalizeGridPersistenceGroups,
+  normalizeSixGridPersistenceGroups,
+  stableSixGridStoryboardId,
+} from '@/lib/novel-promotion/six-grid/persistence-contract'
 import { persistStoryboardOutputs } from '@/lib/workers/handlers/script-to-storyboard-helpers'
 
 function panels(count: 4 | 6) {
@@ -225,6 +230,68 @@ describe('grid storyboard persistence', () => {
     expect(fourGridId).not.toBe(sixGridId)
     expect(fourGridId).toBe(`four_grid_${legacyHash}`)
     expect(sixGridId).toBe(`six_grid_${legacyHash}`)
+  })
+
+  it('preserves unique positive sparse six-grid group sequences and their stable keys', () => {
+    const first = {
+      ...group('six_grid'),
+      groupId: 'six-grid:2:clip-1:1',
+      groupKey: 'six-grid:2:clip-1:1',
+      groupSequence: 2,
+    }
+    const second = {
+      ...group('six_grid'),
+      groupId: 'six-grid:5:clip-1:2',
+      groupKey: 'six-grid:5:clip-1:2',
+      groupSequence: 5,
+      incomingContinuity: first.outgoingContinuity,
+    }
+
+    const normalized = normalizeSixGridPersistenceGroups([first, second])
+
+    expect(normalized.map((item) => item.groupSequence)).toEqual([2, 5])
+    expect(normalized.map((item) => item.groupKey)).toEqual([
+      first.groupKey,
+      second.groupKey,
+    ])
+    expect(normalized.map((item) => stableSixGridStoryboardId('episode-1', item.groupKey))).toEqual([
+      stableGridStoryboardId('episode-1', first.groupKey, 'six_grid'),
+      stableGridStoryboardId('episode-1', second.groupKey, 'six_grid'),
+    ])
+    expect(() => normalizeSixGridPersistenceGroups([
+      first,
+      { ...second, groupSequence: 2 },
+    ])).toThrow('SIX_GRID_GROUP_IDENTITY_DUPLICATE')
+    expect(() => normalizeSixGridPersistenceGroups([
+      { ...first, groupSequence: 0 },
+    ])).toThrow('SIX_GRID_GROUP_SEQUENCE_INVALID')
+  })
+
+  it('allows sparse four-grid group sequences while rejecting duplicate and non-positive values', () => {
+    const spec = resolveStoryboardGridSpec('four_grid', '16:9')
+    const first = {
+      ...group('four_grid'),
+      groupId: 'four-grid:2:clip-1:1',
+      groupKey: 'four-grid:2:clip-1:1',
+      groupSequence: 2,
+    }
+    const second = {
+      ...group('four_grid'),
+      groupId: 'four-grid:5:clip-1:2',
+      groupKey: 'four-grid:5:clip-1:2',
+      groupSequence: 5,
+      incomingContinuity: first.outgoingContinuity,
+    }
+    expect(normalizeGridPersistenceGroups([first, second], spec)
+      .map((item) => item.groupSequence)).toEqual([2, 5])
+
+    expect(() => normalizeGridPersistenceGroups([
+      first,
+      { ...second, groupSequence: 2 },
+    ], spec)).toThrow('GRID_GROUP_IDENTITY_DUPLICATE')
+    expect(() => normalizeGridPersistenceGroups([
+      { ...first, groupSequence: 0 },
+    ], spec)).toThrow('GRID_GROUP_SEQUENCE_INVALID')
   })
 
   it('routes a four-grid worker persistence call through the generic grid path', async () => {
