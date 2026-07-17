@@ -1,14 +1,24 @@
 import { createHash } from 'node:crypto'
 import type { StoryboardPanel } from '@/lib/storyboard-phases'
+import {
+  validateGridSceneGroups,
+  type GridSceneGroup,
+} from '@/lib/novel-promotion/grid-storyboard/scene-planner'
+import {
+  resolveStoryboardGridSpec,
+  type GridStoryboardMode,
+  type StoryboardGridSpec,
+} from '@/lib/novel-promotion/grid-storyboard/spec'
 import type { ResolvedStoryboardRunSnapshot } from './run-snapshot'
 import {
   validateAndNormalizeSixGridGroups,
   type SixGridSceneGroup,
+  type SixStoryboardPanels,
 } from './scene-planner'
 
 export type JsonRecord = Record<string, unknown>
 
-export type SixGridPersistenceGroupInput = {
+export type GridPersistenceGroupInput = {
   clipId: string
   clipIndex: number
   finalPanels: StoryboardPanel[]
@@ -20,62 +30,82 @@ export type SixGridPersistenceGroupInput = {
   outgoingContinuity?: string
 }
 
-export type NormalizedSixGridPersistenceGroup = SixGridSceneGroup & {
+export type NormalizedGridPersistenceGroup = GridSceneGroup & {
   clipIndex: number
   groupId: string
   groupKey: string
   groupSequence: number
 }
 
-export type PersistSixGridParams = {
+export type PersistGridParams = {
   episodeId: string
   runId: string
-  clipPanels: SixGridPersistenceGroupInput[]
+  clipPanels: GridPersistenceGroupInput[]
   voiceLineRows: JsonRecord[] | null
   runSnapshot: ResolvedStoryboardRunSnapshot
 }
 
-export function normalizeSixGridPersistenceGroups(
-  input: SixGridPersistenceGroupInput[],
-): NormalizedSixGridPersistenceGroup[] {
-  const normalized = validateAndNormalizeSixGridGroups(input.map((group) => ({
+export type SixGridPersistenceGroupInput = GridPersistenceGroupInput
+export type NormalizedSixGridPersistenceGroup = SixGridSceneGroup & NormalizedGridPersistenceGroup
+export type PersistSixGridParams = PersistGridParams
+
+export function normalizeGridPersistenceGroups(
+  input: GridPersistenceGroupInput[],
+  gridSpec: StoryboardGridSpec,
+): NormalizedGridPersistenceGroup[] {
+  const candidates = input.map((group) => ({
     sceneKey: group.sceneKey,
     clipId: group.clipId,
     incomingContinuity: group.incomingContinuity,
     outgoingContinuity: group.outgoingContinuity,
     panels: group.finalPanels,
-  })))
+  }))
+  const normalized = gridSpec.mode === 'six_grid'
+    ? validateAndNormalizeSixGridGroups(candidates)
+    : validateGridSceneGroups(candidates, gridSpec)
+  const errorPrefix = gridSpec.mode === 'six_grid' ? 'SIX_GRID' : 'GRID'
   const seenGroupKeys = new Set<string>()
   const seenGroupIds = new Set<string>()
-  const seenSequences = new Set<number>()
   return normalized.map((group, index) => {
     const source = input[index]
-    const groupId = readRequiredText(source.groupId, 'SIX_GRID_GROUP_ID_INVALID')
-    const groupKey = readRequiredText(source.groupKey, 'SIX_GRID_GROUP_KEY_INVALID')
+    const groupId = readRequiredText(source.groupId, `${errorPrefix}_GROUP_ID_INVALID`)
+    const groupKey = readRequiredText(source.groupKey, `${errorPrefix}_GROUP_KEY_INVALID`)
     const groupSequence = source.groupSequence
-    if (!Number.isInteger(groupSequence) || Number(groupSequence) <= 0) {
-      throw new Error('SIX_GRID_GROUP_SEQUENCE_INVALID')
-    }
-    if (seenGroupIds.has(groupId)
-      || seenGroupKeys.has(groupKey)
-      || seenSequences.has(groupSequence as number)) {
-      throw new Error('SIX_GRID_GROUP_IDENTITY_DUPLICATE')
+    if (groupSequence !== index + 1) throw new Error(`${errorPrefix}_GROUP_SEQUENCE_INVALID`)
+    if (seenGroupIds.has(groupId) || seenGroupKeys.has(groupKey)) {
+      throw new Error(`${errorPrefix}_GROUP_IDENTITY_DUPLICATE`)
     }
     seenGroupIds.add(groupId)
     seenGroupKeys.add(groupKey)
-    seenSequences.add(groupSequence as number)
     return {
       ...group,
       clipIndex: source.clipIndex,
       groupId,
       groupKey,
-      groupSequence: groupSequence as number,
+      groupSequence,
     }
   })
 }
 
+export function normalizeSixGridPersistenceGroups(
+  input: SixGridPersistenceGroupInput[],
+): NormalizedSixGridPersistenceGroup[] {
+  return normalizeGridPersistenceGroups(
+    input,
+    resolveStoryboardGridSpec('six_grid', '16:9'),
+  ).map((group) => ({ ...group, panels: group.panels as SixStoryboardPanels }))
+}
+
+export function stableGridStoryboardId(
+  episodeId: string,
+  groupKey: string,
+  mode: GridStoryboardMode,
+) {
+  return `${mode}_${sha256PersistencePayload(`${episodeId}\u0000${groupKey}`)}`
+}
+
 export function stableSixGridStoryboardId(episodeId: string, groupKey: string) {
-  return `six_grid_${sha256PersistencePayload(`${episodeId}\u0000${groupKey}`)}`
+  return stableGridStoryboardId(episodeId, groupKey, 'six_grid')
 }
 
 export function sha256PersistencePayload(value: string) {

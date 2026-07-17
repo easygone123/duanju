@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { estimatePanelDuration } from '@/lib/novel-promotion/six-grid/duration'
+import { stableSixGridStoryboardId } from '@/lib/novel-promotion/six-grid/persistence-contract'
 import { persistSixGridPlanningArtifacts } from '@/lib/novel-promotion/six-grid/run-artifacts'
 import { resolveStoryboardRunSnapshot } from '@/lib/novel-promotion/six-grid/run-snapshot'
 import type { ResolvedStoryboardRunSnapshot } from '@/lib/novel-promotion/six-grid/run-snapshot'
@@ -132,6 +133,7 @@ describe('six-grid storyboard persistence', () => {
       include: { panels: { orderBy: { panelIndex: 'asc' } } },
     })
     expect(storyboards).toHaveLength(1)
+    expect(storyboards[0].id).toBe(stableSixGridStoryboardId(episode.id, group.groupKey))
     expect(storyboards[0]).toMatchObject({
       clipId: clip.id,
       layoutMode: 'six_grid',

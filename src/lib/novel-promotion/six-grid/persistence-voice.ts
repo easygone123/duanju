@@ -8,6 +8,17 @@ export async function persistSixGridVoiceLines(params: {
   storyboardIdByRef: Map<string, string>
   panelIdByStoryboardRef: Map<string, string>
 }) {
+  return await persistGridVoiceLines({ ...params, expectedPanelCount: 6 })
+}
+
+export async function persistGridVoiceLines(params: {
+  tx: Prisma.TransactionClient
+  episodeId: string
+  voiceLineRows: JsonRecord[]
+  storyboardIdByRef: Map<string, string>
+  panelIdByStoryboardRef: Map<string, string>
+  expectedPanelCount: 4 | 6
+}) {
   const created: Array<{ id: string }> = []
   for (let index = 0; index < params.voiceLineRows.length; index += 1) {
     const row = params.voiceLineRows[index]
@@ -20,7 +31,7 @@ export async function persistSixGridVoiceLines(params: {
         matchedPanel.storyboardId,
         `voice line ${index + 1} has invalid matchedPanel reference`,
       )
-      matchedPanelIndex = readPanelIndex(matchedPanel.panelIndex, index)
+      matchedPanelIndex = readPanelIndex(matchedPanel.panelIndex, index, params.expectedPanelCount)
       matchedStoryboardId = params.storyboardIdByRef.get(storyboardRef) || null
       matchedPanelId = params.panelIdByStoryboardRef.get(`${storyboardRef}:${matchedPanelIndex}`) || null
       if (!matchedStoryboardId || !matchedPanelId) {
@@ -68,11 +79,21 @@ export async function persistSixGridVoiceLines(params: {
 }
 
 export function validateSixGridVoiceLineRows(rows: JsonRecord[] | null) {
+  validateGridVoiceLineRows(rows, 6)
+}
+
+export function validateGridVoiceLineRows(
+  rows: JsonRecord[] | null,
+  expectedPanelCount: 4 | 6,
+) {
   const seen = new Set<number>()
   for (let index = 0; index < (rows || []).length; index += 1) {
-    const lineIndex = readPositiveInt(rows![index].lineIndex, `voice line ${index + 1} has invalid lineIndex`)
+    const row = rows![index]
+    const lineIndex = readPositiveInt(row.lineIndex, `voice line ${index + 1} has invalid lineIndex`)
     if (seen.has(lineIndex)) throw new Error('voice line indexes must be unique')
     seen.add(lineIndex)
+    const matchedPanel = isRecord(row.matchedPanel) ? row.matchedPanel : null
+    if (matchedPanel) readPanelIndex(matchedPanel.panelIndex, index, expectedPanelCount)
   }
 }
 
@@ -86,8 +107,11 @@ function readPositiveInt(value: unknown, message: string) {
   return value
 }
 
-function readPanelIndex(value: unknown, rowIndex: number) {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 5) {
+function readPanelIndex(value: unknown, rowIndex: number, expectedPanelCount: 4 | 6) {
+  if (typeof value !== 'number'
+    || !Number.isInteger(value)
+    || value < 0
+    || value >= expectedPanelCount) {
     throw new Error(`voice line ${rowIndex + 1} has invalid matchedPanel reference`)
   }
   return value

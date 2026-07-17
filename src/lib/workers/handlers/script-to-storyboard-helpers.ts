@@ -1,7 +1,8 @@
 import { safeParseJson, safeParseJsonArray } from '@/lib/json-repair'
 import { prisma } from '@/lib/prisma'
 import type { StoryboardPanel } from '@/lib/storyboard-phases'
-import { persistSixGridStoryboardOutputs } from '@/lib/novel-promotion/six-grid/persistence'
+import { persistGridStoryboardOutputs } from '@/lib/novel-promotion/grid-storyboard/persistence'
+import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 import type { ResolvedStoryboardRunSnapshot } from '@/lib/novel-promotion/six-grid/run-snapshot'
 import { getRunIdentitySnapshot } from '@/lib/run-runtime/service'
 
@@ -257,8 +258,8 @@ export async function persistStoryboardOutputs(params: {
       || runSnapshot.episodeId !== params.episodeId) {
       throw new Error('STORYBOARD_RUN_SNAPSHOT_INVALID')
     }
-    if (runSnapshot.runSettings.storyboardGenerationMode === 'six_grid') {
-      return await persistSixGridStoryboardOutputs({
+    if (isGridStoryboardMode(runSnapshot.runSettings.storyboardGenerationMode)) {
+      return await persistGridStoryboardOutputs({
         episodeId: params.episodeId,
         runId: params.runId,
         clipPanels: params.clipPanels,
