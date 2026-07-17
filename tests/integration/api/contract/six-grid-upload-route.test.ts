@@ -13,6 +13,7 @@ const loadOwnedSixGridMock = vi.hoisted(() => vi.fn())
 const assertAvailableMock = vi.hoisted(() => vi.fn())
 const replaceSheetMock = vi.hoisted(() => vi.fn())
 const validateUploadMock = vi.hoisted(() => vi.fn())
+const validateGridUploadMock = vi.hoisted(() => vi.fn())
 const uploadObjectMock = vi.hoisted(() => vi.fn())
 const ensureMediaMock = vi.hoisted(() => vi.fn())
 
@@ -23,6 +24,7 @@ vi.mock('@/lib/api-auth', () => ({
 
 vi.mock('@/lib/novel-promotion/six-grid/image-task-route', () => ({
   loadOwnedSixGrid: loadOwnedSixGridMock,
+  loadOwnedGridStoryboard: loadOwnedSixGridMock,
 }))
 
 vi.mock('@/lib/novel-promotion/six-grid/upload-service', () => ({
@@ -33,9 +35,11 @@ vi.mock('@/lib/novel-promotion/six-grid/upload-service', () => ({
 vi.mock('@/lib/novel-promotion/six-grid/upload-validation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/novel-promotion/six-grid/upload-validation')>()
   validateUploadMock.mockImplementation(actual.validateAndNormalizeSixGridUpload)
+  validateGridUploadMock.mockImplementation(actual.validateAndNormalizeGridUpload)
   return {
     ...actual,
     validateAndNormalizeSixGridUpload: validateUploadMock,
+    validateAndNormalizeGridUpload: validateGridUploadMock,
   }
 })
 
@@ -308,6 +312,29 @@ describe('POST six-grid storyboard sheet upload', () => {
     expect(validateUploadMock).toHaveBeenCalledWith(expect.any(Buffer), '16:9')
     const [uploaded] = uploadObjectMock.mock.calls[0] as [Buffer, string, number, string]
     expect((await sharp(uploaded).metadata()).format).toBe('webp')
+  })
+
+  it('accepts a four-grid upload using the owned immutable grid spec', async () => {
+    loadOwnedSixGridMock.mockResolvedValueOnce({
+      id: 'storyboard-1',
+      layoutMode: 'four_grid',
+      sixGridCellAspectRatio: '16:9',
+      sheetArtifactVersion: 4,
+      gridSpec: {
+        version: 1, mode: 'four_grid', columns: 2, rows: 2, panelCount: 4,
+        cellAspectRatio: '16:9', sheetAspectRatio: '16:9',
+      },
+    })
+    const response = await callUpload(validForm(makeFile(await image('png', 1600, 900))))
+
+    expect(response.status).toBe(200)
+    expect(validateGridUploadMock).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      expect.objectContaining({ mode: 'four_grid', panelCount: 4, sheetAspectRatio: '16:9' }),
+    )
+    expect(replaceSheetMock).toHaveBeenCalledWith(expect.objectContaining({
+      gridSpec: expect.objectContaining({ mode: 'four_grid', panelCount: 4 }),
+    }))
   })
 
   it('loads the owned storyboard and checks availability before reading bytes or storing data', async () => {

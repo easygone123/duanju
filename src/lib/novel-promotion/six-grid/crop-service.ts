@@ -21,6 +21,14 @@ import {
 } from './crop-claim'
 import type { NormalizedCropRect, SixGridCellAspectRatio } from './contracts'
 import {
+  computeGridPixelRects,
+  validateManualGridCrop,
+} from '@/lib/novel-promotion/grid-storyboard/crop-geometry'
+import {
+  resolveStoryboardGridSpec,
+  type StoryboardGridSpec,
+} from '@/lib/novel-promotion/grid-storyboard/spec'
+import {
   assertSixGridCellAspectRatio,
   computeSixGridPixelRects,
   pixelRectToNormalized,
@@ -67,13 +75,18 @@ export type SixGridCropArtifact = {
   lineage: SixGridCropLineage
 }
 
-export async function cropSixGridSheet(input: {
+export type GridCropSheetInput = {
   userId: string
   projectId: string
   sourceMediaId: string
   cellAspectRatio: SixGridCellAspectRatio
+  storyboardId?: string
+  expectedSheetArtifactVersion?: number
+  gridSpec?: StoryboardGridSpec & { version?: 1 }
   manualOverrides?: Array<{ cellIndex: number; normalizedCropRect: NormalizedCropRect }>
-}, dependencies: {
+}
+
+export async function cropGridSheet(input: GridCropSheetInput, dependencies: {
   storage?: SixGridCropStorage
   claimLeaseMs?: number
   onSharpPipelineActivity?: SharpPipelineObserver
@@ -81,10 +94,13 @@ export async function cropSixGridSheet(input: {
   assertSixGridCellAspectRatio(input.cellAspectRatio)
   const limits = readSixGridCropLimits()
   const storage = dependencies.storage ?? defaultStorage
-  const source = await findOwnedSheetMedia(input.userId, input.projectId, input.sourceMediaId)
-  if (!source || !source.storageKey || !source.mimeType?.startsWith('image/')) {
+  const owned = await findOwnedSheetMedia(input)
+  const source = owned?.media
+  if (!owned || !source || !source.storageKey || !source.mimeType?.startsWith('image/')) {
     throw new Error('SIX_GRID_SOURCE_NOT_FOUND_OR_FORBIDDEN')
   }
+  const gridSpec = resolveOwnedGridSpec(owned.storyboard, input)
+  const resolvedInput = { ...input, gridSpec }
   const owner = await acquireCropClaim({ sourceMediaId: source.id, leaseMs: dependencies.claimLeaseMs })
   const heartbeat = startCropClaimHeartbeat(owner)
   try {
@@ -102,9 +118,9 @@ export async function cropSixGridSheet(input: {
     }
     const dimensions = await readCropSourceMetadata(sourceBytes, dependencies.onSharpPipelineActivity)
     await heartbeat.fence()
-    const rects = resolveCropRects(input, dimensions)
+    const rects = resolveCropRects(resolvedInput, dimensions)
     const prepared = await prepareCropIdentities({
-      input,
+      input: resolvedInput,
       source,
       sourceBytes,
       sourceChecksum,
@@ -143,8 +159,15 @@ export async function cropSixGridSheet(input: {
   }
 }
 
+export async function cropSixGridSheet(
+  input: GridCropSheetInput,
+  dependencies: Parameters<typeof cropGridSheet>[1] = {},
+): Promise<SixGridCropArtifact[]> {
+  return cropGridSheet(input, dependencies)
+}
+
 async function prepareCropIdentities(input: {
-  input: Parameters<typeof cropSixGridSheet>[0]
+  input: GridCropSheetInput & { gridSpec: StoryboardGridSpec }
   source: CropMediaRow
   sourceBytes: Buffer
   sourceChecksum: string
@@ -164,6 +187,7 @@ async function prepareCropIdentities(input: {
       sourceChecksum: input.sourceChecksum,
       normalizedCropRect,
       artifactVersion: ARTIFACT_VERSION,
+      ...(input.input.gridSpec.mode === 'four_grid' ? { gridMode: 'four_grid' } : {}),
     })))
     result.push({
       cellIndex,
@@ -179,18 +203,26 @@ async function prepareCropIdentities(input: {
 }
 
 function resolveCropRects(
-  input: Parameters<typeof cropSixGridSheet>[0],
+  input: GridCropSheetInput & { gridSpec: StoryboardGridSpec },
   dimensions: { width: number; height: number },
 ) {
-  const automatic = computeSixGridPixelRects(dimensions)
+  const automatic = input.gridSpec.mode === 'six_grid'
+    ? computeSixGridPixelRects(dimensions)
+    : computeGridPixelRects(dimensions, input.gridSpec)
   const overrides = new Map<number, PixelRect>()
   for (const override of input.manualOverrides ?? []) {
     if (overrides.has(override.cellIndex)) throw new Error('SIX_GRID_CROP_OVERRIDE_DUPLICATE')
-    overrides.set(override.cellIndex, validateManualSixGridCrop({
-      ...override,
-      cellAspectRatio: input.cellAspectRatio,
-      dimensions,
-    }))
+    overrides.set(override.cellIndex, input.gridSpec.mode === 'six_grid'
+      ? validateManualSixGridCrop({
+          ...override,
+          cellAspectRatio: input.cellAspectRatio,
+          dimensions,
+        })
+      : validateManualGridCrop({
+          ...override,
+          spec: input.gridSpec,
+          dimensions,
+        }))
   }
   return automatic.map(({ cellIndex, ...autoRect }) => ({
     cellIndex,
@@ -227,17 +259,57 @@ function toArtifact(
   }
 }
 
-async function findOwnedSheetMedia(userId: string, projectId: string, sourceMediaId: string) {
+async function findOwnedSheetMedia(input: GridCropSheetInput) {
   const storyboard = await prisma.novelPromotionStoryboard.findFirst({
     where: {
-      OR: [{ sheetImageMediaId: sourceMediaId }, { upscaledSheetImageMediaId: sourceMediaId }],
-      episode: { novelPromotionProject: { projectId, project: { userId } } },
+      ...(input.storyboardId ? { id: input.storyboardId } : {}),
+      ...(input.expectedSheetArtifactVersion !== undefined
+        ? { sheetArtifactVersion: input.expectedSheetArtifactVersion }
+        : {}),
+      ...(input.gridSpec ? { layoutMode: input.gridSpec.mode } : {}),
+      OR: [{ sheetImageMediaId: input.sourceMediaId }, { upscaledSheetImageMediaId: input.sourceMediaId }],
+      episode: { novelPromotionProject: { projectId: input.projectId, project: { userId: input.userId } } },
     },
-    select: { sheetImageMedia: true, upscaledSheetImageMedia: true },
+    select: {
+      id: true,
+      layoutMode: true,
+      sixGridCellAspectRatio: true,
+      sheetArtifactVersion: true,
+      sheetImageMedia: true,
+      upscaledSheetImageMedia: true,
+    },
   })
-  if (storyboard?.sheetImageMedia?.id === sourceMediaId) return storyboard.sheetImageMedia
-  if (storyboard?.upscaledSheetImageMedia?.id === sourceMediaId) return storyboard.upscaledSheetImageMedia
+  if (storyboard?.sheetImageMedia?.id === input.sourceMediaId) {
+    return { storyboard, media: storyboard.sheetImageMedia }
+  }
+  if (storyboard?.upscaledSheetImageMedia?.id === input.sourceMediaId) {
+    return { storyboard, media: storyboard.upscaledSheetImageMedia }
+  }
   return null
+}
+
+function resolveOwnedGridSpec(
+  storyboard: { layoutMode: string; sixGridCellAspectRatio: string | null },
+  input: GridCropSheetInput,
+): StoryboardGridSpec {
+  let canonical: StoryboardGridSpec
+  try {
+    canonical = resolveStoryboardGridSpec(storyboard.layoutMode, storyboard.sixGridCellAspectRatio)
+  } catch {
+    throw new Error('SIX_GRID_SOURCE_NOT_FOUND_OR_FORBIDDEN')
+  }
+  if (canonical.cellAspectRatio !== input.cellAspectRatio) {
+    throw new Error('SIX_GRID_SOURCE_NOT_FOUND_OR_FORBIDDEN')
+  }
+  if (input.gridSpec && (input.gridSpec.mode !== canonical.mode
+    || input.gridSpec.columns !== canonical.columns
+    || input.gridSpec.rows !== canonical.rows
+    || input.gridSpec.panelCount !== canonical.panelCount
+    || input.gridSpec.cellAspectRatio !== canonical.cellAspectRatio
+    || input.gridSpec.sheetAspectRatio !== canonical.sheetAspectRatio)) {
+    throw new Error('SIX_GRID_SOURCE_NOT_FOUND_OR_FORBIDDEN')
+  }
+  return canonical
 }
 
 async function readSourceBytes(
@@ -262,6 +334,7 @@ function isStableCropError(error: unknown) {
     || message === 'SIX_GRID_CROP_CLAIM_LOST'
     || message === 'SIX_GRID_CROP_EXTRACT_FAILED'
     || message.startsWith('CROP_')
+    || message.startsWith('GRID_')
 }
 
 function sha256(bytes: Buffer) {

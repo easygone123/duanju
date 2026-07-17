@@ -1,11 +1,13 @@
 import sharp from 'sharp'
 import type { SixGridCellAspectRatio } from './contracts'
+import { resolveStoryboardGridSpec, type StoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 import {
   SIX_GRID_UPLOAD_MAX_BYTES,
   SIX_GRID_UPLOAD_MAX_DIMENSION,
   SIX_GRID_UPLOAD_MAX_PIXELS,
   SixGridUploadError,
-  isSixGridSheetRatioAllowed,
+  expectedGridSheetRatio,
+  isGridSheetRatioAllowed,
   sheetRatio,
   type NormalizedSixGridUpload,
 } from './upload-contract'
@@ -15,6 +17,19 @@ const ALLOWED_FORMATS = new Set(['png', 'jpeg', 'webp'])
 export async function validateAndNormalizeSixGridUpload(
   source: Buffer,
   cellAspectRatio: SixGridCellAspectRatio,
+): Promise<NormalizedSixGridUpload> {
+  let spec: StoryboardGridSpec
+  try {
+    spec = resolveStoryboardGridSpec('six_grid', cellAspectRatio)
+  } catch {
+    throw new SixGridUploadError('SIX_GRID_UPLOAD_IMAGE_INVALID')
+  }
+  return validateAndNormalizeGridUpload(source, spec)
+}
+
+export async function validateAndNormalizeGridUpload(
+  source: Buffer,
+  spec: StoryboardGridSpec,
 ): Promise<NormalizedSixGridUpload> {
   if (source.byteLength === 0) {
     throw new SixGridUploadError('SIX_GRID_UPLOAD_IMAGE_INVALID')
@@ -41,11 +56,13 @@ export async function validateAndNormalizeSixGridUpload(
     assertDecodedSize(width, height)
 
     const actualRatio = sheetRatio(width, height)
-    if (!isSixGridSheetRatioAllowed(actualRatio, cellAspectRatio)) {
+    if (!isGridSheetRatioAllowed(actualRatio, spec)) {
       throw new SixGridUploadError('SIX_GRID_UPLOAD_RATIO_INVALID', {
         width,
         height,
         actualRatio,
+        expectedRatio: expectedGridSheetRatio(spec),
+        mode: spec.mode,
       })
     }
 

@@ -2,12 +2,14 @@ import { Prisma } from '@prisma/client'
 import { ApiError } from '@/lib/api-errors'
 import { prisma } from '@/lib/prisma'
 import { TASK_STATUS, TASK_TYPE } from '@/lib/task/types'
+import { resolveStoryboardGridSpec, type StoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 export type SixGridUploadIdentity = {
   userId: string
   projectId: string
   episodeId: string
   storyboardId: string
+  gridSpec?: StoryboardGridSpec
 }
 
 export type ReplaceSixGridSheetInput = SixGridUploadIdentity & {
@@ -71,7 +73,7 @@ const defaultSixGridUploadStore: SixGridUploadStore = {
           ON project.id = promotion.projectId
         WHERE storyboard.id = ${input.storyboardId}
           AND storyboard.episodeId = ${input.episodeId}
-          AND storyboard.layoutMode = 'six_grid'
+          AND storyboard.layoutMode = ${input.gridSpec?.mode ?? 'six_grid'}
           AND project.id = ${input.projectId}
           AND project.userId = ${input.userId}
         LIMIT 1
@@ -84,7 +86,7 @@ const defaultSixGridUploadStore: SixGridUploadStore = {
       where: {
         id: input.storyboardId,
         episodeId: input.episodeId,
-        layoutMode: 'six_grid',
+        layoutMode: input.gridSpec?.mode ?? 'six_grid',
         sheetArtifactVersion: input.expectedSheetArtifactVersion,
         episode: {
           novelPromotionProject: {
@@ -161,33 +163,35 @@ export async function replaceSixGridSheet(
   input: ReplaceSixGridSheetInput,
   store: SixGridUploadStore = defaultSixGridUploadStore,
 ): Promise<{ mediaId: string; url: string; sheetArtifactVersion: number }> {
-  await assertSixGridUploadAvailable(input, store)
+  const resolvedInput = { ...input, gridSpec: resolveUploadGridSpec(input.gridSpec) }
+  await assertSixGridUploadAvailable(resolvedInput, store)
   try {
     return await store.transaction(async (transaction) => {
-      if (!await transaction.lockOwnedStoryboard(input)) {
+      if (!await transaction.lockOwnedStoryboard(resolvedInput)) {
         throw new ApiError('CONFLICT', { code: 'SIX_GRID_UPLOAD_STALE' })
       }
-      await assertSixGridUploadAvailable(input, transaction)
+      await assertSixGridUploadAvailable(resolvedInput, transaction)
 
       const storyboard = await transaction.replaceOwnedStoryboard({
-        userId: input.userId,
-        projectId: input.projectId,
-        episodeId: input.episodeId,
-        storyboardId: input.storyboardId,
-        expectedSheetArtifactVersion: input.expectedSheetArtifactVersion,
-        mediaId: input.media.id,
-        url: input.media.url,
+        userId: resolvedInput.userId,
+        projectId: resolvedInput.projectId,
+        episodeId: resolvedInput.episodeId,
+        storyboardId: resolvedInput.storyboardId,
+        gridSpec: resolvedInput.gridSpec,
+        expectedSheetArtifactVersion: resolvedInput.expectedSheetArtifactVersion,
+        mediaId: resolvedInput.media.id,
+        url: resolvedInput.media.url,
       })
       if (storyboard.count !== 1) {
         throw new ApiError('CONFLICT', { code: 'SIX_GRID_UPLOAD_STALE' })
       }
 
-      const panels = await transaction.clearStoryboardPanels(input.storyboardId)
-      if (panels.count !== 6) {
+      const panels = await transaction.clearStoryboardPanels(resolvedInput.storyboardId)
+      if (panels.count !== resolvedInput.gridSpec.panelCount) {
         throw new ApiError('CONFLICT', { code: 'SIX_GRID_UPLOAD_PANEL_SET_CHANGED' })
       }
 
-      const current = await transaction.readStoryboardSheet(input.storyboardId)
+      const current = await transaction.readStoryboardSheet(resolvedInput.storyboardId)
       if (!current || current.sheetImageMediaId === null || current.sheetImageUrl === null) {
         throw new ApiError('CONFLICT', { code: 'SIX_GRID_UPLOAD_STALE' })
       }
@@ -203,6 +207,18 @@ export async function replaceSixGridSheet(
     }
     throw error
   }
+}
+
+function resolveUploadGridSpec(spec: StoryboardGridSpec | undefined): StoryboardGridSpec {
+  if (!spec) return resolveStoryboardGridSpec('six_grid', '16:9')
+  const canonical = resolveStoryboardGridSpec(spec.mode, spec.cellAspectRatio)
+  if (spec.columns !== canonical.columns
+    || spec.rows !== canonical.rows
+    || spec.panelCount !== canonical.panelCount
+    || spec.sheetAspectRatio !== canonical.sheetAspectRatio) {
+    throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_GRID_SPEC_INVALID' })
+  }
+  return canonical
 }
 
 function isPrismaTransactionConflict(error: unknown): error is { code: 'P2034' } {

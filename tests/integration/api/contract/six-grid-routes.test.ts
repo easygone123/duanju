@@ -133,6 +133,27 @@ describe('six-grid route/task registration contract', () => {
     }))
   })
 
+  it('submits exactly four canonical crop cells for a four-grid storyboard', async () => {
+    const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-sheet/crop/route')
+    prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce(storyboardFixture('four_grid'))
+    const response = await callRoute(route.POST, 'POST', {
+      episodeId: 'episode-1', storyboardId: 'storyboard-1', locale: 'zh',
+    }, { params: { projectId: 'project-1' } })
+
+    expect(response.status).toBe(200)
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        gridSpec: expect.objectContaining({ mode: 'four_grid', panelCount: 4 }),
+        cropRects: [
+          { cellIndex: 0, normalizedCropRect: { x: 0, y: 0, width: 0.5, height: 0.5 } },
+          { cellIndex: 1, normalizedCropRect: { x: 0.5, y: 0, width: 0.5, height: 0.5 } },
+          { cellIndex: 2, normalizedCropRect: { x: 0, y: 0.5, width: 0.5, height: 0.5 } },
+          { cellIndex: 3, normalizedCropRect: { x: 0.5, y: 0.5, width: 0.5, height: 0.5 } },
+        ],
+      }),
+    }))
+  })
+
   it('rejects non-six-grid and incomplete groups before the task/billing boundary', async () => {
     const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-sheet/crop/route')
     prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce({ ...storyboardFixture(), layoutMode: 'individual' })

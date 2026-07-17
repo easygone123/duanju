@@ -564,6 +564,53 @@ describe('six-grid sheet and panel execution', () => {
 
 describe('six-grid crop atomic persistence', () => {
   beforeEach(() => resetExecutionMocks())
+  it('crops and commits exactly four cells against the immutable four-grid lineage', async () => {
+    const fourGridSpec = {
+      version: 1 as const, mode: 'four_grid' as const, columns: 2 as const, rows: 2 as const,
+      panelCount: 4 as const, cellAspectRatio: '16:9' as const, sheetAspectRatio: '16:9' as const,
+    }
+    const cropRects = Array.from({ length: 4 }, (_, cellIndex) => ({
+      cellIndex,
+      normalizedCropRect: {
+        x: (cellIndex % 2) / 2,
+        y: Math.floor(cellIndex / 2) / 2,
+        width: 0.5,
+        height: 0.5,
+      },
+    }))
+    const crop = vi.fn(async () => cropRects.map(({ cellIndex, normalizedCropRect }) => ({
+      cellIndex, mediaId: `crop-${cellIndex}`, url: `/m/crop-${cellIndex}`,
+      normalizedCropRect, lineage: { sourceMediaId: 'media-sheet-1', artifactVersion: 1 },
+    })))
+    const lockStoryboard = vi.fn(async () => true)
+    const update = vi.fn(async () => ({}))
+    const transaction = async (callback: (tx: unknown) => Promise<void>) => callback({
+      lockStoryboard,
+      novelPromotionPanel: {
+        findMany: vi.fn(async () => Array.from({ length: 4 }, (_, gridCellIndex) => ({
+          id: `panel-${gridCellIndex}`, gridCellIndex, imageMediaId: null, imageUrl: null,
+        }))),
+        update,
+      },
+    })
+    const task = snapshot({ gridSpec: fourGridSpec, cropRects })
+    const { executeSixGridCrop } = await import('@/lib/workers/handlers/storyboard-crop-task-handler')
+
+    await executeSixGridCrop(task, {
+      userId: 'user-1', crop: crop as never, transaction: transaction as never,
+    })
+
+    expect(crop).toHaveBeenCalledWith(expect.objectContaining({
+      storyboardId: 'storyboard-1',
+      expectedSheetArtifactVersion: 3,
+      gridSpec: fourGridSpec,
+    }))
+    expect(lockStoryboard).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'four_grid', projectId: 'project-1', episodeId: 'episode-1', userId: 'user-1',
+    }))
+    expect(update).toHaveBeenCalledTimes(4)
+  })
+
   it('directly crops the uploaded original at version 5', async () => {
     const crop = vi.fn(async () => Array.from({ length: 6 }, (_, cellIndex) => ({
       cellIndex,
@@ -601,12 +648,12 @@ describe('six-grid crop atomic persistence', () => {
     })
 
     expect(crop).toHaveBeenCalledWith(expect.objectContaining({ sourceMediaId: 'media-uploaded' }))
-    expect(lockStoryboard).toHaveBeenCalledWith({
+    expect(lockStoryboard).toHaveBeenCalledWith(expect.objectContaining({
       storyboardId: 'storyboard-1',
       sourceMediaId: 'media-uploaded',
       expectedSheetArtifactVersion: 5,
       processingOrder: 'crop_then_panel_upscale',
-    })
+    }))
   })
 
   it('crops the newly upscaled uploaded sheet instead of its original', async () => {
@@ -646,12 +693,12 @@ describe('six-grid crop atomic persistence', () => {
     })
 
     expect(crop).toHaveBeenCalledWith(expect.objectContaining({ sourceMediaId: 'media-uploaded-upscaled' }))
-    expect(lockStoryboard).toHaveBeenCalledWith({
+    expect(lockStoryboard).toHaveBeenCalledWith(expect.objectContaining({
       storyboardId: 'storyboard-1',
       sourceMediaId: 'media-uploaded-upscaled',
       expectedSheetArtifactVersion: 6,
       processingOrder: 'sheet_upscale_then_crop',
-    })
+    }))
   })
 
   it('rejects a stale crop after upload advances to version 5 and replaces the source', async () => {

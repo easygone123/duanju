@@ -44,7 +44,7 @@ const snapshotSchema = z.object({
   gridSpec: gridSpecSchema.optional(),
   processingOrder: z.enum(['sheet_upscale_then_crop', 'crop_then_panel_upscale']),
   expectedSheetArtifactVersion: z.number().int().nonnegative(),
-  cropRects: z.array(z.object({ cellIndex: z.number().int().min(0).max(5), normalizedCropRect: rectSchema }).strict()).length(6).optional(),
+  cropRects: z.array(z.object({ cellIndex: z.number().int().min(0).max(5), normalizedCropRect: rectSchema }).strict()).min(1).max(6).optional(),
   promptSnapshot: z.string(), modelSnapshot: z.string().min(1), optionsSnapshot: z.record(z.unknown()),
   imageModel: z.string().min(1).optional(), generationOptions: z.record(z.unknown()).optional(),
   comfyWorkflowVersionId: z.string().min(1).optional(), comfyModelSnapshotVersion: z.literal(1).optional(),
@@ -101,7 +101,11 @@ export function parseSixGridImageTaskSnapshot(value: unknown): ParsedGridImageTa
   const legacyGridSpecSnapshot = !parsed.gridSpec
   const gridSpec = normalizeGridSpec(parsed)
   const indexes = parsed.cropRects?.map((item) => item.cellIndex)
-  if (indexes && new Set(indexes).size !== 6) throw new Error('SIX_GRID_CROP_INDEXES_INVALID')
+  if (parsed.operation === 'crop' && indexes && (indexes.length !== gridSpec.panelCount
+    || new Set(indexes).size !== gridSpec.panelCount
+    || indexes.some((index) => index < 0 || index >= gridSpec.panelCount))) {
+    throw new Error('SIX_GRID_CROP_INDEXES_INVALID')
+  }
   if (parsed.operation !== 'generate' && (!parsed.sourceMediaId || !parsed.sourceChecksum || !parsed.sourceVersion)) {
     throw new Error('SIX_GRID_SOURCE_SNAPSHOT_REQUIRED')
   }

@@ -4,11 +4,17 @@ import {
   SIX_GRID_UPLOAD_MAX_BYTES,
   SIX_GRID_UPLOAD_RATIO_TOLERANCE,
   SixGridUploadError,
+  expectedGridSheetRatio,
   expectedSixGridSheetRatio,
+  isGridSheetRatioAllowed,
   isSixGridSheetRatioAllowed,
   sheetRatio,
 } from '@/lib/novel-promotion/six-grid/upload-contract'
-import { validateAndNormalizeSixGridUpload } from '@/lib/novel-promotion/six-grid/upload-validation'
+import {
+  validateAndNormalizeGridUpload,
+  validateAndNormalizeSixGridUpload,
+} from '@/lib/novel-promotion/six-grid/upload-validation'
+import { resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 async function imageFixture(
   format: 'png' | 'jpeg' | 'webp' | 'gif',
@@ -77,6 +83,47 @@ describe('six-grid upload contract', () => {
         expect.objectContaining({ code: 'SIX_GRID_UPLOAD_IMAGE_INVALID' }),
       )
     }
+  })
+})
+
+describe('configurable grid upload contract', () => {
+  it.each([
+    { mode: 'four_grid' as const, cellRatio: '16:9' as const, expected: 16 / 9 },
+    { mode: 'four_grid' as const, cellRatio: '9:16' as const, expected: 9 / 16 },
+    { mode: 'six_grid' as const, cellRatio: '16:9' as const, expected: 8 / 3 },
+    { mode: 'six_grid' as const, cellRatio: '9:16' as const, expected: 27 / 32 },
+  ])('uses $mode $cellRatio canonical sheet ratio', ({ mode, cellRatio, expected }) => {
+    const spec = resolveStoryboardGridSpec(mode, cellRatio)
+    expect(expectedGridSheetRatio(spec)).toBe(expected)
+    expect(isGridSheetRatioAllowed(expected, spec)).toBe(true)
+  })
+
+  it.each([
+    { ratio: '16:9' as const, width: 1600, height: 900 },
+    { ratio: '9:16' as const, width: 900, height: 1600 },
+  ])('accepts a four-grid $ratio full sheet', async ({ ratio, width, height }) => {
+    const result = await validateAndNormalizeGridUpload(
+      await imageFixture('png', width, height),
+      resolveStoryboardGridSpec('four_grid', ratio),
+    )
+    expect(result).toMatchObject({ width, height, mimeType: 'image/webp' })
+  })
+
+  it('rejects a mismatched four-grid sheet with mode and expected ratio context', async () => {
+    const error = await captureUploadError(async () => validateAndNormalizeGridUpload(
+      await imageFixture('png', 1600, 900),
+      resolveStoryboardGridSpec('four_grid', '9:16'),
+    ))
+    expect(error).toMatchObject({
+      code: 'SIX_GRID_UPLOAD_RATIO_INVALID',
+      details: {
+        width: 1600,
+        height: 900,
+        actualRatio: 16 / 9,
+        expectedRatio: 9 / 16,
+        mode: 'four_grid',
+      },
+    })
   })
 })
 

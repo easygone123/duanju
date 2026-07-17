@@ -4,7 +4,7 @@ import type { NormalizedCropRect, SixGridProcessingOrder } from './contracts'
 import { buildSixGridTaskDedupeKey, type SixGridImageTaskSnapshot } from '@/lib/workers/handlers/storyboard-sheet-task-handler'
 import { validateWorkflowContract } from '@/lib/comfyui/workflow-schema'
 import type { ComfyInputBinding, ComfyOutputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
-import { resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
+import { resolveStoryboardGridSpec, type StoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 function invalid(code: string, field?: string): never {
   throw new ApiError('INVALID_PARAMS', { code, ...(field ? { field } : {}) })
@@ -98,18 +98,33 @@ async function loadOwnedPublishedTestedWorkflow(input: {
   return { workflow, version }
 }
 
-export function defaultCropRects(): Array<{ cellIndex: number; normalizedCropRect: NormalizedCropRect }> {
-  return Array.from({ length: 6 }, (_, cellIndex) => ({
+export function defaultGridCropRects(
+  gridSpec: StoryboardGridSpec,
+): Array<{ cellIndex: number; normalizedCropRect: NormalizedCropRect }> {
+  return Array.from({ length: gridSpec.panelCount }, (_, cellIndex) => ({
     cellIndex,
-    normalizedCropRect: { x: (cellIndex % 3) / 3, y: Math.floor(cellIndex / 3) / 2, width: 1 / 3, height: 1 / 2 },
+    normalizedCropRect: {
+      x: (cellIndex % gridSpec.columns) / gridSpec.columns,
+      y: Math.floor(cellIndex / gridSpec.columns) / gridSpec.rows,
+      width: 1 / gridSpec.columns,
+      height: 1 / gridSpec.rows,
+    },
   }))
 }
 
-export function sourceForCrop(storyboard: Awaited<ReturnType<typeof loadOwnedSixGrid>>) {
+export function defaultCropRects(): Array<{ cellIndex: number; normalizedCropRect: NormalizedCropRect }> {
+  return defaultGridCropRects(resolveStoryboardGridSpec('six_grid', '16:9'))
+}
+
+export function sourceForGridCrop(storyboard: Awaited<ReturnType<typeof loadOwnedGridStoryboard>>) {
   const order = storyboard.sixGridProcessingOrder as SixGridProcessingOrder
   const media = order === 'sheet_upscale_then_crop' ? storyboard.upscaledSheetImageMedia : storyboard.sheetImageMedia
   if (!media) invalid(order === 'sheet_upscale_then_crop' ? 'UPSCALED_SHEET_REQUIRED' : 'SHEET_IMAGE_REQUIRED')
   return { order, media }
+}
+
+export function sourceForCrop(storyboard: Awaited<ReturnType<typeof loadOwnedSixGrid>>) {
+  return sourceForGridCrop(storyboard)
 }
 
 export function finalizeSnapshot(snapshot: SixGridImageTaskSnapshot) {

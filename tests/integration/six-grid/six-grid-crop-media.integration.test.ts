@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { pixelRectToNormalized } from '@/lib/novel-promotion/six-grid/crop-geometry'
-import { cropSixGridSheet, type SixGridCropStorage } from '@/lib/novel-promotion/six-grid/crop-service'
+import { cropGridSheet, cropSixGridSheet, type SixGridCropStorage } from '@/lib/novel-promotion/six-grid/crop-service'
+import { resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 import { stablePublicIdFromStorageKey } from '@/lib/media/hash'
 import { resetSystemState } from '../../helpers/db-reset'
 import {
@@ -57,7 +58,7 @@ async function createKnownSheet(width = 301, height = 201) {
   return await sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer()
 }
 
-async function seedOwnedSheet(storage: TestStorage) {
+async function seedOwnedSheet(storage: TestStorage, layoutMode: 'four_grid' | 'six_grid' = 'six_grid') {
   const user = await createFixtureUser()
   const project = await createFixtureProject(user.id)
   const novelProject = await createFixtureNovelProject(project.id)
@@ -84,9 +85,9 @@ async function seedOwnedSheet(storage: TestStorage) {
     data: {
       episodeId: episode.id,
       clipId: clip.id,
-      layoutMode: 'six_grid',
+      layoutMode,
       groupSequence: 1,
-      panelCount: 6,
+      panelCount: layoutMode === 'four_grid' ? 4 : 6,
       sheetImageMediaId: media.id,
       sheetImageUrl: `/m/${media.publicId}`,
     },
@@ -173,6 +174,38 @@ describe('six-grid crop artifact service', () => {
     const repeated = await cropSixGridSheet(cropInput(fixture), { storage })
     expect(repeated.map((item) => item.mediaId)).toEqual(outputs.map((item) => item.mediaId))
     expect(await prisma.mediaObject.count()).toBe(7)
+  })
+
+  it('stores four exact crops only for the owned four-grid storyboard/version lineage', async () => {
+    const storage = new TestStorage()
+    const fixture = await seedOwnedSheet(storage, 'four_grid')
+    const gridSpec = resolveStoryboardGridSpec('four_grid', '16:9')
+
+    const outputs = await cropGridSheet({
+      userId: fixture.user.id,
+      projectId: fixture.project.id,
+      storyboardId: fixture.storyboard.id,
+      sourceMediaId: fixture.media.id,
+      expectedSheetArtifactVersion: fixture.storyboard.sheetArtifactVersion,
+      cellAspectRatio: '16:9',
+      gridSpec,
+    }, { storage })
+
+    expect(outputs).toHaveLength(4)
+    expect(outputs.map((output) => output.cellIndex)).toEqual([0, 1, 2, 3])
+    expect(outputs.reduce((area, output) => area + output.pixelRect.width * output.pixelRect.height, 0))
+      .toBe(301 * 201)
+    expect(await prisma.mediaObject.count()).toBe(5)
+
+    await expect(cropGridSheet({
+      userId: fixture.user.id,
+      projectId: fixture.project.id,
+      storyboardId: fixture.storyboard.id,
+      sourceMediaId: fixture.media.id,
+      expectedSheetArtifactVersion: fixture.storyboard.sheetArtifactVersion + 1,
+      cellAspectRatio: '16:9',
+      gridSpec,
+    }, { storage })).rejects.toThrow('SIX_GRID_SOURCE_NOT_FOUND_OR_FORBIDDEN')
   })
 
   it('directly crops the uploaded original sheet and records that media as the source', async () => {

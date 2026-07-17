@@ -109,6 +109,34 @@ describe('grid storyboard immutable sheet task', () => {
     expect(buildSixGridTaskDedupeKey(four)).not.toBe(buildSixGridTaskDedupeKey(six))
   })
 
+  it('parses exactly four unique four-grid crop rectangles', () => {
+    const cropRects = Array.from({ length: 4 }, (_, cellIndex) => ({
+      cellIndex,
+      normalizedCropRect: {
+        x: (cellIndex % 2) / 2,
+        y: Math.floor(cellIndex / 2) / 2,
+        width: 0.5,
+        height: 0.5,
+      },
+    }))
+    expect(parseSixGridImageTaskSnapshot(task({
+      operation: 'crop',
+      sourceMediaId: 'sheet-1',
+      sourceChecksum: 'sha-1',
+      sourceVersion: 'v1',
+      gridSpec: FOUR_GRID_SPEC,
+      cropRects,
+    })).cropRects).toEqual(cropRects)
+    expect(() => parseSixGridImageTaskSnapshot(task({
+      operation: 'crop',
+      sourceMediaId: 'sheet-1',
+      sourceChecksum: 'sha-1',
+      sourceVersion: 'v1',
+      gridSpec: FOUR_GRID_SPEC,
+      cropRects: [...cropRects, { ...cropRects[3]!, cellIndex: 4 }],
+    }))).toThrow('SIX_GRID_CROP_INDEXES_INVALID')
+  })
+
   it.each([
     ['16:9', FOUR_GRID_SPEC],
     ['9:16', { ...FOUR_GRID_SPEC, cellAspectRatio: '9:16' as const, sheetAspectRatio: '9:16' as const }],

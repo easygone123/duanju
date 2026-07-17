@@ -230,7 +230,7 @@ class InMemorySixGridUploadStore implements SixGridUploadStore {
           && storyboard.episodeId === identity.episodeId
           && storyboard.projectId === identity.projectId
           && storyboard.userId === identity.userId
-          && storyboard.layoutMode === 'six_grid'
+          && storyboard.layoutMode === (identity.gridSpec?.mode ?? 'six_grid')
       },
       findActiveTask: async (args) => {
         this.lastAvailabilityQuery = structuredClone(args)
@@ -243,7 +243,7 @@ class InMemorySixGridUploadStore implements SixGridUploadStore {
           && storyboard.episodeId === replacement.episodeId
           && storyboard.projectId === replacement.projectId
           && storyboard.userId === replacement.userId
-          && storyboard.layoutMode === 'six_grid'
+          && storyboard.layoutMode === (replacement.gridSpec?.mode ?? 'six_grid')
           && storyboard.sheetArtifactVersion === replacement.expectedSheetArtifactVersion
         if (!matches) return { count: 0 }
         this.storyboardWriteCount += 1
@@ -350,6 +350,26 @@ describe('atomic six-grid sheet replacement', () => {
       'storyboard-lock',
       'availability',
     ])
+  })
+
+  it('atomically replaces a four-grid sheet and clears exactly four derived panels', async () => {
+    const state = createState(4)
+    state.storyboard.layoutMode = 'four_grid'
+    const store = new InMemorySixGridUploadStore(state)
+
+    await expect(replaceSixGridSheet({
+      ...input,
+      gridSpec: {
+        mode: 'four_grid', columns: 2, rows: 2, panelCount: 4,
+        cellAspectRatio: '16:9', sheetAspectRatio: '16:9',
+      },
+    }, store)).resolves.toEqual({
+      mediaId: input.media.id,
+      url: input.media.url,
+      sheetArtifactVersion: 5,
+    })
+    expect(store.snapshot().panels).toHaveLength(4)
+    expect(store.snapshot().panels.every((panel) => panel.imageMediaId === null)).toBe(true)
   })
 
   it('preserves storyboard planning snapshots and panel content, video, planning, and ordering data', async () => {

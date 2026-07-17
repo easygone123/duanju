@@ -6,6 +6,7 @@ import type { TaskJobData } from '@/lib/task/types'
 import { buildSixGridTaskDedupeKey, parseSixGridImageTaskSnapshot, sourceMatchesSnapshot, type SixGridImageTaskSnapshot } from './storyboard-sheet-task-handler'
 import { getObjectBuffer } from '@/lib/storage'
 import { assertTaskActive } from '@/lib/workers/utils'
+import { resolveStoryboardGridSpec, type GridStoryboardMode, type StoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 type CropArtifact = Pick<SixGridCropArtifact, 'cellIndex' | 'mediaId' | 'url' | 'normalizedCropRect'> & { lineage: unknown }
 type CurrentCropPanel = {
@@ -21,6 +22,10 @@ type CropTransactionClient = {
     sourceMediaId: string
     expectedSheetArtifactVersion: number
     processingOrder: SixGridImageTaskSnapshot['processingOrder']
+    mode?: GridStoryboardMode
+    userId?: string
+    projectId?: string
+    episodeId?: string
   }) => Promise<boolean>
   novelPromotionPanel: {
     findMany: (args: unknown) => Promise<CurrentCropPanel[]>
@@ -35,9 +40,16 @@ export async function commitSixGridCropBatch(input: {
   expectedSheetArtifactVersion: number
   processingOrder: SixGridImageTaskSnapshot['processingOrder']
   taskLineage: string
+  gridSpec?: StoryboardGridSpec
+  userId?: string
+  projectId?: string
+  episodeId?: string
   artifacts: CropArtifact[]
 }, dependencies: { transaction?: Transaction } = {}) {
-  if (input.artifacts.length !== 6 || new Set(input.artifacts.map((item) => item.cellIndex)).size !== 6) {
+  const gridSpec = input.gridSpec ?? resolveStoryboardGridSpec('six_grid', '16:9')
+  if (input.artifacts.length !== gridSpec.panelCount
+    || new Set(input.artifacts.map((item) => item.cellIndex)).size !== gridSpec.panelCount
+    || input.artifacts.some((item) => item.cellIndex < 0 || item.cellIndex >= gridSpec.panelCount)) {
     throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
   }
   const runTransaction = dependencies.transaction ?? defaultCropTransaction
@@ -47,13 +59,17 @@ export async function commitSixGridCropBatch(input: {
       sourceMediaId: input.sourceMediaId,
       expectedSheetArtifactVersion: input.expectedSheetArtifactVersion,
       processingOrder: input.processingOrder,
+      mode: gridSpec.mode,
+      userId: input.userId,
+      projectId: input.projectId,
+      episodeId: input.episodeId,
     })
     if (!locked) throw new Error('SIX_GRID_SOURCE_STALE')
     const currentPanels = await tx.novelPromotionPanel.findMany({
       where: { storyboardId: input.storyboardId },
       select: { id: true, gridCellIndex: true, imageMediaId: true, imageUrl: true },
     })
-    if (currentPanels.length !== 6) throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
+    if (currentPanels.length !== gridSpec.panelCount) throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
     const currentByCell = new Map(currentPanels.map((panel) => [panel.gridCellIndex, panel]))
     for (const artifact of [...input.artifacts].sort((a, b) => a.cellIndex - b.cellIndex)) {
       const previous = currentByCell.get(artifact.cellIndex)
@@ -81,6 +97,31 @@ export async function commitSixGridCropBatch(input: {
 const defaultCropTransaction: Transaction = async (callback) => prisma.$transaction(async (tx) => {
   await callback({
     lockStoryboard: async (input) => {
+      if (input.userId && input.projectId && input.episodeId && input.mode) {
+        const sourceColumn = input.processingOrder === 'sheet_upscale_then_crop'
+          ? Prisma.sql`storyboard.upscaledSheetImageMediaId`
+          : Prisma.sql`storyboard.sheetImageMediaId`
+        const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT storyboard.id
+          FROM novel_promotion_storyboards AS storyboard
+          INNER JOIN novel_promotion_episodes AS episode
+            ON episode.id = storyboard.episodeId
+          INNER JOIN novel_promotion_projects AS promotion
+            ON promotion.id = episode.novelPromotionProjectId
+          INNER JOIN projects AS project
+            ON project.id = promotion.projectId
+          WHERE storyboard.id = ${input.storyboardId}
+            AND storyboard.episodeId = ${input.episodeId}
+            AND storyboard.layoutMode = ${input.mode}
+            AND storyboard.sheetArtifactVersion = ${input.expectedSheetArtifactVersion}
+            AND ${sourceColumn} = ${input.sourceMediaId}
+            AND project.id = ${input.projectId}
+            AND project.userId = ${input.userId}
+          LIMIT 1
+          FOR UPDATE
+        `)
+        return rows.length === 1
+      }
       const rows = input.processingOrder === 'sheet_upscale_then_crop'
         ? await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
             SELECT id
@@ -128,8 +169,11 @@ export async function executeSixGridCrop(snapshotValue: unknown, dependencies: {
   const artifacts = await crop({
     userId: dependencies.userId,
     projectId: snapshot.projectId,
+    storyboardId: snapshot.storyboardId,
     sourceMediaId: snapshot.sourceMediaId,
+    expectedSheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
     cellAspectRatio: snapshot.cellAspectRatio,
+    gridSpec: snapshot.gridSpec,
     manualOverrides: snapshot.cropRects,
   })
   await dependencies.assertActive?.('six_grid_crop_after_crop')
@@ -139,6 +183,10 @@ export async function executeSixGridCrop(snapshotValue: unknown, dependencies: {
     expectedSheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
     processingOrder: snapshot.processingOrder,
     taskLineage: buildSixGridTaskDedupeKey(snapshot),
+    gridSpec: snapshot.gridSpec,
+    userId: dependencies.userId,
+    projectId: snapshot.projectId,
+    episodeId: snapshot.episodeId,
     artifacts,
   }, { transaction: dependencies.transaction })
   return { storyboardId: snapshot.storyboardId, mediaIds: artifacts.map((item) => item.mediaId) }
@@ -158,8 +206,11 @@ export async function handleStoryboardCropTask(job: Job<TaskJobData>) {
     artifacts = await cropSixGridSheet({
       userId: job.data.userId,
       projectId: job.data.projectId,
+      storyboardId: snapshot.storyboardId,
       sourceMediaId: snapshot.sourceMediaId,
+      expectedSheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
       cellAspectRatio: snapshot.cellAspectRatio,
+      gridSpec: snapshot.gridSpec,
       manualOverrides: snapshot.cropRects,
     })
   } catch (error) {
@@ -173,6 +224,10 @@ export async function handleStoryboardCropTask(job: Job<TaskJobData>) {
     expectedSheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
     processingOrder: snapshot.processingOrder,
     taskLineage: buildSixGridTaskDedupeKey(snapshot),
+    gridSpec: snapshot.gridSpec,
+    userId: job.data.userId,
+    projectId: snapshot.projectId,
+    episodeId: snapshot.episodeId,
     artifacts,
   })
   return { storyboardId: snapshot.storyboardId, mediaIds: artifacts.map((item) => item.mediaId) }
@@ -181,11 +236,27 @@ export async function handleStoryboardCropTask(job: Job<TaskJobData>) {
 async function reconcileCommittedCrop(snapshot: SixGridImageTaskSnapshot) {
   const taskLineage = buildSixGridTaskDedupeKey(snapshot)
   const panels = await prisma.novelPromotionPanel.findMany({
-    where: { storyboardId: snapshot.storyboardId },
+    where: {
+      storyboardId: snapshot.storyboardId,
+      storyboard: {
+        is: {
+          id: snapshot.storyboardId,
+          episodeId: snapshot.episodeId,
+          layoutMode: snapshot.gridSpec?.mode ?? 'six_grid',
+          sheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
+          episode: {
+            novelPromotionProject: {
+              projectId: snapshot.projectId,
+            },
+          },
+        },
+      },
+    },
     select: { gridCellIndex: true, croppedImageMediaId: true, imageMediaId: true, imageLineage: true, croppedImageMedia: true },
     orderBy: { gridCellIndex: 'asc' },
   })
-  if (panels.length !== 6 || panels.some((panel) => !panel.croppedImageMedia?.storageKey
+  const panelCount = snapshot.gridSpec?.panelCount ?? 6
+  if (panels.length !== panelCount || panels.some((panel) => !panel.croppedImageMedia?.storageKey
     || panel.imageMediaId !== panel.croppedImageMediaId || !panel.imageLineage?.includes(taskLineage))) return null
   for (const panel of panels) await getObjectBuffer(panel.croppedImageMedia!.storageKey)
   return panels.map((panel) => panel.croppedImageMediaId!)

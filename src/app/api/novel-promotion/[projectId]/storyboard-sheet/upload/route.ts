@@ -6,7 +6,8 @@ import { apiHandler, ApiError, getRequestId } from '@/lib/api-errors'
 import { createScopedLogger } from '@/lib/logging/core'
 import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
 import type { SixGridCellAspectRatio } from '@/lib/novel-promotion/six-grid/contracts'
-import { loadOwnedSixGrid } from '@/lib/novel-promotion/six-grid/image-task-route'
+import { resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
+import { loadOwnedGridStoryboard } from '@/lib/novel-promotion/six-grid/image-task-route'
 import {
   SIX_GRID_UPLOAD_MAX_BYTES,
   SixGridUploadError,
@@ -15,7 +16,10 @@ import {
   assertSixGridUploadAvailable,
   replaceSixGridSheet,
 } from '@/lib/novel-promotion/six-grid/upload-service'
-import { validateAndNormalizeSixGridUpload } from '@/lib/novel-promotion/six-grid/upload-validation'
+import {
+  validateAndNormalizeGridUpload,
+  validateAndNormalizeSixGridUpload,
+} from '@/lib/novel-promotion/six-grid/upload-validation'
 import { uploadObject } from '@/lib/storage'
 
 // Allows multipart field names, boundaries, and metadata without weakening the
@@ -182,14 +186,21 @@ export const POST = apiHandler(async (
       episodeId: payload.episodeId,
       storyboardId: payload.storyboardId,
     }
-    const storyboard = await loadOwnedSixGrid(identity)
+    const storyboard = await loadOwnedGridStoryboard(identity)
     await assertSixGridUploadAvailable(identity)
 
     const source = Buffer.from(await payload.file.arrayBuffer())
-    const normalized = await validateAndNormalizeSixGridUpload(
-      source,
-      storyboard.sixGridCellAspectRatio as SixGridCellAspectRatio,
-    )
+    const gridSpec = storyboard.gridSpec
+      ?? { version: 1 as const, ...resolveStoryboardGridSpec(
+        storyboard.layoutMode,
+        storyboard.sixGridCellAspectRatio,
+      ) }
+    const normalized = gridSpec.mode === 'six_grid'
+      ? await validateAndNormalizeSixGridUpload(
+          source,
+          storyboard.sixGridCellAspectRatio as SixGridCellAspectRatio,
+        )
+      : await validateAndNormalizeGridUpload(source, gridSpec)
 
     const key = scopedUploadKey(identity.userId, projectId)
     await uploadObject(normalized.bytes, key, 1, 'image/webp')
@@ -201,6 +212,7 @@ export const POST = apiHandler(async (
     })
     const replacement = await replaceSixGridSheet({
       ...identity,
+      ...(gridSpec.mode === 'four_grid' ? { gridSpec } : {}),
       expectedSheetArtifactVersion: payload.expectedSheetArtifactVersion,
       media: { id: media.id, url: media.url },
     })

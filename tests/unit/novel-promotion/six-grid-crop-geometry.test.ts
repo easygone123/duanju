@@ -60,6 +60,17 @@ describe('six-grid crop geometry', () => {
     }
   })
 
+  it('preserves legacy minimum-dimension validation for conversion helpers', () => {
+    expect(() => pixelRectToNormalized(
+      { x: 0, y: 0, width: 2, height: 2 },
+      { width: 2, height: 2 },
+    )).toThrow('SIX_GRID_DIMENSIONS_TOO_SMALL')
+    expect(() => normalizedRectToPixel(
+      { x: 0, y: 0, width: 1, height: 1 },
+      { width: 2, height: 2 },
+    )).toThrow('SIX_GRID_DIMENSIONS_TOO_SMALL')
+  })
+
   it('accepts a locked 16:9 manual crop wholly inside its assigned cell', () => {
     const dimensions = { width: 1200, height: 800 }
     const result = validateManualSixGridCrop({
