@@ -191,15 +191,19 @@ class InMemorySixGridUploadStore implements SixGridUploadStore {
   }
   lastAvailabilityQuery: unknown = null
   transactionCount = 0
+  storyboardWriteCount = 0
+  panelWriteCount = 0
   readonly events: string[] = []
+  private readonly onStoryboardLocked?: (state: FixtureState) => void
 
   constructor(state: FixtureState, readBackOverride?: {
     sheetImageMediaId: string | null
     sheetImageUrl: string | null
     sheetArtifactVersion: number
-  }) {
+  }, onStoryboardLocked?: (state: FixtureState) => void) {
     this.state = structuredClone(state)
     this.readBackOverride = readBackOverride
+    this.onStoryboardLocked = onStoryboardLocked
   }
 
   snapshot(): FixtureState {
@@ -209,16 +213,7 @@ class InMemorySixGridUploadStore implements SixGridUploadStore {
   async findActiveTask(args: Parameters<SixGridUploadStore['findActiveTask']>[0]) {
     this.lastAvailabilityQuery = structuredClone(args)
     this.events.push('availability')
-    const where = args.where
-    return this.state.tasks.find((task) => (
-      task.userId === where.userId
-      && task.projectId === where.projectId
-      && task.episodeId === where.episodeId
-      && task.targetType === where.targetType
-      && task.targetId === where.targetId
-      && where.type.in.includes(task.type)
-      && where.status.in.includes(task.status)
-    )) ?? null
+    return findActiveTask(this.state, args)
   }
 
   async transaction<T>(operation: (transaction: SixGridUploadTransaction) => Promise<T>): Promise<T> {
@@ -226,6 +221,22 @@ class InMemorySixGridUploadStore implements SixGridUploadStore {
     this.events.push('transaction')
     const draft = structuredClone(this.state)
     const transaction: SixGridUploadTransaction = {
+      lockOwnedStoryboard: async (identity) => {
+        this.events.push('storyboard-lock')
+        this.onStoryboardLocked?.(this.state)
+        this.onStoryboardLocked?.(draft)
+        const storyboard = draft.storyboard
+        return storyboard.id === identity.storyboardId
+          && storyboard.episodeId === identity.episodeId
+          && storyboard.projectId === identity.projectId
+          && storyboard.userId === identity.userId
+          && storyboard.layoutMode === 'six_grid'
+      },
+      findActiveTask: async (args) => {
+        this.lastAvailabilityQuery = structuredClone(args)
+        this.events.push('availability')
+        return findActiveTask(draft, args)
+      },
       replaceOwnedStoryboard: async (replacement) => {
         const storyboard = draft.storyboard
         const matches = storyboard.id === replacement.storyboardId
@@ -235,6 +246,7 @@ class InMemorySixGridUploadStore implements SixGridUploadStore {
           && storyboard.layoutMode === 'six_grid'
           && storyboard.sheetArtifactVersion === replacement.expectedSheetArtifactVersion
         if (!matches) return { count: 0 }
+        this.storyboardWriteCount += 1
         Object.assign(storyboard, {
           sheetImageMediaId: replacement.mediaId,
           sheetImageUrl: replacement.url,
@@ -248,6 +260,7 @@ class InMemorySixGridUploadStore implements SixGridUploadStore {
       },
       clearStoryboardPanels: async (storyboardId) => {
         const panels = draft.panels.filter((panel) => panel.storyboardId === storyboardId)
+        this.panelWriteCount += panels.length
         for (const panel of panels) Object.assign(panel, clearedPanelImageFields)
         return { count: panels.length }
       },
@@ -266,6 +279,19 @@ class InMemorySixGridUploadStore implements SixGridUploadStore {
     this.state = draft
     return result
   }
+}
+
+function findActiveTask(state: FixtureState, args: Parameters<SixGridUploadStore['findActiveTask']>[0]) {
+  const where = args.where
+  return state.tasks.find((task) => (
+    task.userId === where.userId
+    && task.projectId === where.projectId
+    && task.episodeId === where.episodeId
+    && task.targetType === where.targetType
+    && task.targetId === where.targetId
+    && where.type.in.includes(task.type)
+    && where.status.in.includes(task.status)
+  )) ?? null
 }
 
 function activeTask(type: string, status: string): TaskFixture {
@@ -318,7 +344,12 @@ describe('atomic six-grid sheet replacement', () => {
     })
     expect(state.panels).toHaveLength(6)
     for (const panel of state.panels) expect(panel).toMatchObject(clearedPanelImageFields)
-    expect(store.events).toEqual(['availability', 'transaction'])
+    expect(store.events).toEqual([
+      'availability',
+      'transaction',
+      'storyboard-lock',
+      'availability',
+    ])
   })
 
   it('preserves storyboard planning snapshots and panel content, video, planning, and ordering data', async () => {
@@ -499,6 +530,21 @@ describe('atomic six-grid sheet replacement', () => {
     expectConflict(error, 'SIX_GRID_UPLOAD_BUSY')
     expect(store.transactionCount).toBe(0)
     expect(store.snapshot()).toEqual(before)
+  })
+
+  it('rejects a task that appears after the preflight check but before replacement writes', async () => {
+    const store = new InMemorySixGridUploadStore(createState(), undefined, (state) => {
+      state.tasks.push(activeTask(TASK_TYPE.STORYBOARD_SHEET_GENERATE, TASK_STATUS.QUEUED))
+    })
+    const before = store.snapshot()
+
+    const error = await captureError(() => replaceSixGridSheet(input, store))
+
+    expectConflict(error, 'SIX_GRID_UPLOAD_BUSY')
+    expect(store.storyboardWriteCount).toBe(0)
+    expect(store.panelWriteCount).toBe(0)
+    expect(store.snapshot().storyboard).toEqual(before.storyboard)
+    expect(store.snapshot().panels).toEqual(before.panels)
   })
 
   it('does not block replacement for a terminal sheet task', async () => {

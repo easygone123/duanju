@@ -37,7 +37,12 @@ export type SixGridStoryboardReplacement = SixGridUploadIdentity & {
   url: string
 }
 
-export interface SixGridUploadTransaction {
+type SixGridUploadTaskReader = {
+  findActiveTask(input: SixGridUploadTaskQuery): Promise<{ id: string } | null>
+}
+
+export interface SixGridUploadTransaction extends SixGridUploadTaskReader {
+  lockOwnedStoryboard(input: SixGridUploadIdentity): Promise<boolean>
   replaceOwnedStoryboard(input: SixGridStoryboardReplacement): Promise<{ count: number }>
   clearStoryboardPanels(storyboardId: string): Promise<{ count: number }>
   readStoryboardSheet(storyboardId: string): Promise<{
@@ -47,14 +52,34 @@ export interface SixGridUploadTransaction {
   } | null>
 }
 
-export interface SixGridUploadStore {
-  findActiveTask(input: SixGridUploadTaskQuery): Promise<{ id: string } | null>
+export interface SixGridUploadStore extends SixGridUploadTaskReader {
   transaction<T>(operation: (transaction: SixGridUploadTransaction) => Promise<T>): Promise<T>
 }
 
 const defaultSixGridUploadStore: SixGridUploadStore = {
   findActiveTask: (input) => prisma.task.findFirst(input),
   transaction: (operation) => prisma.$transaction((tx) => operation({
+    lockOwnedStoryboard: async (input) => {
+      const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT storyboard.id
+        FROM novel_promotion_storyboards AS storyboard
+        INNER JOIN novel_promotion_episodes AS episode
+          ON episode.id = storyboard.episodeId
+        INNER JOIN novel_promotion_projects AS promotion
+          ON promotion.id = episode.novelPromotionProjectId
+        INNER JOIN projects AS project
+          ON project.id = promotion.projectId
+        WHERE storyboard.id = ${input.storyboardId}
+          AND storyboard.episodeId = ${input.episodeId}
+          AND storyboard.layoutMode = 'six_grid'
+          AND project.id = ${input.projectId}
+          AND project.userId = ${input.userId}
+        LIMIT 1
+        FOR UPDATE
+      `)
+      return rows.length === 1
+    },
+    findActiveTask: (input) => tx.task.findFirst(input),
     replaceOwnedStoryboard: (input) => tx.novelPromotionStoryboard.updateMany({
       where: {
         id: input.storyboardId,
@@ -109,7 +134,7 @@ const defaultSixGridUploadStore: SixGridUploadStore = {
 
 export async function assertSixGridUploadAvailable(
   input: SixGridUploadIdentity,
-  store: SixGridUploadStore = defaultSixGridUploadStore,
+  store: SixGridUploadTaskReader = defaultSixGridUploadStore,
 ): Promise<void> {
   const activeTask = await store.findActiveTask({
     where: {
@@ -139,6 +164,11 @@ export async function replaceSixGridSheet(
   await assertSixGridUploadAvailable(input, store)
   try {
     return await store.transaction(async (transaction) => {
+      if (!await transaction.lockOwnedStoryboard(input)) {
+        throw new ApiError('CONFLICT', { code: 'SIX_GRID_UPLOAD_STALE' })
+      }
+      await assertSixGridUploadAvailable(input, transaction)
+
       const storyboard = await transaction.replaceOwnedStoryboard({
         userId: input.userId,
         projectId: input.projectId,
