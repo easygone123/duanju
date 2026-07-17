@@ -344,6 +344,7 @@ describe('system - six-grid storyboard acceptance', () => {
     expect(resolveStoryboardRunSettings({ project: { videoRatio: '4:3' } })).toEqual({
       storyboardGenerationMode: 'individual',
       sixGridCellAspectRatio: null,
+      gridSpec: null,
       sixGridProcessingOrder: 'crop_then_panel_upscale',
       storyboardUpscaleModel: null,
       dialogueVideoModel: null,
@@ -409,6 +410,7 @@ async function installFakeComfyGeneration(transferFailures = 0) {
       new InMemoryComfyExecution(server.client(), storage, aggregate, telemetry).dependencies(),
     )
     if (result.outcome !== 'completed') throw new Error(`unexpected direct ComfyUI result: ${result.outcome}`)
+    persistComfyStorageObjects(storage)
     return result.primary.url
   }
   let closed = false
@@ -462,6 +464,7 @@ async function installFakeComfyGeneration(transferFailures = 0) {
           )
         }
         if (result.outcome !== 'completed') throw new Error(`unexpected ComfyUI result: ${result.outcome}`)
+        persistComfyStorageObjects(storage)
         await prisma.comfyGenerationRequest.update({
           where: { id: request.id },
           data: {
@@ -484,6 +487,12 @@ async function installFakeComfyGeneration(transferFailures = 0) {
       await pump
       await server.close()
     },
+  }
+}
+
+function persistComfyStorageObjects(storage: InMemoryComfyStorage) {
+  for (const [storageKey, object] of storage.objects) {
+    sixGridRuntime.bytes.set(storageKey, Buffer.from(object.bytes))
   }
 }
 
