@@ -199,6 +199,65 @@ describe('six-grid sheet and panel execution', () => {
     expect(prismaMock.novelPromotionPanel.updateMany).not.toHaveBeenCalled()
   })
 
+  it('rejects a four-grid panel task when its parent storyboard mode or project lineage changed', async () => {
+    const task = snapshot({
+      operation: 'panel_upscale', panelId: 'panel-2', sourceVersion: '2026-07-13T00:00:00.000Z',
+      workflowId: 'workflow-1', workflowVersionId: 'version-1', workflowPurpose: 'upscale',
+      gridSpec: {
+        version: 1, mode: 'four_grid', columns: 2, rows: 2, panelCount: 4,
+        cellAspectRatio: '16:9', sheetAspectRatio: '16:9',
+      },
+    })
+    prismaMock.novelPromotionPanel.findFirst.mockImplementationOnce(async (args: {
+      where?: { storyboard?: { is?: { layoutMode?: string; episodeId?: string; episode?: { novelPromotionProject?: { projectId?: string; project?: { userId?: string } } } } } }
+    }) => {
+      const parent = args?.where?.storyboard?.is
+      if (parent?.layoutMode === 'four_grid'
+        && parent.episodeId === 'episode-1'
+        && parent.episode?.novelPromotionProject?.projectId === 'project-1'
+        && parent.episode.novelPromotionProject.project?.userId === 'user-1') return null
+      return {
+        id: 'panel-2', imageMediaId: 'media-sheet-1', imageUrl: '/m/crop-2',
+        upscaledImageMedia: null, imageLineage: null,
+        imageMedia: { id: 'media-sheet-1', storageKey: 'owned/crop-2.png', sha256: 'sha-1', updatedAt: new Date('2026-07-13T00:00:00.000Z') },
+      }
+    })
+
+    await expect(handleStoryboardPanelUpscaleTask(job(task, TASK_TYPE.STORYBOARD_PANEL_UPSCALE)))
+      .rejects.toThrow('SIX_GRID_SOURCE_STALE')
+
+    expect(generationMock.resolve).not.toHaveBeenCalled()
+    expect(prismaMock.novelPromotionPanel.updateMany).not.toHaveBeenCalled()
+  })
+
+  it('revalidates the same grid parent lineage in the final panel upscale CAS', async () => {
+    const task = snapshot({
+      operation: 'panel_upscale', panelId: 'panel-2', sourceVersion: '2026-07-13T00:00:00.000Z',
+      workflowId: 'workflow-1', workflowVersionId: 'version-1', workflowPurpose: 'upscale',
+      gridSpec: {
+        version: 1, mode: 'four_grid', columns: 2, rows: 2, panelCount: 4,
+        cellAspectRatio: '16:9', sheetAspectRatio: '16:9',
+      },
+    })
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce({
+      id: 'panel-2', imageMediaId: 'media-sheet-1', imageUrl: '/m/crop-2', upscaledImageMedia: null, imageLineage: null,
+      imageMedia: { id: 'media-sheet-1', storageKey: 'owned/crop-2.png', sha256: 'sha-1', updatedAt: new Date('2026-07-13T00:00:00.000Z') },
+    })
+    prismaMock.novelPromotionPanel.updateMany.mockImplementationOnce(async (args?: {
+      where?: { storyboard?: { is?: { layoutMode?: string; episodeId?: string; episode?: { novelPromotionProject?: { projectId?: string; project?: { userId?: string } } } } } }
+    }) => {
+      const parent = args?.where?.storyboard?.is
+      return { count: parent?.layoutMode === 'four_grid'
+        && parent.episodeId === 'episode-1'
+        && parent.episode?.novelPromotionProject?.projectId === 'project-1'
+        && parent.episode.novelPromotionProject.project?.userId === 'user-1' ? 0 : 1 }
+    })
+
+    await expect(handleStoryboardPanelUpscaleTask(job(task, TASK_TYPE.STORYBOARD_PANEL_UPSCALE)))
+      .rejects.toThrow('SIX_GRID_SOURCE_STALE')
+    expect(prismaMock.novelPromotionPanel.updateMany).toHaveBeenCalledOnce()
+  })
+
   it('reconciles matching stored bytes without another provider submission', async () => {
     const task = snapshot({ operation: 'generate', sourceMediaId: undefined, sourceChecksum: undefined, sourceVersion: undefined })
     const lineage = buildSixGridTaskDedupeKey(task)

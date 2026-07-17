@@ -241,7 +241,15 @@ export async function handleStoryboardPanelUpscaleTask(job: Job<TaskJobData>) {
   await assertTaskActive(job, 'six_grid_panel_upscale_entry')
   const snapshot = parseSixGridImageTaskSnapshot(job.data.payload)
   if (snapshot.operation !== 'panel_upscale' || !snapshot.panelId) throw new Error('SIX_GRID_PANEL_UPSCALE_SNAPSHOT_INVALID')
-  const panel = await prisma.novelPromotionPanel.findFirst({ where: { id: snapshot.panelId, storyboardId: snapshot.storyboardId }, include: { imageMedia: true, upscaledImageMedia: true } })
+  const parentWhere = panelParentSnapshotWhere(snapshot, job.data.userId)
+  const panel = await prisma.novelPromotionPanel.findFirst({
+    where: {
+      id: snapshot.panelId,
+      storyboardId: snapshot.storyboardId,
+      storyboard: { is: parentWhere },
+    },
+    include: { imageMedia: true, upscaledImageMedia: true },
+  })
   if (!panel) throw new Error('SIX_GRID_SOURCE_STALE')
   const lineage = buildSixGridTaskDedupeKey(snapshot)
   if (panel.upscaledImageMedia?.storageKey && panel.imageLineage?.includes(lineage)) {
@@ -263,7 +271,10 @@ export async function handleStoryboardPanelUpscaleTask(job: Job<TaskJobData>) {
   const advancesCurrent = media.id !== panel.imageMediaId
   await assertTaskActive(job, 'six_grid_panel_upscale_before_persist')
   const updated = await prisma.novelPromotionPanel.updateMany({ where: {
-    id: panel.id, imageMediaId: snapshot.sourceMediaId, imageMedia: { is: sourceSnapshotWhere(snapshot) },
+    id: panel.id,
+    imageMediaId: snapshot.sourceMediaId,
+    imageMedia: { is: sourceSnapshotWhere(snapshot) },
+    storyboard: { is: parentWhere },
   }, data: {
     ...(advancesCurrent ? { previousImageMediaId: panel.imageMediaId, previousImageUrl: panel.imageUrl } : {}),
     upscaledImageMediaId: media.id, upscaledImageUrl: media.url,
@@ -271,6 +282,20 @@ export async function handleStoryboardPanelUpscaleTask(job: Job<TaskJobData>) {
   } })
   if (updated.count !== 1) throw new Error('SIX_GRID_SOURCE_STALE')
   return { panelId: panel.id, mediaId: media.id, reconciled: false }
+}
+
+function panelParentSnapshotWhere(snapshot: ParsedGridImageTaskSnapshot, userId: string) {
+  return {
+    id: snapshot.storyboardId,
+    episodeId: snapshot.episodeId,
+    layoutMode: snapshot.gridSpec.mode,
+    episode: {
+      novelPromotionProject: {
+        projectId: snapshot.projectId,
+        project: { userId },
+      },
+    },
+  }
 }
 
 function sourceSnapshotWhere(snapshot: SixGridImageTaskSnapshot) {
