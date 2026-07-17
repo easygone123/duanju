@@ -106,10 +106,29 @@ function withSixGridErrors<T>(run: () => T): T {
     return run()
   } catch (error) {
     if (error instanceof GridStoryboardValidationError) {
-      throw new SixGridValidationError(mapGridCode(error.code), { ...error.rawContext })
+      throw new SixGridValidationError(
+        mapGridCode(error.code),
+        toLegacySixGridContext(error.code, error.rawContext),
+      )
     }
     throw error
   }
+}
+
+function toLegacySixGridContext(
+  code: GridValidationCode,
+  context: Readonly<Record<string, string | number>>,
+): Record<string, string | number> {
+  const {
+    mode: _mode,
+    expectedPanelCount: _expectedPanelCount,
+    actualPanelCount,
+    ...legacyContext
+  } = context
+  if (code === GRID_REQUIRES_EXACT_PANEL_COUNT && actualPanelCount !== undefined) {
+    return { ...legacyContext, panelCount: actualPanelCount }
+  }
+  return legacyContext
 }
 
 function mapGridCode(code: GridValidationCode): SixGridValidationCode {

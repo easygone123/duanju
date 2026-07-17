@@ -91,6 +91,57 @@ describe('six-grid continuous scene planner', () => {
     ])).toThrow(SIX_GRID_REQUIRES_EXACTLY_SIX_PANELS)
   })
 
+  it('preserves the legacy exact-count rawContext shape', () => {
+    try {
+      validateAndNormalizeSixGridGroups([
+        group({
+          sceneKey: 'room-a',
+          incomingContinuity: 'start',
+          outgoingContinuity: 'end',
+          panelCount: 5,
+        }),
+      ])
+      throw new Error('expected validation to fail')
+    } catch (error) {
+      expect(error).toBeInstanceOf(SixGridValidationError)
+      expect((error as SixGridValidationError).rawContext).toEqual({
+        groupIndex: 0,
+        panelCount: 5,
+      })
+    }
+  })
+
+  it('strips generic-only fields from other legacy six-grid rawContext objects', () => {
+    const invalidNumbering = group({
+      sceneKey: 'room-a',
+      incomingContinuity: 'start',
+      outgoingContinuity: 'end',
+    })
+    invalidNumbering.panels[1].panel_number = 1
+
+    try {
+      validateAndNormalizeSixGridGroups([invalidNumbering])
+      throw new Error('expected validation to fail')
+    } catch (error) {
+      expect(error).toBeInstanceOf(SixGridValidationError)
+      expect((error as SixGridValidationError).rawContext).toEqual({
+        groupIndex: 0,
+        rowIndex: 1,
+      })
+    }
+
+    try {
+      validateSixGridPhotographyRules([1, 2, 3, 4, 5].map(photographyRule))
+      throw new Error('expected validation to fail')
+    } catch (error) {
+      expect(error).toBeInstanceOf(SixGridValidationError)
+      expect((error as SixGridValidationError).rawContext).toEqual({
+        scope: 'photography',
+        rowCount: 5,
+      })
+    }
+  })
+
   it('rejects a group that crosses a hard location boundary', () => {
     const mixedPanels = [
       ...panels('room-a').slice(0, 5),
