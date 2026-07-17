@@ -43,6 +43,8 @@ vi.mock('@/lib/storage', () => ({ uploadObject: uploadObjectMock }))
 vi.mock('@/lib/media/service', () => ({ ensureMediaObjectFromStorageKey: ensureMediaMock }))
 
 const routeFile = 'src/app/api/novel-promotion/[projectId]/storyboard-sheet/upload/route.ts'
+const routeUrl = 'http://localhost/api/novel-promotion/project-1/storyboard-sheet/upload'
+const multipartEnvelopeAllowanceBytes = 256 * 1024
 
 type UploadFile = File & { arrayBuffer: ReturnType<typeof vi.fn> }
 
@@ -78,17 +80,41 @@ function validForm(file: File): FormData {
   })
 }
 
-function makeRequest(form: FormData): {
+function makeRequest(form: FormData, headers?: {
+  contentType?: string | null
+  contentLength?: string | null
+}): {
   request: NextRequest
   parseFormData: ReturnType<typeof vi.fn>
 } {
-  const request = new NextRequest(
-    'http://localhost/api/novel-promotion/project-1/storyboard-sheet/upload',
-    { method: 'POST' },
-  )
+  const requestHeaders = new Headers({
+    'content-type': 'multipart/form-data; boundary=test-boundary',
+    'content-length': '1024',
+  })
+  if (headers?.contentType === null) requestHeaders.delete('content-type')
+  else if (headers?.contentType !== undefined) requestHeaders.set('content-type', headers.contentType)
+  if (headers?.contentLength === null) requestHeaders.delete('content-length')
+  else if (headers?.contentLength !== undefined) requestHeaders.set('content-length', headers.contentLength)
+
+  const request = new NextRequest(routeUrl, { method: 'POST', headers: requestHeaders })
   const parseFormData = vi.fn(async () => form)
   Object.defineProperty(request, 'formData', { value: parseFormData })
   return { request, parseFormData }
+}
+
+async function makeSerializedMultipartRequest(form: FormData): Promise<NextRequest> {
+  const encoded = new Response(form)
+  const body = await encoded.arrayBuffer()
+  const contentType = encoded.headers.get('content-type')
+  if (!contentType) throw new Error('serialized multipart content type missing')
+  return new NextRequest(routeUrl, {
+    method: 'POST',
+    headers: {
+      'content-type': contentType,
+      'content-length': String(body.byteLength),
+    },
+    body,
+  })
 }
 
 async function callUpload(form: FormData): Promise<Response> {
@@ -149,6 +175,71 @@ describe('POST six-grid storyboard sheet upload', () => {
     expect(validateUploadMock).not.toHaveBeenCalled()
     expect(uploadObjectMock).not.toHaveBeenCalled()
     expect(replaceSheetMock).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['missing content type', { contentType: null }, 'body'],
+    ['wrong content type', { contentType: 'application/json' }, 'body'],
+    ['missing multipart boundary', { contentType: 'multipart/form-data' }, 'body'],
+    ['empty multipart boundary', { contentType: 'multipart/form-data; boundary=' }, 'body'],
+    ['missing content length', { contentLength: null }, 'content-length'],
+    ['fractional content length', { contentLength: '12.5' }, 'content-length'],
+    ['negative content length', { contentLength: '-1' }, 'content-length'],
+    ['duplicate content length', { contentLength: '12, 12' }, 'content-length'],
+    ['unsafe content length', { contentLength: '9007199254740992' }, 'content-length'],
+  ] as const)('rejects %s before parsing multipart data', async (_label, headers, field) => {
+    const file = makeFile(Buffer.from('must-not-read'))
+    const { request, parseFormData } = makeRequest(validForm(file), headers)
+    const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-sheet/upload/route')
+
+    const response = await route.POST(request, { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'INVALID_PARAMS',
+        details: { code: 'SIX_GRID_UPLOAD_PAYLOAD_INVALID', field },
+      },
+    })
+    expect(parseFormData).not.toHaveBeenCalled()
+    expect(loadOwnedSixGridMock).not.toHaveBeenCalled()
+    expect(validateUploadMock).not.toHaveBeenCalled()
+    expect(uploadObjectMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an oversized multipart body before formData materializes it', async () => {
+    const file = makeFile(Buffer.from('must-not-read'))
+    const contentLength = SIX_GRID_UPLOAD_MAX_BYTES + multipartEnvelopeAllowanceBytes + 1
+    const { request, parseFormData } = makeRequest(validForm(file), {
+      contentLength: String(contentLength),
+    })
+    const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-sheet/upload/route')
+
+    const response = await route.POST(request, { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({
+      error: { details: { code: 'SIX_GRID_UPLOAD_TOO_LARGE', field: 'content-length' } },
+    })
+    expect(parseFormData).not.toHaveBeenCalled()
+    expect(loadOwnedSixGridMock).not.toHaveBeenCalled()
+    expect(uploadObjectMock).not.toHaveBeenCalled()
+  })
+
+  it('parses an actually serialized multipart NextRequest', async () => {
+    const request = await makeSerializedMultipartRequest(validForm(makeFile(await image('png'))))
+    const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-sheet/upload/route')
+
+    const response = await route.POST(request, { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(loadOwnedSixGridMock).toHaveBeenCalledWith({
+      userId: 'user-1',
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      storyboardId: 'storyboard-1',
+    })
+    expect(validateUploadMock).toHaveBeenCalledWith(expect.any(Buffer), '16:9')
   })
 
   it.each([
@@ -313,6 +404,23 @@ describe('POST six-grid storyboard sheet upload', () => {
         },
       },
     })
+  })
+
+  it.each([
+    ['validator', validateUploadMock],
+    ['storage', uploadObjectMock],
+    ['media service', ensureMediaMock],
+    ['replacement', replaceSheetMock],
+  ])('sanitizes an unknown %s infrastructure error', async (label, boundary) => {
+    const sentinel = `SECRET_${label.replaceAll(' ', '_').toUpperCase()}_/private/path/P2034`
+    boundary.mockRejectedValueOnce(new Error(sentinel))
+
+    const response = await callUpload(validForm(makeFile(await image('png'))))
+    const responseText = await response.text()
+
+    expect(response.status).toBe(500)
+    expect(JSON.parse(responseText)).toMatchObject({ error: { code: 'INTERNAL_ERROR' } })
+    expect(responseText).not.toContain(sentinel)
   })
 
   it('stores normalized bytes under a scoped safe WebP key and returns only public fields', async () => {
