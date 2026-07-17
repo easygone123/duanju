@@ -77,6 +77,38 @@ describe('continuous first/last-frame resolver', () => {
       .toEqual({ mode: 'automatic', sourcePanelId: 'four-2-0' })
   })
 
+  it('links a four-grid group to the next six-grid group in global sequence', () => {
+    const four = fourGridStoryboard({
+      id: 'four-1', groupSequence: 1, sceneKey: 'office', cellIndexes: [3, 0, 2, 1],
+    })
+    const six = sixGridStoryboard({
+      id: 'six-2', groupSequence: 2, sceneKey: 'office',
+      panelIds: ['six-2-0', 'six-2-1', 'six-2-2', 'six-2-3', 'six-2-4', 'six-2-5'],
+    })
+
+    expect(resolveFrameLinkChoices({ panelId: 'four-1-3', storyboards: [six, four] }).lastFrame)
+      .toEqual({ mode: 'automatic', sourcePanelId: 'six-2-0' })
+  })
+
+  it('links every matching-scene successor across a four-six-four grid sequence', () => {
+    const first = fourGridStoryboard({
+      id: 'four-1', groupSequence: 1, sceneKey: 'office', cellIndexes: [0, 1, 2, 3],
+    })
+    const middle = sixGridStoryboard({
+      id: 'six-2', groupSequence: 2, sceneKey: 'office',
+      panelIds: ['six-2-0', 'six-2-1', 'six-2-2', 'six-2-3', 'six-2-4', 'six-2-5'],
+    })
+    const last = fourGridStoryboard({
+      id: 'four-3', groupSequence: 3, sceneKey: 'office', cellIndexes: [0, 1, 2, 3],
+    })
+
+    const storyboards = [last, first, middle]
+    expect(resolveFrameLinkChoices({ panelId: 'four-1-3', storyboards }).lastFrame)
+      .toEqual({ mode: 'automatic', sourcePanelId: 'six-2-0' })
+    expect(resolveFrameLinkChoices({ panelId: 'six-2-5', storyboards }).lastFrame)
+      .toEqual({ mode: 'automatic', sourcePanelId: 'four-3-0' })
+  })
+
   it('uses deterministic panel-index and id tie-breaks for missing or duplicate grid cells', () => {
     const storyboard: FrameLinkStoryboard = {
       id: 'four-ties',

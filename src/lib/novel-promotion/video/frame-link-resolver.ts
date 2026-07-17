@@ -215,9 +215,7 @@ export function buildFrameLinkResolutionIndex(input: {
   const nextGridGroupById = new Map<string, FrameLinkStoryboard>()
   orderedGridGroups.forEach((storyboard, index) => {
     const next = orderedGridGroups[index + 1]
-    if (next && next.layoutMode === storyboard.layoutMode) {
-      nextGridGroupById.set(storyboard.id, next)
-    }
+    if (next) nextGridGroupById.set(storyboard.id, next)
   })
   const storyboardIndexById = new Map(storyboards.map((storyboard, index) => [storyboard.id, index]))
 
