@@ -328,6 +328,30 @@ describe('ComfyUI dispatcher contract', () => {
     expect(deps.client.getHistory).toHaveBeenCalledWith('prompt-1')
   })
 
+  it('recovers completed history when WebSocket missed the terminal event but stays open', async () => {
+    let releaseSocket!: () => void
+    const socketGate = new Promise<void>((resolve) => { releaseSocket = resolve })
+    const deps = dependencies({
+      client: { ...dependencies().client, watchPrompt: async function* () {
+        yield { type: 'status' as const, queueRemaining: 0 }
+        await socketGate
+      } },
+    })
+    const pending = dispatchComfyRequest('request-1', deps)
+
+    try {
+      await vi.waitFor(() => expect(deps.client.getHistory).toHaveBeenCalledWith('prompt-1'), {
+        timeout: 100,
+      })
+    } finally {
+      releaseSocket()
+    }
+
+    await expect(pending).resolves.toMatchObject({ outcome: 'completed' })
+    expect(deps.persistCompletedOutputs).toHaveBeenCalledOnce()
+    expect(deps.release).toHaveBeenCalledOnce()
+  })
+
   it('falls back to history after a WebSocket transport failure', async () => {
     const deps = dependencies({
       client: { ...dependencies().client, watchPrompt: async function* () { throw new Error('socket lost') } },
