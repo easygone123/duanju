@@ -219,6 +219,7 @@ describe('worker reference-to-character', () => {
     const { prompt, options } = readGenerateCall(0)
     expect(prompt).toContain('BASE_REFERENCE_PROMPT')
     expect(prompt).toContain(CHARACTER_PROMPT_SUFFIX)
+    expect(prompt.endsWith(CHARACTER_PROMPT_SUFFIX)).toBe(true)
     expect(options.referenceImages).toEqual(['https://example.com/ref-a.png', 'https://example.com/ref-b.png'])
     expect(options.aspectRatio).toBe(CHARACTER_IMAGE_BANANA_RATIO)
 

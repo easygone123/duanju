@@ -139,6 +139,10 @@ describe('worker character-image-task-handler behavior', () => {
     expect(generationInput.prompt).toContain(realisticStylePrompt)
     expect(generationInput.prompt.split(CHARACTER_PROMPT_SUFFIX).length - 1).toBe(1)
     expect(generationInput.prompt.split(realisticStylePrompt).length - 1).toBe(1)
+    expect(generationInput.prompt.indexOf(realisticStylePrompt)).toBeLessThan(
+      generationInput.prompt.indexOf(CHARACTER_PROMPT_SUFFIX),
+    )
+    expect(generationInput.prompt.endsWith(CHARACTER_PROMPT_SUFFIX)).toBe(true)
     expect(generationInput.label).toBe('Hero - 战斗形态')
     expect(generationInput.options).toEqual(expect.objectContaining({
       referenceImages: ['normalized-primary-ref'],

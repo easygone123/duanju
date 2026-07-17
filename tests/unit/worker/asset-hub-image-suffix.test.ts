@@ -1,6 +1,6 @@
 import type { Job } from 'bullmq'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { CHARACTER_ASSET_IMAGE_RATIO, CHARACTER_PROMPT_SUFFIX, PROP_IMAGE_RATIO, PROP_PROMPT_SUFFIX } from '@/lib/constants'
+import { CHARACTER_ASSET_IMAGE_RATIO, CHARACTER_PROMPT_SUFFIX, getArtStylePrompt, PROP_IMAGE_RATIO, PROP_PROMPT_SUFFIX } from '@/lib/constants'
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 
 const workersUtilsMock = vi.hoisted(() => ({
@@ -106,6 +106,25 @@ describe('asset hub character image prompt suffix regression', () => {
     expect(countOccurrences(prompt, CHARACTER_PROMPT_SUFFIX)).toBe(1)
     expect(callArg?.options).toEqual(expect.objectContaining({ aspectRatio: CHARACTER_ASSET_IMAGE_RATIO }))
     expect(callArg?.label).toBeUndefined()
+  })
+
+  it('places character art style before the final fixed suffix', async () => {
+    const job = buildJob({
+      type: 'character',
+      id: 'global-character-1',
+      appearanceIndex: 0,
+      artStyle: 'realistic',
+    })
+
+    await handleAssetHubImageTask(job)
+
+    const callArg = sharedMock.generateCleanImageToStorage.mock.calls[0]?.[0] as {
+      prompt?: string
+    } | undefined
+    const prompt = callArg?.prompt || ''
+    const artStylePrompt = getArtStylePrompt('realistic', 'zh')
+    expect(prompt.indexOf(artStylePrompt)).toBeLessThan(prompt.indexOf(CHARACTER_PROMPT_SUFFIX))
+    expect(prompt.endsWith(CHARACTER_PROMPT_SUFFIX)).toBe(true)
   })
 
   it('honors requested count for global location generation', async () => {
