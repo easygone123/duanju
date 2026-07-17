@@ -128,8 +128,30 @@ describe('six-grid route/task registration contract', () => {
       payload: expect.objectContaining({
         sourceMediaId: 'sheet-media', sourceChecksum: 'sheet-sha', sourceVersion: '2026-07-13T00:00:00.000Z',
         processingOrder: 'crop_then_panel_upscale', expectedSheetArtifactVersion: 4,
+        cropRectSource: 'auto',
         cropRects: expect.arrayContaining([expect.objectContaining({ cellIndex: 5 })]),
       }),
+    }))
+  })
+
+  it('marks client supplied crop rectangles as manual overrides', async () => {
+    const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-sheet/crop/route')
+    const cropRects = Array.from({ length: 6 }, (_, cellIndex) => ({
+      cellIndex,
+      normalizedCropRect: {
+        x: (cellIndex % 3) / 3,
+        y: Math.floor(cellIndex / 3) / 2,
+        width: 1 / 3,
+        height: 1 / 2,
+      },
+    }))
+    const response = await callRoute(route.POST, 'POST', {
+      episodeId: 'episode-1', storyboardId: 'storyboard-1', cropRects, locale: 'zh',
+    }, { params: { projectId: 'project-1' } })
+
+    expect(response.status).toBe(200)
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ cropRectSource: 'manual', cropRects }),
     }))
   })
 
@@ -144,6 +166,7 @@ describe('six-grid route/task registration contract', () => {
     expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
       payload: expect.objectContaining({
         gridSpec: expect.objectContaining({ mode: 'four_grid', panelCount: 4 }),
+        cropRectSource: 'auto',
         cropRects: [
           { cellIndex: 0, normalizedCropRect: { x: 0, y: 0, width: 0.5, height: 0.5 } },
           { cellIndex: 1, normalizedCropRect: { x: 0.5, y: 0, width: 0.5, height: 0.5 } },

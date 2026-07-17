@@ -23,6 +23,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
   const body = parsed.data
   const storyboard = await loadOwnedGridStoryboard({ userId: auth.session.user.id, projectId, episodeId: body.episodeId, storyboardId: body.storyboardId })
   const { order, media } = sourceForGridCrop(storyboard)
+  const cropRectSource = body.cropRects ? 'manual' as const : 'auto' as const
   const cropRects = body.cropRects || defaultGridCropRects(storyboard.gridSpec)
   if (cropRects.length !== storyboard.gridSpec.panelCount
     || new Set(cropRects.map((item) => item.cellIndex)).size !== storyboard.gridSpec.panelCount
@@ -35,7 +36,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     sourceMediaId: media.id, sourceChecksum: media.sha256 || `media:${media.id}`, sourceVersion: media.updatedAt.toISOString(),
     cellAspectRatio: storyboard.sixGridCellAspectRatio as '16:9' | '9:16', processingOrder: order,
     gridSpec: storyboard.gridSpec,
-    expectedSheetArtifactVersion: storyboard.sheetArtifactVersion, cropRects,
+    expectedSheetArtifactVersion: storyboard.sheetArtifactVersion, cropRectSource, cropRects,
     promptSnapshot: storyboard.sheetPromptSnapshot || '', modelSnapshot: storyboard.sheetModelSnapshot || 'local:sharp', optionsSnapshot: {}, locale,
   }
   const { dedupeKey } = finalizeSnapshot(snapshot)

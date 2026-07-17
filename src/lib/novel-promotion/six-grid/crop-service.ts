@@ -22,6 +22,7 @@ import {
 import type { NormalizedCropRect, SixGridCellAspectRatio } from './contracts'
 import {
   computeGridPixelRects,
+  resolveGridCropRects,
   validateManualGridCrop,
 } from '@/lib/novel-promotion/grid-storyboard/crop-geometry'
 import {
@@ -83,6 +84,7 @@ export type GridCropSheetInput = {
   storyboardId?: string
   expectedSheetArtifactVersion?: number
   gridSpec?: StoryboardGridSpec & { version?: 1 }
+  cropRectSource?: 'auto' | 'manual'
   manualOverrides?: Array<{ cellIndex: number; normalizedCropRect: NormalizedCropRect }>
 }
 
@@ -206,6 +208,15 @@ function resolveCropRects(
   input: GridCropSheetInput & { gridSpec: StoryboardGridSpec },
   dimensions: { width: number; height: number },
 ) {
+  const cropRectSource = input.cropRectSource ?? (input.manualOverrides ? 'manual' : 'auto')
+  if (cropRectSource === 'auto') {
+    return resolveGridCropRects({
+      cropRectSource,
+      cropRects: input.manualOverrides,
+      spec: input.gridSpec,
+      dimensions,
+    })
+  }
   const automatic = input.gridSpec.mode === 'six_grid'
     ? computeSixGridPixelRects(dimensions)
     : computeGridPixelRects(dimensions, input.gridSpec)

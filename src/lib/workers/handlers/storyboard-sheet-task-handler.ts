@@ -44,6 +44,7 @@ const snapshotSchema = z.object({
   gridSpec: gridSpecSchema.optional(),
   processingOrder: z.enum(['sheet_upscale_then_crop', 'crop_then_panel_upscale']),
   expectedSheetArtifactVersion: z.number().int().nonnegative(),
+  cropRectSource: z.enum(['auto', 'manual']).optional(),
   cropRects: z.array(z.object({ cellIndex: z.number().int().min(0).max(5), normalizedCropRect: rectSchema }).strict()).min(1).max(6).optional(),
   promptSnapshot: z.string(), modelSnapshot: z.string().min(1), optionsSnapshot: z.record(z.unknown()),
   imageModel: z.string().min(1).optional(), generationOptions: z.record(z.unknown()).optional(),
@@ -68,6 +69,7 @@ export type SixGridImageTaskSnapshot = {
   cellAspectRatio: SixGridCellAspectRatio; processingOrder: SixGridProcessingOrder
   gridSpec?: VersionedStoryboardGridSpec
   expectedSheetArtifactVersion: number
+  cropRectSource?: 'auto' | 'manual'
   cropRects?: Array<{ cellIndex: number; normalizedCropRect: NormalizedCropRect }>
   promptSnapshot: string; modelSnapshot: string; optionsSnapshot: Record<string, unknown>; locale: 'zh' | 'en'
   imageModel?: string; generationOptions?: Record<string, unknown>; comfyWorkflowVersionId?: string; comfyModelSnapshotVersion?: 1
@@ -149,6 +151,7 @@ export function buildSixGridTaskDedupeKey(snapshot: SixGridImageTaskSnapshot) {
     workflowId: snapshot.workflowId, workflowVersionId: snapshot.workflowVersionId,
     cellAspectRatio: snapshot.cellAspectRatio, processingOrder: snapshot.processingOrder,
     ...(!legacyGridSpecSnapshot ? { gridSpec } : {}),
+    ...(snapshot.cropRectSource ? { cropRectSource: snapshot.cropRectSource } : {}),
     cropRects: snapshot.cropRects ? [...snapshot.cropRects].sort((a, b) => a.cellIndex - b.cellIndex) : undefined,
     promptSnapshot: snapshot.promptSnapshot, modelSnapshot: snapshot.modelSnapshot,
     options: snapshot.optionsSnapshot, generationOptions: snapshot.generationOptions,

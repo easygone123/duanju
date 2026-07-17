@@ -7,6 +7,8 @@ import {
 export type ImageDimensions = { width: number; height: number }
 export type PixelRect = { x: number; y: number; width: number; height: number }
 export type GridPixelRect = PixelRect & { cellIndex: number }
+export type GridCropRectSource = 'auto' | 'manual'
+export type GridCropRectEntry = { cellIndex: number; normalizedCropRect: NormalizedCropRect }
 
 const NORMALIZED_BOUNDARY_EPSILON = 1e-12
 const CONTINUOUS_ASPECT_RELATIVE_EPSILON = 1e-9
@@ -107,6 +109,33 @@ export function validateManualGridCrop(input: {
   return rect
 }
 
+export function resolveGridCropRects(input: {
+  cropRectSource: GridCropRectSource
+  cropRects?: GridCropRectEntry[]
+  spec: StoryboardGridSpec
+  dimensions: ImageDimensions
+}): Array<{ cellIndex: number; pixelRect: PixelRect }> {
+  const automatic = computeGridPixelRects(input.dimensions, input.spec)
+  if (input.cropRectSource === 'auto') {
+    assertCanonicalAutomaticRects(input.cropRects, input.spec)
+    return automatic.map(({ cellIndex, ...pixelRect }) => ({ cellIndex, pixelRect }))
+  }
+
+  const overrides = new Map<number, PixelRect>()
+  for (const override of input.cropRects ?? []) {
+    if (overrides.has(override.cellIndex)) throw new Error('SIX_GRID_CROP_OVERRIDE_DUPLICATE')
+    overrides.set(override.cellIndex, validateManualGridCrop({
+      ...override,
+      spec: input.spec,
+      dimensions: input.dimensions,
+    }))
+  }
+  return automatic.map(({ cellIndex, ...pixelRect }) => ({
+    cellIndex,
+    pixelRect: overrides.get(cellIndex) ?? pixelRect,
+  }))
+}
+
 export function pixelRectToNormalized(
   rect: PixelRect,
   dimensions: ImageDimensions,
@@ -151,6 +180,33 @@ function validateNormalizedRect(rect: NormalizedCropRect): void {
     || rect.x + rect.width > 1
     || rect.y + rect.height > 1) {
     throw new Error('GRID_CROP_INVALID')
+  }
+}
+
+function assertCanonicalAutomaticRects(
+  rects: GridCropRectEntry[] | undefined,
+  spec: StoryboardGridSpec,
+): void {
+  if (!rects) return
+  if (rects.length !== spec.panelCount || new Set(rects.map((item) => item.cellIndex)).size !== spec.panelCount) {
+    throw new Error('SIX_GRID_CROP_INDEXES_INVALID')
+  }
+  for (const item of rects) {
+    const column = item.cellIndex % spec.columns
+    const row = Math.floor(item.cellIndex / spec.columns)
+    const expected = {
+      x: column / spec.columns,
+      y: row / spec.rows,
+      width: 1 / spec.columns,
+      height: 1 / spec.rows,
+    }
+    if (item.cellIndex < 0 || item.cellIndex >= spec.panelCount
+      || item.normalizedCropRect.x !== expected.x
+      || item.normalizedCropRect.y !== expected.y
+      || item.normalizedCropRect.width !== expected.width
+      || item.normalizedCropRect.height !== expected.height) {
+      throw new Error('GRID_AUTO_CROP_INVALID')
+    }
   }
 }
 

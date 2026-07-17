@@ -174,7 +174,8 @@ export async function executeSixGridCrop(snapshotValue: unknown, dependencies: {
     expectedSheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
     cellAspectRatio: snapshot.cellAspectRatio,
     gridSpec: snapshot.gridSpec,
-    manualOverrides: snapshot.cropRects,
+    cropRectSource: snapshot.cropRectSource,
+    manualOverrides: snapshot.cropRectSource === 'auto' ? undefined : snapshot.cropRects,
   })
   await dependencies.assertActive?.('six_grid_crop_after_crop')
   await commitSixGridCropBatch({
@@ -211,7 +212,8 @@ export async function handleStoryboardCropTask(job: Job<TaskJobData>) {
       expectedSheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
       cellAspectRatio: snapshot.cellAspectRatio,
       gridSpec: snapshot.gridSpec,
-      manualOverrides: snapshot.cropRects,
+      cropRectSource: snapshot.cropRectSource,
+      manualOverrides: snapshot.cropRectSource === 'auto' ? undefined : snapshot.cropRects,
     })
   } catch (error) {
     throw toRetryableCropError(error)

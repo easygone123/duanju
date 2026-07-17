@@ -644,7 +644,9 @@ describe('six-grid crop atomic persistence', () => {
         update,
       },
     })
-    const task = snapshot({ gridSpec: fourGridSpec, cropRects })
+    const task = Object.assign(snapshot({ gridSpec: fourGridSpec, cropRects }), {
+      cropRectSource: 'auto' as const,
+    })
     const { executeSixGridCrop } = await import('@/lib/workers/handlers/storyboard-crop-task-handler')
 
     await executeSixGridCrop(task, {
@@ -655,6 +657,8 @@ describe('six-grid crop atomic persistence', () => {
       storyboardId: 'storyboard-1',
       expectedSheetArtifactVersion: 3,
       gridSpec: fourGridSpec,
+      cropRectSource: 'auto',
+      manualOverrides: undefined,
     }))
     expect(lockStoryboard).toHaveBeenCalledWith(expect.objectContaining({
       mode: 'four_grid', projectId: 'project-1', episodeId: 'episode-1', userId: 'user-1',
@@ -683,13 +687,13 @@ describe('six-grid crop atomic persistence', () => {
         update: vi.fn(async () => ({})),
       },
     })
-    const task = snapshot({
+    const task = Object.assign(snapshot({
       sourceMediaId: 'media-uploaded',
       sourceChecksum: 'uploaded-sha',
       sourceVersion: '2026-07-17T00:00:00.000Z',
       expectedSheetArtifactVersion: 5,
       processingOrder: 'crop_then_panel_upscale',
-    })
+    }), { cropRectSource: 'auto' as const })
     const { executeSixGridCrop } = await import('@/lib/workers/handlers/storyboard-crop-task-handler')
 
     await executeSixGridCrop(task, {
@@ -698,7 +702,9 @@ describe('six-grid crop atomic persistence', () => {
       transaction: transaction as never,
     })
 
-    expect(crop).toHaveBeenCalledWith(expect.objectContaining({ sourceMediaId: 'media-uploaded' }))
+    expect(crop).toHaveBeenCalledWith(expect.objectContaining({
+      sourceMediaId: 'media-uploaded', cropRectSource: 'auto', manualOverrides: undefined,
+    }))
     expect(lockStoryboard).toHaveBeenCalledWith(expect.objectContaining({
       storyboardId: 'storyboard-1',
       sourceMediaId: 'media-uploaded',
