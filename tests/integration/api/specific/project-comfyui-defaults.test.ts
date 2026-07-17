@@ -141,6 +141,20 @@ describe('api specific - project ComfyUI defaults', () => {
     expect(bindingConfig.comfyVideoWorkflowVersionId).toBe('video-version-1')
   })
 
+  it('preserves a stored four-grid storyboard mode', async () => {
+    const { getProjectModelConfig } = await import('@/lib/config-service')
+    prismaMock.projectComfyBinding.findUnique.mockResolvedValueOnce(null)
+    prismaMock.novelPromotionProject.findUnique.mockResolvedValueOnce({
+      analysisModel: 'cloud::analysis', characterModel: 'cloud::character',
+      locationModel: 'cloud::location', storyboardModel: 'cloud::storyboard',
+      editModel: 'cloud::edit', videoModel: 'cloud::video', audioModel: 'cloud::audio',
+      capabilityOverrides: null, storyboardGenerationMode: 'four_grid',
+    })
+
+    await expect(getProjectModelConfig('project-1', 'user-1'))
+      .resolves.toMatchObject({ storyboardGenerationMode: 'four_grid' })
+  })
+
   it('AC03 specialized project provider model wins when no Comfy default exists', async () => {
     const { getProjectModelConfig } = await import('@/lib/config-service')
     prismaMock.projectComfyBinding.findUnique.mockResolvedValueOnce({

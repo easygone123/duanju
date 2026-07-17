@@ -1,8 +1,15 @@
-import type {
-  SixGridCellAspectRatio,
-  SixGridProcessingOrder,
-  StoryboardGenerationMode,
+import {
+  isStoryboardGenerationMode,
+  type SixGridCellAspectRatio,
+  type SixGridProcessingOrder,
+  type StoryboardGenerationMode,
 } from './contracts'
+import {
+  isGridCellAspectRatio,
+  isGridStoryboardMode,
+  resolveStoryboardGridSpec,
+  type StoryboardGridSpec,
+} from '@/lib/novel-promotion/grid-storyboard/spec'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 
 export const SIX_GRID_ASPECT_RATIO_UNSUPPORTED = 'SIX_GRID_ASPECT_RATIO_UNSUPPORTED'
@@ -20,6 +27,7 @@ export interface StoryboardRunSettingsSource {
 export interface ResolvedStoryboardRunSettings {
   storyboardGenerationMode: StoryboardGenerationMode
   sixGridCellAspectRatio: SixGridCellAspectRatio | null
+  gridSpec?: StoryboardGridSpec | null
   sixGridProcessingOrder: SixGridProcessingOrder
   storyboardUpscaleModel: string | null
   dialogueVideoModel: string | null
@@ -31,8 +39,7 @@ export function parseStoryboardRunSettingsTask(value: unknown): StoryboardRunSet
   const parsed: StoryboardRunSettingsSource = {}
   if (Object.hasOwn(value, 'storyboardGenerationMode')) {
     if (value.storyboardGenerationMode !== null
-      && value.storyboardGenerationMode !== 'individual'
-      && value.storyboardGenerationMode !== 'six_grid') {
+      && !isStoryboardGenerationMode(value.storyboardGenerationMode)) {
       throw new Error(STORYBOARD_RUN_SETTINGS_INVALID)
     }
     parsed.storyboardGenerationMode = value.storyboardGenerationMode
@@ -80,20 +87,23 @@ export function resolveStoryboardRunSettings(input: {
     ?? 'crop_then_panel_upscale'
 
   let sixGridCellAspectRatio: SixGridCellAspectRatio | null = null
-  if (storyboardGenerationMode === 'six_grid') {
+  let gridSpec: StoryboardGridSpec | null = null
+  if (isGridStoryboardMode(storyboardGenerationMode)) {
     const candidate = task.sixGridCellAspectRatio
       ?? project.sixGridCellAspectRatio
       ?? task.videoRatio
       ?? project.videoRatio
-    if (candidate !== '16:9' && candidate !== '9:16') {
+    if (!isGridCellAspectRatio(candidate)) {
       throw new Error(SIX_GRID_ASPECT_RATIO_UNSUPPORTED)
     }
     sixGridCellAspectRatio = candidate
+    gridSpec = resolveStoryboardGridSpec(storyboardGenerationMode, candidate)
   }
 
   return {
     storyboardGenerationMode,
     sixGridCellAspectRatio,
+    gridSpec,
     sixGridProcessingOrder,
     storyboardUpscaleModel: Object.hasOwn(task, 'storyboardUpscaleModel')
       ? task.storyboardUpscaleModel ?? null

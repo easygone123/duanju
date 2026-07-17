@@ -13,6 +13,11 @@ export type {
   SixGridProcessingOrder,
   StoryboardGenerationMode,
 } from '@/lib/novel-promotion/six-grid/contracts'
+export type {
+  GridCellAspectRatio,
+  GridStoryboardMode,
+  StoryboardGridSpec,
+} from '@/lib/novel-promotion/grid-storyboard/spec'
 
 // ============================================
 // 基础项目类型

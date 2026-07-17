@@ -287,7 +287,7 @@ model NovelPromotionProject {
   lastEpisodeId   String?
   imageResolution String                    @default("2K")
   importStatus    String?
-  storyboardGenerationMode String           @default("individual")
+  storyboardGenerationMode String           @default("four_grid")
   sixGridCellAspectRatio String?
   sixGridProcessingOrder String              @default("crop_then_panel_upscale")
   storyboardUpscaleModel String?

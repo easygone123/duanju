@@ -1,6 +1,12 @@
-export type StoryboardGenerationMode = 'individual' | 'six_grid'
+import {
+  isGridStoryboardMode,
+  type GridCellAspectRatio,
+  type GridStoryboardMode,
+} from '@/lib/novel-promotion/grid-storyboard/spec'
 
-export type SixGridCellAspectRatio = '16:9' | '9:16'
+export type StoryboardGenerationMode = 'individual' | GridStoryboardMode
+
+export type SixGridCellAspectRatio = GridCellAspectRatio
 
 export type SixGridProcessingOrder =
   | 'sheet_upscale_then_crop'
@@ -24,6 +30,10 @@ const PROCESSING_ORDERS: readonly SixGridProcessingOrder[] = [
   'sheet_upscale_then_crop',
   'crop_then_panel_upscale',
 ]
+
+export function isStoryboardGenerationMode(value: unknown): value is StoryboardGenerationMode {
+  return value === 'individual' || isGridStoryboardMode(value)
+}
 
 export function parseSixGridRunSettings(value: unknown): SixGridRunSettings {
   if (!isRecord(value)

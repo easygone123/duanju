@@ -20,10 +20,11 @@ import {
   type WorkflowConcurrencyConfig,
   normalizeWorkflowConcurrencyConfig,
 } from '@/lib/workflow-concurrency'
-import type {
-  SixGridCellAspectRatio,
-  SixGridProcessingOrder,
-  StoryboardGenerationMode,
+import {
+  isStoryboardGenerationMode,
+  type SixGridCellAspectRatio,
+  type SixGridProcessingOrder,
+  type StoryboardGenerationMode,
 } from '@/lib/novel-promotion/six-grid/contracts'
 import { validateComfyDefaultModels } from '@/lib/comfyui/workflow-default-model'
 import { readComfyAspectRatioOptions } from '@/lib/comfyui/aspect-ratio'
@@ -322,8 +323,8 @@ export async function getProjectModelConfig(
       : null,
     videoRatio: projectData?.videoRatio || '16:9',
     artStyle: projectData?.artStyle || null,
-    storyboardGenerationMode: projectData?.storyboardGenerationMode === 'six_grid'
-      ? 'six_grid'
+    storyboardGenerationMode: isStoryboardGenerationMode(projectData?.storyboardGenerationMode)
+      ? projectData.storyboardGenerationMode
       : 'individual',
     sixGridCellAspectRatio: projectData?.sixGridCellAspectRatio === '16:9'
       || projectData?.sixGridCellAspectRatio === '9:16'

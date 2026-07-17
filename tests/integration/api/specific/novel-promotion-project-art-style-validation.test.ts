@@ -125,4 +125,21 @@ describe('api specific - novel promotion project art style validation', () => {
     )
     expect(prismaMock.userPreference.upsert).not.toHaveBeenCalled()
   })
+
+  it('accepts four-grid storyboard generation mode', async () => {
+    const mod = await import('@/app/api/novel-promotion/[projectId]/route')
+    const req = buildMockRequest({
+      path: '/api/novel-promotion/project-1',
+      method: 'PATCH',
+      body: { storyboardGenerationMode: 'four_grid' },
+    })
+
+    const res = await mod.PATCH(req, { params: Promise.resolve({ projectId: 'project-1' }) })
+    expect(res.status).toBe(200)
+    expect(workflowServiceMock.updateProjectWithComfyDefaults).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectData: expect.objectContaining({ storyboardGenerationMode: 'four_grid' }),
+      }),
+    )
+  })
 })

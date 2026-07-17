@@ -25,17 +25,30 @@ describe('resolveStoryboardRunSettings', () => {
     })).toEqual({
       storyboardGenerationMode: 'six_grid',
       sixGridCellAspectRatio: '16:9',
+      gridSpec: {
+        mode: 'six_grid',
+        columns: 3,
+        rows: 2,
+        panelCount: 6,
+        cellAspectRatio: '16:9',
+        sheetAspectRatio: '8:3',
+      },
       sixGridProcessingOrder: 'crop_then_panel_upscale',
       storyboardUpscaleModel: 'comfyui::upscale-v1',
       dialogueVideoModel: 'comfyui::dialogue-v1',
     })
   })
 
-  it.each(['16:9', '9:16'] as const)(
-    'inherits the supported project video ratio %s for six-grid cells',
-    (videoRatio) => {
+  it.each([
+    ['four_grid', '16:9'],
+    ['four_grid', '9:16'],
+    ['six_grid', '16:9'],
+    ['six_grid', '9:16'],
+  ] as const)(
+    '%s mode inherits the supported project video ratio %s',
+    (storyboardGenerationMode, videoRatio) => {
       expect(resolveStoryboardRunSettings({
-        task: { storyboardGenerationMode: 'six_grid' },
+        task: { storyboardGenerationMode },
         project: {
           storyboardGenerationMode: 'individual',
           sixGridCellAspectRatio: null,
@@ -44,7 +57,14 @@ describe('resolveStoryboardRunSettings', () => {
           dialogueVideoModel: null,
           videoRatio,
         },
-      }).sixGridCellAspectRatio).toBe(videoRatio)
+      })).toMatchObject({
+        storyboardGenerationMode,
+        sixGridCellAspectRatio: videoRatio,
+        gridSpec: {
+          mode: storyboardGenerationMode,
+          cellAspectRatio: videoRatio,
+        },
+      })
     },
   )
 
@@ -76,6 +96,7 @@ describe('resolveStoryboardRunSettings', () => {
     })).toMatchObject({
       storyboardGenerationMode: 'individual',
       sixGridCellAspectRatio: null,
+      gridSpec: null,
     })
   })
 
@@ -98,6 +119,14 @@ describe('resolveStoryboardRunSettings', () => {
 })
 
 describe('parseStoryboardRunSettingsTask', () => {
+  it('accepts four-grid mode', () => {
+    expect(parseStoryboardRunSettingsTask({
+      storyboardGenerationMode: 'four_grid',
+    })).toEqual({
+      storyboardGenerationMode: 'four_grid',
+    })
+  })
+
   it('rejects malformed auxiliary model keys', () => {
     expect(() => parseStoryboardRunSettingsTask({
       storyboardUpscaleModel: 'bad-key',

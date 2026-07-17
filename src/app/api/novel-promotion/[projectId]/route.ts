@@ -56,7 +56,7 @@ const PROJECT_PATCH_SCHEMA = z.object({
   storyboardUpscaleModel: MODEL_KEY_INPUT.optional(),
   dialogueVideoModel: MODEL_KEY_INPUT.optional(),
   videoRatio: z.string().max(64).optional(),
-  storyboardGenerationMode: z.enum(['individual', 'six_grid']).optional(),
+  storyboardGenerationMode: z.enum(['individual', 'four_grid', 'six_grid']).optional(),
   sixGridCellAspectRatio: z.enum(['16:9', '9:16']).nullable().optional(),
   sixGridProcessingOrder: z.enum([
     'sheet_upscale_then_crop',
