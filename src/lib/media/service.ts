@@ -49,7 +49,7 @@ function isLikelyExternalUrl(value: string): boolean {
   return value.startsWith('http://') || value.startsWith('https://')
 }
 
-function guessMimeTypeFromStorageKey(storageKey: string): string | null {
+export function guessMimeTypeFromStorageKey(storageKey: string): string | null {
   const ext = path.extname(storageKey).toLowerCase()
   return MIME_BY_EXT[ext] || null
 }

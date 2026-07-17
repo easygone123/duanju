@@ -1,7 +1,11 @@
 import type { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
-import { resolveStorageKeyFromMediaValue } from '@/lib/media/service'
+import {
+  ensureMediaObjectFromStorageKey,
+  guessMimeTypeFromStorageKey,
+  resolveStorageKeyFromMediaValue,
+} from '@/lib/media/service'
 
 import { isOpaqueStorageKey } from './media'
 import type { ComfyMediaType } from './types'
@@ -93,43 +97,105 @@ export async function resolveOwnedComfyMediaRefFromValue(
 
 async function repairLegacyOwnedProjectAsset(input: OwnedComfyMediaInput) {
   if (input.mediaType !== 'image') return null
-  const media = await prisma.mediaObject.findFirst({
-    where: {
-      storageKey: input.storageKey,
-      mimeType: { startsWith: 'image/' },
-    },
-    select: { id: true, storageKey: true, mimeType: true },
-  })
-  if (!media || !isOwnedMediaRecord(media, input.storageKey, input.mediaType)) return null
+  const mimeType = guessMimeTypeFromStorageKey(input.storageKey)
+  if (!mimeType?.startsWith('image/')) return null
 
-  const [characterResult, locationResult] = await prisma.$transaction([
-    prisma.characterAppearance.updateMany({
-      where: {
-        imageUrl: input.storageKey,
-        character: {
-          novelPromotionProject: {
-            projectId: input.projectId,
-            project: { userId: input.userId },
-          },
-        },
+  const ownedAsset = await findExactOwnedLegacyAsset(input)
+  if (!ownedAsset) return null
+
+  const media = await ensureMediaObjectFromStorageKey(input.storageKey, { mimeType })
+  if (!isOwnedMediaRecord(media, input.storageKey, input.mediaType)) return null
+
+  const result = await ownedAsset.attach(media.id)
+  return result.count > 0 ? media : null
+}
+
+interface ExactOwnedLegacyAsset {
+  attach(mediaId: string): Promise<{ count: number }>
+}
+
+async function findExactOwnedLegacyAsset(
+  input: OwnedComfyMediaInput,
+): Promise<ExactOwnedLegacyAsset | null> {
+  const projectCharacterWhere = {
+    imageUrl: input.storageKey,
+    character: {
+      novelPromotionProject: {
+        projectId: input.projectId,
+        project: { userId: input.userId },
       },
-      data: { imageMediaId: media.id },
-    }),
-    prisma.locationImage.updateMany({
-      where: {
-        imageUrl: input.storageKey,
-        location: {
-          novelPromotionProject: {
-            projectId: input.projectId,
-            project: { userId: input.userId },
-          },
-        },
+    },
+  }
+  const projectCharacter = await prisma.characterAppearance.findFirst({
+    where: projectCharacterWhere,
+    select: { id: true },
+  })
+  if (projectCharacter) {
+    return {
+      attach: async (mediaId) => await prisma.characterAppearance.updateMany({
+        where: { id: projectCharacter.id, ...projectCharacterWhere },
+        data: { imageMediaId: mediaId },
+      }),
+    }
+  }
+
+  const projectLocationWhere = {
+    imageUrl: input.storageKey,
+    location: {
+      novelPromotionProject: {
+        projectId: input.projectId,
+        project: { userId: input.userId },
       },
-      data: { imageMediaId: media.id },
-    }),
-  ])
-  const repaired = characterResult.count + locationResult.count
-  return repaired > 0 ? media : null
+    },
+  }
+  const projectLocation = await prisma.locationImage.findFirst({
+    where: projectLocationWhere,
+    select: { id: true },
+  })
+  if (projectLocation) {
+    return {
+      attach: async (mediaId) => await prisma.locationImage.updateMany({
+        where: { id: projectLocation.id, ...projectLocationWhere },
+        data: { imageMediaId: mediaId },
+      }),
+    }
+  }
+
+  const globalCharacterWhere = {
+    imageUrl: input.storageKey,
+    character: { userId: input.userId },
+  }
+  const globalCharacter = await prisma.globalCharacterAppearance.findFirst({
+    where: globalCharacterWhere,
+    select: { id: true },
+  })
+  if (globalCharacter) {
+    return {
+      attach: async (mediaId) => await prisma.globalCharacterAppearance.updateMany({
+        where: { id: globalCharacter.id, ...globalCharacterWhere },
+        data: { imageMediaId: mediaId },
+      }),
+    }
+  }
+
+  const globalLocationWhere = {
+    imageUrl: input.storageKey,
+    location: { userId: input.userId },
+  }
+  const globalLocation = await prisma.globalLocationImage.findFirst({
+    where: globalLocationWhere,
+    select: { id: true },
+  })
+  if (globalLocation) {
+    return {
+      attach: async (mediaId) => await prisma.globalLocationImage.updateMany({
+        where: { id: globalLocation.id, ...globalLocationWhere },
+        data: { imageMediaId: mediaId },
+      }),
+    }
+  }
+
+  return null
 }
 
 function parseInternalSignedStorageRoute(value: string): string | null {
