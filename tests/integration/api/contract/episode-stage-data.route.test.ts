@@ -72,7 +72,9 @@ const fixture: JsonObject = {
       storyboardTextJson: hugeHistory, imageHistory: hugeHistory, candidateImages: hugeHistory,
       storyboardImageUrl: 'legacy-board-1.jpg', createdAt: new Date('2026-07-14T01:04:00.000Z'),
       updatedAt: new Date('2026-07-14T01:05:00.000Z'), layoutMode: 'individual', groupSequence: null,
-      continuityAnchor: '{"sceneKey":"home"}', panels: [
+      continuityAnchor: '{"sceneKey":"home"}',
+      sheetPromptSnapshot: 'ORIGINAL SIX GRID PROMPT\nBeat 1',
+      panels: [
         {
           id: 'panel-1b', storyboardId: 'storyboard-1', panelIndex: 1, description: 'later panel',
           srtSegment: 'later', imagePrompt: 'later image', imageUrl: null, imageMediaId: null,
@@ -208,6 +210,9 @@ describe('episode stage data route', () => {
       }
 
       if (stage === 'storyboard') {
+        expect(body.episode.storyboards[0].sheetPromptSnapshot).toBe(
+          'ORIGINAL SIX GRID PROMPT\nBeat 1',
+        )
         expect(body.episode.storyboards[0].panels[0]).toMatchObject({
           imageUrl: 'legacy-image-1.jpg', imageMediaId: 'image-media-1', candidateImages: '["candidate.jpg"]',
           videoPrompt: 'first video', hasDialogue: true,
@@ -218,6 +223,7 @@ describe('episode stage data route', () => {
       }
 
       if (stage === 'videos') {
+        expect(body.episode.storyboards[0]).not.toHaveProperty('sheetPromptSnapshot')
         expect(body.episode.storyboards[0].panels[0]).toMatchObject({
           videoPrompt: 'first video', videoUrl: 'legacy-video-1.mp4', videoMediaId: 'video-media-1',
           lipSyncVideoMediaId: 'lipsync-media-1', dialogueText: 'hello', linkedToNextPanel: true,
@@ -227,6 +233,7 @@ describe('episode stage data route', () => {
       }
 
       if (stage === 'voice') {
+        expect(body.episode.storyboards[0]).not.toHaveProperty('sheetPromptSnapshot')
         expect(body.episode.storyboards[0].panels[0]).toEqual(expect.objectContaining({
           id: 'panel-1a', panelIndex: 0, srtSegment: 'hello', description: 'first panel',
         }))

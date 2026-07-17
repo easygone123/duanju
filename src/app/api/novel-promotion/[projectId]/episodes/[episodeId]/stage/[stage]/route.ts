@@ -123,6 +123,7 @@ const storyboardSelect = {
   sheetImageMediaId: true,
   upscaledSheetImageUrl: true,
   upscaledSheetImageMediaId: true,
+  sheetPromptSnapshot: true,
   sheetArtifactVersion: true,
   createdAt: true,
   updatedAt: true,

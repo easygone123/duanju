@@ -122,6 +122,7 @@ type StoryboardFields =
   | 'sheetImageMediaId'
   | 'upscaledSheetImageUrl'
   | 'upscaledSheetImageMediaId'
+  | 'sheetPromptSnapshot'
   | 'sheetArtifactVersion'
 
 export type StoryboardEpisodeStageStoryboard = Pick<NovelPromotionStoryboard, StoryboardFields> & {
