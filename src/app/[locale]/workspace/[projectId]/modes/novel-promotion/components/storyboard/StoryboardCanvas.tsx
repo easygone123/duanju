@@ -81,6 +81,7 @@ interface StoryboardCanvasProps {
   onGenerateSixGridSheet: (storyboardId: string) => void
   onUpscaleSixGridSheet: (storyboardId: string, workflow: SixGridUpscaleWorkflow) => void
   onCropSixGridSheet: (storyboardId: string, cropRects: CropEntry[]) => Promise<unknown>
+  onUploadSixGridSheet: (storyboardId: string, file: File, version: number) => Promise<unknown>
   onUpscaleSixGridPanel: (storyboardId: string, panelId: string, workflow: SixGridUpscaleWorkflow) => Promise<unknown>
   onUndoSixGridPanel: (storyboardId: string, panelId: string, expectedCurrentMediaId: string, expectedPreviousMediaId: string) => Promise<unknown>
 }
@@ -142,6 +143,7 @@ export default function StoryboardCanvas({
   onGenerateSixGridSheet,
   onUpscaleSixGridSheet,
   onCropSixGridSheet,
+  onUploadSixGridSheet,
   onUpscaleSixGridPanel,
   onUndoSixGridPanel,
 }: StoryboardCanvasProps) {
@@ -260,6 +262,7 @@ export default function StoryboardCanvas({
               onGenerateSixGridSheet={() => onGenerateSixGridSheet(storyboard.id)}
               onUpscaleSixGridSheet={(workflow) => onUpscaleSixGridSheet(storyboard.id, workflow)}
               onCropSixGridSheet={(cropRects) => onCropSixGridSheet(storyboard.id, cropRects)}
+              onUploadSixGridSheet={(file, version) => onUploadSixGridSheet(storyboard.id, file, version)}
               onUpscaleSixGridPanel={(panelId, workflow) => onUpscaleSixGridPanel(storyboard.id, panelId, workflow)}
               onUndoSixGridPanel={(panelId, currentMediaId, previousMediaId) => onUndoSixGridPanel(storyboard.id, panelId, currentMediaId, previousMediaId)}
             />

@@ -123,6 +123,7 @@ export default function StoryboardStage({
     generateSixGridSheet,
     upscaleSixGridSheet,
     cropSixGridSheet,
+    uploadSixGridSheet,
     upscaleSixGridPanel,
     undoSixGridPanel,
   } = controller
@@ -232,6 +233,7 @@ export default function StoryboardStage({
           onGenerateSixGridSheet={generateSixGridSheet}
           onUpscaleSixGridSheet={upscaleSixGridSheet}
           onCropSixGridSheet={cropSixGridSheet}
+          onUploadSixGridSheet={uploadSixGridSheet}
           onUpscaleSixGridPanel={upscaleSixGridPanel}
           onUndoSixGridPanel={undoSixGridPanel}
         />

@@ -21,10 +21,13 @@ interface Props {
   onPreviewSheet: (url: string) => void
   onUpscaleSheet: (workflow: SixGridUpscaleWorkflow) => void
   onOpenCrop: () => void
+  onViewPrompt: () => void
+  onUploadSheet: () => void
 }
 
 export default function SixGridGroupControls({
   storyboard, isTaskRunning, upscaleWorkflow, generationError, onGenerateSheet, onPreviewSheet, onUpscaleSheet, onOpenCrop,
+  onViewPrompt, onUploadSheet,
 }: Props) {
   const t = useTranslations('storyboard.sixGrid')
   if (storyboard.layoutMode !== 'six_grid') return null
@@ -73,6 +76,14 @@ export default function SixGridGroupControls({
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" className="glass-btn-base glass-btn-secondary rounded-lg px-3 py-1.5 text-xs" onClick={onViewPrompt}>
+          <AppIcon name="eye" className="h-3.5 w-3.5" />
+          {t('viewPrompt')}
+        </button>
+        <button type="button" className="glass-btn-base glass-btn-secondary rounded-lg px-3 py-1.5 text-xs" disabled={isTaskRunning} onClick={onUploadSheet}>
+          <AppIcon name="upload" className="h-3.5 w-3.5" />
+          {t('uploadSheet')}
+        </button>
         <button type="button" className="glass-btn-base glass-btn-primary rounded-lg px-3 py-1.5 text-xs" disabled={isTaskRunning} onClick={onGenerateSheet}>
           <AppIcon name="imagePreview" className="h-3.5 w-3.5" />
           {hasSheet ? t('regenerateSheet') : t('generateSheet')}

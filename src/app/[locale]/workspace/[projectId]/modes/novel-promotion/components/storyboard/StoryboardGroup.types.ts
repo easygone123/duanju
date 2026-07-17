@@ -74,6 +74,7 @@ export interface StoryboardGroupProps {
   onGenerateSixGridSheet: () => void
   onUpscaleSixGridSheet: (workflow: SixGridUpscaleWorkflow) => void
   onCropSixGridSheet: (cropRects: CropEntry[]) => Promise<unknown>
+  onUploadSixGridSheet: (file: File, expectedSheetArtifactVersion: number) => Promise<unknown>
   onUpscaleSixGridPanel: (panelId: string, workflow: SixGridUpscaleWorkflow) => Promise<unknown>
   onUndoSixGridPanel: (panelId: string, expectedCurrentMediaId: string, expectedPreviousMediaId: string) => Promise<unknown>
 }

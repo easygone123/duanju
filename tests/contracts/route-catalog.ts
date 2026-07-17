@@ -143,6 +143,7 @@ const ROUTE_FILES = [
   'src/app/api/novel-promotion/[projectId]/storyboards/route.ts',
   'src/app/api/novel-promotion/[projectId]/storyboard-sheet/route.ts',
   'src/app/api/novel-promotion/[projectId]/storyboard-sheet/crop/route.ts',
+  'src/app/api/novel-promotion/[projectId]/storyboard-sheet/upload/route.ts',
   'src/app/api/novel-promotion/[projectId]/storyboard-panel/upscale/route.ts',
   'src/app/api/novel-promotion/[projectId]/undo-regenerate/route.ts',
   'src/app/api/novel-promotion/[projectId]/update-appearance/route.ts',
