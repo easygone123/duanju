@@ -61,6 +61,14 @@ vi.mock('@/lib/config-service', () => ({
     return payload
   }),
   getProjectModelConfig: getProjectModelConfigMock,
+  resolveProjectComfyWorkflowVersion: vi.fn((config: {
+    comfyImageWorkflowVersionId?: string | null
+    comfyVideoWorkflowVersionId?: string | null
+  }, _modelKey: string, mediaType: 'image' | 'video') => (
+    mediaType === 'image'
+      ? config.comfyImageWorkflowVersionId ?? null
+      : config.comfyVideoWorkflowVersionId ?? null
+  )),
   resolveTrustedComfyWorkflowVersion: vi.fn(async (_userId: string, model: string | null) => (
     model?.startsWith('comfyui::') ? 'video-version-1' : null
   )),
@@ -112,6 +120,7 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     panelUpdateManyMock.mockResolvedValue({ count: 1 })
     comfyVersionFindFirstMock.mockResolvedValue({
       id: 'video-version-1',
+      contentHash: 'video-content-hash',
       variableDefinitions: [{ name: 'duration', type: 'number', options: [5, 10] }],
     })
     userPreferenceFindUniqueMock.mockResolvedValue({

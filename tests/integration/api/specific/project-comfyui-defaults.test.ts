@@ -46,6 +46,34 @@ const prismaMock = vi.hoisted(() => ({
       id: where.id,
       currentVersionId: where.mediaType === 'image' ? 'task-image-version-1' : 'task-video-version-1',
     })),
+    findMany: vi.fn(async ({ where }: { where: { id: { in: string[] }; userId: string } }) =>
+      where.id.in.map((id) => {
+        const mediaType = id.includes('video') ? 'video' : 'image'
+        const versionId = mediaType === 'image' ? 'task-image-version-1' : 'task-video-version-1'
+        return {
+          id,
+          userId: where.userId,
+          status: 'published',
+          mediaType,
+          currentVersionId: versionId,
+          currentVersion: {
+            id: versionId,
+            purpose: 'generation',
+            publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+            contentHash: `${id}-content-hash`,
+            lastSuccessfulTestAt: new Date('2026-01-01T00:00:00.000Z'),
+            lastTestConnection: { userId: where.userId },
+          },
+        }
+      })),
+  },
+  comfyWorkflowVersion: {
+    findFirst: vi.fn(async ({ where }: {
+      where: { id: string; workflowId: string; workflow: { mediaType: string } }
+    }) => ({
+      id: where.id,
+      contentHash: `${where.workflowId}-${where.workflow.mediaType}-content-hash`,
+    })),
   },
 }))
 
@@ -195,19 +223,17 @@ describe('api specific - project ComfyUI defaults', () => {
     expect(config.comfyImageWorkflowVersionId).toBe('task-image-version-1')
     expect(config.videoModel).toBe('comfyui::task-video-workflow')
     expect(config.comfyVideoWorkflowVersionId).toBe('task-video-version-1')
-    expect(prismaMock.comfyWorkflow.findFirst).toHaveBeenCalledWith({
+    expect(prismaMock.comfyWorkflow.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
-        id: 'task-image-workflow', userId: 'user-1', mediaType: 'image', status: 'published',
-        currentVersionId: { not: null },
-        currentVersion: { publishedAt: { not: null } },
+        id: { in: expect.arrayContaining(['task-image-workflow', 'task-video-workflow']) },
+        userId: 'user-1',
       },
-      select: { currentVersionId: true },
-    })
+    }))
   })
 
   it('fails closed when an explicit Comfy override is not an owned published workflow', async () => {
     const { getProjectModelConfig } = await import('@/lib/config-service')
-    prismaMock.comfyWorkflow.findFirst.mockResolvedValueOnce(null)
+    prismaMock.comfyWorkflow.findMany.mockResolvedValueOnce([])
 
     await expect(getProjectModelConfig('project-1', 'user-1', {
       imageModel: 'comfyui::other-users-workflow',

@@ -310,6 +310,7 @@ describe('workspace card virtualization', () => {
       sixGridUpscaleWorkflow: null,
       sixGridTaskStoryboardId: null,
       sixGridTaskPanelId: null,
+      sixGridGenerationErrors: {},
       onGenerateSixGridSheet: asyncNoop,
       onUpscaleSixGridSheet: asyncNoop,
       onCropSixGridSheet: asyncNoop,

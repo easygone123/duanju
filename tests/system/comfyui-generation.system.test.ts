@@ -184,8 +184,32 @@ describe('system - ComfyUI executable acceptance evidence', () => {
       { target: delegates.novelPromotionProject, key: 'findUnique', value: async () => project },
       { target: delegates.userPreference, key: 'findUnique', value: async () => user },
       { target: delegates.projectComfyBinding, key: 'findUnique', value: async () => binding },
-      { target: delegates.comfyWorkflow, key: 'findFirst', value: async (input: { where: { id: string } }) => ({
-        currentVersionId: `${input.where.id}-version-fixed`,
+      { target: delegates.comfyWorkflow, key: 'findMany', value: async (input: {
+        where: { id: { in: string[] }; userId: string }
+      }) => input.where.id.in.map((id) => {
+        const mediaType = id.includes('video') ? 'video' : 'image'
+        const versionId = `${id}-version-fixed`
+        return {
+          id,
+          userId: input.where.userId,
+          status: 'published',
+          mediaType,
+          currentVersionId: versionId,
+          currentVersion: {
+            id: versionId,
+            purpose: 'generation',
+            publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+            contentHash: `${id}-content-hash`,
+            lastSuccessfulTestAt: new Date('2026-01-01T00:00:00.000Z'),
+            lastTestConnection: { userId: input.where.userId },
+          },
+        }
+      }) },
+      { target: delegates.comfyWorkflowVersion, key: 'findFirst', value: async (input: {
+        where: { id: string; workflowId: string }
+      }) => ({
+        id: input.where.id,
+        contentHash: `${input.where.workflowId}-content-hash`,
       }) },
     ], async () => {
       const task = await getProjectModelConfig('project-a', 'user-a', {

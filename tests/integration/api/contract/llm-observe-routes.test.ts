@@ -49,6 +49,7 @@ const configServiceMock = vi.hoisted(() => ({
     characterModel: 'img::character',
     comfyImageWorkflowVersionId: null,
   })),
+  resolveProjectComfyWorkflowVersion: vi.fn(() => null),
 }))
 
 const prismaMock = vi.hoisted(() => ({
