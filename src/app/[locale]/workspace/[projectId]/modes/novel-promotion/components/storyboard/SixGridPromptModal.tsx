@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 
 import GlassModalShell from '@/components/ui/primitives/GlassModalShell'
 import { AppIcon } from '@/components/ui/icons'
+import type { GridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 interface SixGridPromptModalProps {
   open: boolean
@@ -12,6 +13,7 @@ interface SixGridPromptModalProps {
   prompt: string | null | undefined
   groupSequence: number | null | undefined
   cellRatio: '16:9' | '9:16'
+  mode?: GridStoryboardMode
 }
 
 export default function SixGridPromptModal({
@@ -20,6 +22,7 @@ export default function SixGridPromptModal({
   prompt,
   groupSequence,
   cellRatio,
+  mode = 'six_grid',
 }: SixGridPromptModalProps) {
   const t = useTranslations('storyboard.sixGrid.promptModal')
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
@@ -66,8 +69,8 @@ export default function SixGridPromptModal({
     <GlassModalShell
       open={open}
       onClose={close}
-      title={t('title')}
-      description={t('description')}
+      title={t(mode === 'four_grid' ? 'titleFourGrid' : 'title')}
+      description={t(mode === 'four_grid' ? 'descriptionFourGrid' : 'description')}
       size="lg"
       showCloseButton={false}
       footer={(
@@ -98,7 +101,7 @@ export default function SixGridPromptModal({
 
         {hasPrompt ? (
           <textarea
-            aria-label={t('promptLabel')}
+            aria-label={t(mode === 'four_grid' ? 'promptLabelFourGrid' : 'promptLabel')}
             readOnly
             value={prompt ?? ''}
             rows={16}

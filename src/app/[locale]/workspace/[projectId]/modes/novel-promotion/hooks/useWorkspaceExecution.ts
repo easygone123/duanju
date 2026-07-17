@@ -47,6 +47,17 @@ function isRunStreamTimeoutMessage(message: string): boolean {
   return /(?:run|task)\s+stream\s+timeout/i.test(message.trim())
 }
 
+export function resolveStoryboardRunErrorMessage(
+  message: string,
+  mode: StoryboardGenerationMode | undefined,
+  translate: (key: string) => string,
+) {
+  if (mode === 'six_grid' && message.includes('SIX_GRID_ASPECT_RATIO_UNSUPPORTED')) {
+    return translate('execution.sixGridRatioUnsupported')
+  }
+  return message
+}
+
 function readSessionBoolean(key: string): boolean {
   if (typeof window === 'undefined') return false
   try {
@@ -276,7 +287,10 @@ export function useWorkspaceExecution({
         return
       }
       const rawMessage = getErrorMessage(err)
-      alert(`${t('execution.generationFailed')}: ${isRunStreamTimeoutMessage(rawMessage) ? t('execution.taskStreamTimeout') : rawMessage}`)
+      const friendlyMessage = isRunStreamTimeoutMessage(rawMessage)
+        ? t('execution.taskStreamTimeout')
+        : resolveStoryboardRunErrorMessage(rawMessage, storyboardGenerationMode, t)
+      alert(`${t('execution.generationFailed')}: ${friendlyMessage}`)
     } finally {
       setIsConfirmingAssets(false)
       setTransitionProgress({ message: '', step: '' })

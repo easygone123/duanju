@@ -64,6 +64,9 @@ export const sixGridStoryboardQueryKeys = {
     ['six-grid-storyboard', projectId, episodeId, storyboardId, panelId] as const,
 }
 
+/** Neutral alias; the persisted key prefix remains unchanged for cache compatibility. */
+export const gridStoryboardQueryKeys = sixGridStoryboardQueryKeys
+
 function refreshStoryboardGroupQueries(
   queryClient: QueryClient,
   projectId: string,
@@ -307,6 +310,11 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
 
   return { sheet, crop, panelUpscale, upload, undo, generationErrorsByStoryboardId }
 }
+
+/** Four-grid and six-grid intentionally share the same mutation family. */
+export const useGridStoryboard = useSixGridStoryboard
+export const isGridPanelBusy = isSixGridPanelBusy
+export const isGridGroupBusy = isSixGridGroupBusy
 
 export function swapPanelImageWithPrevious(value: unknown, panelId: string): unknown {
   if (!value || typeof value !== 'object') return value

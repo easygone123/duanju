@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { useParams } from 'next/navigation'
 import NovelInputStage from './NovelInputStage'
 import SmartImportWizard from './SmartImportWizard'
@@ -13,6 +13,71 @@ import { shouldLockStoryboardRunSettings } from '@/lib/novel-promotion/six-grid/
 import type { StoryboardConfigKey } from '../hooks/useWorkspaceConfigActions'
 import { Link } from '@/i18n/navigation'
 import StageDataBoundary from './StageDataBoundary'
+import { isGridStoryboardMode, resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
+import type { SixGridCellAspectRatio, StoryboardGenerationMode } from '@/lib/novel-promotion/six-grid/contracts'
+
+export interface StoryboardModeSelectorProps {
+  mode: StoryboardGenerationMode
+  cellRatio: SixGridCellAspectRatio | null
+  videoRatio: string | null | undefined
+  settingsLocked: boolean
+  onChange: (key: StoryboardConfigKey, value: unknown) => void
+}
+
+export function StoryboardModeSelector({
+  mode,
+  cellRatio,
+  videoRatio,
+  settingsLocked,
+  onChange,
+}: StoryboardModeSelectorProps) {
+  const t = useTranslations('novelPromotion.storyboardRunSettings')
+  const selectedCellRatio = cellRatio || (videoRatio === '9:16' ? '9:16' : '16:9')
+  const gridSpec = isGridStoryboardMode(mode)
+    ? resolveStoryboardGridSpec(mode, selectedCellRatio)
+    : null
+
+  return (
+    <>
+      <label className="min-w-0 text-xs text-[var(--glass-text-secondary)]">
+        <span className="mb-1 block">{t('modeLabel')}</span>
+        <select
+          value={mode}
+          disabled={settingsLocked}
+          aria-label={t('modeLabel')}
+          onChange={(event) => onChange('storyboardGenerationMode', event.target.value)}
+          className="glass-input-base w-full min-w-0 px-3 py-2"
+        >
+          <option value="individual">{t('mode.individual')}</option>
+          <option value="four_grid">{t('mode.four_grid')} · {t('recommended')}</option>
+          <option value="six_grid">{t('mode.six_grid')}</option>
+        </select>
+        <span className="mt-1 block break-words text-[11px] text-[var(--glass-text-tertiary)]">
+          {mode === 'six_grid' ? t('sixGridRatioWarning') : mode === 'four_grid' ? t('fourGridHint') : null}
+        </span>
+      </label>
+      {gridSpec && (
+        <label className="min-w-0 text-xs text-[var(--glass-text-secondary)]">
+          <span className="mb-1 block">{t('cellRatioLabel')}</span>
+          <select
+            value={cellRatio || ''}
+            disabled={settingsLocked}
+            aria-label={t('cellRatioLabel')}
+            onChange={(event) => onChange('sixGridCellAspectRatio', event.target.value || null)}
+            className="glass-input-base w-full min-w-0 px-3 py-2"
+          >
+            <option value="">{t('inheritVideoRatio', { ratio: videoRatio || '-' })}</option>
+            <option value="16:9">16:9</option>
+            <option value="9:16">9:16</option>
+          </select>
+          <span className="mt-1 block break-words text-[11px] text-[var(--glass-text-tertiary)]">
+            {t('sheetRatioLabel')}: {gridSpec.sheetAspectRatio}
+          </span>
+        </label>
+      )}
+    </>
+  )
+}
 
 /**
  * 配置阶段 — 整合 NovelInputStage + 长文本智能分集
@@ -106,7 +171,7 @@ export default function ConfigStage() {
             <p className="text-xs text-[var(--glass-text-tertiary)]">
               {t('summary', {
                 mode: t(`mode.${runtime.storyboardGenerationMode}`),
-                ratio: runtime.storyboardGenerationMode === 'six_grid' ? displayedCellRatio : t('notApplicable'),
+                ratio: isGridStoryboardMode(runtime.storyboardGenerationMode) ? displayedCellRatio : t('notApplicable'),
               })}
             </p>
           </div>
@@ -114,45 +179,19 @@ export default function ConfigStage() {
             <span className="text-xs text-[var(--glass-text-tertiary)]">{t('locked')}</span>
           )}
         </div>
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          <label className="text-xs text-[var(--glass-text-secondary)]">
-            <span className="mb-1 block">{t('modeLabel')}</span>
-            <select
-              value={runtime.storyboardGenerationMode}
-              disabled={settingsLocked}
-              onChange={(event) => void handleStoryboardSettingChange(
-                'storyboardGenerationMode',
-                event.target.value,
-              )}
-              className="glass-input-base w-full px-3 py-2"
-            >
-              <option value="individual">{t('mode.individual')}</option>
-              <option value="six_grid">{t('mode.six_grid')}</option>
-            </select>
-          </label>
-          {runtime.storyboardGenerationMode === 'six_grid' && (
-            <label className="text-xs text-[var(--glass-text-secondary)]">
-              <span className="mb-1 block">{t('cellRatioLabel')}</span>
-              <select
-                value={runtime.sixGridCellAspectRatio || ''}
-                disabled={settingsLocked}
-                onChange={(event) => void handleStoryboardSettingChange(
-                  'sixGridCellAspectRatio',
-                  event.target.value || null,
-                )}
-                className="glass-input-base w-full px-3 py-2"
-              >
-                <option value="">{t('inheritVideoRatio', { ratio: runtime.videoRatio || '-' })}</option>
-                <option value="16:9">16:9</option>
-                <option value="9:16">9:16</option>
-              </select>
-            </label>
-          )}
+        <div className="grid min-w-0 gap-3 md:grid-cols-2 lg:grid-cols-3">
+          <StoryboardModeSelector
+            mode={runtime.storyboardGenerationMode}
+            cellRatio={runtime.sixGridCellAspectRatio}
+            videoRatio={runtime.videoRatio}
+            settingsLocked={settingsLocked}
+            onChange={(key, value) => void handleStoryboardSettingChange(key, value)}
+          />
           <label className="text-xs text-[var(--glass-text-secondary)]">
             <span className="mb-1 block">{t('processingOrderLabel')}</span>
             <select
               value={runtime.sixGridProcessingOrder}
-              disabled={settingsLocked || runtime.storyboardGenerationMode !== 'six_grid'}
+              disabled={settingsLocked || !isGridStoryboardMode(runtime.storyboardGenerationMode)}
               onChange={(event) => void handleStoryboardSettingChange(
                 'sixGridProcessingOrder',
                 event.target.value,

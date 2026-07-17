@@ -11,6 +11,7 @@ import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import type { SixGridUpscaleWorkflow } from './SixGridGroupControls'
 import { isSixGridPanelBusy } from '@/lib/query/hooks/useSixGridStoryboard'
 import { VirtualCardRange } from '@/components/virtualization/VirtualCardRange'
+import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 interface StoryboardPanelListProps {
   storyboard: NovelPromotionStoryboard
@@ -185,7 +186,7 @@ export default function StoryboardPanelList({
               onVariant={() => onVariant(index)}
               isInsertDisabled={isInsertDisabled(panel.id)}
               previousImageUrl={panel.previousImageUrl}
-              sixGridActions={storyboard.layoutMode === 'six_grid' ? {
+              sixGridActions={isGridStoryboardMode(storyboard.layoutMode) ? {
                 previousUrl: panel.previousImageUrl,
                 isBusy: isSixGridPanelBusy(
                   sixGridTaskPanelId,

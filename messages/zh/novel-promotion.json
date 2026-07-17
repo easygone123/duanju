@@ -152,10 +152,15 @@
     "modeLabel": "分镜方式",
     "mode": {
       "individual": "逐张分镜",
+      "four_grid": "2×2 四宫格",
       "six_grid": "3×2 六宫格"
     },
+    "recommended": "推荐",
+    "fourGridHint": "推荐：整图使用大多数生图模型都支持的常见 16:9 或 9:16 比例。",
+    "sixGridRatioWarning": "需要模型支持较少见的 8:3 或 27:32 整图比例；不支持时请切换四宫格。",
     "cellRatioLabel": "宫格比例",
     "inheritVideoRatio": "继承视频比例（{ratio}）",
+    "sheetRatioLabel": "整图比例",
     "notApplicable": "不适用",
     "processingOrderLabel": "裁剪与放大顺序",
     "processingOrder": {
@@ -181,6 +186,7 @@
     "analysisFailed": "资产分析失败",
     "prepareFailed": "准备失败",
     "generationFailed": "生成失败",
+    "sixGridRatioUnsupported": "当前模型不支持六宫格整图比例，请切换四宫格或更换生图模型。",
     "batchVideoFailed": "批量生成视频失败",
     "updateFailed": "更新失败",
     "saveFailed": "保存失败",

@@ -29,15 +29,19 @@ const messages = {
     },
     uploadModal: {
       title: 'Upload six-grid sheet', description: 'Replace the generated sheet with an external image.',
+      titleFourGrid: 'Upload four-grid sheet', descriptionFourGrid: 'Replace the four-grid sheet with an external image.',
       chooseFile: 'Choose image', dropFile: 'or drop an image here', supportedTypes: 'PNG, JPEG, or WebP up to 25 MiB',
       fileLabel: 'File', sizeLabel: 'Size', dimensionsLabel: 'Dimensions',
       expectedRatioLabel: 'Expected sheet ratio', detectedRatioLabel: 'Detected ratio',
       previewAlt: 'Selected six-grid sheet preview',
+      previewAltFourGrid: 'Selected four-grid sheet preview',
       cellRatioLabel: 'Cell ratio',
       replacementWarning: 'This replaces the current six-grid sheet and derived panels.',
+      replacementWarningFourGrid: 'This replaces the current four-grid sheet and derived panels.',
       invalidType: 'Choose a PNG, JPEG, or WebP image.', invalidImage: 'The selected file is not a valid image.',
       tooLarge: 'The selected image exceeds the upload limit.', dimensionsInvalid: 'The decoded image dimensions exceed the limit.',
       ratioInvalid: 'The image ratio does not match the six-grid layout.', uploadFailed: 'Upload failed. Try again.',
+      ratioInvalidFourGrid: 'The image ratio does not match the four-grid layout.',
       uploading: 'Uploading…', cancel: 'Cancel', confirm: 'Upload sheet',
     },
   } },
@@ -184,6 +188,27 @@ describe('six-grid prompt modal', () => {
 })
 
 describe('six-grid external upload modal', () => {
+  it('accepts common-ratio four-grid sheets through the same upload component', async () => {
+    createImageBitmapMock.mockResolvedValueOnce(bitmap(1280, 720))
+    const view = render(withIntl(
+      <SixGridUploadModal
+        open mode="four_grid" onClose={vi.fn()} cellRatio="16:9"
+        expectedSheetArtifactVersion={5} onSubmit={vi.fn()}
+      />,
+    ))
+    fireEvent.change(view.getByLabelText('Choose image'), {
+      target: { files: [imageFile('four-grid.png', 'image/png', pngBytes(1600, 900))] },
+    })
+    await waitFor(() => expect(view.getByText('1600 × 900')).toBeTruthy())
+    expect(view.getAllByText('16:9')).toHaveLength(2)
+    expect(view.getByRole('button', { name: 'Upload sheet' }).hasAttribute('disabled')).toBe(false)
+
+    fireEvent.change(view.getByLabelText('Choose image'), {
+      target: { files: [imageFile('six-only.png', 'image/png', pngBytes(2400, 900))] },
+    })
+    expect((await view.findByRole('alert')).textContent).toBe('The image ratio does not match the four-grid layout.')
+  })
+
   it('accepts a valid landscape-cell sheet and submits the frozen artifact version', async () => {
     const decoded = bitmap(1280, 480)
     createImageBitmapMock.mockResolvedValueOnce(decoded)
@@ -426,7 +451,7 @@ describe('six-grid storyboard group dialog wiring', () => {
         handleOpenVariantModal: vi.fn(), handleCloseVariantModal: vi.fn(), handleVariant: vi.fn(),
       }),
     }))
-    vi.doMock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/SixGridGroupControls', () => ({
+    vi.doMock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/GridGroupControls', () => ({
       default: ({ onViewPrompt, onUploadSheet }: { onViewPrompt(): void; onUploadSheet(): void }) => (
         <div><button onClick={onViewPrompt}>OPEN PROMPT</button><button onClick={onUploadSheet}>OPEN UPLOAD</button></div>
       ),
@@ -450,7 +475,7 @@ describe('six-grid storyboard group dialog wiring', () => {
     }))
     for (const path of [
       'ScreenplayDisplay', 'StoryboardGroupHeader', 'StoryboardGroupActions', 'StoryboardPanelList',
-      'StoryboardGroupFailedAlert', 'StoryboardGroupDialogs', 'SixGridCropModal',
+      'StoryboardGroupFailedAlert', 'StoryboardGroupDialogs', 'GridCropModal',
     ]) {
       vi.doMock(`@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/${path}`, () => ({ default: () => null }))
     }

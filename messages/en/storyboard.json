@@ -383,6 +383,63 @@
         "deleteShot": "Delete Shot",
         "pasteSrtPlaceholder": "Paste new SRT content..."
     },
+    "grid": {
+        "title": {
+            "four_grid": "Four-grid storyboard",
+            "six_grid": "Six-grid storyboard"
+        },
+        "generateSheet": {
+            "four_grid": "Generate 2×2 four-grid",
+            "six_grid": "Generate 3×2 six-grid"
+        },
+        "regenerateSheet": {
+            "four_grid": "Regenerate 2×2 four-grid",
+            "six_grid": "Regenerate 3×2 six-grid"
+        },
+        "viewPrompt": "View prompt",
+        "uploadSheet": "Upload grid sheet",
+        "generationFailed": "Generation failed: {message}",
+        "sixGridRatioUnsupported": "The selected model does not support the six-grid sheet ratio. Switch to four-grid or change the image model.",
+        "sheetPreviewAlt": "Storyboard sheet preview",
+        "upscaleSheet": "Upscale sheet",
+        "crop": "Crop panels",
+        "orders": {
+            "sheet_upscale_then_crop": "Upscale the original sheet, then crop",
+            "crop_then_panel_upscale": "Crop first, then upscale each panel"
+        },
+        "sourceLabel": "Current source",
+        "sourceOriginal": "Original sheet",
+        "sourceUpscaled": "Upscaled sheet",
+        "sourceMissing": "No sheet yet",
+        "artifactVersion": "Artifact version {version}",
+        "status": "Task status: {status}",
+        "idle": "Idle",
+        "running": "Running",
+        "manageComfyui": "Manage ComfyUI pool",
+        "comfyuiHint": "Open Settings Center to manage your private ComfyUI workflows.",
+        "workflowRequired": "Publish and test an upscale workflow available to your account first",
+        "sheetRequired": "Generate or upload the original sheet first",
+        "upscaledSheetRequired": "The current order requires upscaling the sheet before cropping",
+        "sourceOrderMismatch": "The selected source does not match the processing order",
+        "cropModal": {
+            "title": {
+                "four_grid": "Crop four panels",
+                "six_grid": "Crop six panels"
+            },
+            "source": "Crop source",
+            "original": "Original sheet",
+            "upscaled": "Upscaled sheet",
+            "cell": "Cell {cell}",
+            "resetCell": "Reset cell",
+            "resetAll": "Reset all",
+            "cancel": "Cancel",
+            "submit": "Submit crops",
+            "moveHint": "Use arrow keys to nudge; hold Shift for larger steps. The crop stays ratio-locked inside its cell.",
+            "shrink": "Shrink crop",
+            "grow": "Grow crop",
+            "resize": "Resize cell {cell}"
+        }
+    },
     "sixGrid": {
         "title": "Six-grid storyboard",
         "generateSheet": "Generate full 3×2 sheet",
@@ -390,6 +447,7 @@
         "viewPrompt": "View prompt",
         "uploadSheet": "Upload six-grid",
         "generationFailed": "Generation failed: {message}",
+        "sixGridRatioUnsupported": "The selected model does not support the six-grid sheet ratio. Switch to four-grid or change the image model.",
         "previewOriginal": "Preview original sheet",
         "upscaleSheet": "Upscale original sheet",
         "crop": "Crop six panels",
@@ -414,10 +472,13 @@
         "sourceOrderMismatch": "The selected source does not match the processing order",
         "promptModal": {
             "title": "Six-grid prompt",
+            "titleFourGrid": "Four-grid prompt",
             "description": "View the exact prompt stored when storyboard planning created this sheet.",
+            "descriptionFourGrid": "View the exact four-grid prompt stored when storyboard planning created this sheet.",
             "groupContext": "Group {sequence}",
             "cellRatioContext": "Cell ratio {ratio}",
             "promptLabel": "Stored six-grid prompt",
+            "promptLabelFourGrid": "Stored four-grid prompt",
             "copy": "Copy prompt",
             "copied": "Prompt copied",
             "copyFailed": "Could not copy the prompt. Please try again.",
@@ -426,11 +487,14 @@
         },
         "uploadModal": {
             "title": "Upload six-grid sheet",
+            "titleFourGrid": "Upload four-grid sheet",
             "description": "Validate and replace the generated sheet with an external image.",
+            "descriptionFourGrid": "Validate and replace the four-grid sheet with an external image.",
             "chooseFile": "Choose image",
             "dropFile": "or drop an image here",
             "supportedTypes": "PNG, JPEG, or WebP up to 25 MiB",
             "previewAlt": "Selected six-grid sheet preview",
+            "previewAltFourGrid": "Selected four-grid sheet preview",
             "fileLabel": "File",
             "sizeLabel": "Size",
             "dimensionsLabel": "Dimensions",
@@ -438,11 +502,13 @@
             "detectedRatioLabel": "Detected ratio",
             "cellRatioLabel": "Cell ratio",
             "replacementWarning": "Uploading replaces the current six-grid sheet and its derived panel images.",
+            "replacementWarningFourGrid": "Uploading replaces the current four-grid sheet and its derived panel images.",
             "invalidType": "Choose a PNG, JPEG, or WebP image.",
             "invalidImage": "The selected file is not a valid image.",
             "tooLarge": "The selected image exceeds the 25 MiB upload limit.",
             "dimensionsInvalid": "The decoded image dimensions or pixel count exceed the supported limit.",
             "ratioInvalid": "The image ratio does not match the expected six-grid layout.",
+            "ratioInvalidFourGrid": "The image ratio does not match the expected four-grid layout.",
             "uploading": "Uploading…",
             "cancel": "Cancel",
             "confirm": "Upload sheet",

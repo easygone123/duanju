@@ -116,7 +116,8 @@ describe('six-grid storyboard controls', () => {
     const idle = renderControls(false)
     expect(idle).toMatch(/<button[^>]*>[^<]*(?:<span[^>]*><\/span>)?View prompt<\/button>/)
     expect(idle).toMatch(/<button[^>]*>[^<]*(?:<span[^>]*><\/span>)?Upload six-grid<\/button>/)
-    expect(idle.match(/disabled=""/g)).toHaveLength(3)
+    // The sheet is previewed inline, so only upscale and crop are unavailable before a sheet exists.
+    expect(idle.match(/disabled=""/g)).toHaveLength(2)
 
     const busy = renderControls(true)
     const uploadButton = busy.match(/<button[^>]*disabled=""[^>]*>[^<]*(?:<span[^>]*><\/span>)?Upload six-grid<\/button>/)

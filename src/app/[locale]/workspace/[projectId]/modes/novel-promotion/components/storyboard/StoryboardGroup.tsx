@@ -16,14 +16,15 @@ import StoryboardGroupDialogs from './StoryboardGroupDialogs'
 import type { StoryboardGroupProps } from './StoryboardGroup.types'
 import { AppIcon } from '@/components/ui/icons'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
-import SixGridGroupControls from './SixGridGroupControls'
-import SixGridCropModal from './SixGridCropModal'
+import GridGroupControls from './GridGroupControls'
+import GridCropModal from './GridCropModal'
 import SixGridPromptModal from './SixGridPromptModal'
 import SixGridUploadModal from './SixGridUploadModal'
-import { isSixGridGroupBusy } from '@/lib/query/hooks/useSixGridStoryboard'
+import { isGridGroupBusy } from '@/lib/query/hooks/useSixGridStoryboard'
 import { useVirtualCardRetention } from '@/components/virtualization/VirtualCardRange'
+import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 
-type SixGridUploadSession = {
+type GridUploadSession = {
   storyboardId: string
   expectedSheetArtifactVersion: number
   cellRatio: '16:9' | '9:16'
@@ -95,8 +96,8 @@ export default function StoryboardGroup({
   const t = useTranslations('storyboard')
   const [cropCellIndex, setCropCellIndex] = useState<number | null>(null)
   const [promptModalOpen, setPromptModalOpen] = useState(false)
-  const [uploadSession, setUploadSession] = useState<SixGridUploadSession | null>(null)
-  const isSixGridGroupTaskRunning = isSixGridGroupBusy(isSixGridTaskRunning, isSubmittingStoryboardTask)
+  const [uploadSession, setUploadSession] = useState<GridUploadSession | null>(null)
+  const isGridGroupTaskRunning = isGridGroupBusy(isSixGridTaskRunning, isSubmittingStoryboardTask)
   const sixGridCellRatio = storyboard.sixGridCellAspectRatio === '9:16' ? '9:16' : '16:9'
 
   useEffect(() => {
@@ -216,9 +217,9 @@ export default function StoryboardGroup({
         />
       </div>
 
-      <SixGridGroupControls
+      <GridGroupControls
         storyboard={storyboard}
-        isTaskRunning={isSixGridGroupTaskRunning}
+        isTaskRunning={isGridGroupTaskRunning}
         upscaleWorkflow={sixGridUpscaleWorkflow}
         generationError={sixGridGenerationError}
         onGenerateSheet={onGenerateSixGridSheet}
@@ -295,7 +296,7 @@ export default function StoryboardGroup({
         }
         sixGridUpscaleWorkflow={sixGridUpscaleWorkflow}
         sixGridTaskPanelId={sixGridTaskPanelId}
-        isSixGridTaskRunning={isSixGridGroupTaskRunning}
+        isSixGridTaskRunning={isGridGroupTaskRunning}
         onOpenSixGridCrop={setCropCellIndex}
         onUpscaleSixGridPanel={onUpscaleSixGridPanel}
         onUndoSixGridPanel={onUndoSixGridPanel}
@@ -314,7 +315,7 @@ export default function StoryboardGroup({
         onCloseVariantModal={handleCloseVariantModal}
         onVariant={handleVariant}
       />
-      <SixGridCropModal
+      <GridCropModal
         isOpen={cropCellIndex !== null}
         storyboard={storyboard}
         initialCellIndex={cropCellIndex || 0}
@@ -327,12 +328,14 @@ export default function StoryboardGroup({
         prompt={storyboard.sheetPromptSnapshot}
         groupSequence={storyboard.groupSequence}
         cellRatio={sixGridCellRatio}
+        mode={isGridStoryboardMode(storyboard.layoutMode) ? storyboard.layoutMode : 'six_grid'}
       />
       <SixGridUploadModal
         open={uploadSession !== null}
         onClose={() => setUploadSession(null)}
         cellRatio={uploadSession?.cellRatio ?? sixGridCellRatio}
         expectedSheetArtifactVersion={uploadSession?.expectedSheetArtifactVersion ?? 0}
+        mode={isGridStoryboardMode(storyboard.layoutMode) ? storyboard.layoutMode : 'six_grid'}
         onSubmit={onUploadSixGridSheet}
       />
     </div>

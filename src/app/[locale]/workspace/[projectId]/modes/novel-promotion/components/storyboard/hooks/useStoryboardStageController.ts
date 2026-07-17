@@ -22,9 +22,9 @@ import { useStoryboardStageUiState } from './useStoryboardStageUiState'
 import { useStoryboardStageStatus } from './useStoryboardStageStatus'
 import { useWorkspaceStageRuntime } from '../../../WorkspaceStageRuntimeContext'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
-import { useSixGridStoryboard } from '@/lib/query/hooks/useSixGridStoryboard'
-import type { SixGridUpscaleWorkflow } from '../SixGridGroupControls'
-import type { CropEntry } from '../SixGridCropModal'
+import { useGridStoryboard } from '@/lib/query/hooks/useSixGridStoryboard'
+import type { GridUpscaleWorkflow } from '../GridGroupControls'
+import type { CropEntry } from '../GridCropModal'
 
 interface UseStoryboardStageControllerProps {
   projectId: string
@@ -42,8 +42,8 @@ export function useStoryboardStageController({
   isTransitioning,
 }: UseStoryboardStageControllerProps) {
   const runtime = useWorkspaceStageRuntime()
-  const sixGridTasks = useSixGridStoryboard(projectId, episodeId)
-  const sixGridUpscaleWorkflow = useMemo<SixGridUpscaleWorkflow | null>(() => {
+  const gridTasks = useGridStoryboard(projectId, episodeId)
+  const sixGridUpscaleWorkflow = useMemo<GridUpscaleWorkflow | null>(() => {
     const selected = runtime.userUpscaleModels.find((model) => model.value === runtime.storyboardUpscaleModel)
     const parsed = parseModelKeyStrict(selected?.value || '')
     if (!selected || parsed?.provider !== 'comfyui' || !selected.workflowVersionId) return null
@@ -204,30 +204,30 @@ export function useStoryboardStageController({
   })
 
   const generateSixGridSheet = useCallback((storyboardId: string) => {
-    sixGridTasks.sheet.mutate({ operation: 'generate', episodeId, storyboardId })
-  }, [episodeId, sixGridTasks.sheet])
-  const upscaleSixGridSheet = useCallback((storyboardId: string, workflow: SixGridUpscaleWorkflow) => {
-    sixGridTasks.sheet.mutate({
+    gridTasks.sheet.mutate({ operation: 'generate', episodeId, storyboardId })
+  }, [episodeId, gridTasks.sheet])
+  const upscaleSixGridSheet = useCallback((storyboardId: string, workflow: GridUpscaleWorkflow) => {
+    gridTasks.sheet.mutate({
       operation: 'upscale', episodeId, storyboardId,
       workflowId: workflow.workflowId, workflowVersionId: workflow.workflowVersionId,
     })
-  }, [episodeId, sixGridTasks.sheet])
-  const cropSixGridSheet = useCallback((storyboardId: string, cropRects: CropEntry[]) => sixGridTasks.crop.mutateAsync({
+  }, [episodeId, gridTasks.sheet])
+  const cropSixGridSheet = useCallback((storyboardId: string, cropRects: CropEntry[]) => gridTasks.crop.mutateAsync({
     episodeId, storyboardId, cropRects,
-  }), [episodeId, sixGridTasks.crop])
+  }), [episodeId, gridTasks.crop])
   const uploadSixGridSheet = useCallback(
-    (storyboardId: string, file: File, version: number) => sixGridTasks.upload.mutateAsync({
+    (storyboardId: string, file: File, version: number) => gridTasks.upload.mutateAsync({
       file, episodeId, storyboardId, expectedSheetArtifactVersion: version,
     }),
-    [episodeId, sixGridTasks.upload],
+    [episodeId, gridTasks.upload],
   )
-  const upscaleSixGridPanel = useCallback((storyboardId: string, panelId: string, workflow: SixGridUpscaleWorkflow) => sixGridTasks.panelUpscale.mutateAsync({
+  const upscaleSixGridPanel = useCallback((storyboardId: string, panelId: string, workflow: GridUpscaleWorkflow) => gridTasks.panelUpscale.mutateAsync({
     episodeId, storyboardId, panelId,
     workflowId: workflow.workflowId, workflowVersionId: workflow.workflowVersionId,
-  }), [episodeId, sixGridTasks.panelUpscale])
-  const undoSixGridPanel = useCallback((storyboardId: string, panelId: string, expectedCurrentMediaId: string, expectedPreviousMediaId: string) => sixGridTasks.undo.mutateAsync({
+  }), [episodeId, gridTasks.panelUpscale])
+  const undoSixGridPanel = useCallback((storyboardId: string, panelId: string, expectedCurrentMediaId: string, expectedPreviousMediaId: string) => gridTasks.undo.mutateAsync({
     storyboardId, panelId, expectedCurrentMediaId, expectedPreviousMediaId,
-  }), [sixGridTasks.undo])
+  }), [gridTasks.undo])
 
   return {
     localStoryboards, setLocalStoryboards, sortedStoryboards, expandedClips, toggleExpandedClip,
@@ -245,17 +245,17 @@ export function useStoryboardStageController({
     updatePhotographyPlanMutation, updatePanelActingNotesMutation,
     addingStoryboardGroupState, transitioningState, runningCount, pendingPanelCount, handleGenerateAllPanels,
     sixGridUpscaleWorkflow,
-    sixGridTaskStoryboardId: sixGridTasks.sheet.isPending
-      ? sixGridTasks.sheet.variables?.storyboardId || null
-      : sixGridTasks.crop.isPending
-        ? sixGridTasks.crop.variables?.storyboardId || null
-        : sixGridTasks.upload.isPending
-          ? sixGridTasks.upload.variables?.storyboardId || null
+    sixGridTaskStoryboardId: gridTasks.sheet.isPending
+      ? gridTasks.sheet.variables?.storyboardId || null
+      : gridTasks.crop.isPending
+        ? gridTasks.crop.variables?.storyboardId || null
+        : gridTasks.upload.isPending
+          ? gridTasks.upload.variables?.storyboardId || null
           : null,
-    sixGridTaskPanelId: sixGridTasks.panelUpscale.isPending
-      ? sixGridTasks.panelUpscale.variables?.panelId || null
-      : sixGridTasks.undo.isPending ? sixGridTasks.undo.variables?.panelId || null : null,
-    sixGridGenerationErrors: sixGridTasks.generationErrorsByStoryboardId,
+    sixGridTaskPanelId: gridTasks.panelUpscale.isPending
+      ? gridTasks.panelUpscale.variables?.panelId || null
+      : gridTasks.undo.isPending ? gridTasks.undo.variables?.panelId || null : null,
+    sixGridGenerationErrors: gridTasks.generationErrorsByStoryboardId,
     generateSixGridSheet, upscaleSixGridSheet, cropSixGridSheet, uploadSixGridSheet, upscaleSixGridPanel, undoSixGridPanel,
   }
 }

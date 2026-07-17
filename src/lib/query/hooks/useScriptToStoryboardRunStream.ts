@@ -25,6 +25,23 @@ export type ScriptToStoryboardRunParams = {
 
 export type ScriptToStoryboardRunResult = RunResult
 
+export function buildScriptToStoryboardRunBody(params: ScriptToStoryboardRunParams) {
+  return {
+    episodeId: params.episodeId,
+    model: params.model || undefined,
+    temperature: params.temperature,
+    reasoning: params.reasoning,
+    reasoningEffort: params.reasoningEffort,
+    storyboardGenerationMode: params.storyboardGenerationMode,
+    sixGridCellAspectRatio: params.sixGridCellAspectRatio,
+    sixGridProcessingOrder: params.sixGridProcessingOrder,
+    storyboardUpscaleModel: params.storyboardUpscaleModel,
+    dialogueVideoModel: params.dialogueVideoModel,
+    async: true,
+    displayMode: 'detail',
+  }
+}
+
 type UseScriptToStoryboardRunStreamOptions = {
   projectId: string
   episodeId?: string | null
@@ -83,19 +100,6 @@ export function useScriptToStoryboardRunStream({ projectId, episodeId }: UseScri
         throw new Error('episodeId is required')
       }
     },
-    buildRequestBody: (params) => ({
-      episodeId: params.episodeId,
-      model: params.model || undefined,
-      temperature: params.temperature,
-      reasoning: params.reasoning,
-      reasoningEffort: params.reasoningEffort,
-      storyboardGenerationMode: params.storyboardGenerationMode,
-      sixGridCellAspectRatio: params.sixGridCellAspectRatio,
-      sixGridProcessingOrder: params.sixGridProcessingOrder,
-      storyboardUpscaleModel: params.storyboardUpscaleModel,
-      dialogueVideoModel: params.dialogueVideoModel,
-      async: true,
-      displayMode: 'detail',
-    }),
+    buildRequestBody: buildScriptToStoryboardRunBody,
   })
 }

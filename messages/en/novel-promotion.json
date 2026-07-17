@@ -152,10 +152,15 @@
     "modeLabel": "Storyboard mode",
     "mode": {
       "individual": "Individual panels",
+      "four_grid": "2×2 four-grid",
       "six_grid": "3×2 six-grid"
     },
+    "recommended": "Recommended",
+    "fourGridHint": "Recommended: the full sheet uses the common 16:9 or 9:16 ratio supported by most image models.",
+    "sixGridRatioWarning": "Requires a model that supports the uncommon 8:3 or 27:32 full-sheet ratio. If unsupported, switch to four-grid.",
     "cellRatioLabel": "Cell aspect ratio",
     "inheritVideoRatio": "Inherit video ratio ({ratio})",
+    "sheetRatioLabel": "Whole-sheet ratio",
     "notApplicable": "Not applicable",
     "processingOrderLabel": "Crop and upscale order",
     "processingOrder": {
@@ -181,6 +186,7 @@
     "analysisFailed": "Asset analysis failed",
     "prepareFailed": "Preparation failed",
     "generationFailed": "Generation failed",
+    "sixGridRatioUnsupported": "The selected model does not support the six-grid sheet ratio. Switch to four-grid or change the image model.",
     "batchVideoFailed": "Batch video generation failed",
     "updateFailed": "Update failed",
     "saveFailed": "Save failed",

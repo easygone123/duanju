@@ -383,6 +383,63 @@
         "deleteShot": "删除镜头",
         "pasteSrtPlaceholder": "粘贴新的SRT内容..."
     },
+    "grid": {
+        "title": {
+            "four_grid": "四宫格故事板",
+            "six_grid": "六宫格故事板"
+        },
+        "generateSheet": {
+            "four_grid": "生成 2×2 四宫格",
+            "six_grid": "生成 3×2 六宫格"
+        },
+        "regenerateSheet": {
+            "four_grid": "重新生成 2×2 四宫格",
+            "six_grid": "重新生成 3×2 六宫格"
+        },
+        "viewPrompt": "查看提示词",
+        "uploadSheet": "上传宫格整图",
+        "generationFailed": "生成失败：{message}",
+        "sixGridRatioUnsupported": "当前模型不支持六宫格整图比例，请切换四宫格或更换生图模型。",
+        "sheetPreviewAlt": "故事板整图预览",
+        "upscaleSheet": "放大整图",
+        "crop": "裁剪分镜",
+        "orders": {
+            "sheet_upscale_then_crop": "原图整图放大后裁剪",
+            "crop_then_panel_upscale": "先裁剪后单格放大"
+        },
+        "sourceLabel": "当前来源",
+        "sourceOriginal": "原始整图",
+        "sourceUpscaled": "放大后的整图",
+        "sourceMissing": "尚无整图",
+        "artifactVersion": "素材版本 {version}",
+        "status": "任务状态：{status}",
+        "idle": "空闲",
+        "running": "处理中",
+        "manageComfyui": "管理 ComfyUI 节点池",
+        "comfyuiHint": "前往设置中心管理私有 ComfyUI 工作流。",
+        "workflowRequired": "需要先发布并测试一个本人可用的放大工作流",
+        "sheetRequired": "请先生成或上传原始整图",
+        "upscaledSheetRequired": "当前顺序要求先放大整图，再执行裁剪",
+        "sourceOrderMismatch": "所选来源与当前处理顺序不一致",
+        "cropModal": {
+            "title": {
+                "four_grid": "裁剪四个分镜",
+                "six_grid": "裁剪六个分镜"
+            },
+            "source": "裁剪来源",
+            "original": "原始整图",
+            "upscaled": "放大后的整图",
+            "cell": "宫格 {cell}",
+            "resetCell": "重置当前格",
+            "resetAll": "重置全部",
+            "cancel": "取消",
+            "submit": "提交裁剪",
+            "moveHint": "方向键微调，按住 Shift 可加速移动；裁剪框始终锁定宫格比例且不会越格。",
+            "shrink": "缩小裁剪框",
+            "grow": "放大裁剪框",
+            "resize": "调整宫格 {cell} 大小"
+        }
+    },
     "sixGrid": {
         "title": "六宫格故事板",
         "generateSheet": "生成整张 3×2 故事板",
@@ -390,6 +447,7 @@
         "viewPrompt": "查看提示词",
         "uploadSheet": "上传六宫格",
         "generationFailed": "生成失败：{message}",
+        "sixGridRatioUnsupported": "当前模型不支持六宫格整图比例，请切换四宫格或更换生图模型。",
         "previewOriginal": "查看原始整图",
         "upscaleSheet": "放大原始整图",
         "crop": "裁剪六个分镜",
@@ -414,10 +472,13 @@
         "sourceOrderMismatch": "所选来源与当前处理顺序不一致，请切换为当前顺序要求的来源",
         "promptModal": {
             "title": "六宫格提示词",
+            "titleFourGrid": "四宫格提示词",
             "description": "查看故事板规划生成整图时保存的原始提示词。",
+            "descriptionFourGrid": "查看故事板规划生成四宫格整图时保存的原始提示词。",
             "groupContext": "第 {sequence} 组",
             "cellRatioContext": "单格比例 {ratio}",
             "promptLabel": "已保存的六宫格提示词",
+            "promptLabelFourGrid": "已保存的四宫格提示词",
             "copy": "复制提示词",
             "copied": "提示词已复制",
             "copyFailed": "无法复制提示词，请重试。",
@@ -426,11 +487,14 @@
         },
         "uploadModal": {
             "title": "上传六宫格整图",
+            "titleFourGrid": "上传四宫格整图",
             "description": "验证外部图片并替换当前生成的六宫格整图。",
+            "descriptionFourGrid": "验证外部图片并替换当前四宫格整图。",
             "chooseFile": "选择图片",
             "dropFile": "或将图片拖放到此处",
             "supportedTypes": "支持 PNG、JPEG、WebP，最大 25 MiB",
             "previewAlt": "所选六宫格整图预览",
+            "previewAltFourGrid": "所选四宫格整图预览",
             "fileLabel": "文件名",
             "sizeLabel": "文件大小",
             "dimensionsLabel": "像素尺寸",
@@ -438,11 +502,13 @@
             "detectedRatioLabel": "检测到的比例",
             "cellRatioLabel": "单格比例",
             "replacementWarning": "上传后将替换当前六宫格整图及由其生成的分镜图片。",
+            "replacementWarningFourGrid": "上传后将替换当前四宫格整图及由其生成的分镜图片。",
             "invalidType": "请选择 PNG、JPEG 或 WebP 图片。",
             "invalidImage": "所选文件不是有效图片。",
             "tooLarge": "所选图片超过 25 MiB 上传上限。",
             "dimensionsInvalid": "图片解码后的尺寸或像素总数超过支持上限。",
             "ratioInvalid": "图片比例与预期的六宫格布局不匹配。",
+            "ratioInvalidFourGrid": "图片比例与预期的四宫格布局不匹配。",
             "uploading": "上传中…",
             "cancel": "取消",
             "confirm": "上传整图",
