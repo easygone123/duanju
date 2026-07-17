@@ -436,8 +436,6 @@
             "dimensionsLabel": "Dimensions",
             "expectedRatioLabel": "Expected sheet ratio",
             "detectedRatioLabel": "Detected ratio",
-            "ratioPending": "Detecting…",
-            "cellRatioContext": "Cell ratio {ratio}",
             "cellRatioLabel": "Cell ratio",
             "replacementWarning": "Uploading replaces the current six-grid sheet and its derived panel images.",
             "invalidType": "Choose a PNG, JPEG, or WebP image.",

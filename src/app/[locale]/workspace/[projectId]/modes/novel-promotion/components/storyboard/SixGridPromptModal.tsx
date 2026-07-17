@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import GlassModalShell from '@/components/ui/primitives/GlassModalShell'
@@ -23,23 +23,41 @@ export default function SixGridPromptModal({
 }: SixGridPromptModalProps) {
   const t = useTranslations('storyboard.sixGrid.promptModal')
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const copyTokenRef = useRef(0)
+  const mountedRef = useRef(false)
+  const openRef = useRef(open)
+  openRef.current = open
   const hasPrompt = Boolean(prompt?.trim())
 
   useEffect(() => {
+    copyTokenRef.current += 1
     setCopyState('idle')
   }, [open, prompt])
 
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      copyTokenRef.current += 1
+    }
+  }, [])
+
   const copyPrompt = async () => {
     if (!hasPrompt || prompt == null) return
+    const token = copyTokenRef.current + 1
+    copyTokenRef.current = token
     try {
       await navigator.clipboard.writeText(prompt)
+      if (!mountedRef.current || !openRef.current || copyTokenRef.current !== token) return
       setCopyState('copied')
     } catch {
+      if (!mountedRef.current || !openRef.current || copyTokenRef.current !== token) return
       setCopyState('failed')
     }
   }
 
   const close = () => {
+    copyTokenRef.current += 1
     setCopyState('idle')
     onClose()
   }
@@ -66,7 +84,7 @@ export default function SixGridPromptModal({
         </div>
       )}
     >
-      <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+      <div className="space-y-4">
         <div className="flex flex-wrap gap-2 text-xs text-[var(--glass-text-secondary)]">
           {groupSequence != null ? (
             <span className="rounded-full border border-[var(--glass-stroke-base)] px-2.5 py-1">

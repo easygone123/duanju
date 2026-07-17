@@ -436,8 +436,6 @@
             "dimensionsLabel": "像素尺寸",
             "expectedRatioLabel": "整图预期比例",
             "detectedRatioLabel": "检测到的比例",
-            "ratioPending": "检测中…",
-            "cellRatioContext": "单格比例 {ratio}",
             "cellRatioLabel": "单格比例",
             "replacementWarning": "上传后将替换当前六宫格整图及由其生成的分镜图片。",
             "invalidType": "请选择 PNG、JPEG 或 WebP 图片。",

@@ -33,8 +33,7 @@ const messages = {
       fileLabel: 'File', sizeLabel: 'Size', dimensionsLabel: 'Dimensions',
       expectedRatioLabel: 'Expected sheet ratio', detectedRatioLabel: 'Detected ratio',
       previewAlt: 'Selected six-grid sheet preview',
-      ratioPending: 'Detecting…',
-      cellRatioContext: 'Cell ratio {ratio}', cellRatioLabel: 'Cell ratio',
+      cellRatioLabel: 'Cell ratio',
       replacementWarning: 'This replaces the current six-grid sheet and derived panels.',
       invalidType: 'Choose a PNG, JPEG, or WebP image.', invalidImage: 'The selected file is not a valid image.',
       tooLarge: 'The selected image exceeds the upload limit.', dimensionsInvalid: 'The decoded image dimensions exceed the limit.',
@@ -52,8 +51,36 @@ function withIntl(node: React.ReactNode) {
   )
 }
 
-function imageFile(name = 'sheet.png', type = 'image/png') {
-  return new File(['image'], name, { type })
+function pngBytes(width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(33)
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10])
+  const view = new DataView(bytes.buffer)
+  view.setUint32(8, 13)
+  bytes.set([73, 72, 68, 82], 12)
+  view.setUint32(16, width)
+  view.setUint32(20, height)
+  return bytes
+}
+
+function rotatedJpegBytes(): Uint8Array {
+  return Uint8Array.from([
+    0xff, 0xd8, 0xff, 0xe1, 0x00, 0x22,
+    0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+    0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0, 0, 0,
+    0, 0, 0, 0,
+    0xff, 0xc0, 0x00, 0x0b, 0x08, 0x09, 0x60, 0x03, 0x84, 0x01, 0x01, 0x11, 0,
+    0xff, 0xd9,
+  ])
+}
+
+function imageFile(name = 'sheet.png', type = 'image/png', bytes: Uint8Array = pngBytes(2400, 900)) {
+  const file = new File([bytes as BlobPart], name, { type })
+  Object.defineProperty(file, 'arrayBuffer', {
+    configurable: true,
+    value: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+  })
+  return file
 }
 
 type BitmapStub = { width: number; height: number; close: ReturnType<typeof vi.fn> }
@@ -65,10 +92,12 @@ const createImageBitmapMock = vi.fn()
 const createObjectURLMock = vi.fn<(blob: Blob | MediaSource) => string>()
 const revokeObjectURLMock = vi.fn<(url: string) => void>()
 const clipboardWriteMock = vi.fn<(text: string) => Promise<void>>()
+const drawImageMock = vi.fn()
+const canvasToBlobMock = vi.fn((callback: BlobCallback) => callback(new Blob(['thumbnail'], { type: 'image/webp' })))
 
 beforeEach(() => {
   vi.clearAllMocks()
-  createObjectURLMock.mockImplementation((file) => `blob:${(file as File).name}:${createObjectURLMock.mock.calls.length}`)
+  createObjectURLMock.mockImplementation(() => `blob:preview:${createObjectURLMock.mock.calls.length}`)
   Object.defineProperty(globalThis, 'createImageBitmap', { configurable: true, value: createImageBitmapMock })
   Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURLMock })
   Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURLMock })
@@ -76,6 +105,8 @@ beforeEach(() => {
     configurable: true,
     value: { writeText: clipboardWriteMock },
   })
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: drawImageMock } as unknown as CanvasRenderingContext2D)
+  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(canvasToBlobMock)
   clipboardWriteMock.mockResolvedValue(undefined)
 })
 
@@ -122,6 +153,26 @@ describe('six-grid prompt modal', () => {
     expect(alert.textContent).not.toContain('browser-secret-detail')
   })
 
+  it.each(['resolve', 'reject'] as const)('ignores an old clipboard %s after close and reopen', async (outcome) => {
+    let settle!: () => void
+    const pending = new Promise<void>((resolve, reject) => {
+      settle = () => outcome === 'resolve' ? resolve() : reject(new Error('old clipboard failure'))
+    })
+    clipboardWriteMock.mockReturnValueOnce(pending)
+    const props = { onClose: vi.fn(), groupSequence: 1, cellRatio: '16:9' as const }
+    const view = render(withIntl(<SixGridPromptModal open prompt="old prompt" {...props} />))
+    fireEvent.click(view.getByRole('button', { name: 'Copy prompt' }))
+    await waitFor(() => expect(clipboardWriteMock).toHaveBeenCalledWith('old prompt'))
+
+    view.rerender(withIntl(<SixGridPromptModal open={false} prompt="old prompt" {...props} />))
+    view.rerender(withIntl(<SixGridPromptModal open prompt="new prompt" {...props} />))
+    await act(async () => { settle(); await pending.catch(() => undefined) })
+
+    expect(view.queryByText('Prompt copied')).toBeNull()
+    expect(view.queryByText('Could not copy the prompt')).toBeNull()
+    expect((view.getByRole('textbox', { name: 'Stored prompt' }) as HTMLTextAreaElement).value).toBe('new prompt')
+  })
+
   it('guides replanning when the stored prompt is blank', () => {
     const view = render(withIntl(
       <SixGridPromptModal open onClose={vi.fn()} prompt={'  \n '} groupSequence={null} cellRatio="9:16" />,
@@ -134,7 +185,7 @@ describe('six-grid prompt modal', () => {
 
 describe('six-grid external upload modal', () => {
   it('accepts a valid landscape-cell sheet and submits the frozen artifact version', async () => {
-    const decoded = bitmap(2400, 900)
+    const decoded = bitmap(1280, 480)
     createImageBitmapMock.mockResolvedValueOnce(decoded)
     const onSubmit = vi.fn().mockResolvedValue({ ok: true })
     const onClose = vi.fn()
@@ -143,10 +194,19 @@ describe('six-grid external upload modal', () => {
     ))
     const file = imageFile()
 
+    const chooseFileButton = view.getByRole('button', { name: 'Choose image' })
+    chooseFileButton.focus()
+    expect(document.activeElement).toBe(chooseFileButton)
+
     fireEvent.change(view.getByLabelText('Choose image'), { target: { files: [file] } })
     await waitFor(() => expect(view.getByText('2400 × 900')).toBeTruthy())
     expect(view.getByText('8:3')).toBeTruthy()
     expect(decoded.close).toHaveBeenCalledTimes(1)
+    expect(createImageBitmapMock).toHaveBeenCalledWith(file, expect.objectContaining({
+      resizeWidth: 1280, resizeHeight: 480, imageOrientation: 'from-image',
+    }))
+    expect(createObjectURLMock.mock.calls[0][0]).toBeInstanceOf(Blob)
+    expect(createObjectURLMock.mock.calls[0][0]).not.toBe(file)
 
     const confirm = view.getByRole('button', { name: 'Upload sheet' })
     expect(confirm.hasAttribute('disabled')).toBe(false)
@@ -161,40 +221,59 @@ describe('six-grid external upload modal', () => {
     expect(isSixGridSheetRatioAllowed((27 / 32) * 1.03001, '9:16')).toBe(false)
 
     createImageBitmapMock
-      .mockResolvedValueOnce(bitmap(2700, 3200))
-      .mockResolvedValueOnce(bitmap(2781, 3200))
-      .mockResolvedValueOnce(bitmap(2782, 3200))
+      .mockResolvedValueOnce(bitmap(1080, 1280))
+      .mockResolvedValueOnce(bitmap(1112, 1280))
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const view = render(withIntl(
       <SixGridUploadModal open onClose={vi.fn()} cellRatio="9:16" expectedSheetArtifactVersion={3} onSubmit={onSubmit} />,
     ))
     const input = view.getByLabelText('Choose image')
 
-    fireEvent.change(input, { target: { files: [imageFile('portrait.png')] } })
+    fireEvent.change(input, { target: { files: [imageFile('portrait.png', 'image/png', pngBytes(2700, 3200))] } })
     await waitFor(() => expect(view.getByText('2700 × 3200')).toBeTruthy())
     expect(view.getByRole('button', { name: 'Upload sheet' }).hasAttribute('disabled')).toBe(false)
 
-    fireEvent.change(input, { target: { files: [imageFile('boundary.png')] } })
+    fireEvent.change(input, { target: { files: [imageFile('boundary.png', 'image/png', pngBytes(2781, 3200))] } })
     await waitFor(() => expect(view.getByText('2781 × 3200')).toBeTruthy())
     expect(view.getByRole('button', { name: 'Upload sheet' }).hasAttribute('disabled')).toBe(false)
 
-    fireEvent.change(input, { target: { files: [imageFile('outside.png')] } })
+    const decoderCalls = createImageBitmapMock.mock.calls.length
+    const urlCalls = createObjectURLMock.mock.calls.length
+    fireEvent.change(input, { target: { files: [imageFile('outside.png', 'image/png', pngBytes(2782, 3200))] } })
     expect((await view.findByRole('alert')).textContent).toBe('The image ratio does not match the six-grid layout.')
     expect(view.getByRole('button', { name: 'Upload sheet' }).hasAttribute('disabled')).toBe(true)
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(decoderCalls)
+    expect(createObjectURLMock).toHaveBeenCalledTimes(urlCalls)
+  })
+
+  it('uses post-orientation JPEG metadata and fences unsafe headers before browser decode', async () => {
+    createImageBitmapMock.mockResolvedValueOnce(bitmap(1280, 480))
+    const view = render(withIntl(
+      <SixGridUploadModal open onClose={vi.fn()} cellRatio="16:9" expectedSheetArtifactVersion={3} onSubmit={vi.fn()} />,
+    ))
+    const input = view.getByLabelText('Choose image')
+    fireEvent.change(input, { target: { files: [imageFile('rotated.jpg', 'image/jpeg', rotatedJpegBytes())] } })
+    await waitFor(() => expect(view.getByText('2400 × 900')).toBeTruthy())
+    expect(view.getByRole('button', { name: 'Upload sheet' }).hasAttribute('disabled')).toBe(false)
+
+    const decoderCalls = createImageBitmapMock.mock.calls.length
+    const urlCalls = createObjectURLMock.mock.calls.length
+    fireEvent.change(input, { target: { files: [imageFile('bomb.png', 'image/png', pngBytes(16_385, 5000))] } })
+    expect(await view.findByText('The decoded image dimensions exceed the limit.')).toBeTruthy()
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(decoderCalls)
+    expect(createObjectURLMock).toHaveBeenCalledTimes(urlCalls)
   })
 
   it('blocks wrong ratio, invalid type, oversized bytes, decode failure, and decoded dimension limits', async () => {
     createImageBitmapMock
-      .mockResolvedValueOnce(bitmap(1000, 1000))
       .mockRejectedValueOnce(new Error('decoder internals'))
-      .mockResolvedValueOnce(bitmap(16_385, 1))
     const onSubmit = vi.fn()
     const view = render(withIntl(
       <SixGridUploadModal open onClose={vi.fn()} cellRatio="16:9" expectedSheetArtifactVersion={2} onSubmit={onSubmit} />,
     ))
     const input = view.getByLabelText('Choose image')
 
-    fireEvent.change(input, { target: { files: [imageFile('wrong.png')] } })
+    fireEvent.change(input, { target: { files: [imageFile('wrong.png', 'image/png', pngBytes(1000, 1000))] } })
     expect(await view.findByText('The image ratio does not match the six-grid layout.')).toBeTruthy()
 
     const decodeCalls = createImageBitmapMock.mock.calls.length
@@ -212,13 +291,13 @@ describe('six-grid external upload modal', () => {
     expect(await view.findByText('The selected file is not a valid image.')).toBeTruthy()
     expect(view.queryByText('decoder internals')).toBeNull()
 
-    fireEvent.change(input, { target: { files: [imageFile('dimensions.png')] } })
+    fireEvent.change(input, { target: { files: [imageFile('dimensions.png', 'image/png', pngBytes(16_385, 1))] } })
     expect(await view.findByText('The decoded image dimensions exceed the limit.')).toBeTruthy()
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
   it('keeps the dialog open on upload failure and prevents duplicate submit or close while pending', async () => {
-    createImageBitmapMock.mockResolvedValueOnce(bitmap(2400, 900))
+    createImageBitmapMock.mockResolvedValueOnce(bitmap(1280, 480))
     let rejectUpload!: (error: Error) => void
     const pending = new Promise((_, reject) => { rejectUpload = reject })
     const onSubmit = vi.fn().mockReturnValue(pending)
@@ -244,39 +323,90 @@ describe('six-grid external upload modal', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
+  it.each(['resolve', 'reject'] as const)('ignores an old submit %s after the parent closes and reopens', async (outcome) => {
+    createImageBitmapMock
+      .mockResolvedValueOnce(bitmap(1280, 480))
+      .mockResolvedValueOnce(bitmap(1280, 480))
+    let settle!: () => void
+    const firstSubmit = new Promise((resolve, reject) => {
+      settle = () => outcome === 'resolve' ? resolve(undefined) : reject(new Error('old failure'))
+    })
+    const onSubmit = vi.fn().mockReturnValueOnce(firstSubmit).mockResolvedValueOnce(undefined)
+    const onClose = vi.fn()
+    const props = { onClose, cellRatio: '16:9' as const, expectedSheetArtifactVersion: 4, onSubmit }
+    const view = render(withIntl(<SixGridUploadModal open {...props} />))
+    fireEvent.change(view.getByLabelText('Choose image'), { target: { files: [imageFile('old-session.png')] } })
+    await view.findByText('old-session.png')
+    fireEvent.click(view.getByRole('button', { name: 'Upload sheet' }))
+    await view.findByText('Uploading…')
+
+    view.rerender(withIntl(<SixGridUploadModal open={false} {...props} />))
+    view.rerender(withIntl(<SixGridUploadModal open {...props} expectedSheetArtifactVersion={5} />))
+    fireEvent.change(view.getByLabelText('Choose image'), { target: { files: [imageFile('new-session.png')] } })
+    await view.findByText('new-session.png')
+
+    await act(async () => { settle(); await firstSubmit.catch(() => undefined) })
+    expect(view.getByText('new-session.png')).toBeTruthy()
+    expect(view.queryByText('Upload failed. Try again.')).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('does not close or update state when a pending submit settles after unmount', async () => {
+    createImageBitmapMock.mockResolvedValueOnce(bitmap(1280, 480))
+    let resolveSubmit!: () => void
+    const pending = new Promise<void>((resolve) => { resolveSubmit = resolve })
+    const onClose = vi.fn()
+    const view = render(withIntl(
+      <SixGridUploadModal open onClose={onClose} cellRatio="16:9" expectedSheetArtifactVersion={1} onSubmit={() => pending} />,
+    ))
+    fireEvent.change(view.getByLabelText('Choose image'), { target: { files: [imageFile()] } })
+    await view.findByText('sheet.png')
+    fireEvent.click(view.getByRole('button', { name: 'Upload sheet' }))
+    await view.findByText('Uploading…')
+    view.unmount()
+
+    await act(async () => { resolveSubmit(); await pending })
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
   it('revokes previews on replacement, close, and unmount, and ignores stale decoding', async () => {
     let resolveFirst!: (value: BitmapStub) => void
     const firstDecode = new Promise<BitmapStub>((resolve) => { resolveFirst = resolve })
     createImageBitmapMock
+      .mockResolvedValueOnce(bitmap(1280, 480))
       .mockReturnValueOnce(firstDecode)
-      .mockResolvedValueOnce(bitmap(2400, 900))
+      .mockResolvedValueOnce(bitmap(1280, 480))
     const onClose = vi.fn()
     const view = render(withIntl(
       <SixGridUploadModal open onClose={onClose} cellRatio="16:9" expectedSheetArtifactVersion={1} onSubmit={vi.fn()} />,
     ))
     const input = view.getByLabelText('Choose image')
+    fireEvent.change(input, { target: { files: [imageFile('old.png')] } })
+    await waitFor(() => expect(view.getByText('old.png')).toBeTruthy())
     fireEvent.change(input, { target: { files: [imageFile('slow.png')] } })
     fireEvent.change(input, { target: { files: [imageFile('new.png')] } })
 
     await waitFor(() => expect(view.getByText('new.png')).toBeTruthy())
-    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:slow.png:1')
-    await act(async () => { resolveFirst(bitmap(1000, 1000)); await firstDecode })
+    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:preview:1')
+    const staleBitmap = bitmap(1000, 1000)
+    await act(async () => { resolveFirst(staleBitmap); await firstDecode })
+    expect(staleBitmap.close).toHaveBeenCalledTimes(1)
     expect(view.getByText('new.png')).toBeTruthy()
     expect(view.queryByText('1000 × 1000')).toBeNull()
 
     fireEvent.click(view.getByRole('button', { name: 'Cancel' }))
     expect(onClose).toHaveBeenCalledTimes(1)
-    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:new.png:2')
+    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:preview:2')
     view.unmount()
 
-    createImageBitmapMock.mockResolvedValueOnce(bitmap(2400, 900))
+    createImageBitmapMock.mockResolvedValueOnce(bitmap(1280, 480))
     const second = render(withIntl(
       <SixGridUploadModal open onClose={vi.fn()} cellRatio="16:9" expectedSheetArtifactVersion={1} onSubmit={vi.fn()} />,
     ))
     fireEvent.change(second.getByLabelText('Choose image'), { target: { files: [imageFile('unmount.png')] } })
     await second.findByText('unmount.png')
     second.unmount()
-    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:unmount.png:3')
+    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:preview:3')
   })
 })
 
@@ -307,12 +437,13 @@ describe('six-grid storyboard group dialog wiring', () => {
         : null,
     }))
     vi.doMock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/SixGridUploadModal', () => ({
-      default: ({ open, expectedSheetArtifactVersion, onSubmit }: {
+      default: ({ open, expectedSheetArtifactVersion, cellRatio, onSubmit }: {
         open: boolean
         expectedSheetArtifactVersion: number
+        cellRatio: '16:9' | '9:16'
         onSubmit(file: File, version: number): Promise<unknown>
       }) => open ? (
-        <div data-testid="upload-dialog" data-version={expectedSheetArtifactVersion}>
+        <div data-testid="upload-dialog" data-version={expectedSheetArtifactVersion} data-ratio={cellRatio}>
           <button onClick={() => void onSubmit(imageFile('replacement.png'), expectedSheetArtifactVersion)}>SUBMIT UPLOAD</button>
         </div>
       ) : null,
@@ -366,11 +497,18 @@ describe('six-grid storyboard group dialog wiring', () => {
 
     fireEvent.click(view.getByRole('button', { name: 'OPEN UPLOAD' }))
     expect(view.getByTestId('upload-dialog').getAttribute('data-version')).toBe('4')
+    expect(view.getByTestId('upload-dialog').getAttribute('data-ratio')).toBe('16:9')
     expect(retentionMock).toHaveBeenLastCalledWith(true)
 
-    view.rerender(withIntl(<StoryboardGroup {...props} storyboard={{ ...storyboard, sheetArtifactVersion: 11 }} />))
+    view.rerender(withIntl(<StoryboardGroup {...props} storyboard={{
+      ...storyboard, sheetArtifactVersion: 11, sixGridCellAspectRatio: '9:16',
+    }} />))
     expect(view.getByTestId('upload-dialog').getAttribute('data-version')).toBe('4')
+    expect(view.getByTestId('upload-dialog').getAttribute('data-ratio')).toBe('16:9')
     fireEvent.click(view.getByRole('button', { name: 'SUBMIT UPLOAD' }))
     await waitFor(() => expect(onUploadSixGridSheet).toHaveBeenCalledWith(expect.any(File), 4))
+
+    view.rerender(withIntl(<StoryboardGroup {...props} storyboard={{ ...storyboard, id: 'storyboard-2' }} />))
+    await waitFor(() => expect(view.queryByTestId('upload-dialog')).toBeNull())
   })
 })
