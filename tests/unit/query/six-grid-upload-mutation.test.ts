@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MutationObserver, QueryClient } from '@tanstack/react-query'
+import { MutationObserver, QueryClient, QueryObserver } from '@tanstack/react-query'
 
 import {
   buildSheetUploadRequest,
@@ -113,6 +113,42 @@ describe('six-grid external sheet upload lifecycle', () => {
       queryKey: queryKeys.episodeStages('project-1', 'episode-1'),
     })
     expect(queryClient.getQueryData(queryKeys.tasks.targetStateOverlay('project-1'))).toEqual({})
+  })
+
+  it('refetches active group and episode-stage queries through a real QueryClient', async () => {
+    apiFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ storyboardId: 'storyboard-1' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
+    })
+    const groupFetch = vi.fn(async () => ({ sheetArtifactVersion: groupFetch.mock.calls.length }))
+    const stageFetch = vi.fn(async () => ({ sheetArtifactVersion: stageFetch.mock.calls.length }))
+    const groupObserver = new QueryObserver(queryClient, {
+      queryKey: sixGridStoryboardQueryKeys.group('project-1', 'episode-1', 'storyboard-1'),
+      queryFn: groupFetch,
+    })
+    const stageObserver = new QueryObserver(queryClient, {
+      queryKey: queryKeys.episodeStage('project-1', 'episode-1', 'storyboard'),
+      queryFn: stageFetch,
+    })
+    const unsubscribeGroup = groupObserver.subscribe(() => undefined)
+    const unsubscribeStage = stageObserver.subscribe(() => undefined)
+    await Promise.all([groupObserver.refetch(), stageObserver.refetch()])
+    const groupCallsBeforeUpload = groupFetch.mock.calls.length
+    const stageCallsBeforeUpload = stageFetch.mock.calls.length
+
+    try {
+      await mutate(queryClient, uploadInput())
+
+      expect(groupFetch.mock.calls.length).toBeGreaterThan(groupCallsBeforeUpload)
+      expect(stageFetch.mock.calls.length).toBeGreaterThan(stageCallsBeforeUpload)
+      expect(queryClient.getQueryData(queryKeys.tasks.targetStateOverlay('project-1'))).toEqual({})
+    } finally {
+      unsubscribeGroup()
+      unsubscribeStage()
+    }
   })
 
   it('clears the overlay without invalidating or changing the current sheet after failure', async () => {

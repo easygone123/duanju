@@ -179,6 +179,38 @@ describe('six-grid upload validation', () => {
     expect(error).toMatchObject({ code: 'SIX_GRID_UPLOAD_TOO_LARGE' })
   })
 
+  it('enforces the 80 megapixel cap independently of the per-dimension cap', async () => {
+    const source = await imageFixture('png', 14_640, 5_490)
+
+    const error = await captureUploadError(() => validateAndNormalizeSixGridUpload(
+      source,
+      '16:9',
+    ))
+
+    expect(14_640).toBeLessThan(16_384)
+    expect(5_490).toBeLessThan(16_384)
+    expect(14_640 * 5_490).toBeGreaterThan(80_000_000)
+    expect(error).toMatchObject({ code: 'SIX_GRID_UPLOAD_TOO_LARGE' })
+  })
+
+  it('accepts and normalizes a valid portrait 9:16 six-grid sheet end to end', async () => {
+    const result = await validateAndNormalizeSixGridUpload(
+      await imageFixture('jpeg', 810, 960),
+      '9:16',
+    )
+
+    expect(result).toMatchObject({
+      width: 810,
+      height: 960,
+      mimeType: 'image/webp',
+    })
+    expect(await sharp(result.bytes).metadata()).toMatchObject({
+      format: 'webp',
+      width: 810,
+      height: 960,
+    })
+  })
+
   it('rejects the wrong overall ratio with stable numeric details', async () => {
     const error = await captureUploadError(async () => validateAndNormalizeSixGridUpload(
       await imageFixture('png', 600, 600),
