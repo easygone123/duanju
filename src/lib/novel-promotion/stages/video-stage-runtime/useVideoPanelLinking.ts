@@ -54,7 +54,7 @@ export function useVideoPanelLinking({
       )
       videoPanelById.set(panelId, panel)
       panelKeyById.set(panelId, panelKey)
-      if ((panel.layoutMode === 'six_grid' || hasFrameMetadata)
+      if ((panel.layoutMode === 'four_grid' || panel.layoutMode === 'six_grid' || hasFrameMetadata)
         ? !!choices.firstFrame && !!choices.lastFrame
         : panel.linkedToNextPanel) {
         baseLinkedPanels.set(panelKey, true)

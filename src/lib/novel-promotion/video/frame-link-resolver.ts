@@ -100,14 +100,20 @@ function readSceneKey(storyboard: FrameLinkStoryboard): string | null {
 
 function sortedPanels(storyboard: FrameLinkStoryboard): FrameLinkPanel[] {
   return [...storyboard.panels].sort((left, right) => {
-    const leftOrder = storyboard.layoutMode === 'six_grid'
+    const leftOrder = isGridLayoutMode(storyboard.layoutMode)
       ? left.gridCellIndex ?? left.panelIndex
       : left.panelIndex
-    const rightOrder = storyboard.layoutMode === 'six_grid'
+    const rightOrder = isGridLayoutMode(storyboard.layoutMode)
       ? right.gridCellIndex ?? right.panelIndex
       : right.panelIndex
     return leftOrder - rightOrder
+      || left.panelIndex - right.panelIndex
+      || left.id.localeCompare(right.id)
   })
+}
+
+function isGridLayoutMode(layoutMode: string | null | undefined): boolean {
+  return layoutMode === 'four_grid' || layoutMode === 'six_grid'
 }
 
 function timestamp(value: Date | string | null | undefined): number | null {
@@ -118,7 +124,7 @@ function timestamp(value: Date | string | null | undefined): number | null {
 }
 
 function canonicalStoryboards(storyboards: FrameLinkStoryboard[]): FrameLinkStoryboard[] {
-  return storyboards
+  const canonical = storyboards
     .map((storyboard, index) => ({ storyboard, index }))
     .sort((left, right) => {
       const leftClip = timestamp(left.storyboard.clipCreatedAt)
@@ -141,6 +147,26 @@ function canonicalStoryboards(storyboards: FrameLinkStoryboard[]): FrameLinkStor
       return left.index - right.index
     })
     .map(({ storyboard }) => storyboard)
+  const orderedGridStoryboards = canonical
+    .filter((storyboard) => isGridLayoutMode(storyboard.layoutMode))
+    .sort(compareGridStoryboards)
+  let gridIndex = 0
+  return canonical.map((storyboard) => (
+    isGridLayoutMode(storyboard.layoutMode)
+      ? orderedGridStoryboards[gridIndex++]!
+      : storyboard
+  ))
+}
+
+function compareGridStoryboards(left: FrameLinkStoryboard, right: FrameLinkStoryboard): number {
+  const leftSequence = left.groupSequence
+  const rightSequence = right.groupSequence
+  if (typeof leftSequence !== 'number' && typeof rightSequence === 'number') return 1
+  if (typeof leftSequence === 'number' && typeof rightSequence !== 'number') return -1
+  if (typeof leftSequence === 'number' && typeof rightSequence === 'number' && leftSequence !== rightSequence) {
+    return leftSequence - rightSequence
+  }
+  return left.id.localeCompare(right.id)
 }
 
 function resolveStoredChoice(
@@ -182,17 +208,16 @@ export function buildFrameLinkResolutionIndex(input: {
     }
   }
 
-  const orderedSixGridGroups = storyboards
-    .filter((storyboard) => storyboard.layoutMode === 'six_grid')
+  const orderedGridGroups = storyboards
+    .filter((storyboard) => isGridLayoutMode(storyboard.layoutMode))
     .filter((storyboard) => typeof storyboard.groupSequence === 'number')
-    .sort((left, right) => (
-      (left.groupSequence ?? 0) - (right.groupSequence ?? 0)
-      || left.id.localeCompare(right.id)
-    ))
-  const nextSixGridGroupById = new Map<string, FrameLinkStoryboard>()
-  orderedSixGridGroups.forEach((storyboard, index) => {
-    const next = orderedSixGridGroups[index + 1]
-    if (next) nextSixGridGroupById.set(storyboard.id, next)
+    .sort(compareGridStoryboards)
+  const nextGridGroupById = new Map<string, FrameLinkStoryboard>()
+  orderedGridGroups.forEach((storyboard, index) => {
+    const next = orderedGridGroups[index + 1]
+    if (next && next.layoutMode === storyboard.layoutMode) {
+      nextGridGroupById.set(storyboard.id, next)
+    }
   })
   const storyboardIndexById = new Map(storyboards.map((storyboard, index) => [storyboard.id, index]))
 
@@ -207,8 +232,8 @@ export function buildFrameLinkResolutionIndex(input: {
         automaticLastByPanelId.set(panel.id, { mode: 'automatic', sourcePanelId: withinStoryboard.id })
         continue
       }
-      if (storyboard.layoutMode === 'six_grid') {
-        const nextGroup = nextSixGridGroupById.get(storyboard.id)
+      if (isGridLayoutMode(storyboard.layoutMode)) {
+        const nextGroup = nextGridGroupById.get(storyboard.id)
         const currentSceneKey = readSceneKey(storyboard)
         const nextSceneKey = nextGroup ? readSceneKey(nextGroup) : null
         const nextPanel = nextGroup ? panelsByStoryboard.get(nextGroup.id)?.[0] : undefined
@@ -226,7 +251,7 @@ export function buildFrameLinkResolutionIndex(input: {
         && (storyboard.layoutMode == null || storyboard.layoutMode === 'individual')
       const storyboardIndex = storyboardIndexById.get(storyboard.id) ?? -1
       const nextStoryboard = storyboardIndex >= 0 ? storyboards[storyboardIndex + 1] : undefined
-      const nextPanel = nextStoryboard && nextStoryboard.layoutMode !== 'six_grid'
+      const nextPanel = nextStoryboard && !isGridLayoutMode(nextStoryboard.layoutMode)
         ? panelsByStoryboard.get(nextStoryboard.id)?.[0]
         : undefined
       automaticLastByPanelId.set(

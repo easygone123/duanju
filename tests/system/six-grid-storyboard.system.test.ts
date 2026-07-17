@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { dispatchComfyRequest } from '@/lib/comfyui/dispatcher'
+import { computeGridPixelRects } from '@/lib/novel-promotion/grid-storyboard/crop-geometry'
+import { resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 import { computeSixGridPixelRects, validateManualSixGridCrop } from '@/lib/novel-promotion/six-grid/crop-geometry'
 import { readSixGridCropLimits } from '@/lib/novel-promotion/six-grid/limits'
 import { buildSixGridSheetPrompt } from '@/lib/novel-promotion/six-grid/prompt-builder'
@@ -233,6 +235,9 @@ describe('system - six-grid storyboard acceptance', () => {
       expect(rects).toHaveLength(6)
       expect(rects.reduce((area, rect) => area + rect.width * rect.height, 0))
         .toBe(dimensions.width * dimensions.height)
+      const ratio = dimensions.width > dimensions.height ? '16:9' : '9:16'
+      expect(computeGridPixelRects(dimensions, resolveStoryboardGridSpec('six_grid', ratio)))
+        .toEqual(rects)
     }
     expect(validateManualSixGridCrop({
       cellIndex: 0,

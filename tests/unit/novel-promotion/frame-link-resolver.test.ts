@@ -30,7 +30,119 @@ function sixGridStoryboard(input: {
   }
 }
 
+function fourGridStoryboard(input: {
+  id: string
+  groupSequence: number
+  sceneKey: string
+  cellIndexes: number[]
+}): FrameLinkStoryboard {
+  return {
+    id: input.id,
+    layoutMode: 'four_grid',
+    groupSequence: input.groupSequence,
+    continuityAnchor: JSON.stringify({ sceneKey: input.sceneKey }),
+    panels: input.cellIndexes.map((gridCellIndex, dbIndex) => ({
+      id: `${input.id}-${gridCellIndex}`,
+      storyboardId: input.id,
+      panelIndex: dbIndex,
+      gridCellIndex,
+      firstFrameSourceMeta: null,
+      lastFrameSourceMeta: null,
+    })),
+  }
+}
+
 describe('continuous first/last-frame resolver', () => {
+  it('orders four-grid groups by sequence and each group by row-major cell identity', () => {
+    const first = fourGridStoryboard({
+      id: 'four-1', groupSequence: 1, sceneKey: 'office', cellIndexes: [3, 1, 0, 2],
+    })
+    const second = fourGridStoryboard({
+      id: 'four-2', groupSequence: 2, sceneKey: 'office', cellIndexes: [2, 0, 3, 1],
+    })
+    const visited: string[] = []
+
+    const index = buildFrameLinkResolutionIndex({
+      storyboards: [second, first],
+      onPanelVisit: (panel) => visited.push(panel.id),
+    })
+
+    expect(visited).toEqual([
+      'four-1-0', 'four-1-1', 'four-1-2', 'four-1-3',
+      'four-2-0', 'four-2-1', 'four-2-2', 'four-2-3',
+    ])
+    expect(index.automaticChoicesByPanelId.get('four-1-0')?.lastFrame)
+      .toEqual({ mode: 'automatic', sourcePanelId: 'four-1-1' })
+    expect(index.automaticChoicesByPanelId.get('four-1-3')?.lastFrame)
+      .toEqual({ mode: 'automatic', sourcePanelId: 'four-2-0' })
+  })
+
+  it('uses deterministic panel-index and id tie-breaks for missing or duplicate grid cells', () => {
+    const storyboard: FrameLinkStoryboard = {
+      id: 'four-ties',
+      layoutMode: 'four_grid',
+      groupSequence: 1,
+      continuityAnchor: JSON.stringify({ sceneKey: 'office' }),
+      panels: [
+        { id: 'missing-b', storyboardId: 'four-ties', panelIndex: 3, gridCellIndex: null },
+        { id: 'cell-0-z', storyboardId: 'four-ties', panelIndex: 2, gridCellIndex: 0 },
+        { id: 'cell-0-a', storyboardId: 'four-ties', panelIndex: 1, gridCellIndex: 0 },
+        { id: 'missing-a', storyboardId: 'four-ties', panelIndex: 0, gridCellIndex: null },
+      ],
+    }
+    const visited: string[] = []
+
+    buildFrameLinkResolutionIndex({
+      storyboards: [storyboard],
+      onPanelVisit: (panel) => visited.push(panel.id),
+    })
+
+    expect(visited).toEqual(['missing-a', 'cell-0-a', 'cell-0-z', 'missing-b'])
+  })
+
+  it('keeps individual ordering on panelIndex even when a grid cell value is present', () => {
+    const visited: string[] = []
+    buildFrameLinkResolutionIndex({
+      storyboards: [{
+        id: 'individual-1',
+        layoutMode: 'individual',
+        panels: [
+          { id: 'individual-2', storyboardId: 'individual-1', panelIndex: 2, gridCellIndex: 0 },
+          { id: 'individual-0', storyboardId: 'individual-1', panelIndex: 0, gridCellIndex: 2 },
+          { id: 'individual-1', storyboardId: 'individual-1', panelIndex: 1, gridCellIndex: 1 },
+        ],
+      }],
+      onPanelVisit: (panel) => visited.push(panel.id),
+    })
+
+    expect(visited).toEqual(['individual-0', 'individual-1', 'individual-2'])
+  })
+
+  it('reorders grid groups without moving individual storyboards out of their legacy slots', () => {
+    const visited: string[] = []
+    const individual = (id: string): FrameLinkStoryboard => ({
+      id,
+      layoutMode: 'individual',
+      panels: [{ id: `${id}-0`, storyboardId: id, panelIndex: 0 }],
+    })
+    buildFrameLinkResolutionIndex({
+      storyboards: [
+        individual('individual-a'),
+        fourGridStoryboard({ id: 'four-2', groupSequence: 2, sceneKey: 'office', cellIndexes: [0, 1, 2, 3] }),
+        individual('individual-b'),
+        fourGridStoryboard({ id: 'four-1', groupSequence: 1, sceneKey: 'office', cellIndexes: [0, 1, 2, 3] }),
+      ],
+      onPanelVisit: (panel) => visited.push(panel.id),
+    })
+
+    expect(visited).toEqual([
+      'individual-a-0',
+      'four-1-0', 'four-1-1', 'four-1-2', 'four-1-3',
+      'individual-b-0',
+      'four-2-0', 'four-2-1', 'four-2-2', 'four-2-3',
+    ])
+  })
+
   it('links cell 0 to cell 1 using persisted grid identity', () => {
     const group = sixGridStoryboard({
       id: 'group-1',

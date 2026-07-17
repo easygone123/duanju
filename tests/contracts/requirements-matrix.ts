@@ -259,6 +259,66 @@ export const REQUIREMENTS_MATRIX: ReadonlyArray<RequirementCoverageEntry> = [
     scenarioIds: ['comfy-cloud-provider-coexistence'],
   },
   {
+    id: 'REQ-NP-FOUR-GRID-01', feature: 'Four-grid new-project default',
+    userValue: '新项目默认使用兼容常见生图比例的四宫格，同时不改写存量项目模式',
+    risk: '默认值迁移误更新存量项目，或新项目仍落入旧模式', priority: 'P0',
+    tests: ['tests/system/four-grid-storyboard.system.test.ts'],
+  },
+  {
+    id: 'REQ-NP-FOUR-GRID-02', feature: 'Exact four-panel planning',
+    userValue: '每组严格规划编号 1 到 4 的四个不同分镜',
+    risk: '面板缺失、重复或编号漂移导致整图与裁剪错位', priority: 'P0',
+    tests: [
+      'tests/system/four-grid-storyboard.system.test.ts',
+      'tests/unit/novel-promotion/grid-storyboard-scene-planner.test.ts',
+    ],
+  },
+  {
+    id: 'REQ-NP-FOUR-GRID-03', feature: 'One-call common-ratio sheet generation',
+    userValue: '四宫格以 16:9 或 9:16 常见比例一次生成整张图并保留运行血缘',
+    risk: '拆成多次生成破坏一致性，或快照比例与实际提交不一致', priority: 'P0',
+    tests: [
+      'tests/system/four-grid-storyboard.system.test.ts',
+      'tests/unit/worker/grid-storyboard-sheet-task-handler.test.ts',
+    ],
+  },
+  {
+    id: 'REQ-NP-FOUR-GRID-04', feature: 'Four-grid upload before generation',
+    userValue: '尚未调用生图模型时也能上传外部四宫格继续处理',
+    risk: '上传入口依赖已生成图片或错误拒绝常见比例', priority: 'P0',
+    tests: [
+      'tests/system/four-grid-storyboard.system.test.ts',
+      'tests/unit/components/six-grid-external-upload.test.tsx',
+    ],
+  },
+  {
+    id: 'REQ-NP-FOUR-GRID-05', feature: 'Four-grid crop and owned panel media',
+    userValue: '2x2 整图按行优先裁成四张可继续编辑和生成视频的分镜图',
+    risk: '像素遗漏、格子顺序错乱或媒体未归属当前分镜', priority: 'P0',
+    tests: [
+      'tests/system/four-grid-storyboard.system.test.ts',
+      'tests/unit/novel-promotion/grid-storyboard-crop-geometry.test.ts',
+    ],
+  },
+  {
+    id: 'REQ-NP-FOUR-GRID-06', feature: 'Grid-derived downstream ordering',
+    userValue: '视频首尾帧按组序和四宫格行优先顺序稳定衔接',
+    risk: '数据库返回顺序取代持久化格子身份导致镜头错链', priority: 'P0',
+    tests: [
+      'tests/system/four-grid-storyboard.system.test.ts',
+      'tests/unit/novel-promotion/frame-link-resolver.test.ts',
+    ],
+  },
+  {
+    id: 'REQ-NP-FOUR-GRID-07', feature: 'Backward-compatible six-grid behavior',
+    userValue: '新增四宫格后原有六宫格规划、比例、裁剪和衔接保持不变',
+    risk: '共享网格抽象破坏既有六宫格契约', priority: 'P0',
+    tests: [
+      'tests/system/four-grid-storyboard.system.test.ts',
+      'tests/system/six-grid-storyboard.system.test.ts',
+    ],
+  },
+  {
     id: 'REQ-NP-SIX-GRID-01', feature: 'Six-grid sheet generation',
     userValue: '横屏和竖屏项目可生成连续的 3x2 分镜大图',
     risk: '运行快照、工作流渲染或 ComfyUI 提交偏离', priority: 'P0',

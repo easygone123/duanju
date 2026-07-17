@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { REQUIREMENTS_MATRIX } from './requirements-matrix'
 
 const SYSTEM_TEST = 'tests/system/six-grid-storyboard.system.test.ts'
+const FOUR_GRID_SYSTEM_TEST = 'tests/system/four-grid-storyboard.system.test.ts'
 const EXPECTED_IDS = Array.from(
   { length: 8 },
   (_, index) => `REQ-NP-SIX-GRID-${String(index + 1).padStart(2, '0')}`,
@@ -18,6 +19,27 @@ function expectExecutableTest(filename: string, testTitle: string) {
 }
 
 describe('six-grid requirements matrix', () => {
+  it('maps every four-grid requirement to an executable acceptance title', () => {
+    const entries = REQUIREMENTS_MATRIX.filter((entry) => entry.id.startsWith('REQ-NP-FOUR-GRID-'))
+    expect(entries.map((entry) => entry.id)).toEqual(Array.from(
+      { length: 7 },
+      (_, index) => `REQ-NP-FOUR-GRID-${String(index + 1).padStart(2, '0')}`,
+    ))
+    for (const entry of entries) {
+      expect(entry.priority).toBe('P0')
+      expect(entry.tests.length).toBeGreaterThan(0)
+      for (const filename of entry.tests) {
+        expect(fs.existsSync(path.resolve(process.cwd(), filename)), filename).toBe(true)
+      }
+      if (entry.tests.includes(FOUR_GRID_SYSTEM_TEST)) {
+        const source = fs.readFileSync(path.resolve(process.cwd(), FOUR_GRID_SYSTEM_TEST), 'utf8')
+        const title = source.match(new RegExp(`(?:it|test)\\(\\s*'(${entry.id}[^']*)'\\s*,`))?.[1]
+        expect(title, entry.id).toBeDefined()
+        expectExecutableTest(FOUR_GRID_SYSTEM_TEST, title!)
+      }
+    }
+  })
+
   it('maps the original six-grid requirements to one executable system-test title', () => {
     const entries = REQUIREMENTS_MATRIX.filter((entry) => entry.id.startsWith('REQ-NP-SIX-GRID-'))
     expect(entries.map((entry) => entry.id)).toEqual(EXPECTED_IDS)
