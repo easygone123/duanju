@@ -407,6 +407,29 @@ describe('atomic six-grid sheet replacement', () => {
     })
   })
 
+  it('maps a Prisma serialization conflict to the stable stale-upload conflict', async () => {
+    const store: SixGridUploadStore = {
+      findActiveTask: async () => null,
+      transaction: async () => {
+        throw Object.assign(new Error('Transaction failed due to a write conflict'), { code: 'P2034' })
+      },
+    }
+
+    const error = await captureError(() => replaceSixGridSheet(input, store))
+
+    expectConflict(error, 'SIX_GRID_UPLOAD_STALE')
+  })
+
+  it('does not remap unrelated transaction failures', async () => {
+    const failure = Object.assign(new Error('database unavailable'), { code: 'P1001' })
+    const store: SixGridUploadStore = {
+      findActiveTask: async () => null,
+      transaction: async () => { throw failure },
+    }
+
+    await expect(replaceSixGridSheet(input, store)).rejects.toBe(failure)
+  })
+
   it('rejects a stale artifact version without changing the fixture', async () => {
     const store = new InMemorySixGridUploadStore(createState())
     const before = store.snapshot()

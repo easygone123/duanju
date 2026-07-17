@@ -1,4 +1,5 @@
 import type { Job } from 'bullmq'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { cropSixGridSheet, type SixGridCropArtifact } from '@/lib/novel-promotion/six-grid/crop-service'
 import type { TaskJobData } from '@/lib/task/types'
@@ -7,10 +8,22 @@ import { getObjectBuffer } from '@/lib/storage'
 import { assertTaskActive } from '@/lib/workers/utils'
 
 type CropArtifact = Pick<SixGridCropArtifact, 'cellIndex' | 'mediaId' | 'url' | 'normalizedCropRect'> & { lineage: unknown }
+type CurrentCropPanel = {
+  id: string
+  gridCellIndex: number | null
+  imageMediaId: string | null
+  imageUrl: string | null
+}
 
 type CropTransactionClient = {
+  lockStoryboard: (input: {
+    storyboardId: string
+    sourceMediaId: string
+    expectedSheetArtifactVersion: number
+    processingOrder: SixGridImageTaskSnapshot['processingOrder']
+  }) => Promise<boolean>
   novelPromotionPanel: {
-    findMany: (args: unknown) => Promise<Array<{ id: string; gridCellIndex: number | null; imageMediaId: string | null; imageUrl: string | null }>>
+    findMany: (args: unknown) => Promise<CurrentCropPanel[]>
     update: (args: unknown) => Promise<unknown>
   }
 }
@@ -27,21 +40,15 @@ export async function commitSixGridCropBatch(input: {
   if (input.artifacts.length !== 6 || new Set(input.artifacts.map((item) => item.cellIndex)).size !== 6) {
     throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
   }
-  const runTransaction = dependencies.transaction ?? (async (callback) => await prisma.$transaction(async (tx) => {
-    const storyboard = await tx.novelPromotionStoryboard.findFirst({
-      where: {
-        id: input.storyboardId,
-        sheetArtifactVersion: input.expectedSheetArtifactVersion,
-        ...(input.processingOrder === 'sheet_upscale_then_crop'
-          ? { upscaledSheetImageMediaId: input.sourceMediaId }
-          : { sheetImageMediaId: input.sourceMediaId }),
-      },
-      select: { id: true },
-    })
-    if (!storyboard) throw new Error('SIX_GRID_SOURCE_STALE')
-    await callback(tx as unknown as CropTransactionClient)
-  }))
+  const runTransaction = dependencies.transaction ?? defaultCropTransaction
   await runTransaction(async (tx) => {
+    const locked = await tx.lockStoryboard({
+      storyboardId: input.storyboardId,
+      sourceMediaId: input.sourceMediaId,
+      expectedSheetArtifactVersion: input.expectedSheetArtifactVersion,
+      processingOrder: input.processingOrder,
+    })
+    if (!locked) throw new Error('SIX_GRID_SOURCE_STALE')
     const currentPanels = await tx.novelPromotionPanel.findMany({
       where: { storyboardId: input.storyboardId },
       select: { id: true, gridCellIndex: true, imageMediaId: true, imageUrl: true },
@@ -70,6 +77,41 @@ export async function commitSixGridCropBatch(input: {
     }
   })
 }
+
+const defaultCropTransaction: Transaction = async (callback) => prisma.$transaction(async (tx) => {
+  await callback({
+    lockStoryboard: async (input) => {
+      const rows = input.processingOrder === 'sheet_upscale_then_crop'
+        ? await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            SELECT id
+            FROM novel_promotion_storyboards
+            WHERE id = ${input.storyboardId}
+              AND sheetArtifactVersion = ${input.expectedSheetArtifactVersion}
+              AND upscaledSheetImageMediaId = ${input.sourceMediaId}
+            LIMIT 1
+            FOR UPDATE
+          `)
+        : await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+            SELECT id
+            FROM novel_promotion_storyboards
+            WHERE id = ${input.storyboardId}
+              AND sheetArtifactVersion = ${input.expectedSheetArtifactVersion}
+              AND sheetImageMediaId = ${input.sourceMediaId}
+            LIMIT 1
+            FOR UPDATE
+          `)
+      return rows.length === 1
+    },
+    novelPromotionPanel: {
+      findMany: (args) => tx.novelPromotionPanel.findMany(
+        args as Prisma.NovelPromotionPanelFindManyArgs,
+      ) as unknown as Promise<CurrentCropPanel[]>,
+      update: (args) => tx.novelPromotionPanel.update(
+        args as Prisma.NovelPromotionPanelUpdateArgs,
+      ),
+    },
+  })
+})
 
 export async function executeSixGridCrop(snapshotValue: unknown, dependencies: {
   userId: string

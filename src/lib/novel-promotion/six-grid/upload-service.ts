@@ -137,33 +137,44 @@ export async function replaceSixGridSheet(
   store: SixGridUploadStore = defaultSixGridUploadStore,
 ): Promise<{ mediaId: string; url: string; sheetArtifactVersion: number }> {
   await assertSixGridUploadAvailable(input, store)
-  return store.transaction(async (transaction) => {
-    const storyboard = await transaction.replaceOwnedStoryboard({
-      userId: input.userId,
-      projectId: input.projectId,
-      episodeId: input.episodeId,
-      storyboardId: input.storyboardId,
-      expectedSheetArtifactVersion: input.expectedSheetArtifactVersion,
-      mediaId: input.media.id,
-      url: input.media.url,
+  try {
+    return await store.transaction(async (transaction) => {
+      const storyboard = await transaction.replaceOwnedStoryboard({
+        userId: input.userId,
+        projectId: input.projectId,
+        episodeId: input.episodeId,
+        storyboardId: input.storyboardId,
+        expectedSheetArtifactVersion: input.expectedSheetArtifactVersion,
+        mediaId: input.media.id,
+        url: input.media.url,
+      })
+      if (storyboard.count !== 1) {
+        throw new ApiError('CONFLICT', { code: 'SIX_GRID_UPLOAD_STALE' })
+      }
+
+      const panels = await transaction.clearStoryboardPanels(input.storyboardId)
+      if (panels.count !== 6) {
+        throw new ApiError('CONFLICT', { code: 'SIX_GRID_UPLOAD_PANEL_SET_CHANGED' })
+      }
+
+      const current = await transaction.readStoryboardSheet(input.storyboardId)
+      if (!current || current.sheetImageMediaId === null || current.sheetImageUrl === null) {
+        throw new ApiError('CONFLICT', { code: 'SIX_GRID_UPLOAD_STALE' })
+      }
+      return {
+        mediaId: current.sheetImageMediaId,
+        url: current.sheetImageUrl,
+        sheetArtifactVersion: current.sheetArtifactVersion,
+      }
     })
-    if (storyboard.count !== 1) {
+  } catch (error) {
+    if (isPrismaTransactionConflict(error)) {
       throw new ApiError('CONFLICT', { code: 'SIX_GRID_UPLOAD_STALE' })
     }
+    throw error
+  }
+}
 
-    const panels = await transaction.clearStoryboardPanels(input.storyboardId)
-    if (panels.count !== 6) {
-      throw new ApiError('CONFLICT', { code: 'SIX_GRID_UPLOAD_PANEL_SET_CHANGED' })
-    }
-
-    const current = await transaction.readStoryboardSheet(input.storyboardId)
-    if (!current || current.sheetImageMediaId === null || current.sheetImageUrl === null) {
-      throw new ApiError('CONFLICT', { code: 'SIX_GRID_UPLOAD_STALE' })
-    }
-    return {
-      mediaId: current.sheetImageMediaId,
-      url: current.sheetImageUrl,
-      sheetArtifactVersion: current.sheetArtifactVersion,
-    }
-  })
+function isPrismaTransactionConflict(error: unknown): error is { code: 'P2034' } {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2034'
 }

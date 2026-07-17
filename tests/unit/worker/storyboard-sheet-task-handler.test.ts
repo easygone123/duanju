@@ -430,11 +430,157 @@ describe('six-grid sheet and panel execution', () => {
 
 describe('six-grid crop atomic persistence', () => {
   beforeEach(() => resetExecutionMocks())
+  it('rejects a stale storyboard lock fence before reading or writing panels', async () => {
+    const lockStoryboard = vi.fn(async () => false)
+    const findMany = vi.fn(async () => Array.from({ length: 6 }, (_, gridCellIndex) => ({
+      id: `panel-${gridCellIndex}`,
+      gridCellIndex,
+      imageMediaId: `old-${gridCellIndex}`,
+      imageUrl: `/m/old-${gridCellIndex}`,
+    })))
+    const update = vi.fn(async () => ({}))
+    const transaction = async (callback: (tx: unknown) => Promise<void>) => callback({
+      lockStoryboard,
+      novelPromotionPanel: { findMany, update },
+    })
+    const artifacts = Array.from({ length: 6 }, (_, cellIndex) => ({
+      cellIndex,
+      mediaId: `crop-${cellIndex}`,
+      url: `/m/crop-${cellIndex}`,
+      normalizedCropRect: snapshot().cropRects![cellIndex]!.normalizedCropRect,
+      lineage: { sourceMediaId: 'media-sheet-1', artifactVersion: 1 },
+    }))
+
+    await expect(commitSixGridCropBatch({
+      storyboardId: 'storyboard-1',
+      sourceMediaId: 'media-sheet-1',
+      expectedSheetArtifactVersion: 3,
+      processingOrder: 'crop_then_panel_upscale',
+      taskLineage: 'crop-task-lineage',
+      artifacts,
+    }, { transaction: transaction as never })).rejects.toThrow('SIX_GRID_SOURCE_STALE')
+
+    expect(lockStoryboard).toHaveBeenCalledOnce()
+    expect(findMany).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('serializes upload behind a crop-owned storyboard lock so upload clears the committed crop', async () => {
+    const state = {
+      sheetArtifactVersion: 3,
+      sheetImageMediaId: 'media-sheet-1',
+      panels: Array.from({ length: 6 }, (_, gridCellIndex) => ({
+        id: `panel-${gridCellIndex}`,
+        gridCellIndex,
+        imageMediaId: `old-${gridCellIndex}` as string | null,
+        imageUrl: `/m/old-${gridCellIndex}` as string | null,
+      })),
+    }
+    const events: string[] = []
+    let mutexTail = Promise.resolve()
+    const acquireStoryboardLock = async () => {
+      let release = () => {}
+      const held = new Promise<void>((resolve) => { release = resolve })
+      const previous = mutexTail
+      mutexTail = previous.then(() => held)
+      await previous
+      return release
+    }
+    let signalCropLocked = () => {}
+    const cropLocked = new Promise<void>((resolve) => { signalCropLocked = resolve })
+    let allowCropPanelRead = () => {}
+    const cropMayReadPanels = new Promise<void>((resolve) => { allowCropPanelRead = resolve })
+    const transaction = async (callback: (tx: unknown) => Promise<void>) => {
+      let releaseLock: (() => void) | undefined
+      let cropOwnsLock = false
+      try {
+        await callback({
+          lockStoryboard: async (fence: {
+            storyboardId: string
+            sourceMediaId: string
+            expectedSheetArtifactVersion: number
+          }) => {
+            releaseLock = await acquireStoryboardLock()
+            cropOwnsLock = fence.storyboardId === 'storyboard-1'
+              && state.sheetArtifactVersion === fence.expectedSheetArtifactVersion
+              && state.sheetImageMediaId === fence.sourceMediaId
+            events.push('crop-lock')
+            signalCropLocked()
+            return cropOwnsLock
+          },
+          novelPromotionPanel: {
+            findMany: async () => {
+              if (!cropOwnsLock) throw new Error('PANEL_READ_WITHOUT_STORYBOARD_LOCK')
+              events.push('crop-panel-read')
+              await cropMayReadPanels
+              return structuredClone(state.panels)
+            },
+            update: async (args: { where: { id: string }; data: { imageMediaId: string; imageUrl: string } }) => {
+              if (!cropOwnsLock) throw new Error('PANEL_WRITE_WITHOUT_STORYBOARD_LOCK')
+              const panel = state.panels.find((item) => item.id === args.where.id)
+              if (!panel) throw new Error('PANEL_NOT_FOUND')
+              panel.imageMediaId = args.data.imageMediaId
+              panel.imageUrl = args.data.imageUrl
+              events.push(`crop-write:${panel.gridCellIndex}`)
+            },
+          },
+        })
+      } finally {
+        releaseLock?.()
+      }
+    }
+    const artifacts = Array.from({ length: 6 }, (_, cellIndex) => ({
+      cellIndex,
+      mediaId: `crop-${cellIndex}`,
+      url: `/m/crop-${cellIndex}`,
+      normalizedCropRect: snapshot().cropRects![cellIndex]!.normalizedCropRect,
+      lineage: { sourceMediaId: 'media-sheet-1', artifactVersion: 1 },
+    }))
+
+    const crop = commitSixGridCropBatch({
+      storyboardId: 'storyboard-1',
+      sourceMediaId: 'media-sheet-1',
+      expectedSheetArtifactVersion: 3,
+      processingOrder: 'crop_then_panel_upscale',
+      taskLineage: 'crop-task-lineage',
+      artifacts,
+    }, { transaction: transaction as never })
+    await cropLocked
+
+    let uploadSettled = false
+    const upload = (async () => {
+      const releaseLock = await acquireStoryboardLock()
+      try {
+        events.push('upload-replace')
+        state.sheetArtifactVersion += 1
+        state.sheetImageMediaId = 'media-uploaded'
+        for (const panel of state.panels) {
+          panel.imageMediaId = null
+          panel.imageUrl = null
+        }
+      } finally {
+        releaseLock()
+        uploadSettled = true
+      }
+    })()
+    await Promise.resolve()
+    expect(uploadSettled).toBe(false)
+
+    allowCropPanelRead()
+    await Promise.all([crop, upload])
+
+    expect(state.sheetArtifactVersion).toBe(4)
+    expect(state.sheetImageMediaId).toBe('media-uploaded')
+    expect(state.panels.every((panel) => panel.imageMediaId === null && panel.imageUrl === null)).toBe(true)
+    expect(events.indexOf('upload-replace')).toBeGreaterThan(events.indexOf('crop-write:5'))
+  })
+
   it('switches all six panels in one transaction without changing dialogue or duration', async () => {
+    const lockStoryboard = vi.fn(async () => true)
     const update = vi.fn(async () => ({}))
     const findMany = vi.fn(async () => Array.from({ length: 6 }, (_, gridCellIndex) => ({ id: `panel-${gridCellIndex}`, gridCellIndex, imageMediaId: `old-${gridCellIndex}`, imageUrl: `/m/old-${gridCellIndex}` })))
-    const transaction = vi.fn(async (callback: (tx: { novelPromotionPanel: { update: typeof update; findMany: typeof findMany } }) => Promise<void>) => {
-      await callback({ novelPromotionPanel: { update, findMany } })
+    const transaction = vi.fn(async (callback: (tx: { lockStoryboard: typeof lockStoryboard; novelPromotionPanel: { update: typeof update; findMany: typeof findMany } }) => Promise<void>) => {
+      await callback({ lockStoryboard, novelPromotionPanel: { update, findMany } })
     })
     const artifacts = Array.from({ length: 6 }, (_, cellIndex) => ({
       cellIndex,
@@ -454,6 +600,7 @@ describe('six-grid crop atomic persistence', () => {
     }, { transaction })
 
     expect(transaction).toHaveBeenCalledTimes(1)
+    expect(lockStoryboard.mock.invocationCallOrder[0]).toBeLessThan(findMany.mock.invocationCallOrder[0]!)
     expect(update).toHaveBeenCalledTimes(6)
     expect(update).toHaveBeenNthCalledWith(1, expect.objectContaining({
       where: { id: 'panel-0' },
