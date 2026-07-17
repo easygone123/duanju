@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react'
 import { useTranslations } from 'next-intl'
-import { resolveOriginalImageUrl, toDisplayImageUrl } from '@/lib/media/image-url'
+import { toDisplayImageUrl } from '@/lib/media/image-url'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import { AppIcon } from '@/components/ui/icons'
 
@@ -34,7 +34,6 @@ export default function ImagePreviewModal({ imageUrl, onClose }: ImagePreviewMod
 
   if (!imageUrl) return null
   const displayImageUrl = toDisplayImageUrl(imageUrl)
-  const originalImageUrl = resolveOriginalImageUrl(imageUrl) || displayImageUrl
   if (!displayImageUrl) return null
 
   return (
@@ -51,18 +50,6 @@ export default function ImagePreviewModal({ imageUrl, onClose }: ImagePreviewMod
         >
           <AppIcon name="close" className="w-6 h-6" />
         </button>
-        {originalImageUrl && (
-          <a
-            href={originalImageUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="absolute top-6 right-20 z-10 px-3 h-10 inline-flex items-center rounded-full bg-[var(--glass-overlay)] hover:bg-[var(--glass-overlay)] text-white text-sm transition-colors"
-          >
-            {t('viewOriginal')}
-          </a>
-        )}
-
         {/* 图片 */}
         <MediaImageWithLoading
           src={displayImageUrl}

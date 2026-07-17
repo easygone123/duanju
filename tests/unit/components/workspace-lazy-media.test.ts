@@ -52,19 +52,13 @@ describe('workspace lazy media', () => {
     expect(view.getByAltText('hero').getAttribute('loading')).toBe('eager')
   })
 
-  it('exposes the original media URL only after the explicit preview opens', () => {
-    const closed = render(React.createElement(ImagePreviewModal, {
-      imageUrl: null,
-      onClose: vi.fn(),
-    }))
-    expect(closed.queryByRole('link', { name: 'viewOriginal' })).toBeNull()
-    closed.unmount()
-
+  it('keeps an opened preview inside the app without exposing an external media link', () => {
     const opened = render(React.createElement(ImagePreviewModal, {
       imageUrl: '/_next/image?url=images%2Foriginal.png&w=640&q=75',
       onClose: vi.fn(),
     }))
-    expect(opened.getByRole('link', { name: 'viewOriginal' }).getAttribute('href'))
+    expect(opened.getByAltText('preview').getAttribute('src'))
       .toBe('/api/storage/sign?key=images%2Foriginal.png')
+    expect(opened.queryByRole('link')).toBeNull()
   })
 })
