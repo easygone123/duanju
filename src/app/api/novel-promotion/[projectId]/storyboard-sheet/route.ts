@@ -5,8 +5,8 @@ import { isErrorResponse, requireProjectAuthLight } from '@/lib/api-auth'
 import { submitTask } from '@/lib/task/submitter'
 import { TASK_TYPE } from '@/lib/task/types'
 import { resolveRequiredTaskLocale } from '@/lib/task/resolve-locale'
-import { loadOwnedPublishedGenerationWorkflow, loadOwnedPublishedUpscaleWorkflow, loadOwnedSixGrid, finalizeSnapshot } from '@/lib/novel-promotion/six-grid/image-task-route'
-import { resolveSheetAspectRatio, type SixGridImageTaskSnapshot } from '@/lib/workers/handlers/storyboard-sheet-task-handler'
+import { loadOwnedGridStoryboard, loadOwnedPublishedGenerationWorkflow, loadOwnedPublishedUpscaleWorkflow, finalizeSnapshot } from '@/lib/novel-promotion/six-grid/image-task-route'
+import type { SixGridImageTaskSnapshot } from '@/lib/workers/handlers/storyboard-sheet-task-handler'
 import { getProjectModelConfig, resolveProjectComfyWorkflowVersion, resolveProjectImageTaskGenerationOptions } from '@/lib/config-service'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { collectSixGridReferenceInputs } from '@/lib/novel-promotion/six-grid/reference-inputs'
@@ -25,7 +25,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
   const parsed = schema.safeParse(await request.json())
   if (!parsed.success) throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_SHEET_PAYLOAD_INVALID', field: parsed.error.issues[0]?.path.join('.') || 'body' })
   const body = parsed.data
-  const storyboard = await loadOwnedSixGrid({ userId: auth.session.user.id, projectId, episodeId: body.episodeId, storyboardId: body.storyboardId })
+  const storyboard = await loadOwnedGridStoryboard({ userId: auth.session.user.id, projectId, episodeId: body.episodeId, storyboardId: body.storyboardId })
   const locale = resolveRequiredTaskLocale(request, body)
   const operation = body.operation === 'generate' ? 'generate' : 'sheet_upscale'
   let workflow: { workflow: { id: string }; version: { id: string } } | null = null
@@ -65,7 +65,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     })
   }
   const source = operation === 'sheet_upscale' ? storyboard.sheetImageMedia! : null
-  const sheetAspectRatio = resolveSheetAspectRatio(storyboard.sixGridCellAspectRatio as '16:9' | '9:16')
+  const sheetAspectRatio = storyboard.gridSpec.sheetAspectRatio
   let resolvedGenerationOptions: Record<string, string | number | boolean> = { aspectRatio: sheetAspectRatio }
   if (operation === 'generate') {
     try {
@@ -76,7 +76,16 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
         projectModelConfig: projectModelConfig ?? undefined,
       })
     } catch (error) {
-      throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_SHEET_RATIO_UNSUPPORTED', field: 'generationOptions.aspectRatio', details: { message: error instanceof Error ? error.message : String(error) } })
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'GRID_SHEET_RATIO_UNSUPPORTED',
+        field: 'generationOptions.aspectRatio',
+        details: {
+          mode: storyboard.gridSpec.mode,
+          sheetAspectRatio,
+          ...(storyboard.gridSpec.mode === 'six_grid' ? { legacyCode: 'SIX_GRID_SHEET_RATIO_UNSUPPORTED' } : {}),
+          message: error instanceof Error ? error.message : String(error),
+        },
+      })
     }
   }
   const referenceImages = operation === 'generate'
@@ -87,6 +96,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     ...(source ? { sourceMediaId: source.id, sourceChecksum: source.sha256 || `media:${source.id}`, sourceVersion: source.updatedAt.toISOString() } : {}),
     ...(workflow ? { workflowId: workflow.workflow.id, workflowVersionId: workflow.version.id, workflowPurpose: operation === 'generate' ? 'generation' as const : 'upscale' as const } : {}),
     cellAspectRatio: storyboard.sixGridCellAspectRatio as '16:9' | '9:16', processingOrder: storyboard.sixGridProcessingOrder as SixGridImageTaskSnapshot['processingOrder'],
+    gridSpec: storyboard.gridSpec,
     expectedSheetArtifactVersion: storyboard.sheetArtifactVersion, promptSnapshot: prompt, modelSnapshot: model,
     optionsSnapshot: operation === 'generate' ? resolvedGenerationOptions : {}, locale,
     imageModel: model, generationOptions: operation === 'generate' ? resolvedGenerationOptions : {},

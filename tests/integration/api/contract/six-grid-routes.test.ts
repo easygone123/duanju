@@ -176,6 +176,61 @@ describe('six-grid route/task registration contract', () => {
     }, { params: { projectId: 'project-1' } })
     expect(response.status).toBe(400)
     expect(capabilityMock).toHaveBeenCalledWith(expect.objectContaining({ taskSelections: { aspectRatio: '8:3' } }))
+    expect(await response.json()).toMatchObject({
+      error: {
+        details: {
+          code: 'GRID_SHEET_RATIO_UNSUPPORTED',
+          details: { mode: 'six_grid', sheetAspectRatio: '8:3' },
+        },
+      },
+    })
+    expect(submitTaskMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts four-grid sheet generation and snapshots its canonical 2x2 ratio', async () => {
+    const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-sheet/route')
+    prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce(storyboardFixture('four_grid'))
+    capabilityMock.mockResolvedValueOnce({ aspectRatio: '16:9' })
+
+    const response = await callRoute(route.POST, 'POST', {
+      operation: 'generate', episodeId: 'episode-1', storyboardId: 'storyboard-1', imageModel: 'openai::image-1', locale: 'zh',
+    }, { params: { projectId: 'project-1' } })
+
+    expect(response.status).toBe(200)
+    expect(capabilityMock).toHaveBeenCalledWith(expect.objectContaining({ taskSelections: { aspectRatio: '16:9' } }))
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        gridSpec: {
+          version: 1, mode: 'four_grid', columns: 2, rows: 2, panelCount: 4,
+          cellAspectRatio: '16:9', sheetAspectRatio: '16:9',
+        },
+      }),
+    }))
+  })
+
+  it('accepts a four-grid panel index from 0 through 3 and rejects out-of-range groups', async () => {
+    const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-panel/upscale/route')
+    prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce(storyboardFixture('four_grid'))
+    let response = await callRoute(route.POST, 'POST', {
+      episodeId: 'episode-1', storyboardId: 'storyboard-1', panelId: 'panel-3',
+      workflowId: 'workflow-1', workflowVersionId: 'version-1', locale: 'zh',
+    }, { params: { projectId: 'project-1' } })
+    expect(response.status).toBe(200)
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({ gridSpec: expect.objectContaining({ mode: 'four_grid', panelCount: 4 }) }),
+    }))
+
+    vi.clearAllMocks()
+    authMock.mockResolvedValue({ session: { user: { id: 'user-1' } } })
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflowFixture())
+    const invalid = storyboardFixture('four_grid')
+    invalid.panels[3] = { ...invalid.panels[3]!, gridCellIndex: 4 }
+    prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce(invalid)
+    response = await callRoute(route.POST, 'POST', {
+      episodeId: 'episode-1', storyboardId: 'storyboard-1', panelId: 'panel-3',
+      workflowId: 'workflow-1', workflowVersionId: 'version-1', locale: 'zh',
+    }, { params: { projectId: 'project-1' } })
+    expect(response.status).toBe(400)
     expect(submitTaskMock).not.toHaveBeenCalled()
   })
 
@@ -261,14 +316,15 @@ describe('six-grid route/task registration contract', () => {
   })
 })
 
-function storyboardFixture() {
+function storyboardFixture(layoutMode: 'four_grid' | 'six_grid' = 'six_grid') {
   const sheet = { id: 'sheet-media', publicId: 'sheet-public', storageKey: 'sheet.png', sha256: 'sheet-sha', updatedAt: new Date('2026-07-13T00:00:00.000Z') }
+  const panelCount = layoutMode === 'four_grid' ? 4 : 6
   return {
-    id: 'storyboard-1', episodeId: 'episode-1', layoutMode: 'six_grid', groupSequence: 1,
+    id: 'storyboard-1', episodeId: 'episode-1', layoutMode, groupSequence: 1,
     sixGridCellAspectRatio: '16:9', sixGridProcessingOrder: 'crop_then_panel_upscale', sheetArtifactVersion: 4,
     sheetPromptSnapshot: 'one continuous story', sheetModelSnapshot: 'openai::image-1', sheetImageUrl: '/m/sheet-public',
     sheetImageMediaId: sheet.id, sheetImageMedia: sheet, upscaledSheetImageMediaId: 'upscaled-sheet', upscaledSheetImageMedia: { ...sheet, id: 'upscaled-sheet', sha256: 'upscaled-sha' },
-    panels: Array.from({ length: 6 }, (_, gridCellIndex) => ({ id: `panel-${gridCellIndex}`, gridCellIndex, imageMediaId: `crop-${gridCellIndex}`, croppedImageMediaId: `crop-${gridCellIndex}`, imageMedia: { ...sheet, id: `crop-${gridCellIndex}` }, croppedImageMedia: { ...sheet, id: `crop-${gridCellIndex}` } })),
+    panels: Array.from({ length: panelCount }, (_, gridCellIndex) => ({ id: `panel-${gridCellIndex}`, gridCellIndex, imageMediaId: `crop-${gridCellIndex}`, croppedImageMediaId: `crop-${gridCellIndex}`, imageMedia: { ...sheet, id: `crop-${gridCellIndex}` }, croppedImageMedia: { ...sheet, id: `crop-${gridCellIndex}` } })),
   }
 }
 

@@ -52,6 +52,15 @@ describe('image task capability overrides', () => {
     })).toThrow(/CAPABILITY_VALUE_NOT_ALLOWED/)
   })
 
+  it.each(['16:9', '9:16'])('accepts a four-grid sheet ratio %s when the workflow declares it', (aspectRatio) => {
+    expect(resolveImageTaskGenerationOptions({
+      imageModel: 'comfyui::workflow-1',
+      projectModelConfig: { capabilityDefaults: {}, capabilityOverrides: {} },
+      taskSelections: { aspectRatio },
+      comfyAspectRatioOptions: ['16:9', '9:16'],
+    })).toEqual({ aspectRatio })
+  })
+
   it('allows six-grid ratios when the Comfy workflow exposes dynamic width and height', () => {
     const options = readComfyAspectRatioOptions([
       { name: 'width', type: 'number', required: false, defaultValue: 832 },

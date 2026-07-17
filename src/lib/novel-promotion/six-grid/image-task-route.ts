@@ -4,12 +4,13 @@ import type { NormalizedCropRect, SixGridProcessingOrder } from './contracts'
 import { buildSixGridTaskDedupeKey, type SixGridImageTaskSnapshot } from '@/lib/workers/handlers/storyboard-sheet-task-handler'
 import { validateWorkflowContract } from '@/lib/comfyui/workflow-schema'
 import type { ComfyInputBinding, ComfyOutputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
+import { resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 function invalid(code: string, field?: string): never {
   throw new ApiError('INVALID_PARAMS', { code, ...(field ? { field } : {}) })
 }
 
-export async function loadOwnedSixGrid(input: {
+export async function loadOwnedGridStoryboard(input: {
   userId: string; projectId: string; episodeId: string; storyboardId: string
 }) {
   const storyboard = await prisma.novelPromotionStoryboard.findFirst({
@@ -20,13 +21,24 @@ export async function loadOwnedSixGrid(input: {
     include: { sheetImageMedia: true, upscaledSheetImageMedia: true, panels: { orderBy: { gridCellIndex: 'asc' }, include: { imageMedia: true, croppedImageMedia: true } } },
   })
   if (!storyboard) throw new ApiError('NOT_FOUND')
-  if (storyboard.layoutMode !== 'six_grid') invalid('SIX_GRID_LAYOUT_REQUIRED', 'storyboardId')
-  if (storyboard.panels.length !== 6 || new Set(storyboard.panels.map((panel) => panel.gridCellIndex)).size !== 6
-    || storyboard.panels.some((panel) => panel.gridCellIndex == null || panel.gridCellIndex < 0 || panel.gridCellIndex > 5)) {
-    invalid('SIX_GRID_EXACTLY_SIX_PANELS_REQUIRED', 'storyboardId')
+  if (storyboard.layoutMode !== 'four_grid' && storyboard.layoutMode !== 'six_grid') invalid('GRID_LAYOUT_REQUIRED', 'storyboardId')
+  if (storyboard.sixGridCellAspectRatio !== '16:9' && storyboard.sixGridCellAspectRatio !== '9:16') invalid('GRID_CELL_RATIO_INVALID')
+  const gridSpec = resolveStoryboardGridSpec(storyboard.layoutMode, storyboard.sixGridCellAspectRatio)
+  if (storyboard.panels.length !== gridSpec.panelCount
+    || new Set(storyboard.panels.map((panel) => panel.gridCellIndex)).size !== gridSpec.panelCount
+    || storyboard.panels.some((panel) => panel.gridCellIndex == null
+      || panel.gridCellIndex < 0 || panel.gridCellIndex >= gridSpec.panelCount)) {
+    invalid('GRID_PANEL_COUNT_INVALID', 'storyboardId')
   }
-  if (storyboard.sixGridCellAspectRatio !== '16:9' && storyboard.sixGridCellAspectRatio !== '9:16') invalid('SIX_GRID_CELL_RATIO_INVALID')
   if (storyboard.sixGridProcessingOrder !== 'sheet_upscale_then_crop' && storyboard.sixGridProcessingOrder !== 'crop_then_panel_upscale') invalid('SIX_GRID_PROCESSING_ORDER_INVALID')
+  return { ...storyboard, gridSpec: { version: 1 as const, ...gridSpec } }
+}
+
+export async function loadOwnedSixGrid(input: {
+  userId: string; projectId: string; episodeId: string; storyboardId: string
+}) {
+  const storyboard = await loadOwnedGridStoryboard(input)
+  if (storyboard.gridSpec.mode !== 'six_grid') invalid('SIX_GRID_LAYOUT_REQUIRED', 'storyboardId')
   return storyboard
 }
 

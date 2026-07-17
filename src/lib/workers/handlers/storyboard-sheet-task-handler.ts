@@ -9,6 +9,23 @@ import { normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-imag
 import type { TaskJobData } from '@/lib/task/types'
 import type { NormalizedCropRect, SixGridCellAspectRatio, SixGridProcessingOrder } from '@/lib/novel-promotion/six-grid/contracts'
 import { COMFY_REFERENCE_UPLOAD_LIMIT } from '@/lib/comfyui/types'
+import {
+  resolveStoryboardGridSpec,
+  type StoryboardGridSpec,
+} from '@/lib/novel-promotion/grid-storyboard/spec'
+
+export type VersionedStoryboardGridSpec = StoryboardGridSpec & { version: 1 }
+const LEGACY_GRID_SPEC_SNAPSHOT = Symbol('legacy-grid-spec-snapshot')
+
+const gridSpecSchema = z.object({
+  version: z.literal(1),
+  mode: z.enum(['four_grid', 'six_grid']),
+  columns: z.union([z.literal(2), z.literal(3)]),
+  rows: z.literal(2),
+  panelCount: z.union([z.literal(4), z.literal(6)]),
+  cellAspectRatio: z.enum(['16:9', '9:16']),
+  sheetAspectRatio: z.enum(['16:9', '9:16', '8:3', '27:32']),
+}).strict()
 
 const rectSchema = z.object({
   x: z.number().finite().min(0).max(1),
@@ -24,6 +41,7 @@ const snapshotSchema = z.object({
   sourceMediaId: z.string().min(1).optional(), sourceChecksum: z.string().min(1).optional(), sourceVersion: z.string().min(1).optional(),
   workflowId: z.string().min(1).optional(), workflowVersionId: z.string().min(1).optional(), workflowPurpose: z.enum(['generation', 'upscale']).optional(),
   cellAspectRatio: z.enum(['16:9', '9:16']),
+  gridSpec: gridSpecSchema.optional(),
   processingOrder: z.enum(['sheet_upscale_then_crop', 'crop_then_panel_upscale']),
   expectedSheetArtifactVersion: z.number().int().nonnegative(),
   cropRects: z.array(z.object({ cellIndex: z.number().int().min(0).max(5), normalizedCropRect: rectSchema }).strict()).length(6).optional(),
@@ -48,6 +66,7 @@ export type SixGridImageTaskSnapshot = {
   sourceMediaId?: string; sourceChecksum?: string; sourceVersion?: string
   workflowId?: string; workflowVersionId?: string; workflowPurpose?: 'generation' | 'upscale'
   cellAspectRatio: SixGridCellAspectRatio; processingOrder: SixGridProcessingOrder
+  gridSpec?: VersionedStoryboardGridSpec
   expectedSheetArtifactVersion: number
   cropRects?: Array<{ cellIndex: number; normalizedCropRect: NormalizedCropRect }>
   promptSnapshot: string; modelSnapshot: string; optionsSnapshot: Record<string, unknown>; locale: 'zh' | 'en'
@@ -55,8 +74,32 @@ export type SixGridImageTaskSnapshot = {
   referenceImages?: Array<{ source: string; kind: 'character' | 'location' | 'prop' | 'sketch'; name: string }>
 }
 
-export function parseSixGridImageTaskSnapshot(value: unknown): SixGridImageTaskSnapshot {
+export type ParsedGridImageTaskSnapshot = Omit<SixGridImageTaskSnapshot, 'gridSpec'> & {
+  gridSpec: VersionedStoryboardGridSpec
+}
+
+function normalizeGridSpec(input: {
+  cellAspectRatio: SixGridCellAspectRatio
+  gridSpec?: VersionedStoryboardGridSpec
+}): VersionedStoryboardGridSpec {
+  const candidate = input.gridSpec
+    ?? { version: 1 as const, ...resolveStoryboardGridSpec('six_grid', input.cellAspectRatio) }
+  const canonical = resolveStoryboardGridSpec(candidate.mode, candidate.cellAspectRatio)
+  if (candidate.version !== 1
+    || input.cellAspectRatio !== candidate.cellAspectRatio
+    || candidate.columns !== canonical.columns
+    || candidate.rows !== canonical.rows
+    || candidate.panelCount !== canonical.panelCount
+    || candidate.sheetAspectRatio !== canonical.sheetAspectRatio) {
+    throw new Error('STORYBOARD_GRID_SPEC_INVALID')
+  }
+  return { version: 1, ...canonical }
+}
+
+export function parseSixGridImageTaskSnapshot(value: unknown): ParsedGridImageTaskSnapshot {
   const parsed = snapshotSchema.parse(value)
+  const legacyGridSpecSnapshot = !parsed.gridSpec
+  const gridSpec = normalizeGridSpec(parsed)
   const indexes = parsed.cropRects?.map((item) => item.cellIndex)
   if (indexes && new Set(indexes).size !== 6) throw new Error('SIX_GRID_CROP_INDEXES_INVALID')
   if (parsed.operation !== 'generate' && (!parsed.sourceMediaId || !parsed.sourceChecksum || !parsed.sourceVersion)) {
@@ -71,10 +114,15 @@ export function parseSixGridImageTaskSnapshot(value: unknown): SixGridImageTaskS
       || parsed.comfyWorkflowVersionId !== parsed.workflowVersionId || parsed.comfyModelSnapshotVersion !== 1)) {
     throw new Error('SIX_GRID_GENERATION_WORKFLOW_SNAPSHOT_REQUIRED')
   }
-  return {
+  const snapshot = {
     ...parsed,
+    gridSpec,
     ...(parsed.cropRects ? { cropRects: [...parsed.cropRects].sort((a, b) => a.cellIndex - b.cellIndex) } : {}),
-  } as SixGridImageTaskSnapshot
+  } as ParsedGridImageTaskSnapshot
+  if (legacyGridSpecSnapshot) {
+    Object.defineProperty(snapshot, LEGACY_GRID_SPEC_SNAPSHOT, { value: true })
+  }
+  return snapshot
 }
 
 export function resolveSheetAspectRatio(cellRatio: SixGridCellAspectRatio) {
@@ -88,11 +136,15 @@ function stable(value: unknown): string {
 }
 
 export function buildSixGridTaskDedupeKey(snapshot: SixGridImageTaskSnapshot) {
+  const gridSpec = normalizeGridSpec(snapshot)
+  const legacyGridSpecSnapshot = !snapshot.gridSpec
+    || Boolean((snapshot as SixGridImageTaskSnapshot & { [LEGACY_GRID_SPEC_SNAPSHOT]?: true })[LEGACY_GRID_SPEC_SNAPSHOT])
   const identity = {
     operation: snapshot.operation, target: snapshot.panelId || snapshot.storyboardId,
     sourceMediaId: snapshot.sourceMediaId, sourceChecksum: snapshot.sourceChecksum, sourceVersion: snapshot.sourceVersion,
     workflowId: snapshot.workflowId, workflowVersionId: snapshot.workflowVersionId,
     cellAspectRatio: snapshot.cellAspectRatio, processingOrder: snapshot.processingOrder,
+    ...(!legacyGridSpecSnapshot ? { gridSpec } : {}),
     cropRects: snapshot.cropRects ? [...snapshot.cropRects].sort((a, b) => a.cellIndex - b.cellIndex) : undefined,
     promptSnapshot: snapshot.promptSnapshot, modelSnapshot: snapshot.modelSnapshot,
     options: snapshot.optionsSnapshot, generationOptions: snapshot.generationOptions,
@@ -114,7 +166,7 @@ export async function handleStoryboardSheetTask(job: Job<TaskJobData>) {
   const snapshot = parseSixGridImageTaskSnapshot(job.data.payload)
   if (snapshot.operation !== 'generate' && snapshot.operation !== 'sheet_upscale') throw new Error('SIX_GRID_SHEET_OPERATION_INVALID')
   const storyboard = await prisma.novelPromotionStoryboard.findFirst({
-    where: { id: snapshot.storyboardId, episodeId: snapshot.episodeId, layoutMode: 'six_grid' },
+    where: { id: snapshot.storyboardId, episodeId: snapshot.episodeId, layoutMode: snapshot.gridSpec.mode },
     include: { sheetImageMedia: true, upscaledSheetImageMedia: true },
   })
   if (!storyboard) throw new Error('SIX_GRID_SHEET_STALE')
@@ -145,7 +197,7 @@ export async function handleStoryboardSheetTask(job: Job<TaskJobData>) {
     prompt,
     options: {
       ...snapshot.optionsSnapshot,
-      aspectRatio: resolveSheetAspectRatio(snapshot.cellAspectRatio),
+      aspectRatio: snapshot.gridSpec.sheetAspectRatio,
       ...(references ? { referenceImages: references.remote } : {}),
       ...(sheetReferences ? { referenceImages: sheetReferences.remote } : {}),
     },

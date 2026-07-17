@@ -5,7 +5,7 @@ import { isErrorResponse, requireProjectAuthLight } from '@/lib/api-auth'
 import { submitTask } from '@/lib/task/submitter'
 import { TASK_TYPE } from '@/lib/task/types'
 import { resolveRequiredTaskLocale } from '@/lib/task/resolve-locale'
-import { finalizeSnapshot, loadOwnedPublishedUpscaleWorkflow, loadOwnedSixGrid } from '@/lib/novel-promotion/six-grid/image-task-route'
+import { finalizeSnapshot, loadOwnedGridStoryboard, loadOwnedPublishedUpscaleWorkflow } from '@/lib/novel-promotion/six-grid/image-task-route'
 import type { SixGridImageTaskSnapshot } from '@/lib/workers/handlers/storyboard-sheet-task-handler'
 
 const schema = z.object({ episodeId: z.string().trim().min(1).max(200), storyboardId: z.string().trim().min(1).max(200), panelId: z.string().trim().min(1).max(200),
@@ -19,7 +19,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
   const parsed = schema.safeParse(await request.json())
   if (!parsed.success) throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_PANEL_UPSCALE_PAYLOAD_INVALID', field: parsed.error.issues[0]?.path.join('.') || 'body' })
   const body = parsed.data
-  const storyboard = await loadOwnedSixGrid({ userId: auth.session.user.id, projectId, episodeId: body.episodeId, storyboardId: body.storyboardId })
+  const storyboard = await loadOwnedGridStoryboard({ userId: auth.session.user.id, projectId, episodeId: body.episodeId, storyboardId: body.storyboardId })
   const panel = storyboard.panels.find((item) => item.id === body.panelId)
   if (!panel) throw new ApiError('NOT_FOUND')
   if (!panel.croppedImageMediaId || panel.imageMediaId !== panel.croppedImageMediaId || !panel.imageMedia) throw new ApiError('INVALID_PARAMS', { code: 'PANEL_CROP_SOURCE_REQUIRED', field: 'panelId' })
@@ -31,6 +31,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     sourceMediaId: source.id, sourceChecksum: source.sha256 || `media:${source.id}`, sourceVersion: source.updatedAt.toISOString(),
     workflowId: workflow.workflow.id, workflowVersionId: workflow.version.id, workflowPurpose: 'upscale',
     cellAspectRatio: storyboard.sixGridCellAspectRatio as '16:9' | '9:16', processingOrder: storyboard.sixGridProcessingOrder as SixGridImageTaskSnapshot['processingOrder'],
+    gridSpec: storyboard.gridSpec,
     expectedSheetArtifactVersion: storyboard.sheetArtifactVersion, promptSnapshot: '', modelSnapshot: `comfyui::${workflow.workflow.id}`,
     optionsSnapshot: body.generationOptions || {}, locale,
   }
