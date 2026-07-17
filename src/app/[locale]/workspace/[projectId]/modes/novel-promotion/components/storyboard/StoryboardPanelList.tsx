@@ -186,12 +186,7 @@ export default function StoryboardPanelList({
               isInsertDisabled={isInsertDisabled(panel.id)}
               previousImageUrl={panel.previousImageUrl}
               sixGridActions={storyboard.layoutMode === 'six_grid' ? {
-                currentUrl: panel.imageUrl,
-                croppedUrl: panel.croppedImageUrl,
-                upscaledUrl: panel.upscaledImageUrl,
                 previousUrl: panel.previousImageUrl,
-                sourceUrl: storyboard.sixGridProcessingOrder === 'sheet_upscale_then_crop'
-                  ? storyboard.upscaledSheetImageUrl : storyboard.sheetImageUrl,
                 isBusy: isSixGridPanelBusy(
                   sixGridTaskPanelId,
                   panel.id,
@@ -206,7 +201,6 @@ export default function StoryboardPanelList({
                 ),
                 onRecrop: () => onOpenSixGridCrop(panel.gridCellIndex ?? index),
                 onUpscale: () => { if (sixGridUpscaleWorkflow) void onUpscaleSixGridPanel(panel.id, sixGridUpscaleWorkflow) },
-                onPreview: onPreviewImage,
                 onUndo: panel.previousImageUrl && panel.imageMediaId && panel.previousImageMediaId
                   ? () => void onUndoSixGridPanel(panel.id, panel.imageMediaId!, panel.previousImageMediaId!)
                   : undefined,

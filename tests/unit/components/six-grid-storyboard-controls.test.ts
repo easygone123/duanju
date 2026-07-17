@@ -132,19 +132,21 @@ describe('six-grid storyboard controls', () => {
     expect(renderWithIntl(createElement(DialoguePanelBadge, { hasDialogue: false }))).toBe('')
   })
 
-  it('exposes recrop, upscale, lineage previews, and previous-image undo on each six-grid card', () => {
-    const html = renderWithIntl(createElement(SixGridPanelActions, {
-      currentUrl: '/current.webp', croppedUrl: '/crop.webp', upscaledUrl: '/upscale.webp', previousUrl: '/previous.webp',
-      sourceUrl: '/sheet.webp', isBusy: false, canUpscale: true,
-      onRecrop: () => undefined, onUpscale: () => undefined, onPreview: () => undefined, onUndo: () => undefined,
-    }))
+  it('keeps only processing actions on each six-grid card because the image is shown inline', () => {
+    const props = {
+      currentUrl: '/current.webp', croppedUrl: '/crop.webp', upscaledUrl: '/upscale.webp',
+      sourceUrl: '/sheet.webp', previousUrl: '/previous.webp', isBusy: false, canUpscale: true,
+      onRecrop: () => undefined, onUpscale: () => undefined,
+      onPreview: () => undefined, onUndo: () => undefined,
+    } as unknown as React.ComponentProps<typeof SixGridPanelActions>
+    const html = renderWithIntl(createElement(SixGridPanelActions, props))
     expect(html).toContain('Recrop')
     expect(html).toContain('Upscale panel')
-    expect(html).toContain('Preview current')
-    expect(html).toContain('Preview crop')
-    expect(html).toContain('Preview upscale')
-    expect(html).toContain('Preview source')
     expect(html).toContain('Undo previous')
+    expect(html).not.toContain('Preview current')
+    expect(html).not.toContain('Preview crop')
+    expect(html).not.toContain('Preview upscale')
+    expect(html).not.toContain('Preview source')
   })
 
   it('keeps six-grid card actions busy while either its local mutation or server image task is running', () => {
@@ -156,9 +158,9 @@ describe('six-grid storyboard controls', () => {
 
   it('disables recrop, upscale, and undo for a server group task and restores them when it finishes', () => {
     const renderActions = (serverGroupRunning: boolean) => renderWithIntl(createElement(SixGridPanelActions, {
-      currentUrl: '/current.webp', croppedUrl: '/crop.webp', previousUrl: '/previous.webp',
+      previousUrl: '/previous.webp',
       isBusy: isSixGridGroupBusy(false, serverGroupRunning), canUpscale: true,
-      onRecrop: () => undefined, onUpscale: () => undefined, onPreview: () => undefined, onUndo: () => undefined,
+      onRecrop: () => undefined, onUpscale: () => undefined, onUndo: () => undefined,
     }))
     const busyHtml = renderActions(true)
     expect(busyHtml.match(/disabled=""/g)).toHaveLength(3)
