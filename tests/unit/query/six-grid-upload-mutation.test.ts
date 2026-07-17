@@ -136,16 +136,32 @@ describe('six-grid external sheet upload lifecycle', () => {
     expect(queryClient.getQueryData(queryKeys.tasks.targetStateOverlay('project-1'))).toEqual({})
   })
 
-  it('clears the overlay even when the post-upload refresh rejects', async () => {
+  it('preserves upload success and clears the overlay when the post-upload refresh rejects', async () => {
     apiFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ storyboardId: 'storyboard-1' }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))
     const queryClient = new QueryClient()
-    vi.spyOn(queryClient, 'invalidateQueries').mockRejectedValueOnce(new Error('refresh failed'))
+    let rejectRefresh!: (error: Error) => void
+    const refresh = new Promise<void>((_resolve, reject) => {
+      rejectRefresh = reject
+    })
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+      .mockReturnValueOnce(refresh)
+      .mockResolvedValue(undefined)
+    const observer = new MutationObserver(queryClient, createUploadOptions(queryClient))
+    const request = observer.mutate(uploadInput())
 
-    await expect(mutate(queryClient, uploadInput())).rejects.toThrow('refresh failed')
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalled())
+    expect(observer.getCurrentResult().isPending).toBe(true)
+    expect(queryClient.getQueryData(queryKeys.tasks.targetStateOverlay('project-1'))).toMatchObject({
+      'NovelPromotionStoryboard:storyboard-1': { intent: 'process' },
+    })
+    rejectRefresh(new Error('refresh failed'))
 
+    await expect(request).resolves.toEqual({ storyboardId: 'storyboard-1' })
+
+    expect(observer.getCurrentResult().isSuccess).toBe(true)
     expect(queryClient.getQueryData(queryKeys.tasks.targetStateOverlay('project-1'))).toEqual({})
   })
 })

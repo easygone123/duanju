@@ -143,12 +143,13 @@ export function createSheetUploadMutationOptions(
       targetId: input.storyboardId,
       intent: 'process',
     }),
-    onSuccess: (_data: unknown, input: SheetUploadInput) => refreshStoryboardGroupQueries(
-      queryClient,
-      projectId,
-      episodeId,
-      input.storyboardId,
-    ),
+    onSuccess: async (_data: unknown, input: SheetUploadInput) => {
+      try {
+        await refreshStoryboardGroupQueries(queryClient, projectId, episodeId, input.storyboardId)
+      } catch {
+        // The upload is already durable; a later query refresh can recover stale cache data.
+      }
+    },
     onSettled: (_data: unknown, _error: Error | null, input: SheetUploadInput) => clearTaskTargetOverlay(queryClient, {
       projectId,
       targetType: 'NovelPromotionStoryboard',
