@@ -516,6 +516,22 @@ describe('ComfyClient contract', () => {
     })
   })
 
+  it('allows output downloads to outlive the short control-plane timeout', async () => {
+    server.override('/proxy/comfy/system_stats', () => undefined)
+    server.override('/proxy/comfy/view', (_request, response) => {
+      setTimeout(() => response.end('delayed-output-bytes'), 75)
+    })
+    const comfy = client({ type: 'none' }, { timeoutMs: 25, outputTimeoutMs: 250 })
+
+    await expect(comfy.getSystemStats()).rejects.toMatchObject({
+      code: 'COMFY_EXECUTION_TIMEOUT',
+    })
+    await expect(comfy.downloadOutput({
+      name: 'primary', nodeId: '9', mediaType: 'image', primary: true,
+      filename: 'large-six-grid.png', subfolder: '', type: 'output',
+    })).resolves.toEqual(Buffer.from('delayed-output-bytes'))
+  })
+
   it('bounds a stalled DNS authorization phase', async () => {
     const resolveHost = () => new Promise<never>(() => undefined)
 

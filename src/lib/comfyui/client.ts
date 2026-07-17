@@ -39,6 +39,7 @@ export interface ComfyClientOptions {
   auth: ComfyConnectionAuth
   networkPolicy: ComfyNetworkPolicyConfig
   timeoutMs?: number
+  outputTimeoutMs?: number
   maxJsonBytes?: number
   maxOutputBytes?: number
   maxErrorBytes?: number
@@ -68,6 +69,7 @@ const MAX_WS_QUEUED_BYTES = 16 * 1024 * 1024
 export class ComfyClient {
   private readonly baseUrl: URL
   private readonly timeoutMs: number
+  private readonly outputTimeoutMs: number
   private readonly maxJsonBytes: number
   private readonly maxOutputBytes: number
   private readonly maxErrorBytes: number
@@ -84,6 +86,7 @@ export class ComfyClient {
   constructor(private readonly options: ComfyClientOptions) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl)
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    this.outputTimeoutMs = options.outputTimeoutMs ?? this.timeoutMs
     this.maxJsonBytes = options.maxJsonBytes ?? DEFAULT_MAX_JSON_BYTES
     this.maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
     this.maxErrorBytes = options.maxErrorBytes ?? DEFAULT_MAX_ERROR_BYTES
@@ -252,6 +255,8 @@ export class ComfyClient {
       { method: 'GET' },
       COMFY_ERROR_CODE.OUTPUT_TRANSFER_FAILED,
       this.maxOutputBytes,
+      undefined,
+      this.outputTimeoutMs,
     )
   }
 
@@ -291,12 +296,13 @@ export class ComfyClient {
     code: ComfyErrorCode,
     limit: number,
     errorContext: ComfyHttpErrorContext = { auth: this.options.auth },
+    timeoutMs: number = this.timeoutMs,
   ): Promise<Buffer> {
     let url = this.endpoint(endpoint)
     for (let redirects = 0; ; redirects += 1) {
       const controller = new AbortController()
       const signal = init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal
-      const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
+      const timeout = setTimeout(() => controller.abort(), timeoutMs)
       let agent: Agent | undefined
       let failed = false
       try {

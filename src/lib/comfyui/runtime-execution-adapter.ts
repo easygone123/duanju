@@ -333,6 +333,7 @@ export function createProductionComfyClient(
     auth: decodeAuth(connection),
     networkPolicy: limits.networkPolicy,
     timeoutMs: Math.min(limits.executionTimeoutMs, 30_000),
+    outputTimeoutMs: limits.executionTimeoutMs,
     wsIdleTimeoutMs: limits.executionTimeoutMs,
     maxWorkflowBytes: limits.workflowMaxBytes,
     maxInputBytes: limits.inputMaxBytes,
