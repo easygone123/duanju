@@ -1,7 +1,7 @@
 # Six-Grid External Upload and Prompt Access Design
 
 - Date: 2026-07-17
-- Status: Approved conversational design, pending written-spec review
+- Status: Approved
 - Target branch: `main`
 
 ## 1. Summary
