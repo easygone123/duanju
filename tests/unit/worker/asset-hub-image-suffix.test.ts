@@ -27,7 +27,11 @@ const prismaMock = vi.hoisted(() => ({
 }))
 
 const sharedMock = vi.hoisted(() => ({
-  generateCleanImageToStorage: vi.fn(async () => 'cos/generated-character.png'),
+  generateCleanImageToStorage: vi.fn<(input: {
+    prompt?: string
+    options?: { aspectRatio?: string }
+    label?: string
+  }) => Promise<string>>(async () => 'cos/generated-character.png'),
   parseJsonStringArray: vi.fn(() => []),
 }))
 

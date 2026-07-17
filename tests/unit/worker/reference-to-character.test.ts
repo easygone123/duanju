@@ -103,7 +103,9 @@ const prismaMock = vi.hoisted(() => ({
     ),
   },
   characterAppearance: {
-    update: vi.fn(async () => ({})),
+    update: vi.fn<(input: { data?: Record<string, unknown>; where?: Record<string, unknown> }) => Promise<Record<string, never>>>(
+      async () => ({}),
+    ),
   },
 }))
 
