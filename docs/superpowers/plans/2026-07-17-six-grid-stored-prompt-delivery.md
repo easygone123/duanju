@@ -17,7 +17,8 @@
 
 - [ ] **Step 1: Add an exact saved prompt to the storyboard fixture**
 
-Add this field to `fixture.storyboards[0]`:
+Add this field to the fixture row whose id is `storyboard-1` (the response sorts
+that row first):
 
 ```ts
 sheetPromptSnapshot: 'ORIGINAL SIX GRID PROMPT\nBeat 1',
