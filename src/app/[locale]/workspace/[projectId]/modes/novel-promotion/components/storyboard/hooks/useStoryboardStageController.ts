@@ -215,6 +215,12 @@ export function useStoryboardStageController({
   const cropSixGridSheet = useCallback((storyboardId: string, cropRects: CropEntry[]) => sixGridTasks.crop.mutateAsync({
     episodeId, storyboardId, cropRects,
   }), [episodeId, sixGridTasks.crop])
+  const uploadSixGridSheet = useCallback(
+    (storyboardId: string, file: File, version: number) => sixGridTasks.upload.mutateAsync({
+      file, episodeId, storyboardId, expectedSheetArtifactVersion: version,
+    }),
+    [episodeId, sixGridTasks.upload],
+  )
   const upscaleSixGridPanel = useCallback((storyboardId: string, panelId: string, workflow: SixGridUpscaleWorkflow) => sixGridTasks.panelUpscale.mutateAsync({
     episodeId, storyboardId, panelId,
     workflowId: workflow.workflowId, workflowVersionId: workflow.workflowVersionId,
@@ -241,11 +247,15 @@ export function useStoryboardStageController({
     sixGridUpscaleWorkflow,
     sixGridTaskStoryboardId: sixGridTasks.sheet.isPending
       ? sixGridTasks.sheet.variables?.storyboardId || null
-      : sixGridTasks.crop.isPending ? sixGridTasks.crop.variables?.storyboardId || null : null,
+      : sixGridTasks.crop.isPending
+        ? sixGridTasks.crop.variables?.storyboardId || null
+        : sixGridTasks.upload.isPending
+          ? sixGridTasks.upload.variables?.storyboardId || null
+          : null,
     sixGridTaskPanelId: sixGridTasks.panelUpscale.isPending
       ? sixGridTasks.panelUpscale.variables?.panelId || null
       : sixGridTasks.undo.isPending ? sixGridTasks.undo.variables?.panelId || null : null,
     sixGridGenerationErrors: sixGridTasks.generationErrorsByStoryboardId,
-    generateSixGridSheet, upscaleSixGridSheet, cropSixGridSheet, upscaleSixGridPanel, undoSixGridPanel,
+    generateSixGridSheet, upscaleSixGridSheet, cropSixGridSheet, uploadSixGridSheet, upscaleSixGridPanel, undoSixGridPanel,
   }
 }

@@ -94,6 +94,35 @@ async function seedOwnedSheet(storage: TestStorage) {
   return { user, project, media, storyboard, bytes }
 }
 
+async function attachUpscaledSheet(
+  storage: TestStorage,
+  fixture: Awaited<ReturnType<typeof seedOwnedSheet>>,
+) {
+  const bytes = await createKnownSheet(303, 202)
+  const storageKey = `users/${fixture.user.id}/projects/${fixture.project.id}/upscaled/${randomUUID()}.png`
+  await storage.uploadObject(bytes, storageKey)
+  const checksum = createHash('sha256').update(bytes).digest('hex')
+  const media = await prisma.mediaObject.create({
+    data: {
+      publicId: stablePublicIdFromStorageKey(storageKey),
+      storageKey,
+      sha256: checksum,
+      mimeType: 'image/png',
+      sizeBytes: BigInt(bytes.length),
+      width: 303,
+      height: 202,
+    },
+  })
+  await prisma.novelPromotionStoryboard.update({
+    where: { id: fixture.storyboard.id },
+    data: {
+      upscaledSheetImageMediaId: media.id,
+      upscaledSheetImageUrl: `/m/${media.publicId}`,
+    },
+  })
+  return media
+}
+
 function cropInput(fixture: Awaited<ReturnType<typeof seedOwnedSheet>>) {
   return {
     userId: fixture.user.id,
@@ -144,6 +173,33 @@ describe('six-grid crop artifact service', () => {
     const repeated = await cropSixGridSheet(cropInput(fixture), { storage })
     expect(repeated.map((item) => item.mediaId)).toEqual(outputs.map((item) => item.mediaId))
     expect(await prisma.mediaObject.count()).toBe(7)
+  })
+
+  it('directly crops the uploaded original sheet and records that media as the source', async () => {
+    const storage = new TestStorage()
+    const fixture = await seedOwnedSheet(storage)
+
+    const outputs = await cropSixGridSheet(cropInput(fixture), { storage })
+
+    expect(outputs).toHaveLength(6)
+    expect(outputs.every((output) => output.lineage.sourceMediaId === fixture.media.id)).toBe(true)
+    expect(outputs.every((output) => output.lineage.sourceStorageKey === fixture.media.storageKey)).toBe(true)
+  })
+
+  it('crops the newly upscaled uploaded sheet instead of the original sheet', async () => {
+    const storage = new TestStorage()
+    const fixture = await seedOwnedSheet(storage)
+    const upscaled = await attachUpscaledSheet(storage, fixture)
+
+    const outputs = await cropSixGridSheet({
+      ...cropInput(fixture),
+      sourceMediaId: upscaled.id,
+    }, { storage })
+
+    expect(outputs).toHaveLength(6)
+    expect(outputs.every((output) => output.lineage.sourceMediaId === upscaled.id)).toBe(true)
+    expect(outputs.every((output) => output.lineage.sourceStorageKey === upscaled.storageKey)).toBe(true)
+    expect(outputs.every((output) => output.lineage.sourceMediaId !== fixture.media.id)).toBe(true)
   })
 
   it('uses a validated manual crop for one cell and keeps automatic geometry for the others', async () => {

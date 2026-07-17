@@ -261,8 +261,9 @@ export async function dispatchComfyRequest(
 
     executionDeadline = dependencies.startExecutionTimeout?.()
     const executionStartedAt = Date.now()
+    let observedHistory: Record<string, unknown> | undefined
     try {
-      await consumePromptEvents(
+      observedHistory = await consumePromptEvents(
         dependencies.client, promptId, clientId, owner, dependencies,
         executionDeadline?.signal ?? dependencies.signal,
       )
@@ -277,7 +278,7 @@ export async function dispatchComfyRequest(
       if (error instanceof ComfyError && !error.retryable) throw error
       dependencies.observation?.increment('reconciliation', { outcome: 'websocket_fallback' })
     }
-    const history = await readCompletedHistory(promptId, dependencies.client)
+    const history = observedHistory ?? await readCompletedHistory(promptId, dependencies.client)
     dependencies.observation?.observe(
       'execution_duration_ms', Date.now() - executionStartedAt,
       { mediaType: request.mediaType ?? 'image' },
@@ -387,7 +388,6 @@ async function consumePromptEvents(
   dependencies: ComfyDispatcherDependencies,
   signal: AbortSignal,
 ) {
-  let completed = false
   for await (const event of client.watchPrompt(promptId, clientId, signal)) {
     if (event.type === 'execution_error') {
       throw new ComfyError(COMFY_ERROR_CODE.EXECUTION_FAILED, 'ComfyUI execution failed')
@@ -399,12 +399,22 @@ async function consumePromptEvents(
     } else if (event.type === 'executing' || event.type === 'executed') {
       await mustOwn(dependencies.persistProgress({ ...owner, promptId, event }))
     }
+    if (event.type === 'status') {
+      try {
+        const history = await client.getHistory(promptId)
+        if (hasHistoryEntry(history, promptId) || Object.hasOwn(history, 'outputs')) return history
+        const queue = await client.getQueue()
+        if (!queueContainsPrompt(queue.running, promptId)
+          && !queueContainsPrompt(queue.pending, promptId)) return undefined
+      } catch {
+        dependencies.observation?.increment('reconciliation', { outcome: 'history_probe_failed' })
+      }
+    }
     if (event.type === 'executing' && event.nodeId === null) {
-      completed = true
       break
     }
   }
-  return completed
+  return undefined
 }
 
 async function readCompletedHistory(

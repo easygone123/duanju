@@ -294,4 +294,22 @@ export const REQUIREMENTS_MATRIX: ReadonlyArray<RequirementCoverageEntry> = [
     risk: '新增配置默认开启导致存量项目行为改变', priority: 'P0',
     tests: ['tests/system/six-grid-storyboard.system.test.ts'],
   },
+  {
+    id: 'REQ-NP-SIX-GRID-07', feature: 'External six-grid upload and stored prompt access',
+    userValue: '生成前或生成后都可上传六宫格，并可原样复制规划阶段保存的提示词',
+    risk: '上传替换未清理旧图血缘，或提示词复制时被改写', priority: 'P0',
+    tests: [
+      'tests/unit/components/six-grid-external-upload.test.tsx',
+      'tests/integration/six-grid/six-grid-upload-replacement.integration.test.ts',
+    ],
+  },
+  {
+    id: 'REQ-NP-SIX-GRID-08', feature: 'External sheet downstream lineage',
+    userValue: '外部六宫格可按 crop_then_panel_upscale 或 sheet_upscale_then_crop 两种顺序继续处理',
+    risk: '上传后的旧任务覆盖新版本，或裁剪继续引用被替换的原图', priority: 'P0',
+    tests: [
+      'tests/integration/six-grid/six-grid-crop-media.integration.test.ts',
+      'tests/unit/worker/storyboard-sheet-task-handler.test.ts',
+    ],
+  },
 ]
