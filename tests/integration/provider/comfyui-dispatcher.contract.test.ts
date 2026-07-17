@@ -352,6 +352,30 @@ describe('ComfyUI dispatcher contract', () => {
     expect(deps.release).toHaveBeenCalledOnce()
   })
 
+  it('keeps watching an accepted prompt when an opportunistic history probe fails', async () => {
+    const getHistory = vi.fn()
+      .mockRejectedValueOnce(new ComfyError(
+        'COMFY_AUTH_FAILED', 'probe authentication failed', { retryable: false },
+      ))
+      .mockResolvedValueOnce({ outputs: {
+        '2': { images: [{ filename: 'primary.png', subfolder: '', type: 'output' }] },
+        '3': { images: [{ filename: 'preview.png', subfolder: '', type: 'output' }] },
+      } })
+    const deps = dependencies({
+      client: { ...dependencies().client, getHistory, watchPrompt: async function* () {
+        yield { type: 'status' as const, queueRemaining: 1 }
+        yield { type: 'executing' as const, promptId: 'prompt-1', nodeId: null }
+      } },
+    })
+
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({
+      outcome: 'completed',
+    })
+    expect(getHistory).toHaveBeenCalledTimes(2)
+    expect(deps.markFailed).not.toHaveBeenCalled()
+    expect(deps.release).toHaveBeenCalledOnce()
+  })
+
   it('falls back to history after a WebSocket transport failure', async () => {
     const deps = dependencies({
       client: { ...dependencies().client, watchPrompt: async function* () { throw new Error('socket lost') } },

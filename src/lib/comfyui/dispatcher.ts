@@ -400,11 +400,15 @@ async function consumePromptEvents(
       await mustOwn(dependencies.persistProgress({ ...owner, promptId, event }))
     }
     if (event.type === 'status') {
-      const history = await client.getHistory(promptId)
-      if (hasHistoryEntry(history, promptId) || Object.hasOwn(history, 'outputs')) return history
-      const queue = await client.getQueue()
-      if (!queueContainsPrompt(queue.running, promptId)
-        && !queueContainsPrompt(queue.pending, promptId)) return undefined
+      try {
+        const history = await client.getHistory(promptId)
+        if (hasHistoryEntry(history, promptId) || Object.hasOwn(history, 'outputs')) return history
+        const queue = await client.getQueue()
+        if (!queueContainsPrompt(queue.running, promptId)
+          && !queueContainsPrompt(queue.pending, promptId)) return undefined
+      } catch {
+        dependencies.observation?.increment('reconciliation', { outcome: 'history_probe_failed' })
+      }
     }
     if (event.type === 'executing' && event.nodeId === null) {
       break
