@@ -46,6 +46,7 @@ vi.mock('@/lib/api-fetch', () => ({ apiFetch: apiFetchMock }))
 const messages = {
   storyboard: { sixGrid: {
     title: 'Six-grid storyboard', generateSheet: 'Generate 3x2 sheet', regenerateSheet: 'Regenerate 3x2 sheet',
+    viewPrompt: 'View prompt', uploadSheet: 'Upload six-grid',
     previewOriginal: 'Preview original sheet', upscaleSheet: 'Upscale original sheet', crop: 'Crop six panels',
     orderLabel: 'Processing order', orders: { sheet_upscale_then_crop: 'Upscale sheet then crop', crop_then_panel_upscale: 'Crop then upscale panels' },
     sourceLabel: 'Current source', sourceOriginal: 'Original sheet', sourceUpscaled: 'Upscaled sheet', sourceMissing: 'No sheet',
@@ -78,11 +79,14 @@ describe('six-grid storyboard controls', () => {
       storyboard: sixGrid(), isTaskRunning: false, upscaleWorkflow: null,
       onGenerateSheet: () => undefined, onPreviewSheet: () => undefined,
       onUpscaleSheet: () => undefined, onOpenCrop: () => undefined,
+      onViewPrompt: () => undefined, onUploadSheet: () => undefined,
     }))
     expect(html).toContain('Regenerate 3x2 sheet')
     expect(html).toContain('Preview original sheet')
     expect(html).toContain('Upscale original sheet')
     expect(html).toContain('Crop six panels')
+    expect(html).toContain('View prompt')
+    expect(html).toContain('Upload six-grid')
     expect(html).toContain('Upscale sheet then crop')
     expect(html).toContain('Crop then upscale panels')
     expect(html).toContain('Artifact version 3')
@@ -92,7 +96,32 @@ describe('six-grid storyboard controls', () => {
       storyboard: sixGrid({ layoutMode: 'individual' }), isTaskRunning: false, upscaleWorkflow: null,
       onGenerateSheet: () => undefined, onPreviewSheet: () => undefined,
       onUpscaleSheet: () => undefined, onOpenCrop: () => undefined,
+      onViewPrompt: () => undefined, onUploadSheet: () => undefined,
     }))).toBe('')
+  })
+
+  it('keeps prompt and upload actions independent from sheet, prompt, and workflow availability', () => {
+    const renderControls = (isTaskRunning: boolean) => renderWithIntl(createElement(SixGridGroupControls, {
+      storyboard: sixGrid({ sheetImageUrl: null, sheetPromptSnapshot: null }),
+      isTaskRunning,
+      upscaleWorkflow: null,
+      onGenerateSheet: () => undefined,
+      onPreviewSheet: () => undefined,
+      onUpscaleSheet: () => undefined,
+      onOpenCrop: () => undefined,
+      onViewPrompt: () => undefined,
+      onUploadSheet: () => undefined,
+    }))
+
+    const idle = renderControls(false)
+    expect(idle).toMatch(/<button[^>]*>[^<]*(?:<span[^>]*><\/span>)?View prompt<\/button>/)
+    expect(idle).toMatch(/<button[^>]*>[^<]*(?:<span[^>]*><\/span>)?Upload six-grid<\/button>/)
+    expect(idle.match(/disabled=""/g)).toHaveLength(3)
+
+    const busy = renderControls(true)
+    const uploadButton = busy.match(/<button[^>]*disabled=""[^>]*>[^<]*(?:<span[^>]*><\/span>)?Upload six-grid<\/button>/)
+    expect(uploadButton).toBeTruthy()
+    expect(busy).not.toMatch(/<button[^>]*disabled=""[^>]*>[^<]*(?:<span[^>]*><\/span>)?View prompt<\/button>/)
   })
 
   it('marks dialogue cards with color plus visible text and an aria label', () => {

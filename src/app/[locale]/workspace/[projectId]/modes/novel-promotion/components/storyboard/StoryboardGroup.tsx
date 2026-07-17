@@ -18,6 +18,8 @@ import { AppIcon } from '@/components/ui/icons'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import SixGridGroupControls from './SixGridGroupControls'
 import SixGridCropModal from './SixGridCropModal'
+import SixGridPromptModal from './SixGridPromptModal'
+import SixGridUploadModal from './SixGridUploadModal'
 import { isSixGridGroupBusy } from '@/lib/query/hooks/useSixGridStoryboard'
 import { useVirtualCardRetention } from '@/components/virtualization/VirtualCardRange'
 
@@ -80,12 +82,16 @@ export default function StoryboardGroup({
   onGenerateSixGridSheet,
   onUpscaleSixGridSheet,
   onCropSixGridSheet,
+  onUploadSixGridSheet,
   onUpscaleSixGridPanel,
   onUndoSixGridPanel,
 }: StoryboardGroupProps) {
   const t = useTranslations('storyboard')
   const [cropCellIndex, setCropCellIndex] = useState<number | null>(null)
+  const [promptModalOpen, setPromptModalOpen] = useState(false)
+  const [uploadSheetArtifactVersion, setUploadSheetArtifactVersion] = useState<number | null>(null)
   const isSixGridGroupTaskRunning = isSixGridGroupBusy(isSixGridTaskRunning, isSubmittingStoryboardTask)
+  const sixGridCellRatio = storyboard.sixGridCellAspectRatio === '9:16' ? '9:16' : '16:9'
 
   const {
     insertModalOpen,
@@ -105,7 +111,11 @@ export default function StoryboardGroup({
     onPanelVariant,
   })
   useVirtualCardRetention(
-    insertModalOpen || variantModalPanel !== null || cropCellIndex !== null,
+    insertModalOpen
+      || variantModalPanel !== null
+      || cropCellIndex !== null
+      || promptModalOpen
+      || uploadSheetArtifactVersion !== null,
   )
 
   const {
@@ -205,6 +215,8 @@ export default function StoryboardGroup({
         onPreviewSheet={onPreviewImage}
         onUpscaleSheet={onUpscaleSixGridSheet}
         onOpenCrop={() => setCropCellIndex(0)}
+        onViewPrompt={() => setPromptModalOpen(true)}
+        onUploadSheet={() => setUploadSheetArtifactVersion(storyboard.sheetArtifactVersion ?? 0)}
       />
 
       {clip && (
@@ -294,6 +306,20 @@ export default function StoryboardGroup({
         initialCellIndex={cropCellIndex || 0}
         onClose={() => setCropCellIndex(null)}
         onSubmit={async (cropRects) => { await onCropSixGridSheet(cropRects) }}
+      />
+      <SixGridPromptModal
+        open={promptModalOpen}
+        onClose={() => setPromptModalOpen(false)}
+        prompt={storyboard.sheetPromptSnapshot}
+        groupSequence={storyboard.groupSequence}
+        cellRatio={sixGridCellRatio}
+      />
+      <SixGridUploadModal
+        open={uploadSheetArtifactVersion !== null}
+        onClose={() => setUploadSheetArtifactVersion(null)}
+        cellRatio={sixGridCellRatio}
+        expectedSheetArtifactVersion={uploadSheetArtifactVersion ?? 0}
+        onSubmit={onUploadSixGridSheet}
       />
     </div>
   )
