@@ -80,6 +80,8 @@ services:
       # 存储：默认 MinIO（S3 兼容）
       STORAGE_TYPE: minio
       MINIO_ENDPOINT: "http://minio:9000"
+      # 浏览器访问签名链接时使用宿主机映射端口，不能使用 Docker 内网主机名 minio
+      MINIO_PUBLIC_ENDPOINT: "${MINIO_PUBLIC_ENDPOINT:-http://localhost:19000}"
       MINIO_REGION: "us-east-1"
       MINIO_BUCKET: "waoowaoo"
       MINIO_ACCESS_KEY: "minioadmin"

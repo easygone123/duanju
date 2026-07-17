@@ -30,14 +30,17 @@ export class MinioStorageProvider implements StorageProvider {
 
   private readonly bucket: string
   private readonly endpoint: string
+  private readonly publicEndpoint: string
   private readonly region: string
   private readonly forcePathStyle: boolean
   private readonly accessKeyId: string
   private readonly secretAccessKey: string
   private clientPromise: Promise<S3ClientLike> | null = null
+  private signingClientPromise: Promise<S3ClientLike> | null = null
 
   constructor() {
     this.endpoint = requireEnv('MINIO_ENDPOINT')
+    this.publicEndpoint = process.env.MINIO_PUBLIC_ENDPOINT?.trim() || this.endpoint
     this.accessKeyId = requireEnv('MINIO_ACCESS_KEY')
     this.secretAccessKey = requireEnv('MINIO_SECRET_KEY')
     this.bucket = requireEnv('MINIO_BUCKET')
@@ -55,20 +58,32 @@ export class MinioStorageProvider implements StorageProvider {
 
   private async getClient(): Promise<S3ClientLike> {
     if (!this.clientPromise) {
-      this.clientPromise = (async () => {
-        const { S3Client } = await this.loadSdk()
-        return new S3Client({
-          endpoint: this.endpoint,
-          region: this.region,
-          forcePathStyle: this.forcePathStyle,
-          credentials: {
-            accessKeyId: this.accessKeyId,
-            secretAccessKey: this.secretAccessKey,
-          },
-        })
-      })()
+      this.clientPromise = this.createClient(this.endpoint)
     }
     return await this.clientPromise
+  }
+
+  private async createClient(endpoint: string): Promise<S3ClientLike> {
+    const { S3Client } = await this.loadSdk()
+    return new S3Client({
+      endpoint,
+      region: this.region,
+      forcePathStyle: this.forcePathStyle,
+      credentials: {
+        accessKeyId: this.accessKeyId,
+        secretAccessKey: this.secretAccessKey,
+      },
+    })
+  }
+
+  private async getSigningClient(): Promise<S3ClientLike> {
+    if (this.publicEndpoint === this.endpoint) {
+      return await this.getClient()
+    }
+    if (!this.signingClientPromise) {
+      this.signingClientPromise = this.createClient(this.publicEndpoint)
+    }
+    return await this.signingClientPromise
   }
 
   async uploadObject(params: UploadObjectParams): Promise<UploadObjectResult> {
@@ -131,7 +146,7 @@ export class MinioStorageProvider implements StorageProvider {
   async getSignedObjectUrl(params: SignedUrlParams): Promise<string> {
     const sdk = await this.loadSdk()
     const presigner = await this.loadPresigner()
-    const client = await this.getClient()
+    const client = await this.getSigningClient()
 
     return await presigner.getSignedUrl(
       client,

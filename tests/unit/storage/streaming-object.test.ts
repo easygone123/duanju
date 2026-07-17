@@ -14,6 +14,7 @@ const {
   facadeGetObjectStreamMock,
   facadeUploadObjectStreamMock,
   getObjectCommandMock,
+  getSignedUrlMock,
   putObjectCommandMock,
   s3ClientMock,
   sendMock,
@@ -41,6 +42,7 @@ const {
       type: 'GetObjectCommand',
       input,
     })),
+    getSignedUrlMock: vi.fn(),
     putObjectCommandMock: vi.fn((input: Record<string, unknown>): MockCommand => ({
       type: 'PutObjectCommand',
       input,
@@ -56,6 +58,10 @@ vi.mock('@aws-sdk/client-s3', () => ({
   S3Client: s3ClientMock,
   PutObjectCommand: putObjectCommandMock,
   GetObjectCommand: getObjectCommandMock,
+}))
+
+vi.mock('@aws-sdk/s3-request-presigner', () => ({
+  getSignedUrl: getSignedUrlMock,
 }))
 
 vi.mock('@/lib/storage/factory', () => ({
@@ -220,6 +226,7 @@ describe('MinioStorageProvider streaming objects', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.MINIO_ENDPOINT = 'http://127.0.0.1:9000'
+    delete process.env.MINIO_PUBLIC_ENDPOINT
     process.env.MINIO_REGION = 'us-east-1'
     process.env.MINIO_BUCKET = 'waoowaoo'
     process.env.MINIO_ACCESS_KEY = 'minioadmin'
@@ -247,6 +254,40 @@ describe('MinioStorageProvider streaming objects', () => {
       ContentLength: 5,
       ContentType: 'video/mp4',
     })
+  })
+
+  it('uses the public endpoint for browser signed URLs while object IO stays internal', async () => {
+    process.env.MINIO_PUBLIC_ENDPOINT = 'http://localhost:19000'
+    const provider = new MinioStorageProvider()
+    sendMock.mockResolvedValueOnce({})
+    getSignedUrlMock.mockResolvedValueOnce('http://localhost:19000/waoowaoo/images/panel.png?signed=1')
+
+    await provider.uploadObject({
+      key: 'images/panel.png',
+      body: Buffer.from('panel'),
+      contentType: 'image/png',
+    })
+    await expect(provider.getSignedObjectUrl({
+      key: 'images/panel.png',
+      expiresInSeconds: 3600,
+    })).resolves.toBe('http://localhost:19000/waoowaoo/images/panel.png?signed=1')
+
+    expect(s3ClientMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      endpoint: 'http://127.0.0.1:9000',
+    }))
+    expect(s3ClientMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      endpoint: 'http://localhost:19000',
+    }))
+    expect(getSignedUrlMock).toHaveBeenCalledWith(
+      s3ClientMock.mock.results[1]?.value,
+      expect.objectContaining({
+        input: expect.objectContaining({
+          Bucket: 'waoowaoo',
+          Key: 'images/panel.png',
+        }),
+      }),
+      { expiresIn: 3600 },
+    )
   })
 
   it('returns a pipeable object body without buffering it', async () => {
