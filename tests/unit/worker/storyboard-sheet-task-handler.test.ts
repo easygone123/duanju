@@ -273,6 +273,55 @@ describe('six-grid sheet and panel execution', () => {
     expect(prismaMock.novelPromotionStoryboard.updateMany).not.toHaveBeenCalled()
   })
 
+  it('does not reconcile a completed sheet through a mismatched task user', async () => {
+    const task = snapshot({ operation: 'generate', sourceMediaId: undefined, sourceChecksum: undefined, sourceVersion: undefined })
+    const lineage = buildSixGridTaskDedupeKey(task)
+    const completed = {
+      id: 'storyboard-1', sheetArtifactVersion: 4,
+      sheetGenerationOptionsSnapshot: JSON.stringify({ lineage }),
+      sheetImageMedia: { id: 'sheet-output', storageKey: 'sheet-output.png' }, upscaledSheetImageMedia: null,
+    }
+    prismaMock.novelPromotionStoryboard.findFirst.mockImplementationOnce(async (args?: {
+      where?: { episode?: { novelPromotionProject?: { project?: { userId?: string } } } }
+    }) => {
+      const requestedUser = args?.where?.episode?.novelPromotionProject?.project?.userId
+      return requestedUser === undefined || requestedUser === 'owner-user' ? completed : null
+    })
+    const hostileJob = job(task, TASK_TYPE.STORYBOARD_SHEET_GENERATE)
+    hostileJob.data.userId = 'attacker-user'
+
+    await expect(handleStoryboardSheetTask(hostileJob)).rejects.toThrow('SIX_GRID_SHEET_STALE')
+    expect(generationMock.getBytes).not.toHaveBeenCalled()
+    expect(generationMock.resolve).not.toHaveBeenCalled()
+    expect(prismaMock.novelPromotionStoryboard.updateMany).not.toHaveBeenCalled()
+  })
+
+  it('does not persist a generated sheet through a mismatched project CAS', async () => {
+    const task = snapshot({
+      operation: 'generate', projectId: 'attacker-project',
+      sourceMediaId: undefined, sourceChecksum: undefined, sourceVersion: undefined,
+    })
+    prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce({
+      id: 'storyboard-1', sheetArtifactVersion: 3, sheetGenerationOptionsSnapshot: null,
+      sheetImageMedia: null, upscaledSheetImageMedia: null,
+    })
+    prismaMock.novelPromotionStoryboard.updateMany.mockImplementationOnce(async (args?: {
+      where?: { episode?: { novelPromotionProject?: { projectId?: string } } }
+    }) => {
+      const requestedProject = args?.where?.episode?.novelPromotionProject?.projectId
+      return { count: requestedProject === undefined || requestedProject === 'owner-project' ? 1 : 0 }
+    })
+
+    await expect(handleStoryboardSheetTask(job(task, TASK_TYPE.STORYBOARD_SHEET_GENERATE)))
+      .rejects.toThrow('SIX_GRID_SHEET_STALE')
+    expect(prismaMock.novelPromotionStoryboard.updateMany).toHaveBeenCalledOnce()
+    expect(prismaMock.novelPromotionStoryboard.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        episode: { novelPromotionProject: expect.objectContaining({ projectId: 'attacker-project' }) },
+      }),
+    }))
+  })
+
   it('generates one complete portrait sheet with 27:32 and artifact-version CAS', async () => {
     const task = snapshot({ operation: 'generate', cellAspectRatio: '9:16', sourceMediaId: undefined, sourceChecksum: undefined, sourceVersion: undefined })
     prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce({
@@ -285,7 +334,7 @@ describe('six-grid sheet and panel execution', () => {
       options: expect.objectContaining({ aspectRatio: '27:32' }),
     }))
     expect(prismaMock.novelPromotionStoryboard.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'storyboard-1', sheetArtifactVersion: 3 },
+      where: expect.objectContaining({ id: 'storyboard-1', sheetArtifactVersion: 3 }),
       data: expect.objectContaining({ sheetImageMediaId: 'output-media', sheetArtifactVersion: { increment: 1 } }),
     }))
   })
@@ -389,7 +438,9 @@ describe('six-grid sheet and panel execution', () => {
     prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce({ id: 'storyboard-1', sheetArtifactVersion: 3, sheetGenerationOptionsSnapshot: null, sheetImageMedia: null, upscaledSheetImageMedia: null })
     prismaMock.novelPromotionStoryboard.updateMany.mockResolvedValueOnce({ count: 0 })
     await expect(handleStoryboardSheetTask(job(task, TASK_TYPE.STORYBOARD_SHEET_GENERATE))).rejects.toThrow('SIX_GRID_SHEET_STALE')
-    expect(prismaMock.novelPromotionStoryboard.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'storyboard-1', sheetArtifactVersion: 3 } }))
+    expect(prismaMock.novelPromotionStoryboard.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'storyboard-1', sheetArtifactVersion: 3 }),
+    }))
   })
 
   it('publishes a panel upscale with a source CAS scoped to only that panel', async () => {
@@ -937,6 +988,32 @@ describe('six-grid crop atomic persistence', () => {
     const result = await handleStoryboardCropTask(job(task, TASK_TYPE.STORYBOARD_SHEET_CROP))
     expect(result).toEqual({ storyboardId: 'storyboard-1', mediaIds: Array.from({ length: 6 }, (_, index) => `crop-${index}`), reconciled: true })
     expect(generationMock.getBytes).toHaveBeenCalledTimes(6)
+  })
+
+  it('does not reconcile committed crops through a mismatched task user', async () => {
+    const task = snapshot()
+    const committed = task.cropRects!.map(({ cellIndex }) => ({
+      gridCellIndex: cellIndex,
+      croppedImageMediaId: `crop-${cellIndex}`,
+      imageMediaId: `crop-${cellIndex}`,
+      imageLineage: JSON.stringify({ taskLineage: buildSixGridTaskDedupeKey(task) }),
+      croppedImageMedia: { id: `crop-${cellIndex}`, storageKey: `crop-${cellIndex}.png` },
+    }))
+    prismaMock.mediaObject.findUnique.mockResolvedValueOnce({ id: 'media-sheet-1', sha256: 'sha-1', updatedAt: 'v1' })
+    prismaMock.novelPromotionPanel.findMany.mockImplementationOnce(async (args?: {
+      where?: { storyboard?: { is?: { episode?: { novelPromotionProject?: { project?: { userId?: string } } } } } }
+    }) => {
+      const requestedUser = args?.where?.storyboard?.is?.episode?.novelPromotionProject?.project?.userId
+      return requestedUser === undefined || requestedUser === 'owner-user' ? committed : []
+    })
+    const hostileJob = job(task, TASK_TYPE.STORYBOARD_SHEET_CROP)
+    hostileJob.data.userId = 'attacker-user'
+    generationMock.assertActive.mockImplementation(async (_job, stage) => {
+      if (stage === 'six_grid_crop_before_crop') throw new Error('RECONCILIATION_REJECTED')
+    })
+
+    await expect(handleStoryboardCropTask(hostileJob)).rejects.toThrow('RECONCILIATION_REJECTED')
+    expect(generationMock.getBytes).not.toHaveBeenCalled()
   })
 })
 

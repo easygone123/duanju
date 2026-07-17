@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { cropSixGridSheet, type SixGridCropArtifact } from '@/lib/novel-promotion/six-grid/crop-service'
 import type { TaskJobData } from '@/lib/task/types'
-import { buildSixGridTaskDedupeKey, parseSixGridImageTaskSnapshot, sourceMatchesSnapshot, type SixGridImageTaskSnapshot } from './storyboard-sheet-task-handler'
+import { buildSixGridTaskDedupeKey, gridStoryboardOwnershipWhere, parseSixGridImageTaskSnapshot, sourceMatchesSnapshot, type SixGridImageTaskSnapshot } from './storyboard-sheet-task-handler'
 import { getObjectBuffer } from '@/lib/storage'
 import { assertTaskActive } from '@/lib/workers/utils'
 import { resolveStoryboardGridSpec, type GridStoryboardMode, type StoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
@@ -198,14 +198,14 @@ export async function handleStoryboardCropTask(job: Job<TaskJobData>) {
   if (!snapshot.sourceMediaId || !snapshot.cropRects) throw new Error('SIX_GRID_CROP_SNAPSHOT_INVALID')
   const source = await prisma.mediaObject.findUnique({ where: { id: snapshot.sourceMediaId }, select: { id: true, sha256: true, updatedAt: true } })
   if (!source || !sourceMatchesSnapshot(source, snapshot)) throw new Error('SIX_GRID_SOURCE_STALE')
-  const reconciled = await reconcileCommittedCrop(snapshot)
+  const reconciled = await reconcileCommittedCrop(snapshot, job.data.userId)
   if (reconciled) return { storyboardId: snapshot.storyboardId, mediaIds: reconciled, reconciled: true }
   await assertTaskActive(job, 'six_grid_crop_before_crop')
   let artifacts: SixGridCropArtifact[]
   try {
     artifacts = await cropSixGridSheet({
       userId: job.data.userId,
-      projectId: job.data.projectId,
+      projectId: snapshot.projectId,
       storyboardId: snapshot.storyboardId,
       sourceMediaId: snapshot.sourceMediaId,
       expectedSheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
@@ -233,29 +233,22 @@ export async function handleStoryboardCropTask(job: Job<TaskJobData>) {
   return { storyboardId: snapshot.storyboardId, mediaIds: artifacts.map((item) => item.mediaId) }
 }
 
-async function reconcileCommittedCrop(snapshot: SixGridImageTaskSnapshot) {
+async function reconcileCommittedCrop(snapshot: ReturnType<typeof parseSixGridImageTaskSnapshot>, userId: string) {
   const taskLineage = buildSixGridTaskDedupeKey(snapshot)
   const panels = await prisma.novelPromotionPanel.findMany({
     where: {
       storyboardId: snapshot.storyboardId,
       storyboard: {
         is: {
-          id: snapshot.storyboardId,
-          episodeId: snapshot.episodeId,
-          layoutMode: snapshot.gridSpec?.mode ?? 'six_grid',
+          ...gridStoryboardOwnershipWhere(snapshot, userId),
           sheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
-          episode: {
-            novelPromotionProject: {
-              projectId: snapshot.projectId,
-            },
-          },
         },
       },
     },
     select: { gridCellIndex: true, croppedImageMediaId: true, imageMediaId: true, imageLineage: true, croppedImageMedia: true },
     orderBy: { gridCellIndex: 'asc' },
   })
-  const panelCount = snapshot.gridSpec?.panelCount ?? 6
+  const panelCount = snapshot.gridSpec.panelCount
   if (panels.length !== panelCount || panels.some((panel) => !panel.croppedImageMedia?.storageKey
     || panel.imageMediaId !== panel.croppedImageMediaId || !panel.imageLineage?.includes(taskLineage))) return null
   for (const panel of panels) await getObjectBuffer(panel.croppedImageMedia!.storageKey)

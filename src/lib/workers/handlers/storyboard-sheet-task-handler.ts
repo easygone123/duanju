@@ -169,8 +169,14 @@ export async function handleStoryboardSheetTask(job: Job<TaskJobData>) {
   await assertTaskActive(job, 'six_grid_sheet_entry')
   const snapshot = parseSixGridImageTaskSnapshot(job.data.payload)
   if (snapshot.operation !== 'generate' && snapshot.operation !== 'sheet_upscale') throw new Error('SIX_GRID_SHEET_OPERATION_INVALID')
+  const ownershipWhere = gridStoryboardOwnershipWhere(snapshot, job.data.userId)
   const storyboard = await prisma.novelPromotionStoryboard.findFirst({
-    where: { id: snapshot.storyboardId, episodeId: snapshot.episodeId, layoutMode: snapshot.gridSpec.mode },
+    where: {
+      ...ownershipWhere,
+      sheetArtifactVersion: {
+        in: [snapshot.expectedSheetArtifactVersion, snapshot.expectedSheetArtifactVersion + 1],
+      },
+    },
     include: { sheetImageMedia: true, upscaledSheetImageMedia: true },
   })
   if (!storyboard) throw new Error('SIX_GRID_SHEET_STALE')
@@ -228,7 +234,7 @@ export async function handleStoryboardSheetTask(job: Job<TaskJobData>) {
     : null
   await assertTaskActive(job, 'six_grid_sheet_before_persist')
   const updated = await prisma.novelPromotionStoryboard.updateMany({
-    where: { id: storyboard.id, sheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
+    where: { ...ownershipWhere, sheetArtifactVersion: snapshot.expectedSheetArtifactVersion,
       ...(snapshot.operation === 'sheet_upscale' ? {
         sheetImageMediaId: snapshot.sourceMediaId, sheetImageMedia: { is: sourceSnapshotWhere(snapshot) },
         imageHistory: storyboard.imageHistory,
@@ -288,7 +294,10 @@ export async function handleStoryboardPanelUpscaleTask(job: Job<TaskJobData>) {
   return { panelId: panel.id, mediaId: media.id, reconciled: false }
 }
 
-function panelParentSnapshotWhere(snapshot: ParsedGridImageTaskSnapshot, userId: string) {
+export function gridStoryboardOwnershipWhere(
+  snapshot: ParsedGridImageTaskSnapshot,
+  userId: string,
+) {
   return {
     id: snapshot.storyboardId,
     episodeId: snapshot.episodeId,
@@ -300,6 +309,10 @@ function panelParentSnapshotWhere(snapshot: ParsedGridImageTaskSnapshot, userId:
       },
     },
   }
+}
+
+function panelParentSnapshotWhere(snapshot: ParsedGridImageTaskSnapshot, userId: string) {
+  return gridStoryboardOwnershipWhere(snapshot, userId)
 }
 
 function sourceSnapshotWhere(snapshot: SixGridImageTaskSnapshot) {
