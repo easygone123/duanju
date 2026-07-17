@@ -268,6 +268,38 @@ function mockSingleSixGridGroup() {
   } as never)
 }
 
+function mockSingleFourGridGroup() {
+  const group = {
+    clipId: 'clip-1',
+    clipIndex: 1,
+    groupId: 'four-grid:1:clip-1:1',
+    groupKey: 'four-grid:1:clip-1:1',
+    groupSequence: 1,
+    sceneKey: 'Office',
+    incomingContinuity: 'start',
+    outgoingContinuity: 'end',
+    finalPanels: Array.from({ length: 4 }, (_, index) => ({
+      panel_number: index + 1,
+      shot_type: 'close-up',
+      camera_move: 'static',
+      description: `panel ${index + 1}`,
+      video_prompt: `prompt ${index + 1}`,
+      location: 'Office',
+      source_text: `source ${index + 1}`,
+      characters: ['Narrator'],
+    })),
+  }
+  runScriptToStoryboardOrchestratorMock.mockResolvedValueOnce({
+    clipPanels: [group],
+    sixGridGroups: [group],
+    phase1PanelsByClipId: { [group.groupId]: group.finalPanels },
+    phase2CinematographyByClipId: {},
+    phase2ActingByClipId: {},
+    phase3PanelsByClipId: { [group.groupId]: group.finalPanels },
+    summary: { totalPanelCount: 4, totalStepCount: 5 },
+  } as never)
+}
+
 describe('worker script-to-storyboard behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -412,13 +444,14 @@ describe('worker script-to-storyboard behavior', () => {
     await handleScriptToStoryboardTask(job)
 
     expect(runScriptToStoryboardOrchestratorMock).toHaveBeenCalledWith(expect.objectContaining({
-      runSettings: {
+      runSettings: expect.objectContaining({
         storyboardGenerationMode: 'six_grid',
         sixGridCellAspectRatio: '16:9',
         sixGridProcessingOrder: 'sheet_upscale_then_crop',
         storyboardUpscaleModel: 'comfyui::upscale-v1',
         dialogueVideoModel: 'comfyui::dialogue-v1',
-      },
+        gridSpec: expect.objectContaining({ mode: 'six_grid', panelCount: 6 }),
+      }),
     }))
     expect(getRunInputSnapshotMock).toHaveBeenCalledTimes(1)
   })
@@ -475,6 +508,34 @@ describe('worker script-to-storyboard behavior', () => {
     expect(runScriptToStoryboardAtomicRetryMock).not.toHaveBeenCalled()
     expect(chatCompletionMock).not.toHaveBeenCalled()
     expect(result).toMatchObject({ retryStepKey, voiceLineCount: 0, panelCount: 6 })
+  })
+
+  it('四宫格沿用整组步骤键重试并写入兼容 planning artifacts', async () => {
+    mockSingleFourGridGroup()
+    getRunInputSnapshotMock.mockResolvedValueOnce({
+      runId: 'run-test-storyboard',
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      workflowType: 'script_to_storyboard_run',
+      input: { storyboardGenerationMode: 'four_grid', sixGridCellAspectRatio: '16:9' },
+    })
+
+    const result = await handleScriptToStoryboardTask(buildJob({
+      episodeId: 'episode-1',
+      retryStepKey: 'six_grid_episode_plan',
+      retryStepAttempt: 2,
+    }))
+
+    expect(runScriptToStoryboardOrchestratorMock).toHaveBeenCalledTimes(1)
+    expect(runScriptToStoryboardAtomicRetryMock).not.toHaveBeenCalled()
+    expect(replaceArtifactsBatchMock).toHaveBeenCalledWith(expect.objectContaining({
+      artifactTypes: expect.arrayContaining(['storyboard.six_grid.plan']),
+    }))
+    expect(result).toMatchObject({
+      retryStepKey: 'six_grid_episode_plan',
+      voiceLineCount: 0,
+      panelCount: 4,
+    })
   })
 
   it('保留同 clip 多组身份并交给 six-grid 原子持久化', async () => {

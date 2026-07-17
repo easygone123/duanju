@@ -38,6 +38,7 @@ import {
 } from './script-to-storyboard-atomic-retry'
 import { persistSixGridPlanningArtifacts } from '@/lib/novel-promotion/six-grid/run-artifacts'
 import { resolveStoryboardRunSnapshot } from '@/lib/novel-promotion/six-grid/run-snapshot'
+import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 type AnyObj = Record<string, unknown>
 const MAX_VOICE_ANALYZE_ATTEMPTS = 2
@@ -138,7 +139,7 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
     throw new Error('No clips found')
   }
   const retryTarget = parseStoryboardRetryTarget(retryStepKey)
-  const retryWholeSixGrid = runSettings.storyboardGenerationMode === 'six_grid'
+  const retryWholeSixGrid = isGridStoryboardMode(runSettings.storyboardGenerationMode)
     && isSixGridRetryStepKey(retryStepKey)
   if (retryStepKey && retryStepKey !== 'voice_analyze' && !retryTarget && !retryWholeSixGrid) {
     throw new Error(`unsupported retry step for script_to_storyboard: ${retryStepKey}`)
@@ -388,7 +389,7 @@ export async function handleScriptToStoryboardTask(job: Job<TaskJobData>) {
       const phase2ActingMap = orchestratorResult.phase2ActingByClipId || {}
       const phase3Map = orchestratorResult.phase3PanelsByClipId || {}
 
-      if (runSettings.storyboardGenerationMode === 'six_grid') {
+      if (isGridStoryboardMode(runSettings.storyboardGenerationMode)) {
         await persistSixGridPlanningArtifacts({
           runSnapshot,
           result: orchestratorResult,

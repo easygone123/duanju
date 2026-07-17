@@ -147,7 +147,15 @@ export const PROMPT_CATALOG: Record<PromptId, PromptCatalogEntry> = {
   },
   [PROMPT_IDS.NP_SIX_GRID_SHEET_IMAGE]: {
     pathStem: 'novel-promotion/six_grid_sheet_image',
-    variableKeys: ['cell_aspect_ratio', 'continuity_block', 'visual_beats'],
+    variableKeys: [
+      'cell_aspect_ratio',
+      'grid_columns',
+      'grid_rows',
+      'panel_count_word',
+      'panel_count_zh',
+      'continuity_block',
+      'visual_beats',
+    ],
   },
   [PROMPT_IDS.NP_STORYBOARD_EDIT]: {
     pathStem: 'novel-promotion/storyboard_edit',

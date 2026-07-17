@@ -26,6 +26,20 @@ import {
 } from '@/lib/workflow-concurrency'
 import type { ResolvedStoryboardRunSettings } from '@/lib/novel-promotion/six-grid/run-settings'
 import {
+  GRID_CLIP_COVERAGE_INVALID,
+  GridStoryboardValidationError,
+  validateGridActingDirections,
+  validateGridEpisodePlan,
+  validateGridPhotographyRules,
+  validateGridSceneGroups,
+  type PlannedGridSceneGroup,
+} from '@/lib/novel-promotion/grid-storyboard/scene-planner'
+import {
+  isGridStoryboardMode,
+  resolveStoryboardGridSpec,
+  type StoryboardGridSpec,
+} from '@/lib/novel-promotion/grid-storyboard/spec'
+import {
   SixGridValidationError,
   validateSixGridActingDirections,
   validateSixGridEpisodePlan,
@@ -235,6 +249,7 @@ function computeRetryDelayMs(attempt: number) {
 
 function shouldRetryStepError(error: unknown, message: string, retryable: boolean) {
   if (error instanceof JsonParseError) return true
+  if (error instanceof GridStoryboardValidationError) return true
   if (error instanceof SixGridValidationError) return true
   if (retryable) return true
   const lowerMessage = message.toLowerCase()
@@ -249,7 +264,9 @@ function shouldRetryStepError(error: unknown, message: string, retryable: boolea
 }
 
 export function getScriptToStoryboardStepErrorCode(error: unknown, fallbackCode: string): string {
-  return error instanceof SixGridValidationError ? error.code : fallbackCode
+  return error instanceof GridStoryboardValidationError || error instanceof SixGridValidationError
+    ? error.code
+    : fallbackCode
 }
 
 async function runStepWithRetry<T>(
@@ -304,7 +321,9 @@ async function runStepWithRetry<T>(
       if (!shouldRetry) {
         break
       }
-      if (error instanceof JsonParseError || error instanceof SixGridValidationError) {
+      if (error instanceof JsonParseError
+        || error instanceof GridStoryboardValidationError
+        || error instanceof SixGridValidationError) {
         const errorCode = getScriptToStoryboardStepErrorCode(error, normalizedError.code)
         currentPrompt = [
           prompt,
@@ -320,23 +339,31 @@ async function runStepWithRetry<T>(
   throw lastError!
 }
 
-async function runSixGridScriptToStoryboardOrchestrator(
+async function runGridScriptToStoryboardOrchestrator(
   input: ScriptToStoryboardOrchestratorInput,
   concurrency: number,
+  gridSpec: StoryboardGridSpec,
 ): Promise<ScriptToStoryboardOrchestratorResult> {
   const { clips, novelPromotionData, promptTemplates, runStep } = input
   const orderedClipIds = clips
     .filter((clip) => typeof clip.content === 'string' && !!clip.content.trim())
     .map((clip) => clip.id)
+  const panelNumbers = Array.from({ length: gridSpec.panelCount }, (_, index) => index + 1)
+  const formattedPanelNumbers = `[${panelNumbers.join(', ')}]`
+  const panelCountWord = gridSpec.panelCount === 4 ? 'four' : 'six'
+  const layout = `${gridSpec.columns}x${gridSpec.rows}`
   const episodePlanningPrompt = [
-    'Plan the complete episode into continuous six-shot scene groups.',
+    `Plan the complete episode into continuous ${panelCountWord}-shot scene groups for a ${layout} storyboard layout.`,
     'Return JSON only: one array with no markdown fences or commentary.',
-    'Every group must contain sceneKey, clipId, incomingContinuity, outgoingContinuity, and exactly six panels.',
-    'Every panel must contain panel_number, description, location, source_text, and characters. panel_number must be the integers 1 through 6 in order; description, location, and source_text must be non-empty strings; characters must be an array. Optional props must be an array of non-empty strings.',
+    `Every group must contain sceneKey, clipId, incomingContinuity, outgoingContinuity, and exactly ${panelCountWord} panels for the ${layout} layout.`,
+    `Every panel must contain panel_number, description, location, source_text, and characters. panel_number must be the integers 1 through ${gridSpec.panelCount} in order; description, location, and source_text must be non-empty strings; characters must be an array. Optional props must be an array of non-empty strings.`,
     'Each panel.location must exactly equal its group sceneKey. sceneKey is the canonical location identity, not a free-form scene description.',
     'Never cross a hard location boundary to fill a group. Adjacent groups in the same scene must copy the previous outgoingContinuity exactly into incomingContinuity.',
     'Continuity anchors must preserve characters, clothing, props, lighting, and emotion.',
+    `If source material is sparse, fill the ${gridSpec.panelCount} distinct panels with grounded reaction, environment, insert, or detail shots that remain faithful to the source; never use blank or duplicate panels.`,
+    'If source material is dense, split it into additional consecutive groups. Preserve complete story coverage and do not drop any source event merely to fit a group.',
     `Immutable run settings: ${JSON.stringify(input.runSettings)}`,
+    `Immutable grid spec: ${JSON.stringify(gridSpec)}`,
     `Complete episode clips: ${JSON.stringify(clips, null, 2)}`,
   ].join('\n\n')
 
@@ -352,9 +379,10 @@ async function runSixGridScriptToStoryboardOrchestrator(
     episodePlanningPrompt,
     'storyboard_six_grid_scene_plan',
     8000,
-    (text) => validateSixGridEpisodePlan(
-      parseJsonArray<JsonRecord>(text, 'six-grid-scene-plan'),
+    (text) => validateGridEpisodePlanForMode(
+      parseJsonArray<JsonRecord>(text, 'grid-scene-plan'),
       orderedClipIds,
+      gridSpec,
     ),
   )
 
@@ -369,7 +397,15 @@ async function runSixGridScriptToStoryboardOrchestrator(
     concurrency,
     async (group, index): Promise<ClipStoryboardPanels> => {
       const clip = clips.find((candidate) => candidate.id === group.clipId)
-      if (!clip) throw new SixGridValidationError('SIX_GRID_CLIP_COVERAGE_INVALID')
+      if (!clip) {
+        if (gridSpec.mode === 'six_grid') {
+          throw new SixGridValidationError('SIX_GRID_CLIP_COVERAGE_INVALID')
+        }
+        throw new GridStoryboardValidationError(GRID_CLIP_COVERAGE_INVALID, {
+          mode: gridSpec.mode,
+          expectedPanelCount: gridSpec.panelCount,
+        })
+      }
       const groupNumber = group.groupSequence
       const stepPrefix = `six_grid_group_${groupNumber}`
       phase1PanelsByClipId.set(group.groupId, group.panels)
@@ -432,20 +468,22 @@ async function runSixGridScriptToStoryboardOrchestrator(
       )
 
       const groupNumberingConstraint = [
-        'For this group, panel_number must restart at 1 and contain exactly [1, 2, 3, 4, 5, 6] in that order.',
+        `For this group, panel_number must restart at 1 and contain exactly ${formattedPanelNumbers} in that order.`,
+        `This group is arranged as a ${layout} storyboard.`,
         'Do not continue numbering from any previous group and do not use 0-based or episode-global numbering.',
+        `Return exactly ${gridSpec.panelCount} distinct panels. Never add blanks or duplicate a panel to reach the required count.`,
         'Return the complete JSON array only.',
       ].join('\n')
 
       const phase2Prompt = `${promptTemplates.phase2CinematographyTemplate
         .replace('{panels_json}', JSON.stringify(group.panels, null, 2))
-        .replace(/\{panel_count\}/g, '6')
+        .replace(/\{panel_count\}/g, String(gridSpec.panelCount))
         .replace('{locations_description}', filteredLocationsDescription)
         .replace('{characters_info}', filteredFullDescription)
         .replace('{props_description}', filteredPropsDescription)}\n\n${groupNumberingConstraint}`
       const phase2ActingPrompt = `${promptTemplates.phase2ActingTemplate
         .replace('{panels_json}', JSON.stringify(group.panels, null, 2))
-        .replace(/\{panel_count\}/g, '6')
+        .replace(/\{panel_count\}/g, String(gridSpec.panelCount))
         .replace('{characters_info}', filteredFullDescription)}\n\n${groupNumberingConstraint}`
       const phase3Prompt = `${promptTemplates.phase3DetailTemplate
         .replace('{panels_json}', JSON.stringify(group.panels, null, 2))
@@ -456,20 +494,26 @@ async function runSixGridScriptToStoryboardOrchestrator(
       const [{ parsed: photographyRules }, { parsed: actingDirections }] = await Promise.all([
         runStepWithRetry(
           runStep, phase2Meta, phase2Prompt, 'storyboard_phase2_cinematography', 2400,
-          (text) => validateSixGridPhotographyRules(
-            parseJsonArray<PhotographyRule>(text, `six-grid-cine:${groupNumber}`),
+          (text) => validateGridPhotographyRulesForMode(
+            parseJsonArray<PhotographyRule>(text, `grid-cine:${groupNumber}`),
+            gridSpec,
           ),
         ),
         runStepWithRetry(
           runStep, phase2ActingMeta, phase2ActingPrompt, 'storyboard_phase2_acting', 2400,
-          (text) => validateSixGridActingDirections(
-            parseJsonArray<ActingDirection>(text, `six-grid-acting:${groupNumber}`),
+          (text) => validateGridActingDirectionsForMode(
+            parseJsonArray<ActingDirection>(text, `grid-acting:${groupNumber}`),
+            gridSpec,
           ),
         ),
       ])
       const { parsed: finalPanels } = await runStepWithRetry(
         runStep, phase3Meta, phase3Prompt, 'storyboard_phase3_detail', 2600,
-        (text) => validateFinalGroup(group, parseJsonArray<StoryboardPanel>(text, `six-grid-detail:${groupNumber}`)),
+        (text) => validateFinalGroup(
+          group,
+          parseJsonArray<StoryboardPanel>(text, `grid-detail:${groupNumber}`),
+          gridSpec,
+        ),
       )
 
       phase2CinematographyByClipId.set(group.groupId, photographyRules)
@@ -506,17 +550,49 @@ async function runSixGridScriptToStoryboardOrchestrator(
     sixGridPhase3PanelsByGroupId: phase3ByGroupId,
     summary: {
       clipCount: clips.length,
-      totalPanelCount: clipPanels.length * 6,
+      totalPanelCount: clipPanels.length * gridSpec.panelCount,
       totalStepCount,
     },
   }
 }
 
-function validateFinalGroup(group: PlannedSixGridSceneGroup, panels: StoryboardPanel[]): StoryboardPanel[] {
-  return validateAndNormalizeSixGridGroups([{
-    ...group,
-    panels,
-  }])[0].panels
+function validateGridEpisodePlanForMode(
+  value: unknown,
+  orderedClipIds: readonly string[],
+  gridSpec: StoryboardGridSpec,
+): Array<PlannedGridSceneGroup | PlannedSixGridSceneGroup> {
+  return gridSpec.mode === 'six_grid'
+    ? validateSixGridEpisodePlan(value, orderedClipIds)
+    : validateGridEpisodePlan(value, orderedClipIds, gridSpec)
+}
+
+function validateGridPhotographyRulesForMode(
+  value: unknown,
+  gridSpec: StoryboardGridSpec,
+): PhotographyRule[] {
+  return gridSpec.mode === 'six_grid'
+    ? validateSixGridPhotographyRules(value)
+    : validateGridPhotographyRules(value, gridSpec)
+}
+
+function validateGridActingDirectionsForMode(
+  value: unknown,
+  gridSpec: StoryboardGridSpec,
+): ActingDirection[] {
+  return gridSpec.mode === 'six_grid'
+    ? validateSixGridActingDirections(value)
+    : validateGridActingDirections(value, gridSpec)
+}
+
+function validateFinalGroup(
+  group: PlannedGridSceneGroup | PlannedSixGridSceneGroup,
+  panels: StoryboardPanel[],
+  gridSpec: StoryboardGridSpec,
+): StoryboardPanel[] {
+  const value = [{ ...group, panels }]
+  return gridSpec.mode === 'six_grid'
+    ? validateAndNormalizeSixGridGroups(value)[0].panels
+    : validateGridSceneGroups(value, gridSpec)[0].panels
 }
 
 function mapToRecord<T>(source: Map<string, T>): Record<string, T> {
@@ -537,8 +613,12 @@ export async function runScriptToStoryboardOrchestrator(
     DEFAULT_ANALYSIS_WORKFLOW_CONCURRENCY,
   )
 
-  if (input.runSettings?.storyboardGenerationMode === 'six_grid') {
-    return runSixGridScriptToStoryboardOrchestrator(input, concurrency)
+  const storyboardGenerationMode = input.runSettings?.storyboardGenerationMode
+  if (isGridStoryboardMode(storyboardGenerationMode)) {
+    const ratio = input.runSettings?.sixGridCellAspectRatio
+    const gridSpec = input.runSettings?.gridSpec
+      || resolveStoryboardGridSpec(storyboardGenerationMode, ratio)
+    return runGridScriptToStoryboardOrchestrator(input, concurrency, gridSpec)
   }
 
   const totalStepCount = clips.length * 4 + 2

@@ -2,6 +2,14 @@ import type { PromptLocale } from '@/lib/prompt-i18n'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
 import type { SixGridCellAspectRatio } from './contracts'
 import {
+  validateGridSceneGroups,
+  type GridSceneGroup,
+} from '@/lib/novel-promotion/grid-storyboard/scene-planner'
+import {
+  resolveStoryboardGridSpec,
+  type StoryboardGridSpec,
+} from '@/lib/novel-promotion/grid-storyboard/spec'
+import {
   validateAndNormalizeSixGridGroups,
   type SixGridSceneGroup,
 } from './scene-planner'
@@ -23,6 +31,11 @@ type SixGridPromptOptions = {
   cellAspectRatio: SixGridCellAspectRatio
 }
 
+type GridPromptOptions = {
+  locale: PromptLocale
+  gridSpec: StoryboardGridSpec
+}
+
 export function buildSixGridSheetPrompt(
   group: SixGridSceneGroup | unknown,
   options: SixGridPromptOptions,
@@ -30,11 +43,23 @@ export function buildSixGridSheetPrompt(
   if (options.cellAspectRatio !== '16:9' && options.cellAspectRatio !== '9:16') {
     throw new Error(SIX_GRID_PROMPT_INVALID)
   }
+  const normalized = validateAndNormalizeSixGridGroups([group])[0]
+  if (!normalized) throw new Error(SIX_GRID_PROMPT_INVALID)
+  return buildGridSheetPrompt(normalized, {
+    locale: options.locale,
+    gridSpec: resolveStoryboardGridSpec('six_grid', options.cellAspectRatio),
+  })
+}
+
+export function buildGridSheetPrompt(
+  group: GridSceneGroup | unknown,
+  options: GridPromptOptions,
+): string {
   if (options.locale !== 'en' && options.locale !== 'zh') {
     throw new Error(SIX_GRID_PROMPT_INVALID)
   }
 
-  const normalized = validateAndNormalizeSixGridGroups([group])[0]
+  const normalized = validateGridSceneGroups([group], options.gridSpec)[0]
   if (!normalized) throw new Error(SIX_GRID_PROMPT_INVALID)
   const dialogueTexts = collectDialogueTexts(group)
   const continuityBlock = `UNTRUSTED_VISUAL_DATA_CONTINUITY=${serializeUntrustedVisualData({
@@ -65,7 +90,11 @@ export function buildSixGridSheetPrompt(
     promptId: PROMPT_IDS.NP_SIX_GRID_SHEET_IMAGE,
     locale: options.locale,
     variables: {
-      cell_aspect_ratio: options.cellAspectRatio,
+      cell_aspect_ratio: options.gridSpec.cellAspectRatio,
+      grid_columns: String(options.gridSpec.columns),
+      grid_rows: String(options.gridSpec.rows),
+      panel_count_word: options.gridSpec.panelCount === 4 ? 'four' : 'six',
+      panel_count_zh: options.gridSpec.panelCount === 4 ? '四' : '六',
       continuity_block: continuityBlock,
       visual_beats: beats,
     },
@@ -221,7 +250,7 @@ export function canonicalizePromptField(value: string | null | undefined): strin
     .replace(/视觉节拍\s*\d+\s*[:：]/gu, '序列 -')
     .replace(/\{\{?[A-Za-z0-9_]+\}?\}/g, '[field]')
     .replace(/\b(?:instructions?|system|assistant)\s*[:：]/giu, 'note -')
-    .replace(/(?:Shared continuity|Six ordered visual beats|共享连续性|六个有序视觉节拍)\s*[:：]/giu, 'note -')
+    .replace(/(?:Shared continuity|(?:Four|Six) ordered visual beats|共享连续性|[四六]个有序视觉节拍)\s*[:：]/giu, 'note -')
     .replace(/\n/g, ' ')
     .replace(/\s+/gu, ' ')
     .trim()
