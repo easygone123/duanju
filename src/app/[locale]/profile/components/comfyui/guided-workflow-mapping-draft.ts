@@ -7,6 +7,7 @@ import { defaultHistoryFieldForOutput } from '@/lib/comfyui/workflow-auto-mapper
 import { isSafeDottedPath } from '@/lib/comfyui/workflow-schema'
 import type {
   ComfyBindingTransform,
+  ComfyNumericBindingTransform,
   ComfyOutputBinding,
   ComfyVariableType,
 } from '@/lib/comfyui/types'
@@ -20,6 +21,7 @@ export interface GuidedInputCandidate {
   roles: CanonicalWorkflowInput[]
   valueTypeByRole: Partial<Record<CanonicalWorkflowInput, ComfyVariableType>>
   transformByRole: Partial<Record<CanonicalWorkflowInput, ComfyBindingTransform>>
+  numericTransformByRole: Partial<Record<CanonicalWorkflowInput, ComfyNumericBindingTransform>>
 }
 
 export interface GuidedWorkflowMappingDraft {
@@ -87,11 +89,25 @@ function isVideoInput(classType: string, inputPath: string, value: unknown) {
     && /(video|filename|path)/.test(inputName)
 }
 
+function numericOutput(value: unknown): 'number' | 'numeric_string' | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? 'number' : null
+  if (typeof value !== 'string' || !value.trim()) return null
+  return Number.isFinite(Number(value.trim())) ? 'numeric_string' : null
+}
+
+function numericTransforms(output: 'number' | 'numeric_string') {
+  return {
+    duration: { sourceUnit: 'seconds', targetUnit: 'seconds', output },
+    fps: { sourceUnit: 'fps', targetUnit: 'fps', output },
+  } satisfies Partial<Record<CanonicalWorkflowInput, ComfyNumericBindingTransform>>
+}
+
 function candidateFor(
   nodeId: string,
   inputPath: string,
   node: WorkflowAutoMappingResult['graph'][string],
   value: unknown,
+  videoWorkflow: boolean,
 ): GuidedInputCandidate | null {
   if (!isSafeDottedPath(inputPath) || inputPath.includes('.')) return null
   const title = nodeTitle(node)
@@ -118,6 +134,7 @@ function candidateFor(
         firstFrame: 'filename',
         lastFrame: 'filename',
       },
+      numericTransformByRole: {},
     }
   }
 
@@ -127,6 +144,24 @@ function candidateFor(
       roles: ['sourceVideo'],
       valueTypeByRole: { sourceVideo: 'video_ref' },
       transformByRole: { sourceVideo: 'filename' },
+      numericTransformByRole: {},
+    }
+  }
+
+  const output = numericOutput(value)
+  if (videoWorkflow && output) {
+    const namedRole = NUMBER_ROLE_BY_INPUT.get(normalize(inputPath))
+    const roles = namedRole && namedRole !== 'duration' && namedRole !== 'fps'
+      ? [namedRole]
+      : ['duration', 'fps'] as CanonicalWorkflowInput[]
+    return {
+      ...common,
+      roles,
+      valueTypeByRole: Object.fromEntries(roles.map((role) => [role, 'number'])),
+      transformByRole: {},
+      numericTransformByRole: roles.includes('duration') || roles.includes('fps')
+        ? numericTransforms(output)
+        : {},
     }
   }
 
@@ -136,6 +171,7 @@ function candidateFor(
       roles: ['prompt', 'negativePrompt'],
       valueTypeByRole: { prompt: 'string', negativePrompt: 'string' },
       transformByRole: {},
+      numericTransformByRole: {},
     }
   }
 
@@ -147,6 +183,7 @@ function candidateFor(
       roles: [role],
       valueTypeByRole: { [role]: 'number' },
       transformByRole: {},
+      numericTransformByRole: {},
     }
   }
 
@@ -174,7 +211,9 @@ export function guidedInputCandidates(
     for (const [inputPath, value] of Object.entries(node.inputs)
       .sort(([left], [right]) => compareNames(left, right))) {
       if (occupied.has(pair(nodeId, inputPath))) continue
-      const candidate = candidateFor(nodeId, inputPath, node, value)
+      const candidate = candidateFor(
+        nodeId, inputPath, node, value, analysis.mediaType === 'video',
+      )
       if (candidate) candidates.push(candidate)
     }
   }
@@ -198,6 +237,7 @@ export function addGuidedInput(
   const valueType = candidate.valueTypeByRole[role]
   if (!valueType) invalidDraft()
   const transform = candidate.transformByRole[role]
+  const numericTransform = candidate.numericTransformByRole[role]
   const referenceIndex = role === 'referenceImages' ? nextReferenceIndex(draft.inputs) : undefined
   const proposal: WorkflowMappingProposal = {
     id: candidate.id,
@@ -206,6 +246,7 @@ export function addGuidedInput(
     inputPath: candidate.inputPath,
     valueType,
     ...(transform ? { transform } : {}),
+    ...(numericTransform ? { numericTransform: structuredClone(numericTransform) } : {}),
     confidence: 'high',
     reasonCode: 'COMFY_MAPPING_MANUAL',
     required: true,
@@ -224,15 +265,40 @@ export function updateGuidedInputRole(
   if (index < 0) invalidDraft()
   const current = draft.inputs[index]!
   if (!guidedCompatibleRoles(current).includes(role)) invalidDraft()
+  const originalValue = draft.analysis.graph[current.nodeId]?.inputs[current.inputPath]
+  const output = numericOutput(originalValue)
+  const replacementNumericTransform = output && (role === 'duration' || role === 'fps')
+    ? numericTransforms(output)[role]
+    : undefined
   const inputs = draft.inputs.map((proposal, proposalIndex) => proposalIndex === index
     ? {
       ...proposal,
       canonicalName: role,
+      ...(replacementNumericTransform
+        ? { numericTransform: structuredClone(replacementNumericTransform) }
+        : { numericTransform: undefined }),
       confidence: 'high' as const,
       reasonCode: 'COMFY_MAPPING_MANUAL',
     }
     : proposal)
   return { ...draft, inputs }
+}
+
+export function updateGuidedNumericTransform(
+  draft: GuidedWorkflowMappingDraft,
+  proposalId: string,
+  numericTransform: ComfyNumericBindingTransform,
+): GuidedWorkflowMappingDraft {
+  const index = draft.inputs.findIndex((proposal) => proposal.id === proposalId)
+  if (index < 0) invalidDraft()
+  const proposal = draft.inputs[index]!
+  if (proposal.canonicalName !== 'duration' && proposal.canonicalName !== 'fps') invalidDraft()
+  return {
+    ...draft,
+    inputs: draft.inputs.map((item, itemIndex) => itemIndex === index
+      ? { ...item, numericTransform: structuredClone(numericTransform) }
+      : item),
+  }
 }
 
 export function removeGuidedInput(

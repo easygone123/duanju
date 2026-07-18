@@ -2,6 +2,7 @@ import type {
   ComfyApiWorkflow,
   ComfyBindingTransform,
   ComfyMediaType,
+  ComfyNumericBindingTransform,
   ComfyOutputBinding,
   ComfyVariableType,
   ComfyWorkflowPurpose,
@@ -60,6 +61,7 @@ export interface WorkflowMappingProposal {
   inputPath: string
   valueType: ComfyVariableType
   transform?: ComfyBindingTransform
+  numericTransform?: ComfyNumericBindingTransform
   confidence: MappingConfidence
   reasonCode: string
   required: boolean

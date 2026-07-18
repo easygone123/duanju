@@ -11,6 +11,7 @@ import {
   removeGuidedOutput,
   setGuidedPrimaryOutput,
   updateGuidedInputRole,
+  updateGuidedNumericTransform,
   updateGuidedOutput,
 } from '@/app/[locale]/profile/components/comfyui/guided-workflow-mapping-draft'
 import type { WorkflowAutoMappingResult } from '@/lib/comfyui/workflow-auto-mapping-types'
@@ -36,6 +37,10 @@ function analysis(overrides: Partial<WorkflowAutoMappingResult> = {}): WorkflowA
       size: {
         class_type: 'EmptyLatentImage',
         inputs: { width: 832, height: 480 },
+      },
+      timing: {
+        class_type: 'VideoTiming',
+        inputs: { length: '81', custom_rate: 16, invalid_rate: 'Infinity' },
       },
       output: {
         class_type: 'VHS_VideoCombine',
@@ -91,7 +96,77 @@ describe('guided ComfyUI mapping draft', () => {
       expect.objectContaining({ nodeId: 'video', inputPath: 'video', roles: ['sourceVideo'] }),
       expect.objectContaining({ nodeId: 'size', inputPath: 'width', roles: ['width'] }),
       expect.objectContaining({ nodeId: 'size', inputPath: 'height', roles: ['height'] }),
+      expect.objectContaining({
+        nodeId: 'timing', inputPath: 'length', roles: ['duration', 'fps'],
+        numericTransformByRole: {
+          duration: expect.objectContaining({
+            sourceUnit: 'seconds', targetUnit: 'seconds', output: 'numeric_string',
+          }),
+          fps: expect.objectContaining({
+            sourceUnit: 'fps', targetUnit: 'fps', output: 'numeric_string',
+          }),
+        },
+      }),
+      expect.objectContaining({
+        nodeId: 'timing', inputPath: 'custom_rate', roles: ['duration', 'fps'],
+      }),
     ]))
+    expect(candidates.find((item) => (
+      item.nodeId === 'timing' && item.inputPath === 'invalid_rate'
+    ))?.roles).not.toEqual(expect.arrayContaining(['duration', 'fps']))
+  })
+
+  it('maps a numeric-string scalar to duration and retains confirmed frame semantics', () => {
+    const draft = createGuidedMappingDraft(analysis())
+    const candidate = guidedInputCandidates(draft.analysis, draft.inputs)
+      .find((item) => item.nodeId === 'timing' && item.inputPath === 'length')
+
+    expect(candidate).toBeTruthy()
+    const added = addGuidedInput(draft, candidate!.id, 'duration')
+    expect(added.inputs.at(-1)).toMatchObject({
+      canonicalName: 'duration',
+      numericTransform: {
+        sourceUnit: 'seconds', targetUnit: 'seconds', output: 'numeric_string',
+      },
+    })
+
+    const configured = updateGuidedNumericTransform(added, candidate!.id, {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'numeric_string',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+      rounding: 'round', frameOffset: 1,
+    })
+    expect(effectiveGuidedAnalysis(configured).proposals.at(-1)).toMatchObject({
+      canonicalName: 'duration',
+      numericTransform: {
+        sourceUnit: 'seconds', targetUnit: 'frames', output: 'numeric_string',
+        fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+        rounding: 'round', frameOffset: 1,
+      },
+    })
+  })
+
+  it('replaces incompatible duration settings when a numeric proposal changes to FPS', () => {
+    const draft = createGuidedMappingDraft(analysis())
+    const candidate = guidedInputCandidates(draft.analysis, draft.inputs)
+      .find((item) => item.nodeId === 'timing' && item.inputPath === 'length')!
+    const configured = updateGuidedNumericTransform(
+      addGuidedInput(draft, candidate.id, 'duration'),
+      candidate.id,
+      {
+        sourceUnit: 'seconds', targetUnit: 'frames', output: 'numeric_string',
+        fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+        rounding: 'ceil', frameOffset: 1, allowedTargetValues: [81],
+      },
+    )
+
+    const changed = updateGuidedInputRole(configured, candidate.id, 'fps')
+    expect(changed.inputs.at(-1)).toMatchObject({
+      canonicalName: 'fps',
+      numericTransform: {
+        sourceUnit: 'fps', targetUnit: 'fps', output: 'numeric_string',
+      },
+    })
+    expect(changed.inputs.at(-1)?.numericTransform).not.toHaveProperty('allowedTargetValues')
   })
 
   it('removes an automatic input and adds a graph-verified replacement', () => {

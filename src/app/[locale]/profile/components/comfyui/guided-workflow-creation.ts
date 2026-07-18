@@ -52,6 +52,9 @@ export function guidedCompatibleRoles(proposal: WorkflowMappingProposal): Canoni
   if (proposal.valueType === 'image_ref_list') return ['referenceImages']
   if (proposal.valueType === 'image_ref') return ['sourceImage', 'referenceImages', 'firstFrame', 'lastFrame']
   if (proposal.canonicalName === 'prompt' || proposal.canonicalName === 'negativePrompt') return ['prompt', 'negativePrompt']
+  if (proposal.valueType === 'number' && (proposal.canonicalName === 'duration' || proposal.canonicalName === 'fps')) {
+    return ['duration', 'fps']
+  }
   return [proposal.canonicalName]
 }
 

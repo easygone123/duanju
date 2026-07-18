@@ -7,6 +7,7 @@ import {
   guidedCompatibleRoles,
   isGuidedWorkflowReady,
 } from '@/app/[locale]/profile/components/comfyui/guided-workflow-creation'
+import { confirmWorkflowAnalysis } from '@/app/[locale]/profile/components/comfyui/workflow-ui'
 
 const analysis = (patch: Partial<WorkflowAutoMappingResult> = {}): WorkflowAutoMappingResult => ({
   graph: { '1': { class_type: 'CLIPTextEncode', inputs: { text: 'portrait' } } },
@@ -140,5 +141,51 @@ describe('guided ComfyUI workflow creation model', () => {
     controller.dispose()
     expect(controller.isCurrent(second)).toBe(false)
     expect(controller.isCurrent(controller.begin())).toBe(false)
+  })
+
+  it('compiles frame conversion into an independently copied workflow contract', () => {
+    const numericTransform = {
+      sourceUnit: 'seconds' as const,
+      targetUnit: 'frames' as const,
+      output: 'numeric_string' as const,
+      fps: { source: 'runtime_then_fallback' as const, variable: 'fps' as const, fallback: 16 },
+      rounding: 'round' as const,
+      frameOffset: 1 as const,
+      allowedTargetValues: [81, 161],
+    }
+    const analyzed = analysis({
+      graph: {
+        video: { class_type: 'VideoLengthNode', inputs: { length: '81' } },
+        out: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+      },
+      mediaType: 'video',
+      proposals: [{
+        id: 'video:length:duration', canonicalName: 'duration', nodeId: 'video',
+        inputPath: 'length', valueType: 'number', confidence: 'high',
+        reasonCode: 'COMFY_MAPPING_DURATION_INPUT', required: false, numericTransform,
+      }],
+      outputs: [{
+        name: 'video', nodeId: 'out', fieldPath: 'videos', mediaType: 'video', primary: true,
+      }],
+    })
+
+    const confirmed = confirmWorkflowAnalysis(analyzed, { roles: {} })
+
+    expect(confirmed.variableDefinitions).toEqual([
+      expect.objectContaining({ name: 'duration', type: 'number' }),
+      { name: 'fps', type: 'number', required: false, defaultValue: 16 },
+    ])
+    expect(confirmed.bindings).toEqual([expect.objectContaining({
+      nodeId: 'video', inputPath: 'length', variable: 'duration',
+      numericTransform,
+    })])
+    expect(confirmed.variableDefinitions.find((item) => item.name === 'duration')?.options)
+      .toBeUndefined()
+
+    numericTransform.fps.fallback = 24
+    numericTransform.allowedTargetValues.push(241)
+    expect(confirmed.bindings[0]?.numericTransform).toMatchObject({
+      fps: { fallback: 16 }, allowedTargetValues: [81, 161],
+    })
   })
 })

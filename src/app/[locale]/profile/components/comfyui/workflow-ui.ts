@@ -223,9 +223,20 @@ export function confirmWorkflowAnalysis(
             ...(proposal.transform === 'filename_list' ? {} : { valueIndex: referenceIndex }),
           }
         : proposal.transform ? { transform: proposal.transform } : {}),
+      ...(proposal.numericTransform
+        ? { numericTransform: structuredClone(proposal.numericTransform) }
+        : {}),
       ...(!required && !isBerniniSlots
         ? { missingValuePolicy: 'preserve_original' as const }
         : {}),
+    })
+  }
+
+  for (const binding of bindings) {
+    if (binding.numericTransform?.targetUnit !== 'frames' || definitions.has('fps')) continue
+    definitions.set('fps', {
+      name: 'fps', type: 'number', required: false,
+      defaultValue: binding.numericTransform.fps!.fallback,
     })
   }
 

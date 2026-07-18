@@ -178,6 +178,79 @@ describe('ComfyUI API workflow auto mapper', () => {
     }))
   })
 
+  it.each([
+    ['duration', 5.5, 'seconds', 'number'],
+    ['seconds', '5.5', 'seconds', 'numeric_string'],
+    ['duration_seconds', 5.5, 'seconds', 'number'],
+    ['num_frames', 81, 'frames', 'number'],
+    ['frame_count', '81', 'frames', 'numeric_string'],
+    ['video_length', 81, 'frames', 'number'],
+  ] as const)(
+    'proposes duration semantics for %s',
+    (inputPath, value, targetUnit, output) => {
+      const result = analyzeComfyApiWorkflow({
+        kind: 'video_generation',
+        graph: {
+          video: {
+            class_type: 'VideoLengthNode',
+            inputs: { [inputPath]: value },
+          },
+          prompt: { class_type: 'CLIPTextEncode', inputs: { text: 'move' } },
+          out: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+        },
+      })
+
+      expect(result.proposals).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          nodeId: 'video',
+          inputPath,
+          canonicalName: 'duration',
+          numericTransform: expect.objectContaining({ targetUnit, output }),
+        }),
+      ]))
+    },
+  )
+
+  it('keeps a video length field confirmable but does not infer an unrelated length field', () => {
+    const video = analyzeComfyApiWorkflow({
+      kind: 'video_generation',
+      graph: {
+        timing: { class_type: 'VideoTiming', inputs: { length: 81 } },
+        out: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+      },
+    })
+    const unrelated = analyzeComfyApiWorkflow({
+      kind: 'video_generation',
+      graph: {
+        text: { class_type: 'StringUtility', inputs: { length: 81 } },
+        out: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+      },
+    })
+
+    expect(video.proposals).toContainEqual(expect.objectContaining({
+      nodeId: 'timing', inputPath: 'length', canonicalName: 'duration',
+      confidence: 'ambiguous',
+      numericTransform: expect.objectContaining({ targetUnit: 'frames' }),
+    }))
+    expect(unrelated.proposals.some((item) => (
+      item.nodeId === 'text' && item.canonicalName === 'duration'
+    ))).toBe(false)
+  })
+
+  it.each([NaN, Infinity, -Infinity, ' ', 'NaN', 'Infinity'])(
+    'does not expose a non-finite duration scalar: %s',
+    (value) => {
+      const result = analyzeComfyApiWorkflow({
+        kind: 'video_generation',
+        graph: {
+          video: { class_type: 'VideoLengthNode', inputs: { duration: value } },
+          out: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+        },
+      })
+      expect(result.proposals.some((item) => item.canonicalName === 'duration')).toBe(false)
+    },
+  )
+
   it('marks an unlabelled text encoder as ambiguous instead of silently positive', () => {
     const result = analyzeComfyApiWorkflow({
       graph: {

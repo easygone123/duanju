@@ -2,6 +2,7 @@ import type {
   ComfyApiWorkflow,
   ComfyApiWorkflowNode,
   ComfyOutputBinding,
+  ComfyNumericBindingTransform,
   ComfyVariableType,
 } from './types'
 import {
@@ -36,7 +37,7 @@ export function analyzeComfyApiWorkflow(input: {
 }): WorkflowAutoMappingResult {
   const meta = WORKFLOW_IMPORT_KIND_META[input.kind]
   const graph = readApiFormatGraph(input.graph)
-  const scalarProposals = inferScalarProposals(graph, meta.requiredInputs, meta.mediaType)
+  const scalarProposals = inferScalarProposals(graph, meta.requiredInputs, input.kind)
   const mediaAnalysis = inferMediaProposals(graph, input.kind, meta.requiredInputs)
   const proposals = [...scalarProposals, ...mediaAnalysis.proposals]
   const outputs = discoverOutputs(graph, meta.mediaType)
@@ -102,37 +103,117 @@ interface ScalarRule {
   canonicalName: CanonicalWorkflowInput
   inputNames: readonly string[]
   valueType: ComfyVariableType
-  mediaType?: 'video'
 }
 
 const SCALAR_RULES: readonly ScalarRule[] = [
   { canonicalName: 'width', inputNames: ['width'], valueType: 'number' },
   { canonicalName: 'height', inputNames: ['height'], valueType: 'number' },
   { canonicalName: 'seed', inputNames: ['seed', 'noise_seed'], valueType: 'number' },
-  {
-    canonicalName: 'duration', inputNames: ['duration', 'seconds'],
-    valueType: 'number', mediaType: 'video',
-  },
-  {
-    canonicalName: 'fps', inputNames: ['fps', 'frame_rate'],
-    valueType: 'number', mediaType: 'video',
-  },
 ]
+
+const SECOND_INPUTS = new Set(['duration', 'seconds', 'durationseconds', 'durations'])
+const FRAME_INPUTS = new Set(['numframes', 'framecount', 'totalframes', 'videolength'])
+const AMBIGUOUS_DURATION_INPUTS = new Set(['length', 'frames'])
+const FPS_INPUTS = new Set(['fps', 'framerate'])
+
+function finiteNumericLiteral(value: unknown): { output: 'number' | 'numeric_string' } | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? { output: 'number' } : null
+  if (typeof value !== 'string' || !value.trim()) return null
+  return Number.isFinite(Number(value.trim())) ? { output: 'numeric_string' } : null
+}
+
+function numericTransform(
+  targetUnit: 'seconds' | 'frames' | 'fps',
+  output: 'number' | 'numeric_string',
+): ComfyNumericBindingTransform {
+  if (targetUnit === 'frames') {
+    return {
+      sourceUnit: 'seconds', targetUnit, output,
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+      rounding: 'round', frameOffset: 1,
+    }
+  }
+  return {
+    sourceUnit: targetUnit === 'fps' ? 'fps' : 'seconds',
+    targetUnit,
+    output,
+  }
+}
+
+function inferVideoNumericProposal(input: {
+  nodeId: string
+  node: ComfyApiWorkflowNode
+  inputPath: string
+  value: unknown
+  title: string
+  requiredInputs: readonly CanonicalWorkflowInput[]
+}): WorkflowMappingProposal | null {
+  const literal = finiteNumericLiteral(input.value)
+  if (!literal) return null
+  const inputName = normalize(input.inputPath)
+  const videoEvidence = /(video|frame|fps|duration|temporal|timing)/.test(
+    normalize(`${input.node.class_type} ${input.title}`),
+  )
+  let canonicalName: 'duration' | 'fps'
+  let targetUnit: 'seconds' | 'frames' | 'fps'
+  let confidence: 'high' | 'ambiguous'
+  if (SECOND_INPUTS.has(inputName)) {
+    canonicalName = 'duration'
+    targetUnit = 'seconds'
+    confidence = literal.output === 'number' ? 'high' : 'ambiguous'
+  } else if (FRAME_INPUTS.has(inputName)) {
+    canonicalName = 'duration'
+    targetUnit = 'frames'
+    confidence = videoEvidence && literal.output === 'number' ? 'high' : 'ambiguous'
+  } else if (AMBIGUOUS_DURATION_INPUTS.has(inputName) && videoEvidence) {
+    canonicalName = 'duration'
+    targetUnit = 'frames'
+    confidence = 'ambiguous'
+  } else if (FPS_INPUTS.has(inputName)) {
+    canonicalName = 'fps'
+    targetUnit = 'fps'
+    confidence = literal.output === 'number' ? 'high' : 'ambiguous'
+  } else {
+    return null
+  }
+  return {
+    id: `${input.nodeId}:${input.inputPath}:${canonicalName}`,
+    canonicalName,
+    nodeId: input.nodeId,
+    inputPath: input.inputPath,
+    valueType: 'number',
+    numericTransform: numericTransform(targetUnit, literal.output),
+    confidence,
+    reasonCode: `COMFY_MAPPING_${canonicalName.toUpperCase()}_INPUT`,
+    required: input.requiredInputs.includes(canonicalName),
+    ...(input.title ? { nodeTitle: input.title } : {}),
+  }
+}
 
 function inferScalarProposals(
   graph: ComfyApiWorkflow,
   requiredInputs: readonly CanonicalWorkflowInput[],
-  mediaType: 'image' | 'video',
+  kind: WorkflowImportKind,
 ): WorkflowMappingProposal[] {
   const proposals: WorkflowMappingProposal[] = []
   for (const [nodeId, node] of Object.entries(graph)) {
     const title = nodeTitle(node)
     proposals.push(...inferPromptProposals(nodeId, node, title, requiredInputs))
 
+    if (kind === 'video_generation' || kind === 'video_to_video') {
+      for (const [inputPath, value] of Object.entries(node.inputs)) {
+        const proposal = inferVideoNumericProposal({
+          nodeId, node, inputPath, value, title, requiredInputs,
+        })
+        if (proposal) proposals.push(proposal)
+      }
+    }
+
     for (const rule of SCALAR_RULES) {
-      if (rule.mediaType && rule.mediaType !== mediaType) continue
       const inputName = rule.inputNames.find((name) => (
-        Object.hasOwn(node.inputs, name) && typeof node.inputs[name] === 'number'
+        Object.hasOwn(node.inputs, name)
+        && typeof node.inputs[name] === 'number'
+        && Number.isFinite(node.inputs[name])
       ))
       if (!inputName) continue
       proposals.push({
