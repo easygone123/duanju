@@ -224,7 +224,7 @@ describe('system - text workflows', () => {
     const response = await callRoute(
       mod.POST,
       'POST',
-      { locale: 'zh', episodeId: seeded.episode.id },
+      { locale: 'zh', episodeId: seeded.episode.id, storyboardGenerationMode: 'individual' },
       { params: { projectId: seeded.project.id } },
     )
 
@@ -296,7 +296,7 @@ describe('system - text workflows', () => {
     const response = await callRoute(
       mod.POST,
       'POST',
-      { locale: 'zh', episodeId: seeded.episode.id },
+      { locale: 'zh', episodeId: seeded.episode.id, storyboardGenerationMode: 'individual' },
       { params: { projectId: seeded.project.id } },
     )
 

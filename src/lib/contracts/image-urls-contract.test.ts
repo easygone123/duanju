@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict'
-import test from 'node:test'
+import { expect, test } from 'vitest'
 import {
   ImageUrlsContractError,
   decodeImageUrlsFromDb,
@@ -9,26 +8,26 @@ import {
 
 test('encodeImageUrls returns JSON array string', () => {
   const encoded = encodeImageUrls(['a', 'b'])
-  assert.equal(encoded, '["a","b"]')
+  expect(encoded).toBe('["a","b"]')
 })
 
 test('decodeImageUrlsStrict parses valid JSON array', () => {
   const decoded = decodeImageUrlsStrict('["a","b"]')
-  assert.deepEqual(decoded, ['a', 'b'])
+  expect(decoded).toEqual(['a', 'b'])
 })
 
 test('decodeImageUrlsStrict throws on invalid JSON', () => {
-  assert.throws(() => decodeImageUrlsStrict('not-json'), ImageUrlsContractError)
+  expect(() => decodeImageUrlsStrict('not-json')).toThrow(ImageUrlsContractError)
 })
 
 test('decodeImageUrlsStrict throws on non-array JSON', () => {
-  assert.throws(() => decodeImageUrlsStrict('{"a":1}'), ImageUrlsContractError)
+  expect(() => decodeImageUrlsStrict('{"a":1}')).toThrow(ImageUrlsContractError)
 })
 
 test('decodeImageUrlsStrict throws on non-string array entry', () => {
-  assert.throws(() => decodeImageUrlsStrict('["a",1]'), ImageUrlsContractError)
+  expect(() => decodeImageUrlsStrict('["a",1]')).toThrow(ImageUrlsContractError)
 })
 
 test('decodeImageUrlsFromDb throws on null', () => {
-  assert.throws(() => decodeImageUrlsFromDb(null), ImageUrlsContractError)
+  expect(() => decodeImageUrlsFromDb(null)).toThrow(ImageUrlsContractError)
 })

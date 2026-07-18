@@ -96,7 +96,33 @@ export async function reconcileActiveRunsFromTasks(limit = 200): Promise<Reconci
 
   if (activeRuns.length === 0) return []
 
+  const taskIds = activeRuns
+    .map((run) => run.taskId)
+    .filter((taskId): taskId is string => typeof taskId === 'string' && taskId.trim().length > 0)
+  const tasks = taskIds.length === 0
+    ? []
+    : await prisma.task.findMany({
+        where: {
+          id: {
+            in: taskIds,
+          },
+          status: {
+            in: [...TERMINAL_TASK_STATUSES],
+          },
+        },
+        select: {
+          id: true,
+          status: true,
+          result: true,
+          errorCode: true,
+          errorMessage: true,
+          finishedAt: true,
+        },
+      }) as LinkedTaskRow[]
+  const taskMap = new Map<string, LinkedTaskRow>(tasks.map((task) => [task.id, task]))
+
   const staleRuns = activeRuns.filter((run) => {
+    if (run.taskId && taskMap.has(run.taskId)) return false
     if (
       run.status === RUN_STATUS.RUNNING
       && run.leaseExpiresAt
@@ -167,34 +193,7 @@ export async function reconcileActiveRunsFromTasks(limit = 200): Promise<Reconci
     }
   }
 
-  const taskIds = activeRuns
-    .map((run) => run.taskId)
-    .filter((taskId): taskId is string => typeof taskId === 'string' && taskId.trim().length > 0)
-
-  if (taskIds.length === 0) return reconciled
-
-  const tasks = await prisma.task.findMany({
-    where: {
-      id: {
-        in: taskIds,
-      },
-      status: {
-        in: [...TERMINAL_TASK_STATUSES],
-      },
-    },
-    select: {
-      id: true,
-      status: true,
-      result: true,
-      errorCode: true,
-      errorMessage: true,
-      finishedAt: true,
-    },
-  }) as LinkedTaskRow[]
-
   if (tasks.length === 0) return reconciled
-
-  const taskMap = new Map<string, LinkedTaskRow>(tasks.map((task) => [task.id, task]))
 
   for (const run of activeRuns) {
     const taskId = run.taskId?.trim() || ''
