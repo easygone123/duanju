@@ -20,6 +20,7 @@ interface ImageSectionActionButtonsProps {
   onOpenAIDataModal: () => void
   onUndo?: (panelId: string) => void
   triggerPulse: () => void
+  allowRegenerate?: boolean
 }
 
 export interface SixGridPanelActionProps {
@@ -56,6 +57,7 @@ export default function ImageSectionActionButtons({
   onOpenAIDataModal,
   onUndo,
   triggerPulse,
+  allowRegenerate = true,
 }: ImageSectionActionButtonsProps) {
   const t = useTranslations('storyboard')
   const { count, setCount } = useImageGenerationCount('storyboard-candidates')
@@ -65,7 +67,7 @@ export default function ImageSectionActionButtons({
       <div className={`absolute bottom-1.5 left-1/2 -translate-x-1/2 z-20 transition-opacity ${isSubmittingPanelImageTask ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
         <div className="relative glass-surface-modal border border-[var(--glass-stroke-base)] rounded-lg p-0.5">
           <div className="flex items-center gap-0.5">
-            <ImageGenerationInlineCountButton
+            {allowRegenerate && <ImageGenerationInlineCountButton
               prefix={
                 <>
                   <AppIcon name="refresh" className="w-2.5 h-2.5" />
@@ -88,9 +90,9 @@ export default function ImageSectionActionButtons({
               className={`glass-btn-base glass-btn-secondary flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] transition-all active:scale-95 ${isSubmittingPanelImageTask ? 'opacity-75' : ''}`}
               selectClassName="appearance-none bg-transparent border-0 pl-0 pr-3 text-[10px] font-semibold text-[var(--glass-text-primary)] outline-none cursor-pointer leading-none transition-colors"
               labelClassName="inline-flex items-center gap-0.5"
-            />
+            />}
 
-            <div className="w-px h-3 bg-[var(--glass-stroke-base)]" />
+            {allowRegenerate && <div className="w-px h-3 bg-[var(--glass-stroke-base)]" />}
 
             <button
               onClick={onOpenAIDataModal}

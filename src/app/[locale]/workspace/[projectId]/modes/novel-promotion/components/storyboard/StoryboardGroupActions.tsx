@@ -72,7 +72,7 @@ export default function StoryboardGroupActions({
         )}
       </GlassButton>}
 
-      {pendingCount > 0 && (
+      {!isGridLayout && pendingCount > 0 && (
         <GlassButton
           variant="primary"
           size="sm"

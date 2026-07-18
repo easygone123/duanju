@@ -11,7 +11,7 @@ import StoryboardCanvas from './StoryboardCanvas'
 import { useStoryboardStageController } from './hooks/useStoryboardStageController'
 import { useStoryboardModalRuntime } from './hooks/useStoryboardModalRuntime'
 import type { StoryboardGenerationMode } from '@/lib/novel-promotion/six-grid/contracts'
-import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
+import { allowsIndividualStoryboardGroupCreation } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 interface StoryboardStageProps {
   projectId: string
@@ -155,7 +155,10 @@ export default function StoryboardStage({
     updatePhotographyPlanMutation,
     updatePanelActingNotesMutation,
   })
-  const allowStoryboardGroupCreation = !isGridStoryboardMode(storyboardGenerationMode)
+  const allowStoryboardGroupCreation = allowsIndividualStoryboardGroupCreation(
+    storyboardGenerationMode,
+    sortedStoryboards.map((storyboard) => storyboard.layoutMode),
+  )
 
   return (
       <StoryboardStageShell

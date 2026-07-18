@@ -15,7 +15,9 @@ const TestActivityProvider = WorkspaceStageActivityProvider as React.ComponentTy
 }>
 
 const rootMocks = vi.hoisted(() => ({
-  canvasProps: null as Record<string, (...args: never[]) => unknown> | null,
+  canvasProps: null as Record<string, unknown> | null,
+  toolbarProps: null as Record<string, unknown> | null,
+  persistedLayoutMode: 'individual' as 'individual' | 'four_grid',
 }))
 
 vi.mock('next-intl', () => ({
@@ -48,12 +50,15 @@ vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/s
 }))
 
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/StoryboardToolbar', () => ({
-  default: () => null,
+  default: (props: Record<string, unknown>) => {
+    rootMocks.toolbarProps = props
+    return null
+  },
 }))
 
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/StoryboardCanvas', () => ({
   default: (props: Record<string, (...args: never[]) => unknown>) => {
-    rootMocks.canvasProps = props
+    rootMocks.canvasProps = props as Record<string, unknown>
     return React.createElement(React.Fragment, null,
       React.createElement('button', {
         onClick: () => props.onOpenCharacterPicker('panel-1' as never),
@@ -78,11 +83,6 @@ vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/s
 
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/hooks/useStoryboardStageController', async () => {
   const ReactModule = await import('react')
-  const storyboard = {
-    id: 'storyboard-1',
-    clipId: 'clip-1',
-    panels: [{ id: 'panel-1', panelNumber: 1, characters: [], location: null }],
-  }
   const noop = () => undefined
   const noopAsync = async () => undefined
   const panelData = {
@@ -93,6 +93,12 @@ vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/s
 
   return {
     useStoryboardStageController: () => {
+      const storyboard = {
+        id: 'storyboard-1',
+        clipId: 'clip-1',
+        layoutMode: rootMocks.persistedLayoutMode,
+        panels: [{ id: 'panel-1', panelNumber: 1, characters: [], location: null }],
+      }
       const [localStoryboards, setLocalStoryboards] = ReactModule.useState([storyboard])
       const [editingPanel, setEditingPanel] = ReactModule.useState<{ storyboardId: string; panelIndex: number } | null>(null)
       const [previewImage, setPreviewImage] = ReactModule.useState<string | null>(null)
@@ -137,12 +143,13 @@ vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/s
   }
 })
 
-function renderRoot(isActive: boolean) {
+function renderRoot(isActive: boolean, storyboardGenerationMode: 'individual' | 'four_grid' = 'individual') {
   return React.createElement(
     TestActivityProvider,
     { isActive },
     React.createElement(StoryboardStage, {
       projectId: 'project-1', episodeId: 'episode-1', storyboards: [], clips: [], videoRatio: '16:9',
+      storyboardGenerationMode,
       onBack: vi.fn(), onNext: vi.fn(),
     }),
   )
@@ -152,6 +159,8 @@ afterEach(() => {
   cleanup()
   document.body.style.overflow = ''
   rootMocks.canvasProps = null
+  rootMocks.toolbarProps = null
+  rootMocks.persistedLayoutMode = 'individual'
   vi.restoreAllMocks()
 })
 
@@ -161,7 +170,7 @@ describe('storyboard root inactive modal cleanup', () => {
     const view = render(renderRoot(true))
     fireEvent.click(view.getByRole('button', { name: 'open character picker' }))
     act(() => {
-      rootMocks.canvasProps?.onOpenEditModal('storyboard-1' as never, 0 as never)
+      ;(rootMocks.canvasProps?.onOpenEditModal as ((storyboardId: string, panelIndex: number) => void) | undefined)?.('storyboard-1', 0)
     })
     expect(document.body.textContent).toContain('storyboard.panel.selectCharacter')
     expect(view.getByTestId('image-edit-modal')).toBeTruthy()
@@ -196,7 +205,7 @@ describe('storyboard root inactive modal cleanup', () => {
     view.rerender(renderRoot(false))
 
     act(() => {
-      rootMocks.canvasProps?.onPreviewImage('/late-preview.png' as never)
+      ;(rootMocks.canvasProps?.onPreviewImage as ((url: string) => void) | undefined)?.('/late-preview.png')
     })
 
     expect(document.body.textContent).not.toContain('common.viewOriginal')
@@ -204,5 +213,21 @@ describe('storyboard root inactive modal cleanup', () => {
 
     view.rerender(renderRoot(true))
     await waitFor(() => expect(document.body.textContent).not.toContain('common.viewOriginal'))
+  })
+
+  it('keeps persisted individual mutation controls during a configured four-grid mismatch', () => {
+    rootMocks.persistedLayoutMode = 'individual'
+    render(renderRoot(true, 'four_grid'))
+
+    expect(rootMocks.toolbarProps?.allowStoryboardGroupCreation).toBe(true)
+    expect(rootMocks.canvasProps?.allowStoryboardGroupCreation).toBe(true)
+  })
+
+  it('uses persisted grid rows to block individual group creation despite configured individual mode', () => {
+    rootMocks.persistedLayoutMode = 'four_grid'
+    render(renderRoot(true, 'individual'))
+
+    expect(rootMocks.toolbarProps?.allowStoryboardGroupCreation).toBe(false)
+    expect(rootMocks.canvasProps?.allowStoryboardGroupCreation).toBe(false)
   })
 })

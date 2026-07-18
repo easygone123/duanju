@@ -34,6 +34,7 @@ interface ImageSectionProps {
   failedError: string | null
   candidateData: PanelCandidateData | null
   previousImageUrl?: string | null
+  allowIndividualImageGeneration?: boolean
   taskPresentationState?: TaskPresentationState | null
   onRegeneratePanelImage: (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => Promise<boolean>
   onOpenEditModal: () => void
@@ -58,6 +59,7 @@ export default function ImageSection({
   failedError,
   candidateData,
   previousImageUrl,
+  allowIndividualImageGeneration = true,
   taskPresentationState,
   onRegeneratePanelImage,
   onOpenEditModal,
@@ -161,7 +163,7 @@ export default function ImageSection({
     <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--glass-bg-surface-strong)] text-[var(--glass-text-tertiary)]">
       <AppIcon name="imagePreview" className="w-8 h-8" />
       <span className="text-xs">{t('video.toolbar.showPending')}</span>
-      <GlassButton
+      {allowIndividualImageGeneration && <GlassButton
         variant="primary"
         size="sm"
         onClick={() => {
@@ -170,7 +172,7 @@ export default function ImageSection({
         }}
       >
         {t('panel.generateImage')}
-      </GlassButton>
+      </GlassButton>}
     </div>
   )
 
@@ -225,7 +227,7 @@ export default function ImageSection({
 
       {!candidateData && (
         <>
-        <div className="absolute bottom-2 left-2 z-20 w-[55%] min-w-0 text-[10px] text-white">
+        {allowIndividualImageGeneration && <div className="absolute bottom-2 left-2 z-20 w-[55%] min-w-0 text-[10px] text-white">
           <span className="sr-only">{tc('taskImageWorkflow')}</span>
           <ModelCapabilityDropdown
             compact
@@ -239,7 +241,7 @@ export default function ImageSection({
               applyImageTaskCapabilityChange(current, field, rawValue, sample))}
             placeholder={tc('inheritProjectDefault')}
           />
-        </div>
+        </div>}
         <ImageSectionActionButtons
           panelId={panelId}
           imageUrl={imageUrl}
@@ -251,6 +253,7 @@ export default function ImageSection({
           onOpenAIDataModal={onOpenAIDataModal}
           onUndo={onUndo}
           triggerPulse={triggerPulse}
+          allowRegenerate={allowIndividualImageGeneration}
          />
         </>
       )}

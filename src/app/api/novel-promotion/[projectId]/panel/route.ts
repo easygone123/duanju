@@ -63,8 +63,11 @@ export const POST = apiHandler(async (
   }
 
   // 验证 storyboard 存在，并获取现有 panels 以计算正确的 panelIndex
-  const storyboard = await prisma.novelPromotionStoryboard.findUnique({
-    where: { id: storyboardId },
+  const storyboard = await prisma.novelPromotionStoryboard.findFirst({
+    where: {
+      id: storyboardId,
+      episode: { novelPromotionProject: { projectId } },
+    },
     include: {
       panels: {
         orderBy: { panelIndex: 'desc' },
@@ -140,8 +143,11 @@ export const DELETE = apiHandler(async (
   }
 
   // 获取要删除的 Panel 信息
-  const panel = await prisma.novelPromotionPanel.findUnique({
-    where: { id: panelId },
+  const panel = await prisma.novelPromotionPanel.findFirst({
+    where: {
+      id: panelId,
+      storyboard: { episode: { novelPromotionProject: { projectId } } },
+    },
     include: {
       storyboard: { select: { layoutMode: true } },
     },
@@ -321,8 +327,11 @@ export const PATCH = apiHandler(async (
   }
 
   // 验证 storyboard 存在
-  const storyboard = await prisma.novelPromotionStoryboard.findUnique({
-    where: { id: storyboardId }
+  const storyboard = await prisma.novelPromotionStoryboard.findFirst({
+    where: {
+      id: storyboardId,
+      episode: { novelPromotionProject: { projectId } },
+    },
   })
 
   if (!storyboard) {
@@ -413,8 +422,11 @@ export const PUT = apiHandler(async (
   }
 
   // 验证 storyboard 存在
-  const storyboard = await prisma.novelPromotionStoryboard.findUnique({
-    where: { id: storyboardId }
+  const storyboard = await prisma.novelPromotionStoryboard.findFirst({
+    where: {
+      id: storyboardId,
+      episode: { novelPromotionProject: { projectId } },
+    },
   })
 
   if (!storyboard) {

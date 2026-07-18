@@ -22,6 +22,16 @@ export function isGridCellAspectRatio(value: unknown): value is GridCellAspectRa
   return GRID_CELL_ASPECT_RATIOS.includes(value as GridCellAspectRatio)
 }
 
+export function allowsIndividualStoryboardGroupCreation(
+  configuredMode: unknown,
+  persistedModes: readonly unknown[],
+): boolean {
+  if (persistedModes.length > 0) {
+    return !persistedModes.some(isGridStoryboardMode)
+  }
+  return !isGridStoryboardMode(configuredMode)
+}
+
 export function assertGridStoryboardMode(value: unknown): asserts value is GridStoryboardMode {
   if (!isGridStoryboardMode(value)) throw new Error('STORYBOARD_GRID_MODE_INVALID')
 }

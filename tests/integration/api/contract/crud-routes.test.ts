@@ -47,6 +47,7 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(),
   },
   novelPromotionStoryboard: {
+    findFirst: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
   },
@@ -258,6 +259,10 @@ describe('api contract - crud routes (behavior)', () => {
     prismaMock.novelPromotionStoryboard.findUnique.mockResolvedValue({
       id: 'storyboard-1',
       projectId: 'project-1',
+    })
+    prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValue({
+      id: 'storyboard-1',
+      layoutMode: 'individual',
     })
     prismaMock.novelPromotionStoryboard.update.mockResolvedValue({
       id: 'storyboard-1',

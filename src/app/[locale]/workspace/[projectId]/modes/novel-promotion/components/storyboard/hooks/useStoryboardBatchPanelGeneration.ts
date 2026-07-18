@@ -6,6 +6,7 @@ import { logInfo as _ulogInfo, logError as _ulogError } from '@/lib/logging/core
 import type { NovelPromotionStoryboard } from '@/types/project'
 import type { StoryboardPanel } from './useStoryboardState'
 import { getErrorMessage } from './storyboard-panel-asset-utils'
+import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 interface UseStoryboardBatchPanelGenerationProps {
   sortedStoryboards: NovelPromotionStoryboard[]
@@ -25,6 +26,7 @@ export function useStoryboardBatchPanelGeneration({
   const t = useTranslations('storyboard')
   const runningCount = useMemo(() => {
     return sortedStoryboards.reduce((count, storyboard) => {
+      if (isGridStoryboardMode(storyboard.layoutMode)) return count
       const panels = getTextPanels(storyboard)
       return count + panels.filter((panel) => panel.imageTaskRunning || submittingPanelImageIds.has(panel.id)).length
     }, 0)
@@ -32,6 +34,7 @@ export function useStoryboardBatchPanelGeneration({
 
   const pendingPanelCount = useMemo(() => {
     return sortedStoryboards.reduce((count, storyboard) => {
+      if (isGridStoryboardMode(storyboard.layoutMode)) return count
       const panels = getTextPanels(storyboard)
       return (
         count +
@@ -47,6 +50,7 @@ export function useStoryboardBatchPanelGeneration({
     try {
       const panelsToGenerate: string[] = []
       sortedStoryboards.forEach((storyboard) => {
+        if (isGridStoryboardMode(storyboard.layoutMode)) return
         const panels = getTextPanels(storyboard)
         panels.forEach((panel) => {
           const isTaskRunning =

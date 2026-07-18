@@ -200,6 +200,7 @@ export default function StoryboardPanelList({
               onVariant={gridSpec ? undefined : () => onVariant(index)}
               isInsertDisabled={isInsertDisabled(panel.id)}
               previousImageUrl={panel.previousImageUrl}
+              allowIndividualImageGeneration={!gridSpec}
               sixGridActions={isGridStoryboardMode(storyboard.layoutMode) ? {
                 previousUrl: panel.previousImageUrl,
                 isBusy: isSixGridPanelBusy(

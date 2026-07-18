@@ -36,9 +36,16 @@ vi.mock('@/components/ui/config-modals/ModelCapabilityDropdown', () => ({
   },
 }))
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/ImageSectionActionButtons', () => ({
-  default: (props: { onRegeneratePanelImage: (id: string, count?: number, force?: boolean) => void }) => React.createElement(
-    'button',
-    { 'data-testid': 'regenerate-image', onClick: () => props.onRegeneratePanelImage('panel-1', 1, false) },
+  default: (props: {
+    allowRegenerate?: boolean
+    onRegeneratePanelImage: (id: string, count?: number, force?: boolean) => void
+    onOpenEditModal: () => void
+  }) => React.createElement(React.Fragment, null,
+    props.allowRegenerate !== false && React.createElement('button', {
+      'data-testid': 'regenerate-image',
+      onClick: () => props.onRegeneratePanelImage('panel-1', 1, false),
+    }),
+    React.createElement('button', { 'data-testid': 'edit-image', onClick: props.onOpenEditModal }),
   ),
 }))
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/ImageSectionCandidateMode', () => ({
@@ -98,5 +105,23 @@ describe('ImageSection model selection', () => {
 
     fireEvent.click(view.getByTestId('regenerate-image'))
     await waitFor(() => expect(dropdownCapture.props?.value).toBeUndefined())
+  })
+
+  it('removes individual generation controls for grid panels but retains safe post-crop editing', () => {
+    const onOpenEditModal = vi.fn()
+    const view = render(React.createElement(ImageSection, {
+      panelId: 'panel-grid', imageUrl: 'https://example.com/cropped.jpg', globalPanelNumber: 1,
+      shotType: 'wide', videoRatio: '16:9', isDeleting: false, isModifying: false,
+      isSubmittingPanelImageTask: false, failedError: null, candidateData: null,
+      allowIndividualImageGeneration: false,
+      onRegeneratePanelImage: vi.fn(), onOpenEditModal, onOpenAIDataModal: vi.fn(),
+      onSelectCandidateIndex: vi.fn(), onConfirmCandidate: vi.fn(), onCancelCandidate: vi.fn(),
+      onClearError: vi.fn(),
+    }))
+
+    expect(view.queryByTestId('image-model-dropdown')).toBeNull()
+    expect(view.queryByTestId('regenerate-image')).toBeNull()
+    fireEvent.click(view.getByTestId('edit-image'))
+    expect(onOpenEditModal).toHaveBeenCalledTimes(1)
   })
 })

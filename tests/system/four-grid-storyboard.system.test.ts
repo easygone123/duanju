@@ -244,6 +244,94 @@ describe('system - four-grid persisted generation chain', () => {
     resetAuthMockState()
   })
 
+  it('atomically replaces persisted individual and six-grid rows with one valid four-panel group', async () => {
+    const user = await createFixtureUser()
+    const project = await createFixtureProject(user.id)
+    const novelProject = await createFixtureNovelProject(project.id)
+    const episode = await createFixtureEpisode(novelProject.id)
+    const clips = await Promise.all(['legacy', 'planned'].map((summary) => prisma.novelPromotionClip.create({
+      data: { episodeId: episode.id, summary, content: `${summary} content` },
+    })))
+    const legacyIndividual = await prisma.novelPromotionStoryboard.create({
+      data: {
+        episodeId: episode.id,
+        clipId: clips[0]!.id,
+        layoutMode: 'individual',
+        panelCount: 1,
+        panels: { create: { panelIndex: 0, panelNumber: 1, description: 'legacy individual' } },
+      },
+      include: { panels: true },
+    })
+    const legacySix = await prisma.novelPromotionStoryboard.create({
+      data: {
+        episodeId: episode.id,
+        clipId: clips[1]!.id,
+        layoutMode: 'six_grid',
+        groupSequence: 0,
+        panelCount: 6,
+        panels: {
+          create: Array.from({ length: 6 }, (_, panelIndex) => ({
+            panelIndex,
+            panelNumber: panelIndex + 1,
+            gridCellIndex: panelIndex,
+            description: `legacy six ${panelIndex}`,
+          })),
+        },
+      },
+      include: { panels: true },
+    })
+    const run = await prisma.graphRun.create({
+      data: {
+        userId: user.id,
+        projectId: project.id,
+        episodeId: episode.id,
+        workflowType: 'script_to_storyboard_run',
+        taskType: 'script_to_storyboard_run',
+        targetType: 'NovelPromotionEpisode',
+        targetId: episode.id,
+        input: { storyboardGenerationMode: 'four_grid', sixGridCellAspectRatio: '16:9' },
+      },
+    })
+    const [planned] = validateGridEpisodePlan([sceneGroup(clips[1]!.id)], [clips[1]!.id], FOUR_GRID_SPEC)
+
+    await persistGridStoryboardOutputs({
+      episodeId: episode.id,
+      runId: run.id,
+      clipPanels: [{ ...planned, clipIndex: 1, finalPanels: planned.panels }],
+      voiceLineRows: null,
+      runSnapshot: {
+        runId: run.id,
+        projectId: project.id,
+        episodeId: episode.id,
+        workflowType: 'script_to_storyboard_run',
+        locale: 'en',
+        sourceHash: 'four-grid-transition-source',
+        runSettings: {
+          storyboardGenerationMode: 'four_grid',
+          sixGridCellAspectRatio: '16:9',
+          gridSpec: FOUR_GRID_SPEC,
+          sixGridProcessingOrder: 'crop_then_panel_upscale',
+          storyboardUpscaleModel: null,
+          dialogueVideoModel: null,
+        },
+      },
+    })
+
+    const storyboards = await prisma.novelPromotionStoryboard.findMany({
+      where: { episodeId: episode.id },
+      include: { panels: { orderBy: { panelIndex: 'asc' } } },
+    })
+    const legacyPanelIds = [...legacyIndividual.panels, ...legacySix.panels].map((panel) => panel.id)
+    expect(storyboards).toHaveLength(1)
+    expect(storyboards[0]).toMatchObject({ layoutMode: 'four_grid', groupSequence: 1, panelCount: 4 })
+    expect(storyboards[0]!.panels.map((panel) => [panel.panelIndex, panel.gridCellIndex]))
+      .toEqual([[0, 0], [1, 1], [2, 2], [3, 3]])
+    expect(await prisma.novelPromotionPanel.count({ where: { id: { in: legacyPanelIds } } })).toBe(0)
+    expect(await prisma.novelPromotionPanel.count({
+      where: { storyboard: { episodeId: episode.id } },
+    })).toBe(4)
+  })
+
   it('REQ-NP-FOUR-GRID-03 persists planning lineage, generates one common-ratio sheet, and owns four crop media', async () => {
     const user = await createFixtureUser()
     const project = await createFixtureProject(user.id)

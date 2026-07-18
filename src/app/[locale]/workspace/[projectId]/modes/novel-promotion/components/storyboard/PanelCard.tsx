@@ -47,6 +47,7 @@ interface PanelCardProps {
   failedError: string | null
   candidateData: PanelCandidateData | null
   previousImageUrl?: string | null  // 支持撤回
+  allowIndividualImageGeneration?: boolean
   onUpdate: (updates: Partial<PanelEditData>) => void
   onDelete?: () => void
   onOpenCharacterPicker: () => void
@@ -85,6 +86,7 @@ export default function PanelCard({
   failedError,
   candidateData,
   previousImageUrl,
+  allowIndividualImageGeneration = true,
   onUpdate,
   onDelete,
   onOpenCharacterPicker,
@@ -139,6 +141,7 @@ export default function PanelCard({
           failedError={failedError}
           candidateData={candidateData}
           previousImageUrl={previousImageUrl}
+          allowIndividualImageGeneration={allowIndividualImageGeneration}
           taskPresentationState={panel.imageTaskPresentation}
           onRegeneratePanelImage={onRegeneratePanelImage}
           onOpenEditModal={onOpenEditModal}

@@ -27,6 +27,7 @@ vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/s
     'data-can-delete': String(typeof props.onDelete === 'function'),
     'data-can-insert': String(typeof props.onInsertAfter === 'function'),
     'data-can-variant': String(typeof props.onVariant === 'function'),
+    'data-can-generate-individually': String(props.allowIndividualImageGeneration !== false),
   }),
 }))
 
@@ -120,6 +121,7 @@ describe('storyboard panel list grid invariants', () => {
       card.getAttribute('data-can-delete') === 'false'
       && card.getAttribute('data-can-insert') === 'false'
       && card.getAttribute('data-can-variant') === 'false'
+      && card.getAttribute('data-can-generate-individually') === 'false'
     ))).toBe(true)
   })
 
@@ -139,6 +141,7 @@ describe('storyboard panel list grid invariants', () => {
       card.getAttribute('data-can-delete') === 'true'
       && card.getAttribute('data-can-insert') === 'true'
       && card.getAttribute('data-can-variant') === 'true'
+      && card.getAttribute('data-can-generate-individually') === 'true'
     ))).toBe(true)
   })
 })

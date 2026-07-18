@@ -28,14 +28,14 @@ const messages = {
   },
 }
 
-function renderActions(isGridLayout: boolean) {
+function renderActions(isGridLayout: boolean, pendingCount = 0) {
   return render(<NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
     <StoryboardGroupActions
       hasAnyImage={false}
       isSubmittingStoryboardTask={false}
       isSubmittingStoryboardTextTask={false}
       currentRunningCount={0}
-      pendingCount={0}
+      pendingCount={pendingCount}
       isGridLayout={isGridLayout}
       onRegenerateText={vi.fn()}
       onGenerateAllIndividually={vi.fn()}
@@ -47,14 +47,16 @@ function renderActions(isGridLayout: boolean) {
 
 describe('storyboard group cardinality actions', () => {
   it('hides add-panel for fixed-cardinality grid rows', () => {
-    const view = renderActions(true)
+    const view = renderActions(true, 2)
     expect(view.queryByRole('button', { name: 'Add panel' })).toBeNull()
     expect(view.queryByRole('button', { name: 'Regenerate text' })).toBeNull()
+    expect(view.queryByRole('button', { name: /Generate all/ })).toBeNull()
   })
 
   it('keeps add-panel for individual rows', () => {
-    const view = renderActions(false)
+    const view = renderActions(false, 2)
     expect(view.getByRole('button', { name: 'Add panel' })).toBeTruthy()
     expect(view.getByRole('button', { name: 'Regenerate text' })).toBeTruthy()
+    expect(view.getByRole('button', { name: /Generate all/ })).toBeTruthy()
   })
 })

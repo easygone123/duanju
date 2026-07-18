@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
-import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
+import { allowsIndividualStoryboardGroupCreation } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 /**
  * POST /api/novel-promotion/[projectId]/storyboard-group
@@ -27,10 +27,14 @@ export const POST = apiHandler(async (
   }
 
   // 获取剧集和现有 clips
-  const episode = await prisma.novelPromotionEpisode.findUnique({
-    where: { id: episodeId },
+  const episode = await prisma.novelPromotionEpisode.findFirst({
+    where: {
+      id: episodeId,
+      novelPromotionProject: { projectId },
+    },
     include: {
       clips: { orderBy: { createdAt: 'asc' } },
+      storyboards: { select: { layoutMode: true } },
       novelPromotionProject: {
         select: { storyboardGenerationMode: true },
       },
@@ -40,7 +44,10 @@ export const POST = apiHandler(async (
   if (!episode) {
     throw new ApiError('NOT_FOUND')
   }
-  if (isGridStoryboardMode(episode.novelPromotionProject.storyboardGenerationMode)) {
+  if (!allowsIndividualStoryboardGroupCreation(
+    episode.novelPromotionProject.storyboardGenerationMode,
+    episode.storyboards.map((storyboard) => storyboard.layoutMode),
+  )) {
     throw new ApiError('INVALID_PARAMS', { code: 'GRID_PANEL_COUNT_FIXED' })
   }
 
@@ -88,7 +95,8 @@ export const POST = apiHandler(async (
       data: {
         episodeId,
         clipId: newClip.id,
-        panelCount: 1
+        panelCount: 1,
+        layoutMode: 'individual',
       }
     })
 
@@ -140,8 +148,11 @@ export const PUT = apiHandler(async (
   }
 
   // 获取剧集和所有 clips（按 createdAt 排序）
-  const episode = await prisma.novelPromotionEpisode.findUnique({
-    where: { id: episodeId },
+  const episode = await prisma.novelPromotionEpisode.findFirst({
+    where: {
+      id: episodeId,
+      novelPromotionProject: { projectId },
+    },
     include: {
       clips: { orderBy: { createdAt: 'asc' } }
     }
@@ -221,8 +232,11 @@ export const DELETE = apiHandler(async (
   }
 
   // 获取 storyboard 及其关联的 clip
-  const storyboard = await prisma.novelPromotionStoryboard.findUnique({
-    where: { id: storyboardId },
+  const storyboard = await prisma.novelPromotionStoryboard.findFirst({
+    where: {
+      id: storyboardId,
+      episode: { novelPromotionProject: { projectId } },
+    },
     include: {
       panels: true,
       clip: true

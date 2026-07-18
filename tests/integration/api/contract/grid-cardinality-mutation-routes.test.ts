@@ -15,9 +15,10 @@ const submitTaskMock = vi.hoisted(() => vi.fn(async () => ({
 
 const prismaMock = vi.hoisted(() => ({
   novelPromotionEpisode: {
-    findUnique: vi.fn(async () => ({
+    findFirst: vi.fn(async () => ({
       id: 'episode-1',
       clips: [],
+      storyboards: [{ layoutMode: routeState.layoutMode }],
       novelPromotionProject: { storyboardGenerationMode: routeState.configuredMode },
     })),
   },
@@ -25,6 +26,8 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(async () => ({
       id: 'storyboard-1',
       layoutMode: routeState.layoutMode,
+      panels: [{ panelIndex: 3 }],
+      episode: { novelPromotionProject: { projectId: 'project-1' } },
     })),
     findUnique: vi.fn(async () => ({
       id: 'storyboard-1',
@@ -35,6 +38,12 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(async () => ({})),
   },
   novelPromotionPanel: {
+    findFirst: vi.fn(async () => ({
+      id: 'panel-1',
+      storyboardId: 'storyboard-1',
+      panelIndex: 0,
+      storyboard: { layoutMode: routeState.layoutMode },
+    })),
     findUnique: vi.fn(async ({ where }: {
       where: { id?: string; storyboardId_panelIndex?: { storyboardId: string; panelIndex: number } }
     }) => {
@@ -104,8 +113,11 @@ describe('grid storyboard cardinality mutation routes', () => {
     }), { params: Promise.resolve({ projectId: 'project-1' }) })
 
     await expectGridMutationRejected(response)
-    expect(prismaMock.novelPromotionStoryboard.findUnique).toHaveBeenCalledWith({
-      where: { id: 'storyboard-1' },
+    expect(prismaMock.novelPromotionStoryboard.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'storyboard-1',
+        episode: { novelPromotionProject: { projectId: 'project-1' } },
+      },
       include: { panels: { orderBy: { panelIndex: 'desc' }, take: 1 } },
     })
     expect(prismaMock.novelPromotionPanel.create).not.toHaveBeenCalled()
