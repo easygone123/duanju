@@ -108,6 +108,29 @@ describe('ComfyUI numeric bindings', () => {
     expect(error.details).toEqual({ variable: 'duration', reason: 'invalid_frames' })
   })
 
+  it('rejects a positive duration that rounds down to zero frames', () => {
+    const error = captureError(() => convertComfyNumericBinding({
+      variable: 'duration',
+      value: 0.01,
+      variables: {},
+      transform: frames({ rounding: 'floor', frameOffset: 0 }),
+    }))
+
+    expect(error.details).toEqual({ variable: 'duration', reason: 'invalid_frames' })
+  })
+
+  it('requires exact allowed values for frame targets', () => {
+    expect(() => convertComfyNumericBinding({
+      variable: 'duration',
+      value: 0.0625,
+      variables: {},
+      transform: frames({
+        frameOffset: 0,
+        allowedTargetValues: [1 + Number.EPSILON],
+      }),
+    })).toThrowError(/unsupported_target/)
+  })
+
   it('accepts decimal-safe allowed values without accepting nearby values', () => {
     expect(decimalEquals(0.1 + 0.2, 0.3)).toBe(true)
     expect(decimalEquals(0.3000001, 0.3)).toBe(false)

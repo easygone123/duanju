@@ -18,8 +18,12 @@ export function decimalEquals(left: number, right: number): boolean {
   return Math.abs(left - right) <= Number.EPSILON * scale * 8
 }
 
-function matchesAllowedTarget(allowed: number, target: number): boolean {
-  if (Number.isInteger(allowed) && Number.isInteger(target)) return allowed === target
+function matchesAllowedTarget(
+  allowed: number,
+  target: number,
+  targetUnit: ComfyNumericBindingTransform['targetUnit'],
+): boolean {
+  if (targetUnit === 'frames' || Number.isInteger(target)) return allowed === target
   return decimalEquals(allowed, target)
 }
 
@@ -69,7 +73,11 @@ export function convertComfyNumericBinding(input: {
   if (
     input.transform.allowedTargetValues !== undefined
     && !input.transform.allowedTargetValues.some(
-      (allowed) => matchesAllowedTarget(allowed, targetValue),
+      (allowed) => matchesAllowedTarget(
+        allowed,
+        targetValue,
+        input.transform.targetUnit,
+      ),
     )
   ) {
     invalid(input.variable, 'unsupported_target')
