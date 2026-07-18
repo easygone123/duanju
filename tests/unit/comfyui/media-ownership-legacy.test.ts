@@ -18,7 +18,7 @@ const mediaServiceMock = vi.hoisted(() => ({
   guessMimeTypeFromStorageKey: vi.fn((storageKey: string) => (
     storageKey.endsWith('.png') ? 'image/png' : storageKey.endsWith('.mp4') ? 'video/mp4' : null
   )),
-  resolveStorageKeyFromMediaValue: vi.fn(async () => null),
+  resolveStorageKeyFromMediaValue: vi.fn(async (): Promise<string | null> => null),
 }))
 
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
