@@ -157,7 +157,7 @@ async function generateVideoForPanel(
     throw new Error(`Panel ${panel.id} has no video prompt`)
   }
 
-  const model = resolveVideoGenerationModel(payload, modelId) ?? modelId
+  const model = modelId
   const isComfyModel = parseModelKeyStrict(model)?.provider === 'comfyui'
   let sourceImageInput = firstFramePanel.imageUrl
   if (!isComfyModel) {

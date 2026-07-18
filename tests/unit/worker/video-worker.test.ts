@@ -1,6 +1,7 @@
 import type { Job } from 'bullmq'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
+import { resolveVideoTaskSnapshot, type TaskModelSnapshot } from '@/lib/workers/task-model-snapshot'
 
 type WorkerProcessor = (job: Job<TaskJobData>) => Promise<unknown>
 
@@ -137,6 +138,29 @@ function buildJob(params: {
   } as unknown as Job<TaskJobData>
 }
 
+function useBehaviorFaithfulVideoBoundary(
+  assertion: (snapshot: TaskModelSnapshot, params: {
+    modelId: string
+    comfyWorkflowVersionId?: string
+    imageUrl: string
+  }) => void,
+) {
+  utilsMock.resolveVideoSourceFromGeneration.mockImplementationOnce(async (...args: unknown[]) => {
+    const job = args[0] as Job<TaskJobData>
+    const params = args[1] as {
+      modelId: string
+      comfyWorkflowVersionId?: string
+      imageUrl: string
+    }
+    const snapshot = resolveVideoTaskSnapshot(job.data.payload, {
+      model: params.modelId,
+      comfyWorkflowVersionId: params.comfyWorkflowVersionId,
+    })
+    assertion(snapshot, params)
+    return { url: 'https://provider.example/video.mp4' }
+  })
+}
+
 describe('worker video processor behavior', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
@@ -144,6 +168,10 @@ describe('worker video processor behavior', () => {
     workerState.processor = null
     capabilityMock.mockReset()
     capabilityMock.mockReturnValue({ video: { firstlastframe: true } })
+    utilsMock.resolveVideoSourceFromGeneration.mockReset()
+    utilsMock.resolveVideoSourceFromGeneration.mockResolvedValue({
+      url: 'https://provider.example/video.mp4',
+    })
 
     prismaMock.novelPromotionPanel.findUnique.mockResolvedValue(buildPanel())
     prismaMock.novelPromotionPanel.findFirst.mockResolvedValue(buildPanel())
@@ -276,7 +304,7 @@ describe('worker video processor behavior', () => {
     await processor!(buildJob({
       type: TASK_TYPE.VIDEO_PANEL,
       payload: {
-        videoModel: 'cloud::normal',
+        videoModel: 'comfyui::wf-video',
         videoPrompt: 'SERVER FIRST LAST PROMPT',
         firstLastFrame: {
           flModel: 'comfyui::wf-video',
@@ -381,6 +409,53 @@ describe('worker video processor behavior', () => {
     )
   })
 
+  it('VIDEO_PANEL: authoritative cloud model normalizes when legacy first-last model looks Comfy', async () => {
+    useBehaviorFaithfulVideoBoundary((snapshot, params) => {
+      expect(snapshot.model).toBe('fal::cloud-video')
+      expect(params.modelId).toBe(snapshot.model)
+      expect(params.imageUrl).toBe('data:image/png;base64,RklSU1Q=')
+    })
+
+    await workerState.processor!(buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: {
+        videoModel: 'fal::cloud-video',
+        videoPrompt: 'AUTHORITATIVE CLOUD PROMPT',
+        firstLastFrame: {
+          flModel: 'comfyui::legacy-video',
+        },
+      },
+    }))
+
+    expect(normalizeToBase64ForGenerationMock).toHaveBeenCalledWith(
+      'https://signed.example/cos/panel-image.png',
+    )
+  })
+
+  it('VIDEO_PANEL: authoritative Comfy model preserves raw source when legacy first-last model looks cloud', async () => {
+    useBehaviorFaithfulVideoBoundary((snapshot, params) => {
+      expect(snapshot.model).toBe('comfyui::workflow-video')
+      expect(params.modelId).toBe(snapshot.model)
+      expect(params.imageUrl).toBe('cos/panel-image.png')
+    })
+
+    await workerState.processor!(buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: {
+        videoModel: 'comfyui::workflow-video',
+        comfyWorkflowVersionId: 'workflow-video-version-1',
+        comfyModelSnapshotVersion: 1,
+        videoPrompt: 'AUTHORITATIVE COMFY PROMPT',
+        firstLastFrame: {
+          flModel: 'fal::legacy-video',
+        },
+      },
+    }))
+
+    expect(normalizeToBase64ForGenerationMock).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('VIDEO_PANEL: rejects a trusted-looking last-frame id that is outside the task project', async () => {
     prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(null)
 
@@ -401,7 +476,7 @@ describe('worker video processor behavior', () => {
     capabilityMock.mockReturnValueOnce(undefined)
     await expect(processor!(buildJob({
       type: TASK_TYPE.VIDEO_PANEL,
-      payload: { videoModel: 'cloud::normal', firstLastFrame: { flModel: 'cloud::unsupported' } },
+      payload: { videoModel: 'cloud::unsupported', firstLastFrame: { flModel: 'cloud::unsupported' } },
     }))).rejects.toThrow('VIDEO_FIRSTLASTFRAME_MODEL_UNSUPPORTED: cloud::unsupported')
   })
 

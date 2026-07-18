@@ -17,7 +17,7 @@ export function resolveVideoGenerationModel(
 ): string | null {
   const firstLastFrame = asRecord(payload?.firstLastFrame)
   if (Object.keys(firstLastFrame).length > 0) {
-    return firstString([firstLastFrame.flModel, fallback, payload?.videoModel, payload?.modelId, payload?.model])
+    return firstString([payload?.videoModel, firstLastFrame.flModel, fallback, payload?.modelId, payload?.model])
   }
   return firstString([payload?.videoModel, payload?.modelId, payload?.model, fallback])
 }
