@@ -90,12 +90,7 @@ export function buildGuidedWorkflowReview(
   const automaticPrimary = analysis.outputs.find((output) => output.primary)?.nodeId
     || (analysis.outputs.length === 1 ? analysis.outputs[0]?.nodeId : '')
   const primaryOutputNodeId = selectedPrimary || automaticPrimary || ''
-  const mappedInputs = new Set<CanonicalWorkflowInput>([
-    ...resolvedInputs,
-    ...analysis.proposals
-      .filter((proposal) => proposal.required && proposal.confidence === 'ambiguous' && !roles[proposal.id])
-      .map((proposal) => proposal.canonicalName),
-  ])
+  const mappedInputs = new Set<CanonicalWorkflowInput>(resolvedInputs)
   const missingRequiredInputs = WORKFLOW_IMPORT_KIND_META[kind].requiredInputs
     .filter((name) => !mappedInputs.has(name))
   return {

@@ -41,6 +41,17 @@ describe('guided ComfyUI workflow creation model', () => {
     expect(review.preservedCount).toBe(1)
   })
 
+  it('does not count an unresolved ambiguous proposal as a completed required mapping', () => {
+    const review = buildGuidedWorkflowReview('image_edit', analysis({ proposals: [
+      { id: 'prompt', canonicalName: 'prompt', nodeId: '1', inputPath: 'text', valueType: 'string', confidence: 'high', reasonCode: 'prompt', required: true },
+      { id: 'source', canonicalName: 'sourceImage', nodeId: '3', inputPath: 'image', valueType: 'image_ref', confidence: 'ambiguous', reasonCode: 'source', required: true },
+    ] }), {}, '')
+
+    expect(review.questions.map((item) => item.id)).toEqual(['source'])
+    expect(review.missingRequiredInputs).toEqual(['sourceImage'])
+    expect(isGuidedWorkflowReady({ name: 'demo', review, busy: false })).toBe(false)
+  })
+
   it('reports a required input missing after its proposal is remapped to the wrong role', () => {
     const review = buildGuidedWorkflowReview('image_edit', analysis({ proposals: [
       { id: 'prompt', canonicalName: 'prompt', nodeId: '1', inputPath: 'text', valueType: 'string', confidence: 'high', reasonCode: 'prompt', required: true },
