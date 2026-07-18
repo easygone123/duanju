@@ -23,14 +23,27 @@ vi.mock('@/app/[locale]/profile/components/comfyui/hooks', () => ({
   useComfyConnections: () => ({ data: { connections: [] } }),
 }))
 vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowEditor', () => ({
-  default: ({ value, disabled, mappingFocusRequestId }: {
-    value: { name: string }
+  default: ({ value, disabled, mappingFocusRequestId, onChange }: {
+    value: {
+      name: string
+      bindings: Array<{ variable: string; numericTransform?: { frameOffset?: 0 | 1 } }>
+    }
     disabled?: boolean
     mappingFocusRequestId?: number
+    onChange(value: unknown): void
   }) => <>
     <output aria-label="draft-name">{value.name}</output>
     <output aria-label="editor-disabled">{String(Boolean(disabled))}</output>
     <output aria-label="mapping-focus-request">{mappingFocusRequestId ?? 0}</output>
+    <output aria-label="duration-frame-offset">{
+      value.bindings.find((binding) => binding.variable === 'duration')?.numericTransform?.frameOffset
+    }</output>
+    <button type="button" onClick={() => onChange({
+      ...value,
+      bindings: value.bindings.map((binding) => binding.variable === 'duration'
+        ? { ...binding, numericTransform: { ...binding.numericTransform, frameOffset: 0 } }
+        : binding),
+    })}>CORRECT DURATION OFFSET</button>
   </>,
 }))
 vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowTestForm', () => ({
@@ -54,8 +67,19 @@ vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowActivationPanel', () 
 
 const savedVersion = {
   id: 'version-1', version: 1, purpose: 'generation' as const,
-  apiFormatJson: { '1': { class_type: 'SaveImage', inputs: {} } },
-  variableDefinitions: [], bindings: [],
+  apiFormatJson: { '1': { class_type: 'SaveImage', inputs: { length: 81 } } },
+  variableDefinitions: [
+    { name: 'duration', type: 'number' as const, required: true },
+    { name: 'fps', type: 'number' as const, required: false, defaultValue: 16 },
+  ],
+  bindings: [{
+    nodeId: '1', inputPath: 'length', variable: 'duration', valueType: 'number' as const,
+    numericTransform: {
+      sourceUnit: 'seconds' as const, targetUnit: 'frames' as const, output: 'number' as const,
+      fps: { source: 'runtime_then_fallback' as const, variable: 'fps' as const, fallback: 16 },
+      rounding: 'round' as const, frameOffset: 1 as const, allowedTargetValues: [81, 161],
+    },
+  }],
   outputs: [{ name: 'image', nodeId: '1', fieldPath: 'images', mediaType: 'image' as const, primary: true }],
   contentHash: 'hash', publishedAt: null, lastSuccessfulTestAt: null,
   validation: { valid: true, issues: [] },
@@ -186,7 +210,14 @@ describe('ComfyUI workflow library removal', () => {
   })
 
   it('keeps mapping repair guidance after save failure and clears it after save succeeds', async () => {
-    const nextVersion = { ...savedVersion, id: 'version-2', version: 2, contentHash: 'hash-2' }
+    const nextVersion = {
+      ...savedVersion,
+      id: 'version-2', version: 2, contentHash: 'hash-2',
+      bindings: savedVersion.bindings.map((binding) => ({
+        ...binding,
+        numericTransform: { ...binding.numericTransform, frameOffset: 0 as const },
+      })),
+    }
     const nextWorkflow = { ...workflow, versions: [nextVersion, savedVersion] }
     let versionCalls = 0
     apiFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
@@ -207,14 +238,30 @@ describe('ComfyUI workflow library removal', () => {
     fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
     fireEvent.click(view.getByRole('button', { name: 'EDIT FAILED MAPPINGS' }))
 
+    expect(view.getByLabelText('duration-frame-offset').textContent).toBe('1')
+    fireEvent.click(view.getByRole('button', { name: 'CORRECT DURATION OFFSET' }))
+    expect(view.getByLabelText('duration-frame-offset').textContent).toBe('0')
+
     fireEvent.click(view.getByRole('button', { name: 'Save draft' }))
     await waitFor(() => expect(view.getByRole('alert')).toBeTruthy())
     expect(view.getByText(/Repair the input or output mappings/)).toBeTruthy()
 
     fireEvent.click(view.getByRole('button', { name: 'Save draft' }))
     await waitFor(() => expect(versionCalls).toBe(2))
+    const versionPosts = apiFetchMock.mock.calls.filter(([url, init]) => (
+      String(url).endsWith('/versions') && init?.method === 'POST'
+    ))
+    expect(JSON.parse(String(versionPosts.at(-1)?.[1]?.body))).toMatchObject({
+      bindings: [{
+        variable: 'duration',
+        numericTransform: {
+          targetUnit: 'frames', frameOffset: 0, allowedTargetValues: [81, 161],
+        },
+      }],
+    })
     await waitFor(() => expect(view.queryByText(/Repair the input or output mappings/)).toBeNull())
     expect(view.getByLabelText('Saved version').textContent).toContain('v2')
+    expect(view.getByLabelText('duration-frame-offset').textContent).toBe('0')
   })
 
   it('does not let a delayed activation reload steal a newer workflow selection', async () => {

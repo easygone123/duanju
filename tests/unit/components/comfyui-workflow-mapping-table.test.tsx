@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
-import React from 'react'
-import { render } from '@testing-library/react'
+import React, { useState } from 'react'
+import { fireEvent, render } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import WorkflowMappingTable from '@/app/[locale]/profile/components/comfyui/WorkflowMappingTable'
+import type { ComfyInputBinding } from '@/lib/comfyui/types'
 import enComfyui from '../../../messages/en/comfyui.json'
 
 ;(globalThis as typeof globalThis & { React: typeof React }).React = React
@@ -37,5 +38,74 @@ describe('WorkflowMappingTable', () => {
     view.rerender(withMessages(<WorkflowMappingTable {...props} focusRequestId={1} />))
 
     expect(document.activeElement).toBe(heading)
+  })
+
+  it('renders numeric conversion settings for duration but not prompt bindings', () => {
+    const onBindingsChange = vi.fn()
+    const view = render(withMessages(<WorkflowMappingTable
+      variables={[
+        { name: 'duration', type: 'number', required: true },
+        { name: 'prompt', type: 'string', required: true },
+      ]}
+      bindings={[
+        {
+          nodeId: 'timing', inputPath: 'length', variable: 'duration', valueType: 'number',
+          numericTransform: {
+            sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+            fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+            rounding: 'round', frameOffset: 1,
+          },
+        },
+        { nodeId: 'prompt', inputPath: 'text', variable: 'prompt', valueType: 'string' },
+      ]}
+      outputs={[]}
+      mediaType="video"
+      onBindingsChange={onBindingsChange}
+      onOutputsChange={vi.fn()}
+    />))
+
+    expect(view.getAllByLabelText('Output format')).toHaveLength(1)
+    expect((view.getByLabelText('Fallback FPS') as HTMLInputElement).value).toBe('16')
+    fireEvent.change(view.getByLabelText('First-frame offset'), { target: { value: '0' } })
+    expect(onBindingsChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ numericTransform: expect.objectContaining({ frameOffset: 0 }) }),
+      expect.not.objectContaining({ numericTransform: expect.anything() }),
+    ])
+  })
+
+  it('installs and removes identity numeric transforms when the mapped variable changes', () => {
+    const onBindingsChange = vi.fn()
+    function Harness() {
+      const [bindings, setBindings] = useState<ComfyInputBinding[]>([{
+        nodeId: 'timing', inputPath: 'value', variable: 'prompt', valueType: 'string',
+      }])
+      return <WorkflowMappingTable
+        variables={[
+          { name: 'prompt', type: 'string', required: true },
+          { name: 'duration', type: 'number', required: true },
+          { name: 'fps', type: 'number', required: false },
+        ]}
+        bindings={bindings}
+        outputs={[]}
+        mediaType="video"
+        onBindingsChange={(next) => { onBindingsChange(next); setBindings(next) }}
+        onOutputsChange={vi.fn()}
+      />
+    }
+    const view = render(withMessages(<Harness />))
+
+    fireEvent.change(view.getByLabelText('Variable'), { target: { value: 'duration' } })
+    expect(onBindingsChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        variable: 'duration', valueType: 'number',
+        numericTransform: { sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number' },
+      }),
+    ])
+    fireEvent.change(view.getByLabelText('Variable'), { target: { value: 'prompt' } })
+    expect(onBindingsChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        variable: 'prompt', valueType: 'string', numericTransform: undefined,
+      }),
+    ])
   })
 })

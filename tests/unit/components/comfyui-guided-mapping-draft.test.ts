@@ -259,6 +259,23 @@ describe('guided ComfyUI mapping draft', () => {
     expect(changed.inputs.at(-1)?.numericTransform).not.toHaveProperty('allowedTargetValues')
   })
 
+  it('blocks creation while a numeric transform contains invalid editor values', () => {
+    const draft = createGuidedMappingDraft(analysis())
+    const candidate = guidedInputCandidates(draft.analysis, draft.inputs)
+      .find((item) => item.nodeId === 'timing' && item.inputPath === 'length')!
+    const invalid = updateGuidedNumericTransform(
+      addGuidedInput(draft, candidate.id, 'duration'),
+      candidate.id,
+      {
+        sourceUnit: 'seconds', targetUnit: 'frames', output: 'numeric_string',
+        fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+        rounding: 'round', frameOffset: 1, allowedTargetValues: [],
+      },
+    )
+
+    expect(guidedMappingDraftIssues(invalid)).toContain('numericTransformInvalid')
+  })
+
   it('removes an automatic input and adds a graph-verified replacement', () => {
     const initial = createGuidedMappingDraft(analysis())
     const removed = removeGuidedInput(initial, 'automatic-prompt')

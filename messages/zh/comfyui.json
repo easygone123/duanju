@@ -102,6 +102,26 @@
       "close": "关闭启用流程"
     },
     "mappingRepairHint": "请修改输入或输出映射并保存草稿；保存后再测试，系统会测试新版本。",
+    "numeric": {
+      "targetUnit": "目标单位",
+      "seconds": "秒",
+      "frames": "总帧数",
+      "outputFormat": "输出格式",
+      "number": "数字",
+      "numericString": "数字字符串",
+      "fallbackFps": "备用帧率",
+      "rounding": "取整方式",
+      "frameOffset": "首帧偏移",
+      "allowedValues": "允许的目标值",
+      "invalidAllowedValues": "请输入用逗号分隔且不重复的正数。",
+      "preview": "转换预览",
+      "errors": {
+        "invalid_source": "示例源值无效。",
+        "missing_fps": "请输入大于零的备用帧率。",
+        "invalid_frames": "转换结果不是有效的总帧数。",
+        "unsupported_target": "转换结果不在允许的目标值中。"
+      }
+    },
     "guided": {
       "wizardTitle": "创建 ComfyUI 工作流",
       "wizardHint": "选择工作流类型，上传 API Format JSON，然后确认识别到的输入和输出。",
@@ -181,7 +201,8 @@
         "outputRequired": "请至少添加一个输出映射。",
         "primaryRequired": "请选择且仅选择一个主要输出。",
         "unsafeField": "请输入有效的 ComfyUI 历史记录字段。",
-        "duplicateTarget": "输出名称以及节点字段不能重复。"
+        "duplicateTarget": "输出名称以及节点字段不能重复。",
+        "numericTransformInvalid": "请完整填写时长或帧率转换设置。"
       },
       "questionsTitle": "需要你确认",
       "questionCandidate": "{question}（{candidate}）",

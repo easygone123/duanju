@@ -102,6 +102,26 @@
       "close": "Close activation"
     },
     "mappingRepairHint": "Repair the input or output mappings and save the draft before testing the new version.",
+    "numeric": {
+      "targetUnit": "Target unit",
+      "seconds": "Seconds",
+      "frames": "Total frames",
+      "outputFormat": "Output format",
+      "number": "Number",
+      "numericString": "Numeric string",
+      "fallbackFps": "Fallback FPS",
+      "rounding": "Rounding",
+      "frameOffset": "First-frame offset",
+      "allowedValues": "Allowed target values",
+      "invalidAllowedValues": "Enter unique, positive, valid numbers separated by commas.",
+      "preview": "Conversion preview",
+      "errors": {
+        "invalid_source": "The sample source value is invalid.",
+        "missing_fps": "Enter a positive fallback FPS.",
+        "invalid_frames": "The conversion does not produce a valid frame count.",
+        "unsupported_target": "The converted value is not in the allowed target values."
+      }
+    },
     "guided": {
       "wizardTitle": "Create a ComfyUI workflow",
       "wizardHint": "Choose a workflow type, upload its API Format JSON, then confirm the detected inputs and output.",
@@ -181,7 +201,8 @@
         "outputRequired": "Add at least one output mapping.",
         "primaryRequired": "Choose exactly one primary output.",
         "unsafeField": "Enter a valid ComfyUI history field.",
-        "duplicateTarget": "Each output name and node field must be unique."
+        "duplicateTarget": "Each output name and node field must be unique.",
+        "numericTransformInvalid": "Complete the duration or FPS conversion settings."
       },
       "questionsTitle": "A few details need your confirmation",
       "questionCandidate": "{question} ({candidate})",

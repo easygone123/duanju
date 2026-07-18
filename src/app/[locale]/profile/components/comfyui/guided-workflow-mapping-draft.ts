@@ -39,6 +39,7 @@ export type GuidedMappingDraftIssue =
   | 'primaryRequired'
   | 'unsafeField'
   | 'duplicateTarget'
+  | 'numericTransformInvalid'
 
 const NUMBER_ROLE_BY_INPUT = new Map<string, CanonicalWorkflowInput>([
   ['width', 'width'],
@@ -66,6 +67,48 @@ function normalize(value: string) {
 
 function pair(nodeId: string, inputPath: string) {
   return JSON.stringify([nodeId, inputPath])
+}
+
+function validAllowedTargetValues(transform: ComfyNumericBindingTransform) {
+  const allowed = transform.allowedTargetValues
+  if (allowed === undefined) return true
+  if (allowed.length === 0) return false
+  if (allowed.some((item) => !Number.isFinite(item) || item <= 0)) return false
+  if (transform.targetUnit === 'frames'
+    && allowed.some((item) => !Number.isSafeInteger(item))) return false
+  return new Set(allowed).size === allowed.length
+}
+
+function validNumericTransform(
+  role: CanonicalWorkflowInput,
+  transform: ComfyNumericBindingTransform | undefined,
+) {
+  if (!transform || (transform.output !== 'number' && transform.output !== 'numeric_string')) {
+    return false
+  }
+  if (!validAllowedTargetValues(transform)) return false
+  if (role === 'fps') {
+    return transform.sourceUnit === 'fps'
+      && transform.targetUnit === 'fps'
+      && transform.fps === undefined
+      && transform.rounding === undefined
+      && transform.frameOffset === undefined
+  }
+  if (role !== 'duration' || transform.sourceUnit !== 'seconds') return false
+  if (transform.targetUnit === 'seconds') {
+    return transform.fps === undefined
+      && transform.rounding === undefined
+      && transform.frameOffset === undefined
+  }
+  return transform.targetUnit === 'frames'
+    && transform.fps?.source === 'runtime_then_fallback'
+    && transform.fps.variable === 'fps'
+    && Number.isFinite(transform.fps.fallback)
+    && transform.fps.fallback > 0
+    && (transform.rounding === 'round'
+      || transform.rounding === 'floor'
+      || transform.rounding === 'ceil')
+    && (transform.frameOffset === 0 || transform.frameOffset === 1)
 }
 
 function candidateId(nodeId: string, inputPath: string) {
@@ -458,6 +501,12 @@ export function guidedMappingDraftIssues(
   }
   const targets = new Set<string>()
   const names = new Set<string>()
+  for (const input of draft.inputs) {
+    if ((input.canonicalName === 'duration' || input.canonicalName === 'fps')
+      && !validNumericTransform(input.canonicalName, input.numericTransform)) {
+      issues.add('numericTransformInvalid')
+    }
+  }
   for (const output of draft.outputs) {
     if (!output.fieldPath.trim() || !isSafeDottedPath(output.fieldPath)) issues.add('unsafeField')
     const target = pair(output.nodeId, output.fieldPath)

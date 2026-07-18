@@ -10,7 +10,9 @@ import WorkflowTypePicker from '@/app/[locale]/profile/components/comfyui/Workfl
 import WorkflowAdvancedMappingInspector from '@/app/[locale]/profile/components/comfyui/WorkflowAdvancedMappingInspector'
 import WorkflowAnalysisSummary from '@/app/[locale]/profile/components/comfyui/WorkflowAnalysisSummary'
 import WorkflowMappingQuestions from '@/app/[locale]/profile/components/comfyui/WorkflowMappingQuestions'
+import WorkflowGuidedMappingEditor from '@/app/[locale]/profile/components/comfyui/WorkflowGuidedMappingEditor'
 import { buildGuidedWorkflowReview } from '@/app/[locale]/profile/components/comfyui/guided-workflow-creation'
+import { createGuidedMappingDraft } from '@/app/[locale]/profile/components/comfyui/guided-workflow-mapping-draft'
 import {
   WORKFLOW_IMPORT_KIND_META,
   type WorkflowAutoMappingResult,
@@ -568,6 +570,10 @@ describe('guided workflow translations', () => {
     ].sort())
     expect(Object.keys(zhComfyui.workflows.mappingReasons).sort())
       .toEqual(Object.keys(enComfyui.workflows.mappingReasons).sort())
+    expect(Object.keys(zhComfyui.workflows.numeric).sort())
+      .toEqual(Object.keys(enComfyui.workflows.numeric).sort())
+    expect(Object.keys(zhComfyui.workflows.numeric.errors).sort())
+      .toEqual(Object.keys(enComfyui.workflows.numeric.errors).sort())
     expect(zhComfyui.workflows.mappingReasons.unknown).toBeTruthy()
     expect(enComfyui.workflows.mappingReasons.unknown).toBeTruthy()
     expect(Object.keys(zh.types)).toEqual(canonicalKinds)
@@ -576,5 +582,58 @@ describe('guided workflow translations', () => {
       expect(Object.keys(zh.types[kind]).sort()).toEqual(['hint', 'title'])
       expect(Object.keys(en.types[kind]).sort()).toEqual(['hint', 'title'])
     }
+  })
+})
+
+describe('guided numeric mapping editor', () => {
+  it('renders duration conversion settings but leaves prompt mappings simple', () => {
+    const numericAnalysis: WorkflowAutoMappingResult = {
+      graph: {
+        timing: { class_type: 'VideoTiming', inputs: { length: 81 } },
+        prompt: { class_type: 'PrimitiveString', inputs: { text: 'A shot' } },
+        output: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+      },
+      mediaType: 'video',
+      purpose: 'generation',
+      referenceCapacity: 0,
+      issues: [],
+      proposals: [
+        {
+          id: 'duration', canonicalName: 'duration', nodeId: 'timing', inputPath: 'length',
+          valueType: 'number', confidence: 'high', required: true,
+          reasonCode: 'COMFY_MAPPING_DURATION_INPUT',
+          numericTransform: {
+            sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+            fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+            rounding: 'round', frameOffset: 1,
+          },
+        },
+        {
+          id: 'prompt', canonicalName: 'prompt', nodeId: 'prompt', inputPath: 'text',
+          valueType: 'string', confidence: 'high', required: true,
+          reasonCode: 'COMFY_MAPPING_PROMPT_POSITIVE_LABEL',
+        },
+      ],
+      outputs: [{
+        name: 'video', nodeId: 'output', fieldPath: 'videos', mediaType: 'video', primary: true,
+      }],
+    }
+    const onChange = vi.fn()
+    const view = render(withEn(<WorkflowGuidedMappingEditor
+      value={createGuidedMappingDraft(numericAnalysis)}
+      onChange={onChange}
+    />))
+
+    expect(view.getAllByLabelText('Output format')).toHaveLength(1)
+    fireEvent.change(view.getByLabelText('Allowed target values'), {
+      target: { value: '81, invalid' },
+    })
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      inputs: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'duration', numericTransform: expect.objectContaining({ allowedTargetValues: [] }),
+        }),
+      ]),
+    }))
   })
 })

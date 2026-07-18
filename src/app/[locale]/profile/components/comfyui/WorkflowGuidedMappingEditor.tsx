@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import type { CanonicalWorkflowInput } from '@/lib/comfyui/workflow-auto-mapping-types'
 import { guidedCompatibleRoles } from './guided-workflow-creation'
+import WorkflowNumericTransformEditor from './WorkflowNumericTransformEditor'
 import {
   addGuidedInput,
   addGuidedOutput,
@@ -14,6 +15,7 @@ import {
   removeGuidedOutput,
   setGuidedPrimaryOutput,
   updateGuidedInputRole,
+  updateGuidedNumericTransform,
   updateGuidedOutput,
   type GuidedWorkflowMappingDraft,
 } from './guided-workflow-mapping-draft'
@@ -22,6 +24,12 @@ interface Props {
   value: GuidedWorkflowMappingDraft
   disabled?: boolean
   onChange(value: GuidedWorkflowMappingDraft): void
+}
+
+function identityNumericTransform(role: 'duration' | 'fps', output: 'number' | 'numeric_string') {
+  return role === 'duration'
+    ? { sourceUnit: 'seconds', targetUnit: 'seconds', output } as const
+    : { sourceUnit: 'fps', targetUnit: 'fps', output } as const
 }
 
 export default function WorkflowGuidedMappingEditor({
@@ -116,6 +124,21 @@ export default function WorkflowGuidedMappingEditor({
             onClick={() => onChange(removeGuidedInput(value, proposal.id))}
             className="glass-btn-base px-3 py-2 text-xs disabled:opacity-50"
           >{t('removeMapping')}</button>
+          {(proposal.canonicalName === 'duration' || proposal.canonicalName === 'fps')
+            && proposal.valueType === 'number'
+            && <WorkflowNumericTransformEditor
+              role={proposal.canonicalName}
+              value={proposal.numericTransform ?? identityNumericTransform(
+                proposal.canonicalName,
+                'number',
+              )}
+              disabled={disabled}
+              onChange={(numericTransform) => onChange(updateGuidedNumericTransform(
+                value,
+                proposal.id,
+                numericTransform,
+              ))}
+            />}
         </div>)}
       </div>
 

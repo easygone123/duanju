@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import { useTranslations } from 'next-intl'
 import type { ComfyInputBinding, ComfyOutputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
 import { removeWorkflowOutput, setPrimaryOutput } from './workflow-ui'
+import WorkflowNumericTransformEditor from './WorkflowNumericTransformEditor'
 
 const TRANSFORMS = ['filename', 'image_ref', 'filename_list', 'bernini_image_slots'] as const
 
@@ -18,6 +19,14 @@ interface Props {
 }
 
 const inputClass = 'w-full min-w-0 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-2 py-1.5 text-xs'
+
+function identityNumericTransform(variable: string) {
+  return variable === 'duration'
+    ? { sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number' } as const
+    : variable === 'fps'
+      ? { sourceUnit: 'fps', targetUnit: 'fps', output: 'number' } as const
+      : undefined
+}
 
 export default function WorkflowMappingTable({ variables, bindings, outputs, mediaType, focusRequestId = 0, onBindingsChange, onOutputsChange }: Props) {
   const t = useTranslations('comfyui.workflows')
@@ -44,11 +53,25 @@ export default function WorkflowMappingTable({ variables, bindings, outputs, med
           <label className="text-xs">{t('inputPath')}<input className={inputClass} value={binding.inputPath} onChange={(event) => updateBinding(index, { inputPath: event.target.value })} /></label>
           <label className="text-xs">{t('variable')}<select className={inputClass} value={binding.variable} onChange={(event) => {
             const variable = variables.find((item) => item.name === event.target.value)
-            updateBinding(index, { variable: event.target.value, valueType: variable?.type ?? 'string' })
+            const numericTransform = variable?.type === 'number'
+              ? identityNumericTransform(event.target.value)
+              : undefined
+            updateBinding(index, {
+              variable: event.target.value,
+              valueType: variable?.type ?? 'string',
+              numericTransform,
+            })
           }}>{variables.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
           <label className="text-xs">{t('transform')}<select className={inputClass} value={binding.transform ?? ''} onChange={(event) => updateBinding(index, { transform: event.target.value ? event.target.value as typeof TRANSFORMS[number] : undefined })}>
             <option value="">{t('none')}</option>{TRANSFORMS.map((transform) => <option key={transform} value={transform}>{transform}</option>)}</select></label>
           <button type="button" className="self-end text-xs text-[var(--glass-danger)]" onClick={() => onBindingsChange(bindings.filter((_, itemIndex) => itemIndex !== index))}>{t('remove')}</button>
+          {binding.valueType === 'number'
+            && (binding.variable === 'duration' || binding.variable === 'fps')
+            && <WorkflowNumericTransformEditor
+              role={binding.variable}
+              value={binding.numericTransform ?? identityNumericTransform(binding.variable)!}
+              onChange={(numericTransform) => updateBinding(index, { numericTransform })}
+            />}
         </div>)}
       </div>
     </section>
