@@ -4,6 +4,7 @@ import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { serializeStructuredJsonField } from '@/lib/novel-promotion/panel-ai-data-sync'
 import { toPanelUndoApiError, undoSixGridPanelImage, type PanelUndoClient } from '@/lib/novel-promotion/six-grid/panel-undo'
+import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 function parseNullableNumberField(value: unknown): number | null {
   if (value === null || value === '') return null
@@ -75,6 +76,9 @@ export const POST = apiHandler(async (
   if (!storyboard) {
     throw new ApiError('NOT_FOUND')
   }
+  if (isGridStoryboardMode(storyboard.layoutMode)) {
+    throw new ApiError('INVALID_PARAMS', { code: 'GRID_PANEL_COUNT_FIXED' })
+  }
 
   // 自动计算正确的 panelIndex（取最大值 + 1，避免唯一约束冲突）
   const maxPanelIndex = storyboard.panels.length > 0 ? storyboard.panels[0].panelIndex : -1
@@ -137,11 +141,17 @@ export const DELETE = apiHandler(async (
 
   // 获取要删除的 Panel 信息
   const panel = await prisma.novelPromotionPanel.findUnique({
-    where: { id: panelId }
+    where: { id: panelId },
+    include: {
+      storyboard: { select: { layoutMode: true } },
+    },
   })
 
   if (!panel) {
     throw new ApiError('NOT_FOUND')
+  }
+  if (isGridStoryboardMode(panel.storyboard.layoutMode)) {
+    throw new ApiError('INVALID_PARAMS', { code: 'GRID_PANEL_COUNT_FIXED' })
   }
 
   const storyboardId = panel.storyboardId

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
+import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 /**
  * POST /api/novel-promotion/[projectId]/storyboard-group
@@ -29,12 +30,18 @@ export const POST = apiHandler(async (
   const episode = await prisma.novelPromotionEpisode.findUnique({
     where: { id: episodeId },
     include: {
-      clips: { orderBy: { createdAt: 'asc' } }
+      clips: { orderBy: { createdAt: 'asc' } },
+      novelPromotionProject: {
+        select: { storyboardGenerationMode: true },
+      },
     }
   })
 
   if (!episode) {
     throw new ApiError('NOT_FOUND')
+  }
+  if (isGridStoryboardMode(episode.novelPromotionProject.storyboardGenerationMode)) {
+    throw new ApiError('INVALID_PARAMS', { code: 'GRID_PANEL_COUNT_FIXED' })
   }
 
   const existingClips = episode.clips

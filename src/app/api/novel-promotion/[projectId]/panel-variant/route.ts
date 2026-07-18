@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { submitTask } from '@/lib/task/submitter'
 import { resolveRequiredTaskLocale } from '@/lib/task/resolve-locale'
 import { TASK_TYPE } from '@/lib/task/types'
+import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 function createPanelVariantId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -95,6 +96,7 @@ export const POST = apiHandler(async (
     where: { id: storyboardId },
     select: {
       id: true,
+      layoutMode: true,
       episode: {
         select: {
           novelPromotionProject: {
@@ -108,6 +110,9 @@ export const POST = apiHandler(async (
   })
   if (!storyboard || storyboard.episode.novelPromotionProject.projectId !== projectId) {
     throw new ApiError('NOT_FOUND')
+  }
+  if (isGridStoryboardMode(storyboard.layoutMode)) {
+    throw new ApiError('INVALID_PARAMS', { code: 'GRID_PANEL_COUNT_FIXED' })
   }
 
   const sourcePanel = await prisma.novelPromotionPanel.findUnique({ where: { id: sourcePanelId } })

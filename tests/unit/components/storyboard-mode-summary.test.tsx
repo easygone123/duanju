@@ -67,4 +67,31 @@ describe('storyboard mode summary', () => {
     expect(view.getByText('Individual panels')).toBeTruthy()
     expect(view.queryByText('Whole-sheet ratio')).toBeNull()
   })
+
+  it('marks a changed project mode as pending until the storyboard is rebuilt', () => {
+    const view = renderSummary({
+      mode: 'four_grid',
+      cellRatio: '16:9',
+      videoRatio: '16:9',
+      persistedModes: ['six_grid'],
+      onOpenSettings: vi.fn(),
+    })
+
+    expect(view.getByRole('status').textContent).toContain(
+      'This mode applies to the next storyboard rebuild',
+    )
+    expect(view.getByRole('status').textContent).toContain('Current storyboard data: 3×2 six-grid')
+  })
+
+  it('does not show a pending warning when persisted rows match the configured mode', () => {
+    const view = renderSummary({
+      mode: 'four_grid',
+      cellRatio: '16:9',
+      videoRatio: '16:9',
+      persistedModes: ['four_grid'],
+      onOpenSettings: vi.fn(),
+    })
+
+    expect(view.queryByRole('status')).toBeNull()
+  })
 })

@@ -7,6 +7,8 @@ import { TASK_TYPE } from '@/lib/task/types'
 import { buildDefaultTaskBillingInfo } from '@/lib/billing'
 import { getProjectModelConfig } from '@/lib/config-service'
 import { resolveInsertPanelUserInput } from '@/lib/novel-promotion/insert-panel'
+import { prisma } from '@/lib/prisma'
+import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 export const POST = apiHandler(async (
   request: NextRequest,
@@ -27,6 +29,20 @@ export const POST = apiHandler(async (
   if (!storyboardId || !insertAfterPanelId) {
     throw new ApiError('INVALID_PARAMS', {
     })
+  }
+
+  const storyboard = await prisma.novelPromotionStoryboard.findUnique({
+    where: { id: storyboardId },
+    select: {
+      layoutMode: true,
+      episode: { select: { novelPromotionProject: { select: { projectId: true } } } },
+    },
+  })
+  if (!storyboard || storyboard.episode.novelPromotionProject.projectId !== projectId) {
+    throw new ApiError('NOT_FOUND')
+  }
+  if (isGridStoryboardMode(storyboard.layoutMode)) {
+    throw new ApiError('INVALID_PARAMS', { code: 'GRID_PANEL_COUNT_FIXED' })
   }
 
   const projectModelConfig = await getProjectModelConfig(projectId, session.user.id)

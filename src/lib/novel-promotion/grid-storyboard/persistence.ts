@@ -71,7 +71,6 @@ export async function persistGridStoryboardOutputs(params: PersistGridParams) {
     const obsoleteStoryboards = await tx.novelPromotionStoryboard.findMany({
       where: {
         episodeId: params.episodeId,
-        layoutMode: gridSpec.mode,
         id: { notIn: plannedStoryboardIds },
       },
       select: { id: true },

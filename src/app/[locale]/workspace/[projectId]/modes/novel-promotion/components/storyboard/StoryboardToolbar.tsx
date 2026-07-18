@@ -19,6 +19,7 @@ interface StoryboardToolbarProps {
   onDownloadAllImages: () => Promise<void>
   onGenerateAllPanels: () => Promise<void>
   onAddStoryboardGroupAtStart: () => void
+  allowStoryboardGroupCreation?: boolean
   onBack: () => void
 }
 
@@ -34,6 +35,7 @@ export default function StoryboardToolbar({
   onDownloadAllImages,
   onGenerateAllPanels,
   onAddStoryboardGroupAtStart,
+  allowStoryboardGroupCreation = true,
   onBack,
 }: StoryboardToolbarProps) {
   const t = useTranslations('storyboard')
@@ -51,7 +53,7 @@ export default function StoryboardToolbar({
         onBack={onBack}
       />
 
-      <div className="flex justify-center">
+      {allowStoryboardGroupCreation && <div className="flex justify-center">
         <GlassButton
           variant="ghost"
           size="sm"
@@ -68,7 +70,7 @@ export default function StoryboardToolbar({
             </>
           )}
         </GlassButton>
-      </div>
+      </div>}
     </>
   )
 }

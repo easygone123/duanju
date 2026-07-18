@@ -17,7 +17,11 @@ const tx = vi.hoisted(() => ({
   },
   novelPromotionStoryboard: {
     findFirst: vi.fn(async () => null),
-    findMany: vi.fn(async () => []),
+    findMany: vi.fn(async () => [] as Array<{
+      id: string
+      clipId?: string
+      layoutMode?: string
+    }>),
     deleteMany: vi.fn(async () => ({ count: 0 })),
     updateMany: vi.fn(async () => ({ count: 0 })),
     upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => {
@@ -187,6 +191,51 @@ describe('grid storyboard persistence', () => {
     expect(state.voices).toHaveLength(4)
   })
 
+  it('replaces stale six-grid and individual storyboards when rebuilding as four-grid', async () => {
+    tx.novelPromotionStoryboard.findMany.mockResolvedValueOnce([
+      { id: 'stale-six-grid' },
+      { id: 'stale-individual' },
+    ])
+
+    await persistGridStoryboardOutputs({
+      episodeId: 'episode-1',
+      runId: 'run-1',
+      clipPanels: [group('four_grid')],
+      voiceLineRows: null,
+      runSnapshot: runSnapshot('four_grid'),
+    })
+
+    const plannedId = stableGridStoryboardId(
+      'episode-1',
+      group('four_grid').groupKey,
+      'four_grid',
+    )
+    expect(tx.novelPromotionStoryboard.findMany).toHaveBeenCalledWith({
+      where: {
+        episodeId: 'episode-1',
+        id: { notIn: [plannedId] },
+      },
+      select: { id: true },
+    })
+    expect(tx.novelPromotionVoiceLine.updateMany).toHaveBeenCalledWith({
+      where: {
+        episodeId: 'episode-1',
+        matchedStoryboardId: { in: ['stale-six-grid', 'stale-individual'] },
+      },
+      data: {
+        matchedPanelId: null,
+        matchedStoryboardId: null,
+        matchedPanelIndex: null,
+      },
+    })
+    expect(tx.novelPromotionStoryboard.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['stale-six-grid', 'stale-individual'] } },
+    })
+    expect(state.storyboards).toHaveLength(1)
+    expect(state.storyboards[0]).toMatchObject({ layoutMode: 'four_grid', panelCount: 4 })
+    expect(state.panels.map((panel) => panel.panelIndex)).toEqual([0, 1, 2, 3])
+  })
+
   it('fails closed when group panel count does not match the immutable grid spec', async () => {
     const invalid = { ...group('four_grid'), finalPanels: panels(6) }
     await expect(persistGridStoryboardOutputs({
@@ -340,6 +389,55 @@ describe('grid storyboard persistence', () => {
     expect(state.storyboards[0]).not.toHaveProperty('layoutMode')
     expect(state.panels).toHaveLength(1)
     expect(state.panels[0]).not.toHaveProperty('gridCellIndex')
+  })
+
+  it('replaces stale grid storyboards when rebuilding as individual panels', async () => {
+    tx.novelPromotionStoryboard.findMany.mockResolvedValueOnce([
+      { id: 'stale-four-grid', clipId: 'clip-old', layoutMode: 'four_grid' },
+      { id: 'stale-six-grid', clipId: 'clip-old', layoutMode: 'six_grid' },
+    ])
+    const snapshot = Object.freeze({
+      ...runSnapshot('four_grid'),
+      runSettings: Object.freeze({
+        storyboardGenerationMode: 'individual' as const,
+        sixGridCellAspectRatio: null,
+        gridSpec: null,
+        sixGridProcessingOrder: 'crop_then_panel_upscale' as const,
+        storyboardUpscaleModel: null,
+        dialogueVideoModel: null,
+      }),
+    })
+
+    await persistStoryboardOutputs({
+      episodeId: 'episode-1',
+      runId: 'run-1',
+      clipPanels: [{ clipId: 'clip-1', clipIndex: 1, finalPanels: [panels(4)[0]] }],
+      voiceLineRows: null,
+      runSnapshot: snapshot,
+    })
+
+    expect(tx.novelPromotionStoryboard.findMany).toHaveBeenCalledWith({
+      where: { episodeId: 'episode-1' },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, clipId: true, layoutMode: true },
+    })
+    expect(tx.novelPromotionVoiceLine.updateMany).toHaveBeenCalledWith({
+      where: {
+        episodeId: 'episode-1',
+        matchedStoryboardId: { in: ['stale-four-grid', 'stale-six-grid'] },
+      },
+      data: {
+        matchedPanelId: null,
+        matchedStoryboardId: null,
+        matchedPanelIndex: null,
+      },
+    })
+    expect(tx.novelPromotionStoryboard.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['stale-four-grid', 'stale-six-grid'] } },
+    })
+    expect(state.storyboards).toHaveLength(1)
+    expect(state.storyboards[0]).not.toHaveProperty('layoutMode')
+    expect(state.panels).toHaveLength(1)
   })
 
   it('keeps the legacy six-grid persistence export and derives its missing spec safely', async () => {

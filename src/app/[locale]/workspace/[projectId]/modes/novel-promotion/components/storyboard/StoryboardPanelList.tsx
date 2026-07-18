@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { NovelPromotionPanel, NovelPromotionStoryboard } from '@/types/project'
 import { StoryboardPanel } from './hooks/useStoryboardState'
 import { PanelEditData } from '../PanelEditForm'
@@ -11,7 +11,7 @@ import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import type { SixGridUpscaleWorkflow } from './SixGridGroupControls'
 import { isSixGridPanelBusy } from '@/lib/query/hooks/useSixGridStoryboard'
 import { VirtualCardRange } from '@/components/virtualization/VirtualCardRange'
-import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
+import { isGridStoryboardMode, resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 interface StoryboardPanelListProps {
   storyboard: NovelPromotionStoryboard
@@ -95,9 +95,23 @@ export default function StoryboardPanelList({
   onUndoSixGridPanel,
 }: StoryboardPanelListProps) {
   const [activeEditPanelId, setActiveEditPanelId] = useState<string | null>(null)
-  const displayImages = useMemo(() => textPanels.map((panel) => panel.imageUrl || null), [textPanels])
+  const gridSpec = isGridStoryboardMode(storyboard.layoutMode)
+    ? resolveStoryboardGridSpec(
+      storyboard.layoutMode,
+      storyboard.sixGridCellAspectRatio === '9:16' ? '9:16' : '16:9',
+    )
+    : null
+  const displayedPanels = gridSpec ? textPanels.slice(0, gridSpec.panelCount) : textPanels
+  const displayImages = useMemo(
+    () => displayedPanels.map((panel) => panel.imageUrl || null),
+    [displayedPanels],
+  )
   const isVertical = ASPECT_RATIO_CONFIGS[videoRatio]?.isVertical ?? false
-  const pinnedPanelIndices = textPanels.flatMap((panel, index) => {
+  const gridColumnsClass = gridSpec?.columns === 2 ? 'grid-cols-2' : 'grid-cols-3'
+  const panelColumnsClass = gridSpec
+    ? gridColumnsClass
+    : isVertical ? 'grid-cols-5' : 'grid-cols-3'
+  const pinnedPanelIndices = displayedPanels.flatMap((panel, index) => {
     const saveState = saveStateByPanel[panel.id]
     const isBusy = savingPanels.has(panel.id)
       || deletingPanelIds.has(panel.id)
@@ -113,15 +127,15 @@ export default function StoryboardPanelList({
 
   return (
     <VirtualCardRange
-      items={textPanels}
+      items={displayedPanels}
       getKey={(panel, index) => panel.id || String(index)}
       estimatedCardHeight={760}
       estimatedRowHeight={776}
       overscan={1}
       pinnedIndices={pinnedPanelIndices}
-      className={`grid gap-4 ${isVertical ? 'grid-cols-5' : 'grid-cols-3'} ${isSubmittingStoryboardTextTask ? 'opacity-50 pointer-events-none' : ''}`}
+      className={`grid gap-4 ${panelColumnsClass} ${isSubmittingStoryboardTextTask ? 'opacity-50 pointer-events-none' : ''}`}
       cardClassName="relative group/panel h-full"
-      cardStyle={(_panel, index) => ({ zIndex: textPanels.length - index })}
+      cardStyle={(_panel, index) => ({ zIndex: displayedPanels.length - index })}
       renderCard={(panel, index) => {
         const imageUrl = displayImages[index]
         const globalPanelNumber = storyboardStartIndex + index + 1
@@ -162,7 +176,7 @@ export default function StoryboardPanelList({
                 setActiveEditPanelId(panel.id)
                 onPanelUpdate(panel.id, panel, updates)
               }}
-              onDelete={() => onPanelDelete(panel.id)}
+              onDelete={gridSpec ? undefined : () => onPanelDelete(panel.id)}
               onOpenCharacterPicker={() => onOpenCharacterPicker(panel.id)}
               onOpenLocationPicker={() => onOpenLocationPicker(panel.id)}
               onRetrySave={() => onRetryPanelSave(panel.id)}
@@ -182,8 +196,8 @@ export default function StoryboardPanelList({
               onCancelCandidate={onCancelPanelCandidate}
               onClearError={() => onClearPanelTaskError(panel.id)}
               onPreviewImage={onPreviewImage}
-              onInsertAfter={() => onInsertAfter(index)}
-              onVariant={() => onVariant(index)}
+              onInsertAfter={gridSpec ? undefined : () => onInsertAfter(index)}
+              onVariant={gridSpec ? undefined : () => onVariant(index)}
               isInsertDisabled={isInsertDisabled(panel.id)}
               previousImageUrl={panel.previousImageUrl}
               sixGridActions={isGridStoryboardMode(storyboard.layoutMode) ? {

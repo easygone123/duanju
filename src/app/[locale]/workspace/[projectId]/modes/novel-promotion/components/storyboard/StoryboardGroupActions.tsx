@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import React, { useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import { resolveTaskPresentationState } from '@/lib/task/presentation'
 import TaskStatusInline from '@/components/task/TaskStatusInline'
@@ -13,6 +13,7 @@ interface StoryboardGroupActionsProps {
   isSubmittingStoryboardTextTask: boolean
   currentRunningCount: number
   pendingCount: number
+  isGridLayout?: boolean
   onRegenerateText: () => void
   onGenerateAllIndividually: () => void
   onAddPanel: () => void
@@ -25,6 +26,7 @@ export default function StoryboardGroupActions({
   isSubmittingStoryboardTextTask,
   currentRunningCount,
   pendingCount,
+  isGridLayout = false,
   onRegenerateText,
   onGenerateAllIndividually,
   onAddPanel,
@@ -90,14 +92,14 @@ export default function StoryboardGroupActions({
         </GlassButton>
       )}
 
-      <GlassButton
+      {!isGridLayout && <GlassButton
         variant="secondary"
         size="sm"
         onClick={onAddPanel}
       >
         <AppIcon name="plusMd" className="h-3.5 w-3.5" />
         <span>{t('group.addPanel')}</span>
-      </GlassButton>
+      </GlassButton>}
 
       <GlassButton
         variant="danger"
@@ -112,4 +114,3 @@ export default function StoryboardGroupActions({
     </div>
   )
 }
-

@@ -16,6 +16,7 @@ interface Props {
   mode: StoryboardGenerationMode
   cellRatio: SixGridCellAspectRatio | null
   videoRatio: string | null | undefined
+  persistedModes?: StoryboardGenerationMode[]
   onOpenSettings(): void
 }
 
@@ -23,6 +24,7 @@ export default function StoryboardModeSummary({
   mode,
   cellRatio,
   videoRatio,
+  persistedModes = [],
   onOpenSettings,
 }: Props) {
   const t = useTranslations('novelPromotion.storyboardRunSettings')
@@ -31,6 +33,9 @@ export default function StoryboardModeSummary({
   const spec = isGridStoryboardMode(mode)
     ? resolveStoryboardGridSpec(mode, selectedRatio)
     : null
+  const activePersistedModes = [...new Set(persistedModes)]
+  const modeChangePending = activePersistedModes.length > 0
+    && (activePersistedModes.length !== 1 || activePersistedModes[0] !== mode)
 
   return <section
     className="mb-4 flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--glass-stroke)] bg-[var(--glass-bg)] p-4"
@@ -51,6 +56,14 @@ export default function StoryboardModeSummary({
           <dd className="font-medium text-[var(--glass-text-secondary)]">{spec.sheetAspectRatio}</dd>
         </div>
       </dl>}
+      {modeChangePending && <p
+        role="status"
+        className="mt-2 text-xs text-[var(--glass-tone-warning-fg)]"
+      >
+        {t('pendingRebuild', {
+          current: activePersistedModes.map((persistedMode) => t(`mode.${persistedMode}`)).join(', '),
+        })}
+      </p>}
     </div>
     <button
       type="button"

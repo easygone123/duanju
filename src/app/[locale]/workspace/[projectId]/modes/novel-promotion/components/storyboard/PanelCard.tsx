@@ -48,7 +48,7 @@ interface PanelCardProps {
   candidateData: PanelCandidateData | null
   previousImageUrl?: string | null  // 支持撤回
   onUpdate: (updates: Partial<PanelEditData>) => void
-  onDelete: () => void
+  onDelete?: () => void
   onOpenCharacterPicker: () => void
   onOpenLocationPicker: () => void
   onRetrySave?: () => void
@@ -115,7 +115,7 @@ export default function PanelCard({
       data-storyboard-id={storyboardId}
     >
       {/* 删除按钮 - 右上角外部 */}
-      {!isModifying && !isDeleting && (
+      {onDelete && !isModifying && !isDeleting && (
         <button
           onClick={onDelete}
           className="absolute -top-2 -right-2 z-10 opacity-0 group-hover/card:opacity-100 transition-opacity bg-[var(--glass-tone-danger-fg)] hover:bg-[var(--glass-tone-danger-fg)] text-white w-5 h-5 rounded-full flex items-center justify-center text-xs shadow-md"

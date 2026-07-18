@@ -23,6 +23,11 @@ export default function StoryboardStage() {
       mode={runtime.storyboardGenerationMode}
       cellRatio={runtime.sixGridCellAspectRatio}
       videoRatio={runtime.videoRatio}
+      persistedModes={storyboards.map((storyboard) => (
+        storyboard.layoutMode === 'four_grid' || storyboard.layoutMode === 'six_grid'
+          ? storyboard.layoutMode
+          : 'individual'
+      ))}
       onOpenSettings={() => runtime.onStageChange('config')}
     />
     <StoryboardStageView
@@ -31,6 +36,7 @@ export default function StoryboardStage() {
         storyboards={storyboards}
         clips={clips}
         videoRatio={runtime.videoRatio || '9:16'}
+        storyboardGenerationMode={runtime.storyboardGenerationMode}
         onBack={() => runtime.onStageChange('script')}
         onNext={async () => runtime.onStageChange('videos')}
         isTransitioning={runtime.isTransitioning}

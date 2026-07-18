@@ -531,6 +531,17 @@ describe('worker script-to-storyboard behavior', () => {
     expect(replaceArtifactsBatchMock).toHaveBeenCalledWith(expect.objectContaining({
       artifactTypes: expect.arrayContaining(['storyboard.six_grid.plan']),
     }))
+    expect(persistStoryboardOutputsMock).toHaveBeenCalledWith(expect.objectContaining({
+      episodeId: 'episode-1',
+      runId: 'run-test-storyboard',
+      clipPanels: [expect.objectContaining({
+        groupKey: 'four-grid:1:clip-1:1',
+        finalPanels: expect.any(Array),
+      })],
+      runSnapshot: expect.objectContaining({
+        runSettings: expect.objectContaining({ storyboardGenerationMode: 'four_grid' }),
+      }),
+    }))
     expect(result).toMatchObject({
       retryStepKey: 'six_grid_episode_plan',
       voiceLineCount: 0,

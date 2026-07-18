@@ -10,6 +10,8 @@ import StoryboardToolbar from './StoryboardToolbar'
 import StoryboardCanvas from './StoryboardCanvas'
 import { useStoryboardStageController } from './hooks/useStoryboardStageController'
 import { useStoryboardModalRuntime } from './hooks/useStoryboardModalRuntime'
+import type { StoryboardGenerationMode } from '@/lib/novel-promotion/six-grid/contracts'
+import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 interface StoryboardStageProps {
   projectId: string
@@ -17,6 +19,7 @@ interface StoryboardStageProps {
   storyboards: NovelPromotionStoryboard[]
   clips: NovelPromotionClip[]
   videoRatio: string
+  storyboardGenerationMode?: StoryboardGenerationMode
   onBack: () => void
   onNext: () => void
   isTransitioning?: boolean
@@ -28,6 +31,7 @@ export default function StoryboardStage({
   storyboards: initialStoryboards,
   clips,
   videoRatio,
+  storyboardGenerationMode = 'individual',
   onBack,
   onNext,
   isTransitioning = false,
@@ -151,6 +155,7 @@ export default function StoryboardStage({
     updatePhotographyPlanMutation,
     updatePanelActingNotesMutation,
   })
+  const allowStoryboardGroupCreation = !isGridStoryboardMode(storyboardGenerationMode)
 
   return (
       <StoryboardStageShell
@@ -171,6 +176,7 @@ export default function StoryboardStage({
           onDownloadAllImages={downloadAllImages}
           onGenerateAllPanels={handleGenerateAllPanels}
           onAddStoryboardGroupAtStart={() => addStoryboardGroup(0)}
+          allowStoryboardGroupCreation={allowStoryboardGroupCreation}
           onBack={onBack}
         />
 
@@ -225,6 +231,7 @@ export default function StoryboardStage({
           onPanelVariant={generatePanelVariant}
           addStoryboardGroup={addStoryboardGroup}
           addingStoryboardGroup={addingStoryboardGroup}
+          allowStoryboardGroupCreation={allowStoryboardGroupCreation}
           setLocalStoryboards={setLocalStoryboards}
           sixGridUpscaleWorkflow={sixGridUpscaleWorkflow}
           sixGridTaskStoryboardId={sixGridTaskStoryboardId}

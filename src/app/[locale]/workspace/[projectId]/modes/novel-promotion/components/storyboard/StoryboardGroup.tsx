@@ -210,6 +210,7 @@ export default function StoryboardGroup({
           isSubmittingStoryboardTextTask={isSubmittingStoryboardTextTask}
           currentRunningCount={currentRunningCount}
           pendingCount={pendingCount}
+          isGridLayout={isGridStoryboardMode(storyboard.layoutMode)}
           onRegenerateText={onRegenerateText}
           onGenerateAllIndividually={onGenerateAllIndividually}
           onAddPanel={onAddPanel}

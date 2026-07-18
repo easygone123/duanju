@@ -273,14 +273,45 @@ export async function persistStoryboardOutputs(params: {
     const panelIdByStoryboardRef = new Map<string, string>()
     const storyboardIdByRef = new Map<string, string>()
 
-    for (const clipEntry of params.clipPanels) {
-      const existingStoryboard = await tx.novelPromotionStoryboard.findFirst({
-        where: { clipId: clipEntry.clipId, layoutMode: 'individual' },
-        orderBy: { createdAt: 'asc' },
-        select: { id: true },
+    const existingStoryboards = await tx.novelPromotionStoryboard.findMany({
+      where: { episodeId: params.episodeId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, clipId: true, layoutMode: true },
+    })
+    const existingIndividualIdByClip = new Map<string, string>()
+    for (const storyboard of existingStoryboards) {
+      if (storyboard.layoutMode === 'individual' && !existingIndividualIdByClip.has(storyboard.clipId)) {
+        existingIndividualIdByClip.set(storyboard.clipId, storyboard.id)
+      }
+    }
+    const plannedStoryboardIds = params.clipPanels.map((clipEntry) => (
+      existingIndividualIdByClip.get(clipEntry.clipId)
+      || `individual:${params.episodeId}:${clipEntry.clipId}`
+    ))
+    const obsoleteStoryboardIds = existingStoryboards
+      .map((storyboard) => storyboard.id)
+      .filter((storyboardId) => !plannedStoryboardIds.includes(storyboardId))
+    if (obsoleteStoryboardIds.length > 0) {
+      await tx.novelPromotionVoiceLine.updateMany({
+        where: {
+          episodeId: params.episodeId,
+          matchedStoryboardId: { in: obsoleteStoryboardIds },
+        },
+        data: {
+          matchedPanelId: null,
+          matchedStoryboardId: null,
+          matchedPanelIndex: null,
+        },
       })
+      await tx.novelPromotionStoryboard.deleteMany({
+        where: { id: { in: obsoleteStoryboardIds } },
+      })
+    }
+
+    for (const clipEntry of params.clipPanels) {
+      const existingStoryboardId = existingIndividualIdByClip.get(clipEntry.clipId)
       const storyboard = await tx.novelPromotionStoryboard.upsert({
-        where: { id: existingStoryboard?.id || `individual:${params.episodeId}:${clipEntry.clipId}` },
+        where: { id: existingStoryboardId || `individual:${params.episodeId}:${clipEntry.clipId}` },
         create: {
           id: `individual:${params.episodeId}:${clipEntry.clipId}`,
           clipId: clipEntry.clipId,

@@ -73,6 +73,7 @@ interface StoryboardCanvasProps {
   ) => Promise<void>
   addStoryboardGroup: (insertIndex: number) => Promise<void>
   addingStoryboardGroup: boolean
+  allowStoryboardGroupCreation?: boolean
   setLocalStoryboards: React.Dispatch<React.SetStateAction<NovelPromotionStoryboard[]>>
   sixGridUpscaleWorkflow: SixGridUpscaleWorkflow | null
   sixGridTaskStoryboardId: string | null
@@ -135,6 +136,7 @@ export default function StoryboardCanvas({
   onPanelVariant,
   addStoryboardGroup,
   addingStoryboardGroup,
+  allowStoryboardGroupCreation = true,
   setLocalStoryboards,
   sixGridUpscaleWorkflow,
   sixGridTaskStoryboardId,
@@ -267,7 +269,7 @@ export default function StoryboardCanvas({
               onUndoSixGridPanel={(panelId, currentMediaId, previousMediaId) => onUndoSixGridPanel(storyboard.id, panelId, currentMediaId, previousMediaId)}
             />
 
-            <div className="flex justify-center py-2">
+            {allowStoryboardGroupCreation && <div className="flex justify-center py-2">
               <GlassButton
                 variant="ghost"
                 size="sm"
@@ -278,7 +280,7 @@ export default function StoryboardCanvas({
                 <AppIcon name="plusAlt" className="h-3 w-3" />
                 <span>{t('group.insertHere')}</span>
               </GlassButton>
-            </div>
+            </div>}
           </div>
         )
       }}

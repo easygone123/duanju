@@ -158,6 +158,7 @@
     "currentModeTitle": "Current storyboard mode",
     "layoutLabel": "Layout",
     "changeInStorySettings": "Change in story settings",
+    "pendingRebuild": "This mode applies to the next storyboard rebuild. Current storyboard data: {current}.",
     "recommended": "Recommended",
     "fourGridHint": "Recommended: the full sheet uses the common 16:9 or 9:16 ratio supported by most image models.",
     "sixGridRatioWarning": "Requires a model that supports the uncommon 8:3 or 27:32 full-sheet ratio. If unsupported, switch to four-grid.",
