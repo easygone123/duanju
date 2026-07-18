@@ -104,6 +104,8 @@
     "mappingRepairHint": "请修改输入或输出映射并保存草稿；保存后再测试，系统会测试新版本。",
     "numeric": {
       "targetUnit": "目标单位",
+      "sampleDuration": "示例时长",
+      "runtimeFps": "运行帧率",
       "seconds": "秒",
       "frames": "总帧数",
       "outputFormat": "输出格式",

@@ -9,6 +9,7 @@ import {
   isComfyWorkflowLinkTuple,
   isSafeDottedPath,
 } from '@/lib/comfyui/workflow-schema'
+import { decimalEquals } from '@/lib/comfyui/numeric-binding'
 import type {
   ComfyBindingTransform,
   ComfyNumericBindingTransform,
@@ -32,6 +33,7 @@ export interface GuidedWorkflowMappingDraft {
   analysis: WorkflowAutoMappingResult
   inputs: WorkflowMappingProposal[]
   outputs: ComfyOutputBinding[]
+  compatibleRolesByInputId: Record<string, CanonicalWorkflowInput[]>
 }
 
 export type GuidedMappingDraftIssue =
@@ -76,7 +78,9 @@ function validAllowedTargetValues(transform: ComfyNumericBindingTransform) {
   if (allowed.some((item) => !Number.isFinite(item) || item <= 0)) return false
   if (transform.targetUnit === 'frames'
     && allowed.some((item) => !Number.isSafeInteger(item))) return false
-  return new Set(allowed).size === allowed.length
+  return !allowed.some((item, index) => allowed.slice(0, index).some((previous) => (
+    transform.targetUnit === 'frames' ? previous === item : decimalEquals(previous, item)
+  )))
 }
 
 function validNumericTransform(
@@ -288,7 +292,20 @@ export function createGuidedMappingDraft(
     analysis,
     inputs: analysis.proposals.map((proposal) => ({ ...proposal })),
     outputs: analysis.outputs.map((output) => ({ ...output })),
+    compatibleRolesByInputId: Object.fromEntries(analysis.proposals.map((proposal) => [
+      proposal.id,
+      guidedCompatibleRoles(proposal),
+    ])),
   }
+}
+
+export function guidedDraftCompatibleRoles(
+  draft: GuidedWorkflowMappingDraft,
+  proposalId: string,
+): CanonicalWorkflowInput[] {
+  const proposal = draft.inputs.find((item) => item.id === proposalId)
+  if (!proposal) invalidDraft()
+  return draft.compatibleRolesByInputId[proposalId] ?? guidedCompatibleRoles(proposal)
 }
 
 export function guidedInputCandidates(
@@ -347,7 +364,14 @@ export function addGuidedInput(
     ...(referenceIndex === undefined ? {} : { referenceIndex }),
     ...(candidate.nodeTitle ? { nodeTitle: candidate.nodeTitle } : {}),
   }
-  return { ...draft, inputs: [...draft.inputs, proposal] }
+  return {
+    ...draft,
+    inputs: [...draft.inputs, proposal],
+    compatibleRolesByInputId: {
+      ...draft.compatibleRolesByInputId,
+      [proposal.id]: [...candidate.roles],
+    },
+  }
 }
 
 export function updateGuidedInputRole(
@@ -358,7 +382,7 @@ export function updateGuidedInputRole(
   const index = draft.inputs.findIndex((proposal) => proposal.id === proposalId)
   if (index < 0) invalidDraft()
   const current = draft.inputs[index]!
-  if (!guidedCompatibleRoles(current).includes(role)) invalidDraft()
+  if (!guidedDraftCompatibleRoles(draft, proposalId).includes(role)) invalidDraft()
   const originalInputs = draft.analysis.graph[current.nodeId]?.inputs
   const originalValue = originalInputs
     ? readInputValue(originalInputs, current.inputPath)
@@ -408,7 +432,13 @@ export function removeGuidedInput(
   proposalId: string,
 ): GuidedWorkflowMappingDraft {
   if (!draft.inputs.some((proposal) => proposal.id === proposalId)) invalidDraft()
-  return { ...draft, inputs: draft.inputs.filter((proposal) => proposal.id !== proposalId) }
+  const compatibleRolesByInputId = { ...draft.compatibleRolesByInputId }
+  delete compatibleRolesByInputId[proposalId]
+  return {
+    ...draft,
+    inputs: draft.inputs.filter((proposal) => proposal.id !== proposalId),
+    compatibleRolesByInputId,
+  }
 }
 
 export function guidedOutputNodeCandidates(analysis: WorkflowAutoMappingResult) {

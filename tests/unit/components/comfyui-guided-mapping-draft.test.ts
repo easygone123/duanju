@@ -276,6 +276,40 @@ describe('guided ComfyUI mapping draft', () => {
     expect(guidedMappingDraftIssues(invalid)).toContain('numericTransformInvalid')
   })
 
+  it('treats decimal-safe duplicate allowed values as a blocking numeric issue', () => {
+    const draft = createGuidedMappingDraft(analysis())
+    const candidate = guidedInputCandidates(draft.analysis, draft.inputs)
+      .find((item) => item.nodeId === 'timing' && item.inputPath === 'length')!
+    const invalid = updateGuidedNumericTransform(
+      addGuidedInput(draft, candidate.id, 'duration'),
+      candidate.id,
+      {
+        sourceUnit: 'seconds', targetUnit: 'seconds', output: 'numeric_string',
+        allowedTargetValues: [0.30000000000000004, 0.3],
+      },
+    )
+
+    expect(guidedMappingDraftIssues(invalid)).toContain('numericTransformInvalid')
+  })
+
+  it('preserves a width candidate role across duration conversion round trips', () => {
+    const draft = createGuidedMappingDraft(analysis())
+    const candidate = guidedInputCandidates(draft.analysis, draft.inputs)
+      .find((item) => item.nodeId === 'size' && item.inputPath === 'width')!
+    const duration = addGuidedInput(draft, candidate.id, 'duration')
+
+    const width = updateGuidedInputRole(duration, candidate.id, 'width')
+    expect(width.inputs.at(-1)).toMatchObject({
+      canonicalName: 'width', numericTransform: undefined,
+    })
+
+    const durationAgain = updateGuidedInputRole(width, candidate.id, 'duration')
+    expect(durationAgain.inputs.at(-1)).toMatchObject({
+      canonicalName: 'duration',
+      numericTransform: { sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number' },
+    })
+  })
+
   it('removes an automatic input and adds a graph-verified replacement', () => {
     const initial = createGuidedMappingDraft(analysis())
     const removed = removeGuidedInput(initial, 'automatic-prompt')

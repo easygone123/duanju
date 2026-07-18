@@ -3,12 +3,12 @@
 import React, { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import type { CanonicalWorkflowInput } from '@/lib/comfyui/workflow-auto-mapping-types'
-import { guidedCompatibleRoles } from './guided-workflow-creation'
 import WorkflowNumericTransformEditor from './WorkflowNumericTransformEditor'
 import {
   addGuidedInput,
   addGuidedOutput,
   guidedInputCandidates,
+  guidedDraftCompatibleRoles,
   guidedMappingDraftIssues,
   guidedOutputNodeCandidates,
   removeGuidedInput,
@@ -112,7 +112,7 @@ export default function WorkflowGuidedMappingEditor({
               ))}
               className="glass-input mt-1 w-full min-w-0 px-2 py-2 text-sm"
             >
-              {guidedCompatibleRoles(proposal).map((role) => <option key={role} value={role}>
+              {guidedDraftCompatibleRoles(value, proposal.id).map((role) => <option key={role} value={role}>
                 {canonical(role)}
               </option>)}
             </select>

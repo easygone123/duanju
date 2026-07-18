@@ -104,6 +104,8 @@
     "mappingRepairHint": "Repair the input or output mappings and save the draft before testing the new version.",
     "numeric": {
       "targetUnit": "Target unit",
+      "sampleDuration": "Sample duration",
+      "runtimeFps": "Runtime FPS",
       "seconds": "Seconds",
       "frames": "Total frames",
       "outputFormat": "Output format",

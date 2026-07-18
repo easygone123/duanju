@@ -49,6 +49,24 @@ describe('WorkflowNumericTransformEditor', () => {
     }))
   })
 
+  it('edits preview samples and shows the selected rounding calculation', () => {
+    function Harness() {
+      const [value, setValue] = useState<ComfyNumericBindingTransform>({
+        sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+        fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 24 },
+        rounding: 'round', frameOffset: 1,
+      })
+      return <WorkflowNumericTransformEditor role="duration" value={value} onChange={setValue} />
+    }
+    const view = render(withMessages(<Harness />))
+
+    fireEvent.change(view.getByLabelText('Sample duration'), { target: { value: '5.1' } })
+    fireEvent.change(view.getByLabelText('Runtime FPS'), { target: { value: '16' } })
+    fireEvent.change(view.getByLabelText('Rounding'), { target: { value: 'floor' } })
+
+    expect(view.getByText(/floor\(5\.1.*16\).*1.*82/)).toBeTruthy()
+  })
+
   it('previews fractional numeric-string seconds', () => {
     const view = render(withMessages(<WorkflowNumericTransformEditor
       role="duration"
@@ -79,6 +97,24 @@ describe('WorkflowNumericTransformEditor', () => {
       allowedTargetValues: [],
     }))
     expect(view.getByRole('alert').textContent).toContain('valid numbers')
+  })
+
+  it('rejects decimal-safe duplicate allowed values without discarding the text', () => {
+    const onChange = vi.fn()
+    const view = render(withMessages(<WorkflowNumericTransformEditor
+      role="duration"
+      value={{ sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number' }}
+      onChange={onChange}
+    />))
+
+    const allowedValues = view.getByLabelText('Allowed target values') as HTMLInputElement
+    fireEvent.change(allowedValues, { target: { value: '0.30000000000000004, 0.3' } })
+
+    expect(allowedValues.value).toBe('0.30000000000000004, 0.3')
+    expect(view.getByRole('alert')).toBeTruthy()
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      allowedTargetValues: [],
+    }))
   })
 
   it('locks FPS mappings to fps units and hides frame conversion controls', () => {

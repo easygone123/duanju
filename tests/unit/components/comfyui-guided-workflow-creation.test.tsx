@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React, { createElement } from 'react'
+import React, { createElement, useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, createEvent, fireEvent, render } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
@@ -12,7 +12,12 @@ import WorkflowAnalysisSummary from '@/app/[locale]/profile/components/comfyui/W
 import WorkflowMappingQuestions from '@/app/[locale]/profile/components/comfyui/WorkflowMappingQuestions'
 import WorkflowGuidedMappingEditor from '@/app/[locale]/profile/components/comfyui/WorkflowGuidedMappingEditor'
 import { buildGuidedWorkflowReview } from '@/app/[locale]/profile/components/comfyui/guided-workflow-creation'
-import { createGuidedMappingDraft } from '@/app/[locale]/profile/components/comfyui/guided-workflow-mapping-draft'
+import {
+  addGuidedInput,
+  createGuidedMappingDraft,
+  guidedInputCandidates,
+  type GuidedWorkflowMappingDraft,
+} from '@/app/[locale]/profile/components/comfyui/guided-workflow-mapping-draft'
 import {
   WORKFLOW_IMPORT_KIND_META,
   type WorkflowAutoMappingResult,
@@ -625,6 +630,8 @@ describe('guided numeric mapping editor', () => {
     />))
 
     expect(view.getAllByLabelText('Output format')).toHaveLength(1)
+    expect(view.getByLabelText('Sample duration')).toBeTruthy()
+    expect(view.getByLabelText('Runtime FPS')).toBeTruthy()
     fireEvent.change(view.getByLabelText('Allowed target values'), {
       target: { value: '81, invalid' },
     })
@@ -635,5 +642,36 @@ describe('guided numeric mapping editor', () => {
         }),
       ]),
     }))
+  })
+
+  it('keeps a numeric candidate original role available after mapping it as duration', () => {
+    const numericCandidateAnalysis: WorkflowAutoMappingResult = {
+      graph: {
+        size: { class_type: 'EmptyLatentImage', inputs: { width: 832 } },
+        output: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+      },
+      mediaType: 'video', purpose: 'generation', referenceCapacity: 0,
+      proposals: [], issues: [],
+      outputs: [{
+        name: 'video', nodeId: 'output', fieldPath: 'videos', mediaType: 'video', primary: true,
+      }],
+    }
+    const initial = createGuidedMappingDraft(numericCandidateAnalysis)
+    const widthCandidate = guidedInputCandidates(initial.analysis, initial.inputs)
+      .find((candidate) => candidate.nodeId === 'size' && candidate.inputPath === 'width')!
+    const duration = addGuidedInput(initial, widthCandidate.id, 'duration')
+
+    function Harness() {
+      const [value, setValue] = useState<GuidedWorkflowMappingDraft>(duration)
+      return <WorkflowGuidedMappingEditor value={value} onChange={setValue} />
+    }
+    const view = render(withEn(<Harness />))
+    const role = view.getByLabelText('Mapping role for size.width') as HTMLSelectElement
+
+    expect([...role.options].map((option) => option.value)).toEqual(['width', 'duration', 'fps'])
+    fireEvent.change(role, { target: { value: 'width' } })
+    expect(view.queryByLabelText('Output format')).toBeNull()
+    fireEvent.change(role, { target: { value: 'duration' } })
+    expect(view.getByLabelText('Output format')).toBeTruthy()
   })
 })

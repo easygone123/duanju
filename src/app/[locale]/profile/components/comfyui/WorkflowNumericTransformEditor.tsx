@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { convertComfyNumericBinding } from '@/lib/comfyui/numeric-binding'
+import { convertComfyNumericBinding, decimalEquals } from '@/lib/comfyui/numeric-binding'
 import type {
   ComfyNumericBindingTransform,
   ComfyNumericOutput,
@@ -50,6 +50,10 @@ export default function WorkflowNumericTransformEditor({
   const lastCanonicalAllowedText = useRef(canonicalAllowedText)
   const [allowedText, setAllowedText] = useState(canonicalAllowedText)
   const [allowedTextInvalid, setAllowedTextInvalid] = useState(false)
+  const [sampleDurationText, setSampleDurationText] = useState(String(sampleDuration))
+  const [runtimeFpsText, setRuntimeFpsText] = useState(String(sampleFps))
+  const previewDuration = Number(sampleDurationText)
+  const runtimeFps = Number(runtimeFpsText)
 
   useEffect(() => {
     if (lastCanonicalAllowedText.current === canonicalAllowedText || allowedTextInvalid) return
@@ -59,26 +63,27 @@ export default function WorkflowNumericTransformEditor({
 
   const preview = useMemo(() => {
     try {
-      const sourceValue = role === 'fps' ? sampleFps : sampleDuration
+      const sourceValue = role === 'fps' ? runtimeFps : previewDuration
       const diagnostic = convertComfyNumericBinding({
         variable: role,
         value: sourceValue,
-        variables: { fps: sampleFps },
+        variables: { fps: runtimeFps },
         transform: value,
       })
       const encoded = diagnostic.encodedAs === 'numeric_string'
         ? JSON.stringify(diagnostic.encodedValue)
         : String(diagnostic.encodedValue)
       if (diagnostic.targetUnit === 'frames') {
+        const rounding = diagnostic.rounding ?? value.rounding ?? 'round'
         return {
-          text: `${diagnostic.sourceValue} × ${diagnostic.effectiveFps} + ${diagnostic.frameOffset ?? 0} = ${encoded}`,
+          text: `${rounding}(${diagnostic.sourceValue} × ${diagnostic.effectiveFps}) + ${diagnostic.frameOffset ?? 0} = ${encoded}`,
         }
       }
       return { text: `${diagnostic.sourceValue} → ${encoded}` }
     } catch (error) {
       return { reason: numericErrorReason(error) ?? 'invalid_source' as const }
     }
-  }, [role, sampleDuration, sampleFps, value])
+  }, [previewDuration, role, runtimeFps, value])
 
   const setTargetUnit = (targetUnit: 'seconds' | 'frames') => {
     if (targetUnit === 'seconds') {
@@ -96,7 +101,7 @@ export default function WorkflowNumericTransformEditor({
       fps: {
         source: 'runtime_then_fallback',
         variable: 'fps',
-        fallback: value.fps?.fallback ?? sampleFps,
+        fallback: value.fps?.fallback ?? runtimeFps,
       },
       rounding: value.rounding ?? 'round',
       frameOffset: value.frameOffset ?? 0,
@@ -115,16 +120,45 @@ export default function WorkflowNumericTransformEditor({
     }
     const parts = text.split(',').map((item) => item.trim())
     const parsed = parts.map(Number)
+    const duplicates = parsed.some((item, index) => parsed.slice(0, index).some((previous) => (
+      value.targetUnit === 'frames' ? previous === item : decimalEquals(previous, item)
+    )))
     const invalid = parts.some((item) => item.length === 0)
       || parsed.some((item) => !Number.isFinite(item) || item <= 0)
       || (value.targetUnit === 'frames' && parsed.some((item) => !Number.isSafeInteger(item)))
-      || new Set(parsed).size !== parsed.length
+      || duplicates
     setAllowedTextInvalid(invalid)
     onChange({ ...value, allowedTargetValues: invalid ? [] : parsed })
   }
 
   return <div className="min-w-0 space-y-3 rounded-lg bg-[var(--glass-bg-surface)] p-3 sm:col-span-full">
     <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+      {role === 'duration' && <label className="min-w-0 text-xs">
+        {t('numeric.sampleDuration')}
+        <input
+          aria-label={t('numeric.sampleDuration')}
+          className={inputClass}
+          disabled={disabled}
+          type="number"
+          min="0.001"
+          step="any"
+          value={sampleDurationText}
+          onChange={(event) => setSampleDurationText(event.target.value)}
+        />
+      </label>}
+      <label className="min-w-0 text-xs">
+        {t('numeric.runtimeFps')}
+        <input
+          aria-label={t('numeric.runtimeFps')}
+          className={inputClass}
+          disabled={disabled}
+          type="number"
+          min="0.001"
+          step="any"
+          value={runtimeFpsText}
+          onChange={(event) => setRuntimeFpsText(event.target.value)}
+        />
+      </label>
       {role === 'duration' && <label className="min-w-0 text-xs">
         {t('numeric.targetUnit')}
         <select

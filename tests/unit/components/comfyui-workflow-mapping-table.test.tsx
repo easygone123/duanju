@@ -65,6 +65,8 @@ describe('WorkflowMappingTable', () => {
     />))
 
     expect(view.getAllByLabelText('Output format')).toHaveLength(1)
+    expect(view.getByLabelText('Sample duration')).toBeTruthy()
+    expect(view.getByLabelText('Runtime FPS')).toBeTruthy()
     expect((view.getByLabelText('Fallback FPS') as HTMLInputElement).value).toBe('16')
     fireEvent.change(view.getByLabelText('First-frame offset'), { target: { value: '0' } })
     expect(onBindingsChange).toHaveBeenLastCalledWith([
