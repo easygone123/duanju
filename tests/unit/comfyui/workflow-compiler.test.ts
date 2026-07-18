@@ -1091,6 +1091,8 @@ describe('ComfyUI workflow compiler', () => {
     ['plain object target', { config: { value: 81 } }, 'config'],
     ['array target', { length: [81] }, 'length'],
     ['Comfy node link target', { length: ['2', 0] }, 'length'],
+    ['Comfy node link source node ID', { length: ['2', 0] }, 'length.0'],
+    ['Comfy node link output index', { length: ['2', 0] }, 'length.1'],
     ['boolean target', { length: true }, 'length'],
     ['nonnumeric string target', { length: 'auto' }, 'length'],
     ['placeholder target', { length: '${duration}' }, 'length'],
@@ -1118,6 +1120,7 @@ describe('ComfyUI workflow compiler', () => {
   it.each([
     ['finite number', { length: 81 }, 'length'],
     ['trimmed finite numeric string', { config: { length: ' 81.5 ' } }, 'config.length'],
+    ['nested array scalar', { size: [512, 768] }, 'size.1'],
   ])('accepts numeric transform bound to %s without mutation', (_case, inputs, inputPath) => {
     const graph = { '1': { class_type: 'VideoNode', inputs } }
     const original = structuredClone(graph)

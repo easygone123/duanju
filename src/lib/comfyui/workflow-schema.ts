@@ -63,6 +63,7 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
   }
 
   const issues: WorkflowValidationIssue[] = []
+  const nodeIds = new Set(Object.keys(graph))
   const purpose = resolveComfyWorkflowPurpose(input.purpose)
   if (!purpose) {
     issues.push(issue(
@@ -173,7 +174,11 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
       definition,
       definitions,
       targetValue: nodeExists && inputPathValid
-        ? readDottedPath(graph[binding.nodeId as string].inputs, binding.inputPath as string)
+        ? readDottedPath(
+          graph[binding.nodeId as string].inputs,
+          binding.inputPath as string,
+          nodeIds,
+        )
         : undefined,
     })) {
       issues.push(issue(
@@ -338,9 +343,14 @@ function isFiniteNumericScalarLiteral(value: unknown): boolean {
     && Number.isFinite(Number(trimmed))
 }
 
-function readDottedPath(root: Record<string, unknown>, path: string): unknown {
+function readDottedPath(
+  root: Record<string, unknown>,
+  path: string,
+  nodeIds: Set<string>,
+): unknown {
   let current: unknown = root
   for (const segment of path.split('.')) {
+    if (isPotentialLink(current, nodeIds)) return undefined
     if ((!isObject(current) && !Array.isArray(current)) || !Object.hasOwn(current, segment)) {
       return undefined
     }
