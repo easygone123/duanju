@@ -305,7 +305,10 @@ function resolveOwnedGridSpec(
 ): StoryboardGridSpec {
   let canonical: StoryboardGridSpec
   try {
-    canonical = resolveStoryboardGridSpec(storyboard.layoutMode, storyboard.sixGridCellAspectRatio)
+    canonical = resolveStoryboardGridSpec(
+      storyboard.layoutMode,
+      storyboard.sixGridCellAspectRatio ?? '16:9',
+    )
   } catch {
     throw new Error('SIX_GRID_SOURCE_NOT_FOUND_OR_FORBIDDEN')
   }

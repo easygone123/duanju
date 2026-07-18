@@ -155,7 +155,17 @@ describe('six-grid storyboard persistence', () => {
     })
     expect(storyboards[0].sheetPromptSnapshot).toContain('3 columns x 2 rows')
     expect(storyboards[0].sheetPromptSnapshot).not.toContain('请不要离开我')
-    expect(JSON.parse(storyboards[0].sheetGenerationOptionsSnapshot!)).toEqual(immutableRunSettings)
+    expect(JSON.parse(storyboards[0].sheetGenerationOptionsSnapshot!)).toEqual({
+      ...immutableRunSettings,
+      gridSpec: {
+        mode: 'six_grid',
+        columns: 3,
+        rows: 2,
+        panelCount: 6,
+        cellAspectRatio: '16:9',
+        sheetAspectRatio: '8:3',
+      },
+    })
 
     expect(storyboards[0].panels).toHaveLength(6)
     expect(storyboards[0].panels[0].description).toBe('updated visual beat 1')
