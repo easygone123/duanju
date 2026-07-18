@@ -1,4 +1,5 @@
 import { COMFY_ERROR_CODE, ComfyError } from './errors'
+import { convertComfyNumericBinding } from './numeric-binding'
 import {
   discoverComfyPlaceholders,
   isComfyTransformCompatible,
@@ -46,6 +47,13 @@ export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflo
         { details: { variable: binding.variable, reason: 'transform_type' } },
       )
     }
+    if (binding.numericTransform !== undefined
+      && (binding.valueType !== 'number' || binding.transform !== undefined)) {
+      throw bindingError(
+        binding,
+        `Numeric transform for workflow variable "${binding.variable}" is incompatible.`,
+      )
+    }
   }
   const variables = resolveVariables(input, rendered)
 
@@ -60,7 +68,13 @@ export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflo
         applyBerniniImageSlots(rendered, binding, value, input.uploads)
         continue
       }
-      const transformed = transformBindingValue(binding, value, input.uploads)
+      const transformed = transformBindingValue(
+        binding,
+        value,
+        variables,
+        input.uploads,
+        input.onNumericConversion,
+      )
       if (transformed !== SKIP_BINDING) {
         setPath(rendered[binding.nodeId].inputs, binding.inputPath, transformed)
       }
@@ -171,8 +185,20 @@ function comfyUploadedImagePath(file: ComfyUploadedFile) {
 function transformBindingValue(
   binding: ComfyInputBinding,
   value: ComfyVariableValue,
+  variables: Record<string, ComfyVariableValue | undefined>,
   uploads: RenderWorkflowInput['uploads'],
+  onNumericConversion: RenderWorkflowInput['onNumericConversion'],
 ): unknown {
+  if (binding.numericTransform) {
+    const converted = convertComfyNumericBinding({
+      variable: binding.variable,
+      value,
+      variables,
+      transform: binding.numericTransform,
+    })
+    onNumericConversion?.(converted)
+    return converted.encodedValue
+  }
   if (!binding.transform) return cloneValue(value)
 
   const upload = uploads[binding.variable]

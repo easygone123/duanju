@@ -1019,7 +1019,362 @@ describe('ComfyUI workflow compiler', () => {
 
     expect(rendered['1'].inputs.size).toEqual([512, 768])
   })
+
+  it('renders seconds into inclusive total frames', () => {
+    const diagnostics: unknown[] = []
+    const rendered = renderComfyWorkflow({
+      graph: { '1': { class_type: 'VideoNode', inputs: { length: 81 } } },
+      variableDefinitions: [
+        { name: 'duration', type: 'number', required: true },
+        { name: 'fps', type: 'number', required: false, defaultValue: 16 },
+      ],
+      bindings: [{
+        nodeId: '1', inputPath: 'length', variable: 'duration', valueType: 'number',
+        numericTransform: {
+          sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+          fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+          rounding: 'round', frameOffset: 1,
+        },
+      }],
+      variables: { duration: 5 },
+      uploads: {},
+      onNumericConversion: (item) => diagnostics.push(item),
+    })
+
+    expect(rendered['1'].inputs.length).toBe(81)
+    expect(diagnostics).toEqual([expect.objectContaining({ targetValue: 81 })])
+  })
+
+  it('rejects frame transforms without a required fallback FPS', () => {
+    const issues = validateWorkflowContract(numericContract({
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps' },
+      rounding: 'round', frameOffset: 1,
+    }))
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'COMFY_BINDING_NUMERIC_TRANSFORM_INVALID',
+        path: 'bindings.0.numericTransform',
+      }),
+    ]))
+  })
+
+  it.each([
+    ['seconds to seconds', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+    }, 'duration'],
+    ['seconds to frames', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+      rounding: 'round', frameOffset: 1,
+    }, 'duration'],
+    ['fps to fps', {
+      sourceUnit: 'fps', targetUnit: 'fps', output: 'numeric_string',
+    }, 'fps'],
+  ])('accepts legal numeric transform pair: %s', (_case, numericTransform, variable) => {
+    expect(validateWorkflowContract(numericContract(numericTransform, { variable }))).toEqual([])
+  })
+
+  it.each([
+    ['seconds to fps', { sourceUnit: 'seconds', targetUnit: 'fps', output: 'number' }, {}],
+    ['fps to seconds', { sourceUnit: 'fps', targetUnit: 'seconds', output: 'number' }, { variable: 'fps' }],
+    ['fps to frames', {
+      sourceUnit: 'fps', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+      rounding: 'round', frameOffset: 1,
+    }, { variable: 'fps' }],
+    ['unsupported source unit', {
+      sourceUnit: 'frames', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+      rounding: 'round', frameOffset: 1,
+    }, {}],
+    ['non-number binding', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+    }, { valueType: 'string', definitionType: 'string' }],
+    ['invalid output', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'json_number',
+    }, {}],
+    ['missing fps', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      rounding: 'round', frameOffset: 1,
+    }, {}],
+    ['invalid fps source', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'fallback_only', variable: 'fps', fallback: 16 },
+      rounding: 'round', frameOffset: 1,
+    }, {}],
+    ['missing fps source', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { variable: 'fps', fallback: 16 },
+      rounding: 'round', frameOffset: 1,
+    }, {}],
+    ['invalid fps variable', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'rate', fallback: 16 },
+      rounding: 'round', frameOffset: 1,
+    }, {}],
+    ['missing fps variable', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', fallback: 16 },
+      rounding: 'round', frameOffset: 1,
+    }, {}],
+    ['missing fps fallback', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps' },
+      rounding: 'round', frameOffset: 1,
+    }, {}],
+    ['zero fps fallback', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 0 },
+      rounding: 'round', frameOffset: 1,
+    }, {}],
+    ['negative fps fallback', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: -1 },
+      rounding: 'round', frameOffset: 1,
+    }, {}],
+    ['nonfinite fps fallback', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: Number.POSITIVE_INFINITY },
+      rounding: 'round', frameOffset: 1,
+    }, {}],
+    ['invalid rounding', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+      rounding: 'truncate', frameOffset: 1,
+    }, {}],
+    ['missing frame offset', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+      rounding: 'round',
+    }, {}],
+    ['invalid frame offset', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+      rounding: 'round', frameOffset: 2,
+    }, {}],
+    ['frame options overflow', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+      rounding: 'round', frameOffset: 1,
+      allowedTargetValues: [Number.MAX_SAFE_INTEGER + 1],
+    }, {}],
+    ['fps on non-frame target', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+    }, {}],
+    ['rounding on non-frame target', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number', rounding: 'round',
+    }, {}],
+    ['frame offset on non-frame target', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number', frameOffset: 0,
+    }, {}],
+    ['allowed values are not an array', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number', allowedTargetValues: 5,
+    }, {}],
+    ['allowed values are empty', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number', allowedTargetValues: [],
+    }, {}],
+    ['allowed values are nonpositive', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number', allowedTargetValues: [0],
+    }, {}],
+    ['allowed values are nonfinite', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+      allowedTargetValues: [Number.NaN],
+    }, {}],
+    ['allowed values contain exact duplicates', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+      allowedTargetValues: [5, 5],
+    }, {}],
+    ['allowed values contain decimal-safe duplicates', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+      allowedTargetValues: [0.1 + 0.2, 0.3],
+    }, {}],
+    ['frame allowed values are fractional', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+      rounding: 'round', frameOffset: 1, allowedTargetValues: [80.5],
+    }, {}],
+    ['unknown transform key', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number', formula: 'value * fps',
+    }, {}],
+    ['unknown fps key', {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: {
+        source: 'runtime_then_fallback', variable: 'fps', fallback: 16, formula: 'eval(value)',
+      },
+      rounding: 'round', frameOffset: 1,
+    }, {}],
+    ['combined media transform', {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+    }, { transform: 'filename' }],
+  ])('rejects invalid numeric transform: %s', (_case, numericTransform, overrides) => {
+    const issues = validateWorkflowContract(numericContract(numericTransform, overrides))
+
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'COMFY_BINDING_NUMERIC_TRANSFORM_INVALID',
+        path: 'bindings.0.numericTransform',
+      }),
+    ]))
+  })
+
+  it('preserves legacy bindings without numeric transforms', () => {
+    const graph = { '1': { class_type: 'VideoNode', inputs: { length: 81 } } }
+    const rendered = renderComfyWorkflow({
+      graph,
+      variableDefinitions: [{ name: 'duration', type: 'number', required: true }],
+      bindings: [{
+        nodeId: '1', inputPath: 'length', variable: 'duration', valueType: 'number',
+      }],
+      variables: { duration: 5 },
+      uploads: {},
+    })
+
+    expect(rendered['1'].inputs.length).toBe(5)
+  })
+
+  it('renders numeric strings for native seconds and converted frames', () => {
+    const rendered = renderComfyWorkflow({
+      graph: { '1': { class_type: 'VideoNode', inputs: { seconds: 1, frames: 1 } } },
+      variableDefinitions: [
+        { name: 'duration', type: 'number', required: true },
+        { name: 'fps', type: 'number', required: false, defaultValue: 16 },
+      ],
+      bindings: [
+        {
+          nodeId: '1', inputPath: 'seconds', variable: 'duration', valueType: 'number',
+          numericTransform: {
+            sourceUnit: 'seconds', targetUnit: 'seconds', output: 'numeric_string',
+          },
+        },
+        {
+          nodeId: '1', inputPath: 'frames', variable: 'duration', valueType: 'number',
+          numericTransform: {
+            sourceUnit: 'seconds', targetUnit: 'frames', output: 'numeric_string',
+            fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+            rounding: 'round', frameOffset: 1,
+          },
+        },
+      ],
+      variables: { duration: 2 },
+      uploads: {},
+    })
+
+    expect(rendered['1'].inputs).toEqual({ seconds: '2', frames: '33' })
+  })
+
+  it('prefers runtime FPS and falls back when it is absent', () => {
+    const base = {
+      graph: { '1': { class_type: 'VideoNode', inputs: { length: 1 } } },
+      variableDefinitions: [
+        { name: 'duration', type: 'number' as const, required: true },
+        { name: 'fps', type: 'number' as const, required: false, missingValuePolicy: 'preserve_original' as const },
+      ],
+      bindings: [{
+        nodeId: '1', inputPath: 'length', variable: 'duration', valueType: 'number' as const,
+        numericTransform: {
+          sourceUnit: 'seconds' as const, targetUnit: 'frames' as const, output: 'number' as const,
+          fps: { source: 'runtime_then_fallback' as const, variable: 'fps' as const, fallback: 16 },
+          rounding: 'round' as const, frameOffset: 1 as const,
+        },
+      }],
+      uploads: {},
+    }
+
+    expect(renderComfyWorkflow({ ...base, variables: { duration: 2, fps: 24 } })['1'].inputs.length)
+      .toBe(49)
+    expect(renderComfyWorkflow({ ...base, variables: { duration: 2 } })['1'].inputs.length)
+      .toBe(33)
+  })
+
+  it('reports exactly one diagnostic per converted binding without mutating inputs', () => {
+    const graph = { '1': { class_type: 'VideoNode', inputs: { seconds: 1, frames: 1 } } }
+    const variables = { duration: 2, fps: 24 }
+    const diagnostics: unknown[] = []
+    const rendered = renderComfyWorkflow({
+      graph,
+      variableDefinitions: [
+        { name: 'duration', type: 'number', required: true },
+        { name: 'fps', type: 'number', required: true },
+      ],
+      bindings: [
+        {
+          nodeId: '1', inputPath: 'seconds', variable: 'duration', valueType: 'number',
+          numericTransform: {
+            sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+          },
+        },
+        {
+          nodeId: '1', inputPath: 'frames', variable: 'duration', valueType: 'number',
+          numericTransform: {
+            sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+            fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+            rounding: 'round', frameOffset: 1,
+          },
+        },
+      ],
+      variables,
+      uploads: {},
+      onNumericConversion: (item) => diagnostics.push(item),
+    })
+
+    expect(rendered['1'].inputs).toEqual({ seconds: 2, frames: 49 })
+    expect(diagnostics).toHaveLength(2)
+    expect(diagnostics).toEqual([
+      expect.objectContaining({ variable: 'duration', targetValue: 2 }),
+      expect.objectContaining({ variable: 'duration', targetValue: 49, effectiveFps: 24 }),
+    ])
+    expect(graph).toEqual({ '1': { class_type: 'VideoNode', inputs: { seconds: 1, frames: 1 } } })
+    expect(variables).toEqual({ duration: 2, fps: 24 })
+  })
+
+  it('propagates numeric converter failures as stable binding errors', () => {
+    const error = captureError(() => renderComfyWorkflow({
+      graph: { '1': { class_type: 'VideoNode', inputs: { seconds: 1 } } },
+      variableDefinitions: [{ name: 'duration', type: 'number', required: true }],
+      bindings: [{
+        nodeId: '1', inputPath: 'seconds', variable: 'duration', valueType: 'number',
+        numericTransform: {
+          sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+          allowedTargetValues: [1, 2],
+        },
+      }],
+      variables: { duration: 3 },
+      uploads: {},
+    })) as ComfyError
+
+    expect(error).toMatchObject({
+      code: COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
+      details: { variable: 'duration', reason: 'unsupported_target' },
+    })
+  })
 })
+
+function numericContract(
+  numericTransform: unknown,
+  overrides: Record<string, unknown> = {},
+): Parameters<typeof validateWorkflowContract>[0] {
+  const definitionType = overrides.definitionType ?? 'number'
+  const variable = overrides.variable ?? 'duration'
+  const binding = {
+    nodeId: '1', inputPath: 'length', variable,
+    valueType: overrides.valueType ?? 'number', numericTransform,
+    ...(Object.hasOwn(overrides, 'transform') ? { transform: overrides.transform } : {}),
+  }
+  return {
+    graph: { '1': { class_type: 'VideoNode', inputs: { length: 81 } } },
+    variableDefinitions: [
+      { name: 'duration', type: definitionType, required: true },
+      { name: 'fps', type: 'number', required: false, defaultValue: 16 },
+    ],
+    bindings: [binding],
+    outputs: [{
+      name: 'video', nodeId: '1', fieldPath: 'videos', mediaType: 'video', primary: true,
+    }],
+  } as unknown as Parameters<typeof validateWorkflowContract>[0]
+}
 
 function captureError(callback: () => unknown): unknown {
   try {

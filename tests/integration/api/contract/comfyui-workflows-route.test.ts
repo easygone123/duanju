@@ -420,6 +420,71 @@ describe('ComfyUI workflow library', () => {
     expect(prismaMock.$transaction).toHaveBeenCalled()
   })
 
+  it('stores distinct immutable versions when only the numeric transform changes', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow())
+    prismaMock.comfyWorkflowVersion.findFirst
+      .mockResolvedValueOnce({ version: 1, purpose: 'generation' })
+      .mockResolvedValueOnce({ version: 2, purpose: 'generation' })
+    prismaMock.comfyWorkflowVersion.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => version({ ...data }),
+    )
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/versions/route')
+    const base = {
+      ...contract,
+      apiFormatJson: {
+        ...graph,
+        '3': { class_type: 'VideoNode', inputs: { length: 81 } },
+      },
+      variableDefinitions: [
+        ...contract.variableDefinitions,
+        { name: 'duration', type: 'number' as const, required: true },
+        { name: 'fps', type: 'number' as const, required: false, defaultValue: 16 },
+      ],
+    }
+    const binding = {
+      nodeId: '3', inputPath: 'length', variable: 'duration', valueType: 'number' as const,
+    }
+    const nativeSeconds = {
+      ...base,
+      bindings: [{
+        ...binding,
+        numericTransform: {
+          sourceUnit: 'seconds' as const, targetUnit: 'seconds' as const, output: 'number' as const,
+        },
+      }],
+    }
+    const inclusiveFrames = {
+      ...base,
+      bindings: [{
+        ...binding,
+        numericTransform: {
+          sourceUnit: 'seconds' as const, targetUnit: 'frames' as const, output: 'number' as const,
+          fps: { source: 'runtime_then_fallback' as const, variable: 'fps' as const, fallback: 16 },
+          rounding: 'round' as const, frameOffset: 1 as const,
+        },
+      }],
+    }
+
+    const first = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/versions', method: 'POST', body: nativeSeconds,
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+    const second = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/versions', method: 'POST', body: inclusiveFrames,
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+
+    expect(first.status).toBe(201)
+    expect(second.status).toBe(201)
+    const creates = prismaMock.comfyWorkflowVersion.create.mock.calls.map(
+      ([call]) => call.data as Record<string, unknown>,
+    )
+    expect(creates).toHaveLength(2)
+    expect(creates.map((item) => item.version)).toEqual([2, 3])
+    expect(creates[0].contentHash).not.toBe(creates[1].contentHash)
+    expect(creates[0].bindingSpec).not.toEqual(creates[1].bindingSpec)
+  })
+
   it('rejects purpose drift when creating a later immutable workflow version', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')

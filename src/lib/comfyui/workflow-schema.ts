@@ -1,4 +1,5 @@
 import { COMFY_ERROR_CODE, ComfyError } from './errors'
+import { decimalEquals } from './numeric-binding'
 import type {
   ComfyApiWorkflow,
   ComfyVariableDefinition,
@@ -20,6 +21,12 @@ const VARIABLE_TYPES = new Set<ComfyVariableType>([
 const BINDING_TRANSFORMS = new Set([
   'filename', 'image_ref', 'filename_list', 'filename_at', 'bernini_image_slots',
 ])
+const NUMERIC_TRANSFORM_KEYS = new Set([
+  'sourceUnit', 'targetUnit', 'output', 'fps', 'rounding', 'frameOffset',
+  'allowedTargetValues',
+])
+const NUMERIC_FPS_KEYS = new Set(['source', 'variable', 'fallback'])
+const NUMERIC_ROUNDING = new Set(['round', 'floor', 'ceil'])
 
 export function validateComfyApiWorkflow(raw: unknown): ComfyApiWorkflow {
   const issues = collectFormatIssues(raw)
@@ -157,6 +164,18 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
         'Binding transform is incompatible with its variable type.',
       ))
     }
+    if (binding.numericTransform !== undefined && !validateNumericTransform({
+      transform: binding.numericTransform,
+      bindingValueType: binding.valueType,
+      mediaTransform: binding.transform,
+      definition,
+      definitions,
+    })) {
+      issues.push(issue(
+        'COMFY_BINDING_NUMERIC_TRANSFORM_INVALID', `${path}.numericTransform`,
+        'Binding numeric transform is invalid.',
+      ))
+    }
     if (binding.transform === 'bernini_image_slots' && nodeIdValid) {
       const target = graph[binding.nodeId as string]
       if (target?.class_type !== 'BerniniStudio' || binding.inputPath !== 'image0') {
@@ -241,6 +260,70 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
   }
 
   return issues
+}
+
+function validateNumericTransform(input: {
+  transform: unknown
+  bindingValueType: unknown
+  mediaTransform: unknown
+  definition: ComfyVariableDefinition | undefined
+  definitions: Map<string, ComfyVariableDefinition>
+}): boolean {
+  const transform = input.transform
+  if (!isObject(transform) || !hasOnlyKeys(transform, NUMERIC_TRANSFORM_KEYS)) return false
+  if (
+    input.bindingValueType !== 'number'
+    || input.definition?.type !== 'number'
+    || input.mediaTransform !== undefined
+  ) return false
+
+  const legalPair = (transform.sourceUnit === 'seconds'
+      && (transform.targetUnit === 'seconds' || transform.targetUnit === 'frames'))
+    || (transform.sourceUnit === 'fps' && transform.targetUnit === 'fps')
+  if (!legalPair || (transform.output !== 'number' && transform.output !== 'numeric_string')) {
+    return false
+  }
+
+  if (transform.targetUnit === 'frames') {
+    if (!isObject(transform.fps) || !hasOnlyKeys(transform.fps, NUMERIC_FPS_KEYS)) return false
+    if (
+      transform.fps.source !== 'runtime_then_fallback'
+      || transform.fps.variable !== 'fps'
+      || input.definitions.get('fps')?.type !== 'number'
+      || typeof transform.fps.fallback !== 'number'
+      || !Number.isFinite(transform.fps.fallback)
+      || transform.fps.fallback <= 0
+      || typeof transform.rounding !== 'string'
+      || !NUMERIC_ROUNDING.has(transform.rounding)
+      || (transform.frameOffset !== 0 && transform.frameOffset !== 1)
+    ) return false
+  } else if (
+    Object.hasOwn(transform, 'fps')
+    || Object.hasOwn(transform, 'rounding')
+    || Object.hasOwn(transform, 'frameOffset')
+  ) {
+    return false
+  }
+
+  if (transform.allowedTargetValues === undefined) return true
+  if (!Array.isArray(transform.allowedTargetValues)
+    || transform.allowedTargetValues.length === 0) return false
+
+  const allowed = transform.allowedTargetValues
+  for (const value of allowed) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return false
+    if (transform.targetUnit === 'frames' && !Number.isSafeInteger(value)) return false
+  }
+  const sorted = [...allowed].sort((left, right) => left - right)
+  return sorted.every((value, index) => index === 0 || (
+    transform.targetUnit === 'frames'
+      ? sorted[index - 1] !== value
+      : !decimalEquals(sorted[index - 1], value)
+  ))
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, keys: Set<string>): boolean {
+  return Object.keys(value).every((key) => keys.has(key))
 }
 
 export function resolveComfyWorkflowPurpose(value: unknown): ComfyWorkflowPurpose | null {
