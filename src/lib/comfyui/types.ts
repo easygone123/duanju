@@ -137,12 +137,41 @@ export type ComfyBindingTransform =
   | 'filename_at'
   | 'bernini_image_slots'
 
+export type ComfyNumericUnit = 'seconds' | 'frames' | 'fps'
+
+export type ComfyNumericOutput = 'number' | 'numeric_string'
+
+export type ComfyNumericRounding = 'round' | 'floor' | 'ceil'
+
+export interface ComfyNumericBindingTransform {
+  sourceUnit: 'seconds' | 'fps'
+  targetUnit: ComfyNumericUnit
+  output: ComfyNumericOutput
+  fps?: { source: 'runtime_then_fallback'; variable: 'fps'; fallback: number }
+  rounding?: ComfyNumericRounding
+  frameOffset?: 0 | 1
+  allowedTargetValues?: number[]
+}
+
+export interface ComfyNumericConversionDiagnostic {
+  variable: string
+  sourceValue: number
+  targetValue: number
+  encodedAs: ComfyNumericOutput
+  sourceUnit: 'seconds' | 'fps'
+  targetUnit: ComfyNumericUnit
+  effectiveFps?: number
+  rounding?: ComfyNumericRounding
+  frameOffset?: 0 | 1
+}
+
 export interface ComfyInputBinding {
   nodeId: string
   inputPath: string
   variable: string
   valueType: ComfyVariableType
   transform?: ComfyBindingTransform
+  numericTransform?: ComfyNumericBindingTransform
   missingValuePolicy?: ComfyMissingValuePolicy
   valueIndex?: number
 }
@@ -153,6 +182,7 @@ export interface RenderWorkflowInput {
   variableDefinitions: ComfyVariableDefinition[]
   bindings: ComfyInputBinding[]
   uploads: Record<string, ComfyUploadedFile | ComfyUploadedFile[] | undefined>
+  onNumericConversion?(diagnostic: ComfyNumericConversionDiagnostic): void
 }
 
 export interface ComfyOutputBinding {
