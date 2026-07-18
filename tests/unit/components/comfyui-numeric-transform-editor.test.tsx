@@ -96,7 +96,47 @@ describe('WorkflowNumericTransformEditor', () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
       allowedTargetValues: [],
     }))
-    expect(view.getByRole('alert').textContent).toContain('valid numbers')
+    const error = view.getByRole('alert')
+    expect(error.textContent).toContain('valid numbers')
+    expect(error.id).not.toBe('')
+    expect(allowedValues.getAttribute('aria-invalid')).toBe('true')
+    expect(allowedValues.getAttribute('aria-describedby')).toBe(error.id)
+  })
+
+  it('preserves invalid text for the same binding but clears it for a new binding identity', () => {
+    const onChange = vi.fn()
+    const validValue: ComfyNumericBindingTransform = {
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+    }
+    const view = render(withMessages(<WorkflowNumericTransformEditor
+      role="duration"
+      mappingIdentity="timing.length"
+      value={validValue}
+      onChange={onChange}
+    />))
+
+    fireEvent.change(view.getByLabelText('Allowed target values'), {
+      target: { value: '5, later' },
+    })
+    view.rerender(withMessages(<WorkflowNumericTransformEditor
+      role="duration"
+      mappingIdentity="timing.length"
+      value={{ ...validValue, allowedTargetValues: [] }}
+      onChange={onChange}
+    />))
+    expect((view.getByLabelText('Allowed target values') as HTMLInputElement).value)
+      .toBe('5, later')
+    expect(view.getByRole('alert')).toBeTruthy()
+
+    view.rerender(withMessages(<WorkflowNumericTransformEditor
+      role="duration"
+      mappingIdentity="timing.frames"
+      value={validValue}
+      onChange={onChange}
+    />))
+    expect((view.getByLabelText('Allowed target values') as HTMLInputElement).value).toBe('')
+    expect(view.queryByRole('alert')).toBeNull()
+    expect(view.getByLabelText('Allowed target values').getAttribute('aria-invalid')).toBeNull()
   })
 
   it('rejects decimal-safe duplicate allowed values without discarding the text', () => {

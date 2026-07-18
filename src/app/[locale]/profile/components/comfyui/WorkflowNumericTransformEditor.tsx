@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { convertComfyNumericBinding, decimalEquals } from '@/lib/comfyui/numeric-binding'
 import type {
@@ -11,6 +11,7 @@ import type {
 
 interface Props {
   role: 'duration' | 'fps'
+  mappingIdentity?: string
   value: ComfyNumericBindingTransform
   sampleDuration?: number
   sampleFps?: number
@@ -39,6 +40,7 @@ function numericErrorReason(error: unknown) {
 
 export default function WorkflowNumericTransformEditor({
   role,
+  mappingIdentity = '',
   value,
   sampleDuration = 5,
   sampleFps = 16,
@@ -46,7 +48,10 @@ export default function WorkflowNumericTransformEditor({
   onChange,
 }: Props) {
   const t = useTranslations('comfyui.workflows')
+  const allowedValuesErrorId = `${useId()}-allowed-values-error`
+  const editorIdentity = JSON.stringify([mappingIdentity, role])
   const canonicalAllowedText = allowedValuesText(value)
+  const lastEditorIdentity = useRef(editorIdentity)
   const lastCanonicalAllowedText = useRef(canonicalAllowedText)
   const [allowedText, setAllowedText] = useState(canonicalAllowedText)
   const [allowedTextInvalid, setAllowedTextInvalid] = useState(false)
@@ -56,10 +61,17 @@ export default function WorkflowNumericTransformEditor({
   const runtimeFps = Number(runtimeFpsText)
 
   useEffect(() => {
+    if (lastEditorIdentity.current !== editorIdentity) {
+      lastEditorIdentity.current = editorIdentity
+      lastCanonicalAllowedText.current = canonicalAllowedText
+      setAllowedText(canonicalAllowedText)
+      setAllowedTextInvalid(false)
+      return
+    }
     if (lastCanonicalAllowedText.current === canonicalAllowedText || allowedTextInvalid) return
     lastCanonicalAllowedText.current = canonicalAllowedText
     setAllowedText(canonicalAllowedText)
-  }, [allowedTextInvalid, canonicalAllowedText])
+  }, [allowedTextInvalid, canonicalAllowedText, editorIdentity])
 
   const preview = useMemo(() => {
     try {
@@ -244,6 +256,8 @@ export default function WorkflowNumericTransformEditor({
         {t('numeric.allowedValues')}
         <input
           aria-label={t('numeric.allowedValues')}
+          aria-invalid={allowedTextInvalid || undefined}
+          aria-describedby={allowedTextInvalid ? allowedValuesErrorId : undefined}
           className={inputClass}
           disabled={disabled}
           inputMode="decimal"
@@ -252,7 +266,11 @@ export default function WorkflowNumericTransformEditor({
         />
       </label>
     </div>
-    {allowedTextInvalid && <p role="alert" className="text-xs text-[var(--glass-danger)]">
+    {allowedTextInvalid && <p
+      id={allowedValuesErrorId}
+      role="alert"
+      className="text-xs text-[var(--glass-danger)]"
+    >
       {t('numeric.invalidAllowedValues')}
     </p>}
     <p className="text-xs text-[var(--glass-text-secondary)]">

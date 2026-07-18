@@ -110,4 +110,42 @@ describe('WorkflowMappingTable', () => {
       }),
     ])
   })
+
+  it('clears stale invalid allowed values when a saved duration binding switches to FPS', () => {
+    const onBindingsChange = vi.fn()
+    function Harness() {
+      const [bindings, setBindings] = useState<ComfyInputBinding[]>([{
+        nodeId: 'timing', inputPath: 'value', variable: 'duration', valueType: 'number',
+        numericTransform: { sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number' },
+      }])
+      return <WorkflowMappingTable
+        variables={[
+          { name: 'duration', type: 'number', required: true },
+          { name: 'fps', type: 'number', required: false },
+        ]}
+        bindings={bindings}
+        outputs={[]}
+        mediaType="video"
+        onBindingsChange={(next) => { onBindingsChange(next); setBindings(next) }}
+        onOutputsChange={vi.fn()}
+      />
+    }
+    const view = render(withMessages(<Harness />))
+    const allowedValues = view.getByLabelText('Allowed target values') as HTMLInputElement
+
+    fireEvent.change(allowedValues, { target: { value: '5, later' } })
+    expect(allowedValues.value).toBe('5, later')
+    expect(view.getByRole('alert')).toBeTruthy()
+
+    fireEvent.change(view.getByLabelText('Variable'), { target: { value: 'fps' } })
+
+    expect(onBindingsChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        variable: 'fps',
+        numericTransform: { sourceUnit: 'fps', targetUnit: 'fps', output: 'number' },
+      }),
+    ])
+    expect((view.getByLabelText('Allowed target values') as HTMLInputElement).value).toBe('')
+    expect(view.queryByRole('alert')).toBeNull()
+  })
 })

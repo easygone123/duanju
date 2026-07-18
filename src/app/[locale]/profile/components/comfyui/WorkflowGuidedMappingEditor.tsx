@@ -128,6 +128,7 @@ export default function WorkflowGuidedMappingEditor({
             && proposal.valueType === 'number'
             && <WorkflowNumericTransformEditor
               role={proposal.canonicalName}
+              mappingIdentity={proposal.id}
               value={proposal.numericTransform ?? identityNumericTransform(
                 proposal.canonicalName,
                 'number',

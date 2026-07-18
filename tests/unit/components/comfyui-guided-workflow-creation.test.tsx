@@ -674,4 +674,40 @@ describe('guided numeric mapping editor', () => {
     fireEvent.change(role, { target: { value: 'duration' } })
     expect(view.getByLabelText('Output format')).toBeTruthy()
   })
+
+  it('clears stale invalid allowed values when a guided duration mapping switches to FPS', () => {
+    const numericCandidateAnalysis: WorkflowAutoMappingResult = {
+      graph: {
+        size: { class_type: 'EmptyLatentImage', inputs: { width: 832 } },
+        output: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+      },
+      mediaType: 'video', purpose: 'generation', referenceCapacity: 0,
+      proposals: [], issues: [],
+      outputs: [{
+        name: 'video', nodeId: 'output', fieldPath: 'videos', mediaType: 'video', primary: true,
+      }],
+    }
+    const initial = createGuidedMappingDraft(numericCandidateAnalysis)
+    const widthCandidate = guidedInputCandidates(initial.analysis, initial.inputs)
+      .find((candidate) => candidate.nodeId === 'size' && candidate.inputPath === 'width')!
+    const duration = addGuidedInput(initial, widthCandidate.id, 'duration')
+
+    function Harness() {
+      const [value, setValue] = useState<GuidedWorkflowMappingDraft>(duration)
+      return <WorkflowGuidedMappingEditor value={value} onChange={setValue} />
+    }
+    const view = render(withEn(<Harness />))
+    const allowedValues = view.getByLabelText('Allowed target values') as HTMLInputElement
+
+    fireEvent.change(allowedValues, { target: { value: '5, later' } })
+    expect(allowedValues.value).toBe('5, later')
+    expect(view.getAllByRole('alert').length).toBeGreaterThan(0)
+
+    fireEvent.change(view.getByLabelText('Mapping role for size.width'), {
+      target: { value: 'fps' },
+    })
+
+    expect((view.getByLabelText('Allowed target values') as HTMLInputElement).value).toBe('')
+    expect(view.queryByRole('alert')).toBeNull()
+  })
 })

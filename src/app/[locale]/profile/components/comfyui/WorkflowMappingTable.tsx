@@ -69,6 +69,7 @@ export default function WorkflowMappingTable({ variables, bindings, outputs, med
             && (binding.variable === 'duration' || binding.variable === 'fps')
             && <WorkflowNumericTransformEditor
               role={binding.variable}
+              mappingIdentity={JSON.stringify([binding.nodeId, binding.inputPath])}
               value={binding.numericTransform ?? identityNumericTransform(binding.variable)!}
               onChange={(numericTransform) => updateBinding(index, { numericTransform })}
             />}
