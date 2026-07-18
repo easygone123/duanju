@@ -117,6 +117,11 @@ export async function getSignedObjectUrl(key: string, expiresInSeconds: number =
   })
 }
 
+export async function getInternalObjectUrl(key: string, expiresInSeconds: number = DEFAULT_SIGNED_URL_EXPIRES_SECONDS): Promise<string> {
+  const internalUrl = await getStorageProvider().getInternalSignedObjectUrl({ key, expiresInSeconds })
+  return toFetchableUrl(internalUrl)
+}
+
 export function getSignedUrl(key: string, expiresInSeconds: number = DEFAULT_SIGNED_URL_EXPIRES_SECONDS): string {
   const provider = getStorageProvider()
   if (provider.kind === 'local') {

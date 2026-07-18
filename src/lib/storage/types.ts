@@ -36,6 +36,7 @@ export interface StorageProvider {
   deleteObject(key: string): Promise<void>
   deleteObjects(keys: string[]): Promise<DeleteObjectsResult>
   getSignedObjectUrl(params: SignedUrlParams): Promise<string>
+  getInternalSignedObjectUrl(params: SignedUrlParams): Promise<string>
   getObjectBuffer(key: string): Promise<Buffer>
   getObjectStream(key: string): Promise<NodeJS.ReadableStream>
   extractStorageKey(input: string | null | undefined): string | null

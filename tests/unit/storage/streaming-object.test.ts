@@ -11,7 +11,9 @@ type MockCommand = {
 
 const {
   createStorageProviderMock,
+  facadeGetInternalSignedObjectUrlMock,
   facadeGetObjectStreamMock,
+  facadeToFetchableUrlMock,
   facadeUploadObjectStreamMock,
   getObjectCommandMock,
   getSignedUrlMock,
@@ -21,6 +23,8 @@ const {
 } = vi.hoisted(() => {
   const facadeUploadObjectStream = vi.fn()
   const facadeGetObjectStream = vi.fn()
+  const facadeGetInternalSignedObjectUrl = vi.fn()
+  const facadeToFetchableUrl = vi.fn()
 
   return {
     createStorageProviderMock: vi.fn(() => ({
@@ -30,13 +34,16 @@ const {
       deleteObject: vi.fn(),
       deleteObjects: vi.fn(),
       getSignedObjectUrl: vi.fn(),
+      getInternalSignedObjectUrl: facadeGetInternalSignedObjectUrl,
       getObjectBuffer: vi.fn(),
       getObjectStream: facadeGetObjectStream,
       extractStorageKey: vi.fn(),
-      toFetchableUrl: vi.fn(),
+      toFetchableUrl: facadeToFetchableUrl,
       generateUniqueKey: vi.fn(),
     })),
+    facadeGetInternalSignedObjectUrlMock: facadeGetInternalSignedObjectUrl,
     facadeGetObjectStreamMock: facadeGetObjectStream,
+    facadeToFetchableUrlMock: facadeToFetchableUrl,
     facadeUploadObjectStreamMock: facadeUploadObjectStream,
     getObjectCommandMock: vi.fn((input: Record<string, unknown>): MockCommand => ({
       type: 'GetObjectCommand',
@@ -256,29 +263,43 @@ describe('MinioStorageProvider streaming objects', () => {
     })
   })
 
-  it('uses the public endpoint for browser signed URLs while object IO stays internal', async () => {
+  it('uses distinct public and internal endpoints for browser and server signed URLs', async () => {
+    process.env.MINIO_ENDPOINT = 'http://minio:9000'
     process.env.MINIO_PUBLIC_ENDPOINT = 'http://localhost:19000'
     const provider = new MinioStorageProvider()
-    sendMock.mockResolvedValueOnce({})
-    getSignedUrlMock.mockResolvedValueOnce('http://localhost:19000/waoowaoo/images/panel.png?signed=1')
+    getSignedUrlMock
+      .mockResolvedValueOnce('http://localhost:19000/waoowaoo/images/panel.png?signed=public')
+      .mockResolvedValueOnce('http://minio:9000/waoowaoo/images/panel.png?signed=internal')
 
-    await provider.uploadObject({
-      key: 'images/panel.png',
-      body: Buffer.from('panel'),
-      contentType: 'image/png',
-    })
     await expect(provider.getSignedObjectUrl({
       key: 'images/panel.png',
       expiresInSeconds: 3600,
-    })).resolves.toBe('http://localhost:19000/waoowaoo/images/panel.png?signed=1')
+    })).resolves.toBe('http://localhost:19000/waoowaoo/images/panel.png?signed=public')
+    await expect(provider.getInternalSignedObjectUrl({
+      key: 'images/panel.png',
+      expiresInSeconds: 3600,
+    })).resolves.toBe('http://minio:9000/waoowaoo/images/panel.png?signed=internal')
 
     expect(s3ClientMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      endpoint: 'http://127.0.0.1:9000',
-    }))
-    expect(s3ClientMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
       endpoint: 'http://localhost:19000',
     }))
-    expect(getSignedUrlMock).toHaveBeenCalledWith(
+    expect(s3ClientMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      endpoint: 'http://minio:9000',
+    }))
+    expect(s3ClientMock.mock.results[0]?.value).not.toBe(s3ClientMock.mock.results[1]?.value)
+    expect(getSignedUrlMock).toHaveBeenNthCalledWith(
+      1,
+      s3ClientMock.mock.results[0]?.value,
+      expect.objectContaining({
+        input: expect.objectContaining({
+          Bucket: 'waoowaoo',
+          Key: 'images/panel.png',
+        }),
+      }),
+      { expiresIn: 3600 },
+    )
+    expect(getSignedUrlMock).toHaveBeenNthCalledWith(
+      2,
       s3ClientMock.mock.results[1]?.value,
       expect.objectContaining({
         input: expect.objectContaining({
@@ -442,5 +463,19 @@ describe('storage facade streaming objects', () => {
     facadeGetObjectStreamMock.mockResolvedValueOnce(body)
 
     await expect(storageFacade.getObjectStream('viral/source.mp4')).resolves.toBe(body)
+  })
+
+  it('normalizes a provider-relative internal object URL for a server fetch', async () => {
+    facadeGetInternalSignedObjectUrlMock.mockResolvedValueOnce('/api/files/images%2Fpanel.png')
+    facadeToFetchableUrlMock.mockReturnValueOnce('http://app:3000/api/files/images%2Fpanel.png')
+
+    await expect(storageFacade.getInternalObjectUrl('images/panel.png', 900))
+      .resolves.toBe('http://app:3000/api/files/images%2Fpanel.png')
+
+    expect(facadeGetInternalSignedObjectUrlMock).toHaveBeenCalledWith({
+      key: 'images/panel.png',
+      expiresInSeconds: 900,
+    })
+    expect(facadeToFetchableUrlMock).toHaveBeenCalledWith('/api/files/images%2Fpanel.png')
   })
 })

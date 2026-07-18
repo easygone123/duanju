@@ -144,9 +144,18 @@ export class MinioStorageProvider implements StorageProvider {
   }
 
   async getSignedObjectUrl(params: SignedUrlParams): Promise<string> {
+    const client = await this.getSigningClient()
+    return await this.signObjectUrl(client, params)
+  }
+
+  async getInternalSignedObjectUrl(params: SignedUrlParams): Promise<string> {
+    const client = await this.getClient()
+    return await this.signObjectUrl(client, params)
+  }
+
+  private async signObjectUrl(client: S3ClientLike, params: SignedUrlParams): Promise<string> {
     const sdk = await this.loadSdk()
     const presigner = await this.loadPresigner()
-    const client = await this.getSigningClient()
 
     return await presigner.getSignedUrl(
       client,
