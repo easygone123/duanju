@@ -221,6 +221,100 @@ describe('WorkflowCreationWizard', () => {
     expect(onCreated).toHaveBeenCalledWith('created-id')
   })
 
+  it('removes an unwanted automatic input and manually adds a missing video input', async () => {
+    const videoAnalysis = analysis({
+      graph: {
+        prompt: { class_type: 'PrimitiveString', inputs: { value: 'animate this' }, _meta: { title: 'Prompt' } },
+        duration: { class_type: 'PrimitiveNumber', inputs: { duration: 81 }, _meta: { title: 'Duration' } },
+        video: { class_type: 'LoadVideo', inputs: { video: 'source.mp4' }, _meta: { title: 'Source video' } },
+        output: { class_type: 'VHS_VideoCombine', inputs: { images: ['video', 0] }, _meta: { title: 'Video output' } },
+      },
+      mediaType: 'video',
+      proposals: [
+        {
+          id: 'prompt', canonicalName: 'prompt', nodeId: 'prompt', inputPath: 'value',
+          valueType: 'string', confidence: 'high', required: true,
+          reasonCode: 'COMFY_MAPPING_PROMPT_POSITIVE_LABEL', nodeTitle: 'Prompt',
+        },
+        {
+          id: 'duration', canonicalName: 'duration', nodeId: 'duration', inputPath: 'duration',
+          valueType: 'number', confidence: 'high', required: false,
+          reasonCode: 'COMFY_MAPPING_DURATION_INPUT', nodeTitle: 'Duration',
+        },
+      ],
+      outputs: [{ name: 'video', nodeId: 'output', fieldPath: 'gifs', mediaType: 'video', primary: true }],
+    })
+    const onCreate = vi.fn<(_: WorkflowAuthorDraft, creationId: string) => Promise<string>>()
+      .mockResolvedValue('video-workflow')
+    const { view } = renderWizard({
+      analyze: vi.fn().mockResolvedValue({ sourceText: '{}', analysis: videoAnalysis }),
+      onCreate,
+    })
+
+    selectKindAndAdvance(view, 'Video to video')
+    await act(async () => { upload(view, 'video-edit.json') })
+
+    fireEvent.click(view.getByRole('button', { name: 'Remove Duration mapping' }))
+    fireEvent.click(view.getByRole('button', { name: 'Add input mapping' }))
+    const field = view.getByLabelText('Workflow field') as HTMLSelectElement
+    const videoOption = view.getByRole('option', { name: 'Source video · video.video' }) as HTMLOptionElement
+    fireEvent.change(field, { target: { value: videoOption.value } })
+    fireEvent.change(view.getByLabelText('New mapping role'), { target: { value: 'sourceVideo' } })
+    fireEvent.click(view.getByRole('button', { name: 'Confirm input mapping' }))
+
+    await act(async () => { fireEvent.click(view.getByRole('button', { name: 'Create workflow' })) })
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      variableDefinitions: expect.arrayContaining([
+        expect.objectContaining({ name: 'prompt' }),
+        expect.objectContaining({ name: 'sourceVideo', type: 'video_ref', required: true }),
+      ]),
+      bindings: expect.arrayContaining([
+        expect.objectContaining({
+          nodeId: 'video', inputPath: 'video', variable: 'sourceVideo', transform: 'filename',
+        }),
+      ]),
+    }), expect.any(String))
+    expect(onCreate.mock.calls[0]![0].bindings).not.toContainEqual(expect.objectContaining({
+      nodeId: 'duration', inputPath: 'duration',
+    }))
+  })
+
+  it('adds, edits, selects, and removes output mappings before creation', async () => {
+    const outputAnalysis = analysis({
+      graph: {
+        '1': { class_type: 'CLIPTextEncode', inputs: { text: 'portrait' }, _meta: { title: 'Prompt' } },
+        '8': { class_type: 'VHS_VideoCombine', inputs: { images: ['1', 0] }, _meta: { title: 'VHS output' } },
+        '99': { class_type: 'CustomRemoteVideoSaver', inputs: { source: ['8', 0] }, _meta: { title: 'Custom output' } },
+      },
+      mediaType: 'video',
+      outputs: [{ name: 'legacy', nodeId: '8', fieldPath: 'files', mediaType: 'video', primary: true }],
+    })
+    const onCreate = vi.fn<(_: WorkflowAuthorDraft, creationId: string) => Promise<string>>()
+      .mockResolvedValue('video-output-workflow')
+    const { view } = renderWizard({
+      analyze: vi.fn().mockResolvedValue({ sourceText: '{}', analysis: outputAnalysis }),
+      onCreate,
+    })
+
+    selectKindAndAdvance(view, 'Video generation')
+    await act(async () => { upload(view, 'video-output.json') })
+
+    fireEvent.click(view.getByRole('button', { name: 'Add output mapping' }))
+    const outputNodes = view.getAllByLabelText('Output node') as HTMLSelectElement[]
+    const outputFields = view.getAllByLabelText('History field') as HTMLInputElement[]
+    fireEvent.change(outputNodes[1]!, { target: { value: '99' } })
+    fireEvent.change(outputFields[1]!, { target: { value: 'videos' } })
+    fireEvent.click(view.getAllByRole('radio', { name: /Use .* as primary output/ })[1]!)
+    fireEvent.click(view.getByRole('button', { name: 'Remove output legacy' }))
+
+    await act(async () => { fireEvent.click(view.getByRole('button', { name: 'Create workflow' })) })
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      outputs: [expect.objectContaining({ nodeId: '99', fieldPath: 'videos', primary: true })],
+    }), expect.any(String))
+  })
+
   it('lets only the latest overlapping analysis render or create', async () => {
     const pendingA = deferred<{ sourceText: string; analysis: WorkflowAutoMappingResult }>()
     const pendingB = deferred<{ sourceText: string; analysis: WorkflowAutoMappingResult }>()
@@ -394,9 +488,6 @@ describe('WorkflowCreationWizard', () => {
     await act(async () => { upload(view, 'locked-review.json') })
     fireEvent.click(view.getByRole('radio', { name: 'Source image' }))
     fireEvent.click(view.getByRole('radio', { name: 'resultA' }))
-    const advanced = view.getByText('Advanced Settings').closest('details') as HTMLDetailsElement
-    advanced.open = true
-    fireEvent(advanced, new Event('toggle'))
 
     fireEvent.click(view.getByRole('button', { name: 'Create workflow' }))
 

@@ -9,10 +9,9 @@ import {
   type WorkflowAutoMappingResult,
   type WorkflowImportKind,
 } from '@/lib/comfyui/workflow-auto-mapping-types'
-import WorkflowAdvancedMappingInspector from './WorkflowAdvancedMappingInspector'
 import WorkflowAnalysisSummary from './WorkflowAnalysisSummary'
+import WorkflowGuidedMappingEditor from './WorkflowGuidedMappingEditor'
 import WorkflowJsonDropzone from './WorkflowJsonDropzone'
-import WorkflowManualMappingCorrections from './WorkflowManualMappingCorrections'
 import WorkflowMappingQuestions from './WorkflowMappingQuestions'
 import WorkflowTypePicker from './WorkflowTypePicker'
 import {
@@ -21,9 +20,14 @@ import {
   isGuidedWorkflowReady,
 } from './guided-workflow-creation'
 import {
-  withManualWorkflowMappings,
-  type ManualWorkflowMappings,
-} from './manual-workflow-mapping'
+  createGuidedMappingDraft,
+  effectiveGuidedAnalysis,
+  guidedMappingDraftIssues,
+  removeGuidedInput,
+  setGuidedPrimaryOutput,
+  updateGuidedInputRole,
+  type GuidedWorkflowMappingDraft,
+} from './guided-workflow-mapping-draft'
 import {
   analyzeWorkflowJson,
   type WorkflowAnalysisResponse,
@@ -38,7 +42,6 @@ import {
 
 type WizardStage = 'type' | 'upload' | 'review'
 type BusyOperation = 'analyzing' | 'creating' | null
-type WorkflowRole = CanonicalWorkflowInput | 'preserve_original'
 
 export interface WorkflowCreationWizardProps {
   onCancel(): void
@@ -78,9 +81,7 @@ export default function WorkflowCreationWizard({
   const [name, setName] = useState('')
   const [sourceText, setSourceText] = useState('')
   const [analysis, setAnalysis] = useState<WorkflowAutoMappingResult | null>(null)
-  const [roles, setRoles] = useState<Record<string, WorkflowRole>>({})
-  const [manualMappings, setManualMappings] = useState<ManualWorkflowMappings>({})
-  const [selectedOutput, setSelectedOutput] = useState('')
+  const [mappingDraft, setMappingDraft] = useState<GuidedWorkflowMappingDraft | null>(null)
   const [busy, setBusy] = useState<BusyOperation>(null)
   const [completed, setCompleted] = useState(false)
   const [navigationFailed, setNavigationFailed] = useState(false)
@@ -107,9 +108,7 @@ export default function WorkflowCreationWizard({
     creationIdRef.current = null
     setSourceText('')
     setAnalysis(null)
-    setRoles({})
-    setManualMappings({})
-    setSelectedOutput('')
+    setMappingDraft(null)
     setError(null)
     setBusy(null)
   }
@@ -120,9 +119,7 @@ export default function WorkflowCreationWizard({
     if (derivedName !== undefined) setName(derivedName)
     setSourceText('')
     setAnalysis(null)
-    setRoles({})
-    setManualMappings({})
-    setSelectedOutput('')
+    setMappingDraft(null)
     setError(null)
     setBusy('analyzing')
     const ticket = coordinatorRef.current.begin()
@@ -136,7 +133,13 @@ export default function WorkflowCreationWizard({
         || (result.analysis.outputs.length === 1 ? result.analysis.outputs[0]?.nodeId : '')
       setSourceText(result.sourceText)
       setAnalysis(result.analysis)
-      setSelectedOutput(automaticOutput || '')
+      setMappingDraft(createGuidedMappingDraft({
+        ...result.analysis,
+        outputs: result.analysis.outputs.map((output) => ({
+          ...output,
+          primary: output.nodeId === automaticOutput,
+        })),
+      }))
       setStage('review')
       setError(null)
     } catch (analysisError) {
@@ -144,9 +147,7 @@ export default function WorkflowCreationWizard({
       if (isAbortError(analysisError)) return
       setSourceText('')
       setAnalysis(null)
-      setRoles({})
-      setManualMappings({})
-      setSelectedOutput('')
+      setMappingDraft(null)
       setStage('upload')
       setError(safeWorkflowAnalysisErrorKey(analysisError))
     } finally {
@@ -155,29 +156,23 @@ export default function WorkflowCreationWizard({
     }
   }
 
-  const mappingResolution = useMemo(() => {
-    if (!analysis) return { effectiveAnalysis: null, mappingInvalid: false }
-    try {
-      return {
-        effectiveAnalysis: withManualWorkflowMappings(analysis, manualMappings, roles),
-        mappingInvalid: false,
-      }
-    } catch (mappingError) {
-      if (!(mappingError instanceof Error) || mappingError.message !== 'workflowManualMappingInvalid') {
-        throw mappingError
-      }
-      return { effectiveAnalysis: analysis, mappingInvalid: true }
-    }
-  }, [analysis, manualMappings, roles])
-  const { effectiveAnalysis, mappingInvalid } = mappingResolution
+  const effectiveAnalysis = useMemo(
+    () => mappingDraft ? effectiveGuidedAnalysis(mappingDraft) : null,
+    [mappingDraft],
+  )
+  const mappingIssues = useMemo(
+    () => mappingDraft ? guidedMappingDraftIssues(mappingDraft) : ['outputRequired'] as const,
+    [mappingDraft],
+  )
+  const selectedOutput = mappingDraft?.outputs.find((output) => output.primary)?.nodeId || ''
   const review = useMemo(() => kind && effectiveAnalysis
-    ? buildGuidedWorkflowReview(kind, effectiveAnalysis, roles, selectedOutput)
-    : null, [effectiveAnalysis, kind, roles, selectedOutput])
+    ? buildGuidedWorkflowReview(kind, effectiveAnalysis, {}, selectedOutput)
+    : null, [effectiveAnalysis, kind, selectedOutput])
   const ready = Boolean(review && isGuidedWorkflowReady({
     name,
     review,
     busy: busy !== null,
-  }) && !mappingInvalid && !completed)
+  }) && mappingIssues.length === 0 && !completed)
   const automaticPrimaryOutputNodeId = analysis?.outputs.find((output) => output.primary)?.nodeId
     || (analysis?.outputs.length === 1 ? analysis.outputs[0]?.nodeId : '')
     || ''
@@ -196,13 +191,13 @@ export default function WorkflowCreationWizard({
   }
 
   const create = async () => {
-    if (!kind || !analysis || !effectiveAnalysis || mappingInvalid || !review || !ready || submissionRef.current !== 'idle') return
+    if (!kind || !analysis || !effectiveAnalysis || mappingIssues.length > 0 || !review || !ready || submissionRef.current !== 'idle') return
     submissionRef.current = 'creating'
     setBusy('creating')
     setError(null)
     try {
       const confirmed = confirmWorkflowAnalysis(effectiveAnalysis, {
-        roles,
+        roles: {},
         primaryOutputNodeId: review.primaryOutputNodeId,
         requiredInputs: WORKFLOW_IMPORT_KIND_META[kind].requiredInputs,
       })
@@ -230,16 +225,17 @@ export default function WorkflowCreationWizard({
     }
   }
 
-  const changeRole = (id: string, value: WorkflowRole) => {
-    setRoles((current) => ({ ...current, [id]: value }))
-    if (value !== 'preserve_original') {
-      setManualMappings((current) => {
-        if (!current[value]) return current
-        const next = { ...current }
-        delete next[value]
-        return next
-      })
-    }
+  const changeRole = (id: string, value: CanonicalWorkflowInput | 'preserve_original') => {
+    if (!mappingDraft) return
+    setMappingDraft(value === 'preserve_original'
+      ? removeGuidedInput(mappingDraft, id)
+      : updateGuidedInputRole(mappingDraft, id, value))
+  }
+
+  const changePrimaryOutput = (nodeId: string) => {
+    if (!mappingDraft) return
+    const index = mappingDraft.outputs.findIndex((output) => output.nodeId === nodeId)
+    if (index >= 0) setMappingDraft(setGuidedPrimaryOutput(mappingDraft, index))
   }
 
   const backToType = () => {
@@ -315,7 +311,7 @@ export default function WorkflowCreationWizard({
             />
           </section>}
 
-          {stage === 'review' && analysis && review && <section className="min-w-0 space-y-6" aria-labelledby="workflow-wizard-review">
+          {stage === 'review' && analysis && mappingDraft && review && <section className="min-w-0 space-y-6" aria-labelledby="workflow-wizard-review">
             <div>
               <h3 ref={stageHeadingRef} tabIndex={-1} id="workflow-wizard-review" className="font-semibold">{t('reviewTitle')}</h3>
               <p className="mt-1 text-sm text-[var(--glass-text-secondary)]">{t('reviewHint')}</p>
@@ -333,35 +329,22 @@ export default function WorkflowCreationWizard({
             </label>
             <WorkflowAnalysisSummary
               review={review}
-              outputCount={analysis.outputs.length}
+              outputCount={mappingDraft.outputs.length}
               automaticPrimaryOutputNodeId={automaticPrimaryOutputNodeId}
             />
-            {mappingInvalid && <p role="alert" className="break-words text-sm text-[var(--glass-tone-danger-fg)]">
-              {t('manualCorrectionInvalid')}
-            </p>}
-            <WorkflowManualMappingCorrections
-              analysis={analysis}
-              missingRequiredInputs={review.missingRequiredInputs}
-              value={manualMappings}
-              disabled={busy === 'creating' || completed}
-              onChange={setManualMappings}
-            />
             <WorkflowMappingQuestions
-              analysis={analysis}
+              analysis={effectiveAnalysis || analysis}
               review={review}
-              roles={roles}
+              roles={{}}
               primaryOutputNodeId={selectedOutput}
               disabled={busy === 'creating' || completed}
               onRoleChange={changeRole}
-              onPrimaryOutputChange={setSelectedOutput}
+              onPrimaryOutputChange={changePrimaryOutput}
             />
-            <WorkflowAdvancedMappingInspector
-              analysis={analysis}
-              roles={roles}
-              primaryOutputNodeId={selectedOutput}
+            <WorkflowGuidedMappingEditor
+              value={mappingDraft}
               disabled={busy === 'creating' || completed}
-              onRoleChange={changeRole}
-              onPrimaryOutputChange={setSelectedOutput}
+              onChange={setMappingDraft}
             />
           </section>}
         </div>
