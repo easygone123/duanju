@@ -157,11 +157,16 @@ async function generateVideoForPanel(
     throw new Error(`Panel ${panel.id} has no video prompt`)
   }
 
-  const sourceImageUrl = toSignedUrlIfCos(firstFramePanel.imageUrl, 3600)
-  if (!sourceImageUrl) {
-    throw new Error(`Panel ${firstFramePanel.id} image url invalid`)
+  const model = resolveVideoGenerationModel(payload, modelId) ?? modelId
+  const isComfyModel = parseModelKeyStrict(model)?.provider === 'comfyui'
+  let sourceImageInput = firstFramePanel.imageUrl
+  if (!isComfyModel) {
+    const sourceImageUrl = toSignedUrlIfCos(firstFramePanel.imageUrl, 3600)
+    if (!sourceImageUrl) {
+      throw new Error(`Panel ${firstFramePanel.id} image url invalid`)
+    }
+    sourceImageInput = await normalizeToBase64ForGeneration(sourceImageUrl)
   }
-  const sourceImageBase64 = await normalizeToBase64ForGeneration(sourceImageUrl)
 
   let lastFrameImageBase64: string | undefined
   let lastFrameStorageValue: string | undefined
@@ -169,10 +174,9 @@ async function generateVideoForPanel(
   const requestedGenerateAudio = typeof generationOptions.generateAudio === 'boolean'
     ? generationOptions.generateAudio
     : undefined
-  const model = resolveVideoGenerationModel(payload, modelId) ?? modelId
 
   if (firstLastFramePayload) {
-    if (parseModelKeyStrict(model)?.provider !== 'comfyui') {
+    if (!isComfyModel) {
       const firstLastFrameCapabilities = resolveBuiltinCapabilitiesByModelKey('video', model)
       if (firstLastFrameCapabilities?.video?.firstlastframe !== true) {
         throw new Error(`VIDEO_FIRSTLASTFRAME_MODEL_UNSUPPORTED: ${model}`)
@@ -185,9 +189,11 @@ async function generateVideoForPanel(
       if (!lastPanel) throw new Error('VIDEO_LAST_FRAME_SOURCE_FORBIDDEN')
       if (lastPanel?.imageUrl) {
         lastFrameStorageValue = lastPanel.imageUrl
-        const lastFrameUrl = toSignedUrlIfCos(lastPanel.imageUrl, 3600)
-        if (lastFrameUrl) {
-          lastFrameImageBase64 = await normalizeToBase64ForGeneration(lastFrameUrl)
+        if (!isComfyModel) {
+          const lastFrameUrl = toSignedUrlIfCos(lastPanel.imageUrl, 3600)
+          if (lastFrameUrl) {
+            lastFrameImageBase64 = await normalizeToBase64ForGeneration(lastFrameUrl)
+          }
         }
       }
     }
@@ -200,7 +206,7 @@ async function generateVideoForPanel(
     comfyWorkflowVersionId: typeof payload.comfyWorkflowVersionId === 'string'
       ? payload.comfyWorkflowVersionId
       : undefined,
-    imageUrl: sourceImageBase64,
+    imageUrl: sourceImageInput,
     comfyFirstFrameSource: firstFramePanel.imageUrl,
     comfyLastFrameSource: lastFrameStorageValue,
     options: {

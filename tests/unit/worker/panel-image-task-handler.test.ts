@@ -1,5 +1,5 @@
 import type { Job } from 'bullmq'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 
 const prismaMock = vi.hoisted(() => ({
@@ -20,6 +20,7 @@ const utilsMock = vi.hoisted(() => ({
 const sharedMock = vi.hoisted(() => ({
   collectPanelReferenceImages: vi.fn(async () => ['https://signed.example/ref-1.png']),
   collectPanelReferenceImageEntries: vi.fn(async () => [{
+    source: 'users/u/projects/p/ref-1.png',
     url: 'https://signed.example/ref-1.png', kind: 'character', name: 'Hero',
   }]),
   resolveNovelData: vi.fn(async () => ({
@@ -54,6 +55,8 @@ const outboundMock = vi.hoisted(() => ({
     return ['normalized-ref-1']
   }),
 }))
+
+const fetchMock = vi.hoisted(() => vi.fn())
 
 const promptMock = vi.hoisted(() => ({
   buildPrompt: vi.fn((input: {
@@ -118,6 +121,7 @@ function buildJob(payload: Record<string, unknown>, targetId = 'panel-1'): Job<T
 describe('worker panel-image-task-handler behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubGlobal('fetch', fetchMock)
 
     prismaMock.novelPromotionPanel.findUnique.mockResolvedValue({
       id: 'panel-1',
@@ -137,13 +141,96 @@ describe('worker panel-image-task-handler behavior', () => {
       imageUrl: null,
     })
 
+    utilsMock.resolveImageSourceFromGeneration.mockReset()
     utilsMock.resolveImageSourceFromGeneration
       .mockResolvedValueOnce('generated-source-1')
       .mockResolvedValueOnce('generated-source-2')
 
+    utilsMock.uploadImageSourceToCos.mockReset()
     utilsMock.uploadImageSourceToCos
       .mockResolvedValueOnce('cos/panel-candidate-1.png')
       .mockResolvedValueOnce('cos/panel-candidate-2.png')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps opaque owned references for ComfyUI without normalizing browser URLs', async () => {
+    const source = 'users/u/projects/p/ref.png'
+    const browserUrl = 'http://localhost:19000/waoowaoo/users/u/projects/p/ref.png?signed=1'
+    utilsMock.getProjectModels.mockResolvedValueOnce({
+      storyboardModel: 'comfyui::workflow-image',
+      artStyle: 'realistic',
+    })
+    sharedMock.collectPanelReferenceImageEntries.mockResolvedValueOnce([{
+      source,
+      url: browserUrl,
+      kind: 'character',
+      name: 'Hero',
+    }])
+
+    await handlePanelImageTask(buildJob({ candidateCount: 1 }))
+
+    expect(outboundMock.normalizeReferenceImagesForGeneration).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        modelId: 'comfyui::workflow-image',
+        comfyReferenceImages: [source],
+        options: expect.not.objectContaining({ referenceImages: expect.anything() }),
+      }),
+    )
+  })
+
+  it('still normalizes browser references to data URLs for cloud image providers', async () => {
+    const source = 'users/u/projects/p/ref.png'
+    const browserUrl = 'http://localhost:19000/waoowaoo/users/u/projects/p/ref.png?signed=1'
+    utilsMock.getProjectModels.mockResolvedValueOnce({
+      storyboardModel: 'fal::cloud-image',
+      artStyle: 'realistic',
+    })
+    sharedMock.collectPanelReferenceImageEntries.mockResolvedValueOnce([{
+      source,
+      url: browserUrl,
+      kind: 'character',
+      name: 'Hero',
+    }])
+    outboundMock.normalizeReferenceImagesForGeneration.mockResolvedValueOnce([
+      'data:image/png;base64,UkVG',
+    ])
+
+    await handlePanelImageTask(buildJob({ candidateCount: 1 }))
+
+    expect(outboundMock.normalizeReferenceImagesForGeneration).toHaveBeenCalledWith([browserUrl])
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        modelId: 'fal::cloud-image',
+        options: expect.objectContaining({
+          referenceImages: ['data:image/png;base64,UkVG'],
+        }),
+      }),
+    )
+  })
+
+  it('does not let a malformed comfy-like model key bypass cloud normalization', async () => {
+    const browserUrl = 'http://localhost:19000/waoowaoo/users/u/projects/p/ref.png?signed=1'
+    utilsMock.getProjectModels.mockResolvedValueOnce({
+      storyboardModel: 'comfyui:remote::workflow-image',
+      artStyle: 'realistic',
+    })
+    sharedMock.collectPanelReferenceImageEntries.mockResolvedValueOnce([{
+      source: 'users/u/projects/p/ref.png',
+      url: browserUrl,
+      kind: 'character',
+      name: 'Hero',
+    }])
+
+    await handlePanelImageTask(buildJob({ candidateCount: 1 }))
+
+    expect(outboundMock.normalizeReferenceImagesForGeneration).toHaveBeenCalledWith([browserUrl])
   })
 
   it('orders compact semantic references as characters, location, props, then sketch', async () => {
@@ -219,12 +306,12 @@ describe('worker panel-image-task-handler behavior', () => {
     expect(utilsMock.resolveImageSourceFromGeneration.mock.calls[0]?.[1]).toMatchObject({
       invocationKey: 'task-panel-image-1:panel:panel-1:candidate:0',
       comfyWorkflowVersionId: 'image-version-1',
-      comfyReferenceImages: ['https://signed.example/ref-1.png'],
+      comfyReferenceImages: ['users/u/projects/p/ref-1.png'],
     })
     expect(utilsMock.resolveImageSourceFromGeneration.mock.calls[1]?.[1]).toMatchObject({
       invocationKey: 'task-panel-image-1:panel:panel-1:candidate:1',
       comfyWorkflowVersionId: 'image-version-1',
-      comfyReferenceImages: ['https://signed.example/ref-1.png'],
+      comfyReferenceImages: ['users/u/projects/p/ref-1.png'],
     })
     expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
       variables: expect.objectContaining({
@@ -301,6 +388,7 @@ describe('worker panel-image-task-handler behavior', () => {
 
   it('uses one shared compact eight-image list for prompt and generation inputs', async () => {
     const entries = Array.from({ length: 10 }, (_, index) => ({
+      source: `source-ref-${index}.png`,
       url: `ref-${index}.png`, kind: 'character' as const, name: `Character ${index}`,
     }))
     sharedMock.collectPanelReferenceImageEntries.mockResolvedValueOnce(entries)
@@ -315,7 +403,7 @@ describe('worker panel-image-task-handler behavior', () => {
     await handlePanelImageTask(buildJob({ candidateCount: 1 }))
 
     const generation = utilsMock.resolveImageSourceFromGeneration.mock.calls[0]?.[1]
-    expect(generation.comfyReferenceImages).toEqual(entries.slice(0, 8).map((entry) => entry.url))
+    expect(generation.comfyReferenceImages).toEqual(entries.slice(0, 8).map((entry) => entry.source))
     expect(generation.options.referenceImages).toEqual(
       entries.slice(0, 8).map((entry) => `normalized-${entry.url}`),
     )

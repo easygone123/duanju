@@ -12,6 +12,7 @@ import {
   uploadImageSourceToCos,
 } from '../utils'
 import { normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-image'
+import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import {
   AnyObj,
   clampCount,
@@ -188,7 +189,9 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
   const referenceEntries = (await collectPanelReferenceImageEntries(projectData, panel))
     .slice(0, COMFY_REFERENCE_UPLOAD_LIMIT)
   const refs = referenceEntries.map((entry) => entry.url)
-  const normalizedRefs = await normalizeReferenceImagesForGeneration(refs)
+  const comfyRefs = referenceEntries.map((entry) => entry.source)
+  const isComfyModel = parseModelKeyStrict(modelKey)?.provider === 'comfyui'
+  const normalizedRefs = isComfyModel ? [] : await normalizeReferenceImagesForGeneration(refs)
 
   const logger = createScopedLogger({
     module: 'worker.panel-image',
@@ -275,9 +278,9 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
         : undefined,
       invocationKey: `${job.data.taskId}:panel:${panel.id}:candidate:${i}`,
       prompt,
-      comfyReferenceImages: refs,
+      comfyReferenceImages: comfyRefs,
       options: {
-        referenceImages: normalizedRefs,
+        ...(!isComfyModel ? { referenceImages: normalizedRefs } : {}),
         aspectRatio,
         ...(resolution ? { resolution } : {}),
       },

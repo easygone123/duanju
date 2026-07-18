@@ -1,5 +1,5 @@
 import type { Job } from 'bullmq'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 
 type WorkerProcessor = (job: Job<TaskJobData>) => Promise<unknown>
@@ -46,9 +46,10 @@ const concurrencyGateMock = vi.hoisted(() => ({
 const capabilityMock = vi.hoisted(() => vi.fn<
   (mediaType: string, modelKey: string) => { video: { firstlastframe: boolean } } | undefined
 >(() => ({ video: { firstlastframe: true } })))
-const parseModelKeyStrictMock = vi.hoisted(() => vi.fn((key: string) => ({
-  provider: key.split('::')[0], modelId: key.split('::')[1], modelKey: key,
-})))
+const normalizeToBase64ForGenerationMock = vi.hoisted(() => vi.fn(async (input: string) => (
+  input.includes('last') ? 'data:image/png;base64,TEFTVA==' : 'data:image/png;base64,RklSU1Q='
+)))
+const fetchMock = vi.hoisted(() => vi.fn())
 
 const prismaMock = vi.hoisted(() => ({
   novelPromotionPanel: {
@@ -91,13 +92,10 @@ vi.mock('@/lib/workers/shared', () => ({
 vi.mock('@/lib/workers/utils', () => utilsMock)
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/media/outbound-image', () => ({
-  normalizeToBase64ForGeneration: vi.fn(async (input: string) => input),
+  normalizeToBase64ForGeneration: normalizeToBase64ForGenerationMock,
 }))
 vi.mock('@/lib/model-capabilities/lookup', () => ({
   resolveBuiltinCapabilitiesByModelKey: capabilityMock,
-}))
-vi.mock('@/lib/model-config-contract', () => ({
-  parseModelKeyStrict: parseModelKeyStrictMock,
 }))
 vi.mock('@/lib/api-config', () => ({
   getProviderConfig: vi.fn(async () => ({ apiKey: 'api-key' })),
@@ -142,7 +140,9 @@ function buildJob(params: {
 describe('worker video processor behavior', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
+    vi.stubGlobal('fetch', fetchMock)
     workerState.processor = null
+    capabilityMock.mockReset()
     capabilityMock.mockReturnValue({ video: { firstlastframe: true } })
 
     prismaMock.novelPromotionPanel.findUnique.mockResolvedValue(buildPanel())
@@ -155,6 +155,10 @@ describe('worker video processor behavior', () => {
 
     const mod = await import('@/lib/workers/video.worker')
     mod.createVideoWorker()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('VIDEO_PANEL: 缺少 payload.videoModel 时显式失败', async () => {
@@ -293,11 +297,14 @@ describe('worker video processor behavior', () => {
       expect.anything(),
       expect.objectContaining({
         modelId: 'comfyui::wf-video',
+        imageUrl: 'cos/panel-image.png',
         comfyFirstFrameSource: 'cos/panel-image.png',
         comfyLastFrameSource: 'cos/last.png',
         options: expect.objectContaining({ prompt: 'SERVER FIRST LAST PROMPT' }),
       }),
     )
+    expect(normalizeToBase64ForGenerationMock).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('VIDEO_PANEL: uses the trusted manual first-frame panel image instead of the target image', async () => {
@@ -327,9 +334,49 @@ describe('worker video processor behavior', () => {
     expect(utilsMock.resolveVideoSourceFromGeneration).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        imageUrl: 'https://signed.example/cos/manual-first.png',
+        imageUrl: 'cos/manual-first.png',
         comfyFirstFrameSource: 'cos/manual-first.png',
         comfyLastFrameSource: 'cos/last.png',
+        options: expect.not.objectContaining({ lastFrameImageUrl: expect.anything() }),
+      }),
+    )
+    expect(normalizeToBase64ForGenerationMock).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('VIDEO_PANEL: cloud first-last-frame keeps normalized data URL inputs', async () => {
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(buildPanel({
+      id: 'last-panel', imageUrl: 'users/u/projects/p/last.png',
+    }))
+
+    await workerState.processor!(buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: {
+        videoModel: 'fal::cloud-video',
+        videoPrompt: 'SERVER FIRST LAST PROMPT',
+        firstLastFrame: {
+          flModel: 'fal::cloud-video',
+          sourcePanelId: 'last-panel',
+        },
+      },
+    }))
+
+    expect(normalizeToBase64ForGenerationMock).toHaveBeenNthCalledWith(
+      1,
+      'https://signed.example/cos/panel-image.png',
+    )
+    expect(normalizeToBase64ForGenerationMock).toHaveBeenNthCalledWith(
+      2,
+      'https://signed.example/users/u/projects/p/last.png',
+    )
+    expect(utilsMock.resolveVideoSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        modelId: 'fal::cloud-video',
+        imageUrl: 'data:image/png;base64,RklSU1Q=',
+        options: expect.objectContaining({
+          lastFrameImageUrl: 'data:image/png;base64,TEFTVA==',
+        }),
       }),
     )
   })
