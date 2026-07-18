@@ -74,7 +74,7 @@ function invertBinding(
   }))
 }
 
-function canonicalDurationDefinition(
+export function canonicalDurationDefinition(
   definitions: readonly ComfyVariableDefinition[],
 ): ComfyVariableDefinition | undefined {
   return definitions.find((definition) => definition.name === 'duration')

@@ -20,6 +20,7 @@ import {
   type OwnedComfyMediaInput,
 } from './media-ownership'
 import { resolveComfyDimensionsForAspectRatio } from './aspect-ratio'
+import { canonicalDurationDefinition } from './duration-contract'
 
 export const ALLOWED_COMFY_REQUEST_TRANSITIONS: Record<
   ComfyRequestStatus,
@@ -185,10 +186,7 @@ function normalizeSystemVariables(
   normalizeSystemAlias({
     normalized, names, legacy: 'input_images', canonical: 'referenceImages',
   })
-  normalizeSystemAlias({
-    normalized, names, legacy: 'duration_seconds', canonical: 'duration',
-    omitLegacyWhenUndeclared: true,
-  })
+  normalizeSystemDuration(normalized, names, definitions as unknown as ComfyVariableDefinition[])
   normalizeSystemAlias({
     normalized, names, legacy: 'first_frame', canonical: 'firstFrame',
     omitLegacyWhenUndeclared: true,
@@ -260,6 +258,28 @@ function normalizeSystemAlias(input: {
   if (!declaresLegacy && !declaresCanonical && input.omitLegacyWhenUndeclared) {
     delete input.normalized[input.legacy]
   }
+}
+
+function normalizeSystemDuration(
+  normalized: Record<string, ComfyVariableValue>,
+  names: Set<string>,
+  definitions: readonly ComfyVariableDefinition[],
+) {
+  if (names.has('duration') && names.has('duration_seconds')) {
+    throw new ApiError('INVALID_PARAMS')
+  }
+  const durationDefinition = canonicalDurationDefinition(definitions)
+  const target = durationDefinition?.name
+  if (!target) {
+    delete normalized.duration_seconds
+    return
+  }
+  if (target === 'duration_seconds') return
+  const hasSystemDuration = Object.hasOwn(normalized, 'duration_seconds')
+  if (!hasSystemDuration) return
+  if (Object.hasOwn(normalized, target)) throw new ApiError('INVALID_PARAMS')
+  normalized[target] = normalized.duration_seconds
+  delete normalized.duration_seconds
 }
 
 export interface TransitionComfyGenerationRequestInput {
