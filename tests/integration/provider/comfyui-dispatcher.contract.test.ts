@@ -43,6 +43,7 @@ function dependencies(overrides: Partial<ComfyDispatcherDependencies> = {}): Com
     heartbeat: vi.fn().mockResolvedValue(true),
     release: vi.fn().mockResolvedValue(true),
     transition: vi.fn().mockResolvedValue(true),
+    recordNumericDiagnostics: vi.fn().mockResolvedValue(true),
     claimSubmissionFence: vi.fn().mockResolvedValue({
       outcome: 'claimed', attemptId: 'attempt-1', clientId: 'client-1',
     }),
@@ -85,7 +86,76 @@ function dependencies(overrides: Partial<ComfyDispatcherDependencies> = {}): Com
   }
 }
 
+function frameDurationContext() {
+  return context({
+    request: {
+      ...context().request,
+      variableSnapshot: { duration: 5 },
+    },
+    version: {
+      ...context().version,
+      graph: {
+        '1': { class_type: 'VideoNode', inputs: { length: 81 } },
+        '2': { class_type: 'PreviewImage', inputs: { images: ['1', 0] } },
+      },
+      variableDefinitions: [
+        { name: 'duration', type: 'number' as const, required: true },
+        { name: 'fps', type: 'number' as const, required: false, defaultValue: 16 },
+      ],
+      bindings: [{
+        nodeId: '1', inputPath: 'length', variable: 'duration', valueType: 'number' as const,
+        numericTransform: {
+          sourceUnit: 'seconds' as const, targetUnit: 'frames' as const, output: 'number' as const,
+          fps: { source: 'runtime_then_fallback' as const, variable: 'fps' as const, fallback: 16 },
+          rounding: 'round' as const, frameOffset: 1 as const,
+        },
+      }],
+      outputs: [{
+        name: 'primary', nodeId: '2', fieldPath: 'images', mediaType: 'image' as const, primary: true,
+      }],
+    },
+  })
+}
+
 describe('ComfyUI dispatcher contract', () => {
+  it('persists duration conversion before prompt submission', async () => {
+    const recordNumericDiagnostics = vi.fn().mockResolvedValue(true)
+    const deps = dependencies({
+      loadContext: vi.fn().mockResolvedValue(frameDurationContext()),
+      recordNumericDiagnostics,
+    })
+
+    await dispatchComfyRequest('request-1', deps)
+
+    expect(recordNumericDiagnostics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'request-1', userId: 'user-1', projectId: 'project-1',
+        connectionId: 'connection-1', leaseId: 'lease-1',
+      }),
+      [expect.objectContaining({
+        variable: 'duration', sourceValue: 5, effectiveFps: 16, targetValue: 81,
+      })],
+    )
+    const persistOrder = recordNumericDiagnostics.mock.invocationCallOrder[0]!
+    const submitOrder = (deps.client.submitPrompt as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]!
+    expect(persistOrder).toBeLessThan(submitOrder)
+  })
+
+  it('does not submit when numeric diagnostics persistence loses ownership', async () => {
+    const deps = dependencies({
+      loadContext: vi.fn().mockResolvedValue(frameDurationContext()),
+      recordNumericDiagnostics: vi.fn().mockResolvedValue(false),
+      returnToWaiting: vi.fn().mockResolvedValue(false),
+    })
+
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({
+      outcome: 'reconciling', promptId: '',
+    })
+    expect(deps.client.submitPrompt).not.toHaveBeenCalled()
+    expect(deps.claimSubmissionFence).not.toHaveBeenCalled()
+    expect(deps.release).not.toHaveBeenCalled()
+  })
+
   it('keeps an accepted running cancellation reconciling without releasing its durable lease', async () => {
     const deps = dependencies({ cancelIfRequested: vi.fn().mockResolvedValue('reconciling') })
     await expect(dispatchComfyRequest('request-1', deps)).resolves.toEqual({

@@ -6,6 +6,7 @@ import {
   type ComfyRuntimeConfig,
   type ComfyRuntimeDeps,
 } from '@/lib/comfyui/runtime'
+import { persistOwnedComfyNumericDiagnostics } from '@/lib/comfyui/runtime-execution-adapter'
 
 const config: ComfyRuntimeConfig = {
   enabled: true,
@@ -173,6 +174,44 @@ describe('ComfyUI runtime lifecycle', () => {
     expect(dependencies.dispatchTick).not.toHaveBeenCalled()
     expect(dependencies.reconcileTick).not.toHaveBeenCalled()
     await runtime.close()
+  })
+})
+
+describe('ComfyUI numeric diagnostics persistence', () => {
+  it('writes a bounded safe projection under the complete active request owner', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 })
+    const persisted = await persistOwnedComfyNumericDiagnostics({
+      requestId: 'request-1', userId: 'user-1', projectId: 'project-1',
+      connectionId: 'connection-1', leaseId: 'lease-1',
+    }, [{
+      variable: 'duration', sourceValue: 5, targetValue: 81,
+      encodedAs: 'number', sourceUnit: 'seconds', targetUnit: 'frames',
+      effectiveFps: 16, rounding: 'round', frameOffset: 1,
+      apiKey: 'must-not-persist', rawMedia: 'must-not-persist',
+    } as never], updateMany)
+
+    expect(persisted).toBe(true)
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'request-1', userId: 'user-1', projectId: 'project-1',
+        connectionId: 'connection-1', leaseId: 'lease-1',
+        status: 'uploading', promptId: null, clientId: null, cancelRequestedAt: null,
+      },
+      data: { numericDiagnostics: [{
+        variable: 'duration', sourceValue: 5, targetValue: 81,
+        encodedAs: 'number', sourceUnit: 'seconds', targetUnit: 'frames',
+        effectiveFps: 16, rounding: 'round', frameOffset: 1,
+      }] },
+    })
+    expect(JSON.stringify(updateMany.mock.calls[0])).not.toContain('must-not-persist')
+  })
+
+  it('reports ownership loss when the scoped update matches no active request', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 })
+    await expect(persistOwnedComfyNumericDiagnostics({
+      requestId: 'request-1', userId: 'user-1', projectId: 'project-1',
+      connectionId: 'connection-1', leaseId: 'lease-1',
+    }, [], updateMany)).resolves.toBe(false)
   })
 })
 

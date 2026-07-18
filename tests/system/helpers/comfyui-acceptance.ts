@@ -291,6 +291,7 @@ export class InMemoryComfyExecution {
         request.status = to
         return true
       },
+      recordNumericDiagnostics: async () => owner(),
       preSubmitGate: async () => {
         const queue = await this.client.getQueue()
         if (queue.running.length + queue.pending.length > 0) return 'external_busy'

@@ -13,6 +13,7 @@ import type {
   ComfyApiWorkflow,
   ComfyExecutionEvent,
   ComfyInputBinding,
+  ComfyNumericConversionDiagnostic,
   ComfyOutputBinding,
   ComfyOutputRef,
   ComfyRequestStatus,
@@ -87,6 +88,10 @@ export interface ComfyDispatcherDependencies extends ComfyMediaDependencies {
   heartbeat(owner: OwnerInput & { ttlMs: number }): Promise<boolean>
   release(owner: OwnerInput & { ttlMs: number }): Promise<boolean>
   transition(input: OwnerInput & { from: ComfyRequestStatus; to: ComfyRequestStatus }): Promise<boolean>
+  recordNumericDiagnostics(
+    input: OwnerInput & { projectId: string },
+    diagnostics: ComfyNumericConversionDiagnostic[],
+  ): Promise<boolean>
   preSubmitGate(
     context: ExecutionContext,
     owner: OwnerInput,
@@ -193,13 +198,22 @@ export async function dispatchComfyRequest(
       ...(dependencies.maxInputBytes === undefined
         ? {} : { maxInputBytes: dependencies.maxInputBytes }),
     })
+    const numericDiagnostics: ComfyNumericConversionDiagnostic[] = []
     const graph = renderComfyWorkflow({
       graph: context.version.graph ?? {},
       variables: request.variableSnapshot ?? {},
       variableDefinitions: context.version.variableDefinitions ?? [],
       bindings: context.version.bindings ?? [],
       uploads,
+      onNumericConversion: (diagnostic) => numericDiagnostics.push(diagnostic),
     })
+    if (numericDiagnostics.length > 0) {
+      if (!request.projectId) throw new ApiError('CONFLICT')
+      await mustOwn(dependencies.recordNumericDiagnostics(
+        { ...owner, projectId: request.projectId },
+        numericDiagnostics,
+      ))
+    }
     await heartbeat.assertOwned()
     let gate: Awaited<ReturnType<ComfyDispatcherDependencies['preSubmitGate']>>
     try {

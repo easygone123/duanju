@@ -1246,6 +1246,7 @@ model ComfyGenerationRequest {
   workflowId            String
   workflowVersionId     String
   variableSnapshot      Json
+  numericDiagnostics    Json?
   status                String                   @default("waiting_capacity")
   connectionId          String?
   leaseId               String?

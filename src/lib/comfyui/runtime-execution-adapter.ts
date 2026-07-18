@@ -30,6 +30,7 @@ import type {
   ComfyConnectionAuth,
   ComfyApiWorkflow,
   ComfyInputBinding,
+  ComfyNumericConversionDiagnostic,
   ComfyOutputBinding,
   ComfyOutputRef,
   ComfyRequestStatus,
@@ -41,6 +42,41 @@ import type {
 } from './types'
 import type { ComfyRuntimeOperationLimits } from './runtime-deps'
 
+type ComfyNumericDiagnosticsOwner = {
+  requestId: string
+  userId: string
+  projectId: string
+  connectionId: string
+  leaseId: string
+}
+
+type StoredComfyNumericDiagnostic = {
+  variable: string
+  sourceValue: number
+  targetValue: number
+  encodedAs: ComfyNumericConversionDiagnostic['encodedAs']
+  sourceUnit: ComfyNumericConversionDiagnostic['sourceUnit']
+  targetUnit: ComfyNumericConversionDiagnostic['targetUnit']
+  effectiveFps?: number
+  rounding?: NonNullable<ComfyNumericConversionDiagnostic['rounding']>
+  frameOffset?: NonNullable<ComfyNumericConversionDiagnostic['frameOffset']>
+}
+
+type ComfyNumericDiagnosticsUpdateMany = (input: {
+  where: {
+    id: string
+    userId: string
+    projectId: string
+    connectionId: string
+    leaseId: string
+    status: 'uploading'
+    promptId: null
+    clientId: null
+    cancelRequestedAt: null
+  }
+  data: { numericDiagnostics: StoredComfyNumericDiagnostic[] }
+}) => Promise<{ count: number }>
+
 type Bundle = ComfyGenerationRequest & {
   connection: ComfyConnection | null
   workflowVersion: ComfyWorkflowVersion
@@ -49,6 +85,39 @@ type Bundle = ComfyGenerationRequest & {
     clientId: string
     promptId: string | null
   }>
+}
+
+export async function persistOwnedComfyNumericDiagnostics(
+  owner: ComfyNumericDiagnosticsOwner,
+  diagnostics: readonly ComfyNumericConversionDiagnostic[],
+  updateMany: ComfyNumericDiagnosticsUpdateMany,
+): Promise<boolean> {
+  const safeDiagnostics = diagnostics.map((diagnostic): StoredComfyNumericDiagnostic => ({
+    variable: diagnostic.variable,
+    sourceValue: diagnostic.sourceValue,
+    targetValue: diagnostic.targetValue,
+    encodedAs: diagnostic.encodedAs,
+    sourceUnit: diagnostic.sourceUnit,
+    targetUnit: diagnostic.targetUnit,
+    ...(diagnostic.effectiveFps === undefined
+      ? {} : { effectiveFps: diagnostic.effectiveFps }),
+    ...(diagnostic.rounding === undefined ? {} : { rounding: diagnostic.rounding }),
+    ...(diagnostic.frameOffset === undefined ? {} : { frameOffset: diagnostic.frameOffset }),
+  }))
+  return (await updateMany({
+    where: {
+      id: owner.requestId,
+      userId: owner.userId,
+      projectId: owner.projectId,
+      connectionId: owner.connectionId,
+      leaseId: owner.leaseId,
+      status: 'uploading',
+      promptId: null,
+      clientId: null,
+      cancelRequestedAt: null,
+    },
+    data: { numericDiagnostics: safeDiagnostics },
+  })).count === 1
 }
 
 export async function createProductionDispatcherDependencies(
@@ -81,6 +150,11 @@ export async function createProductionDispatcherDependencies(
     release: async (input) => await executionFence() && await releaseComfyRequestLease(input),
     transition: ({ from, to }) => updateOwned(
       { status: from }, { status: to, ...timestampFor(to) },
+    ),
+    recordNumericDiagnostics: (input, diagnostics) => persistOwnedComfyNumericDiagnostics(
+      input,
+      diagnostics,
+      (update) => prisma.comfyGenerationRequest.updateMany(update),
     ),
     preSubmitGate: (freshContext) => runFreshComfyPreSubmitGate({
       connectionId: owner.connectionId,
