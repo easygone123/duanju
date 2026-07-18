@@ -117,8 +117,9 @@ interface ExactOwnedLegacyAsset {
 async function findExactOwnedLegacyAsset(
   input: OwnedComfyMediaInput,
 ): Promise<ExactOwnedLegacyAsset | null> {
+  const imageUrlAliases = await legacyImageUrlAliases(input.storageKey)
   const projectCharacterWhere = {
-    imageUrl: input.storageKey,
+    imageUrl: { in: imageUrlAliases },
     character: {
       novelPromotionProject: {
         projectId: input.projectId,
@@ -140,7 +141,7 @@ async function findExactOwnedLegacyAsset(
   }
 
   const projectLocationWhere = {
-    imageUrl: input.storageKey,
+    imageUrl: { in: imageUrlAliases },
     location: {
       novelPromotionProject: {
         projectId: input.projectId,
@@ -162,7 +163,7 @@ async function findExactOwnedLegacyAsset(
   }
 
   const globalCharacterWhere = {
-    imageUrl: input.storageKey,
+    imageUrl: { in: imageUrlAliases },
     character: { userId: input.userId },
   }
   const globalCharacter = await prisma.globalCharacterAppearance.findFirst({
@@ -179,7 +180,7 @@ async function findExactOwnedLegacyAsset(
   }
 
   const globalLocationWhere = {
-    imageUrl: input.storageKey,
+    imageUrl: { in: imageUrlAliases },
     location: { userId: input.userId },
   }
   const globalLocation = await prisma.globalLocationImage.findFirst({
@@ -195,7 +196,41 @@ async function findExactOwnedLegacyAsset(
     }
   }
 
+  const projectPanelWhere = {
+    imageUrl: { in: imageUrlAliases },
+    storyboard: {
+      episode: {
+        novelPromotionProject: {
+          projectId: input.projectId,
+          project: { userId: input.userId },
+        },
+      },
+    },
+  }
+  const projectPanel = await prisma.novelPromotionPanel.findFirst({
+    where: projectPanelWhere,
+    select: { id: true },
+  })
+  if (projectPanel) {
+    return {
+      attach: async (mediaId) => await prisma.novelPromotionPanel.updateMany({
+        where: { id: projectPanel.id, ...projectPanelWhere },
+        data: { imageMediaId: mediaId },
+      }),
+    }
+  }
+
   return null
+}
+
+async function legacyImageUrlAliases(storageKey: string): Promise<string[]> {
+  const existing = await prisma.mediaObject.findUnique({
+    where: { storageKey },
+    select: { publicId: true },
+  })
+  return existing?.publicId
+    ? [storageKey, `/m/${encodeURIComponent(existing.publicId)}`]
+    : [storageKey]
 }
 
 function parseInternalSignedStorageRoute(value: string): string | null {
