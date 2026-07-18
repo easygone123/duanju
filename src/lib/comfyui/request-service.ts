@@ -144,7 +144,7 @@ export async function createComfyGenerationRequest(
           : workflow.currentVersionId === null || selectedVersion.id !== workflow.currentVersionId)) {
         throw new ApiError('NOT_FOUND')
       }
-      const normalizedVariables = normalizeReferenceImageVariables(
+      const normalizedVariables = normalizeSystemVariables(
         input.variables,
         selectedVersion.variableDefinitions,
       )
@@ -172,7 +172,7 @@ export async function createComfyGenerationRequest(
   }
 }
 
-function normalizeReferenceImageVariables(
+function normalizeSystemVariables(
   variables: Record<string, ComfyVariableValue>,
   rawDefinitions: unknown,
 ): Record<string, ComfyVariableValue> {
@@ -181,15 +181,23 @@ function normalizeReferenceImageVariables(
     isRecord(definition) && typeof definition.name === 'string'
   ))
   const names = new Set(definitions.map((definition) => definition.name as string))
-  const declaresLegacy = names.has('input_images')
-  const declaresGuided = names.has('referenceImages')
-  if (declaresLegacy && declaresGuided) throw new ApiError('INVALID_PARAMS')
   const normalized: Record<string, ComfyVariableValue> = { ...variables }
-  if (declaresGuided && Object.hasOwn(normalized, 'input_images')) {
-    if (Object.hasOwn(normalized, 'referenceImages')) throw new ApiError('INVALID_PARAMS')
-    normalized.referenceImages = normalized.input_images
-    delete normalized.input_images
-  }
+  normalizeSystemAlias({
+    normalized, names, legacy: 'input_images', canonical: 'referenceImages',
+  })
+  normalizeSystemAlias({
+    normalized, names, legacy: 'duration_seconds', canonical: 'duration',
+    omitLegacyWhenUndeclared: true,
+  })
+  normalizeSystemAlias({
+    normalized, names, legacy: 'first_frame', canonical: 'firstFrame',
+    omitLegacyWhenUndeclared: true,
+  })
+  normalizeSystemAlias({
+    normalized, names, legacy: 'last_frame', canonical: 'lastFrame',
+    omitLegacyWhenUndeclared: true,
+  })
+  if (!names.has('fps')) delete normalized.fps
   const aspectDefinition = definitions.find((definition) => (
     String(definition.name).replace(/[-_]/g, '').toLowerCase() === 'aspectratio'
   ))
@@ -227,6 +235,31 @@ function normalizeReferenceImageVariables(
     }
   }
   return normalized
+}
+
+function normalizeSystemAlias(input: {
+  normalized: Record<string, ComfyVariableValue>
+  names: Set<string>
+  legacy: string
+  canonical: string
+  omitLegacyWhenUndeclared?: boolean
+}) {
+  const declaresLegacy = input.names.has(input.legacy)
+  const declaresCanonical = input.names.has(input.canonical)
+  if (declaresLegacy && declaresCanonical) throw new ApiError('INVALID_PARAMS')
+
+  const hasLegacy = Object.hasOwn(input.normalized, input.legacy)
+  const hasCanonical = Object.hasOwn(input.normalized, input.canonical)
+  if (hasLegacy && hasCanonical) throw new ApiError('INVALID_PARAMS')
+
+  if (declaresCanonical && hasLegacy) {
+    input.normalized[input.canonical] = input.normalized[input.legacy]
+    delete input.normalized[input.legacy]
+    return
+  }
+  if (!declaresLegacy && !declaresCanonical && input.omitLegacyWhenUndeclared) {
+    delete input.normalized[input.legacy]
+  }
 }
 
 export interface TransitionComfyGenerationRequestInput {

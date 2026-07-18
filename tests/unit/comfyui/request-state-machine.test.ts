@@ -364,6 +364,96 @@ describe('ComfyUI request state machine', () => {
     }))
   })
 
+  it('maps legacy video runtime variables onto a guided workflow contract', async () => {
+    const dependencies = requestDependenciesWithDefinitions([
+      { name: 'prompt', type: 'string', required: true },
+      { name: 'duration', type: 'number', required: false, defaultValue: 5 },
+      { name: 'firstFrame', type: 'image_ref', required: true },
+      { name: 'lastFrame', type: 'image_ref', required: false },
+    ])
+    dependencies.resolveOwnedMedia.mockResolvedValue(true)
+
+    await createComfyGenerationRequest({
+      invocationKey: 'invoke-guided-video', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'video', workflowId: 'workflow-1',
+      variables: {
+        prompt: 'move', duration_seconds: 6,
+        first_frame: { storageKey: 'images/first.png' },
+        last_frame: { storageKey: 'images/last.png' },
+      },
+    }, dependencies)
+
+    expect(dependencies.create).toHaveBeenCalledWith(expect.objectContaining({
+      variableSnapshot: {
+        prompt: 'move', duration: 6,
+        firstFrame: { storageKey: 'images/first.png' },
+        lastFrame: { storageKey: 'images/last.png' },
+      },
+    }))
+  })
+
+  it('preserves video runtime aliases for legacy workflow definitions', async () => {
+    const dependencies = requestDependenciesWithDefinitions([
+      { name: 'prompt', type: 'string', required: true },
+      { name: 'duration_seconds', type: 'number', required: false },
+      { name: 'first_frame', type: 'image_ref', required: true },
+      { name: 'last_frame', type: 'image_ref', required: false },
+    ])
+    dependencies.resolveOwnedMedia.mockResolvedValue(true)
+
+    await createComfyGenerationRequest({
+      invocationKey: 'invoke-legacy-video', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'video', workflowId: 'workflow-1',
+      variables: {
+        prompt: 'move', duration_seconds: 6,
+        first_frame: { storageKey: 'images/first.png' },
+      },
+    }, dependencies)
+
+    expect(dependencies.create).toHaveBeenCalledWith(expect.objectContaining({
+      variableSnapshot: {
+        prompt: 'move', duration_seconds: 6,
+        first_frame: { storageKey: 'images/first.png' },
+      },
+    }))
+  })
+
+  it('omits inapplicable system video hints when the workflow does not declare them', async () => {
+    const dependencies = requestDependenciesWithDefinitions([
+      { name: 'prompt', type: 'string', required: true },
+    ])
+
+    await createComfyGenerationRequest({
+      invocationKey: 'invoke-fixed-video', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'video', workflowId: 'workflow-1',
+      variables: {
+        prompt: 'move', duration_seconds: 6, fps: 24,
+        first_frame: { storageKey: 'images/first.png' },
+        last_frame: { storageKey: 'images/last.png' },
+      },
+    }, dependencies)
+
+    expect(dependencies.create).toHaveBeenCalledWith(expect.objectContaining({
+      variableSnapshot: { prompt: 'move' },
+    }))
+    expect(dependencies.resolveOwnedMedia).not.toHaveBeenCalled()
+  })
+
+  it('rejects ambiguous guided and legacy video variable declarations', async () => {
+    const dependencies = requestDependenciesWithDefinitions([
+      { name: 'prompt', type: 'string', required: true },
+      { name: 'duration', type: 'number', required: false },
+      { name: 'duration_seconds', type: 'number', required: false },
+    ])
+
+    await expect(createComfyGenerationRequest({
+      invocationKey: 'invoke-ambiguous-video', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'video', workflowId: 'workflow-1',
+      variables: { prompt: 'move' },
+    }, dependencies)).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
+    expect(dependencies.create).not.toHaveBeenCalled()
+  })
+
   it('keeps input_images for legacy contracts and rejects an ambiguous dual declaration', async () => {
     const legacy = requestDependenciesWithDefinitions([{
       name: 'input_images', type: 'image_ref_list', required: false, maxItems: 8,
