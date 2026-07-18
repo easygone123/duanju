@@ -7,9 +7,11 @@ import {
   sanitizeImageInputsForTaskPayload,
 } from './outbound-image'
 import { resolveStorageKeyFromMediaValue } from '@/lib/media/service'
+import { getInternalObjectUrl, getSignedUrl } from '@/lib/storage'
 
 vi.mock('@/lib/storage', () => ({
-  getSignedUrl: vi.fn((key: string) => `/signed/${key}`),
+  getInternalObjectUrl: vi.fn(async (key: string) => `http://minio:9000/waoowaoo/${key}`),
+  getSignedUrl: vi.fn((key: string) => `http://localhost:19000/waoowaoo/${key}`),
   toFetchableUrl: vi.fn((value: string) => (
     value.startsWith('/') ? `http://localhost:3000${value}` : value
   )),
@@ -22,6 +24,8 @@ vi.mock('@/lib/media/service', () => ({
 describe('outbound-image normalization', () => {
   const fetchMock = vi.fn()
   const resolveStorageKeyMock = vi.mocked(resolveStorageKeyFromMediaValue)
+  const internalObjectUrlMock = vi.mocked(getInternalObjectUrl)
+  const signedUrlMock = vi.mocked(getSignedUrl)
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -53,10 +57,12 @@ describe('outbound-image normalization', () => {
     })
   })
 
-  it('unwraps next/image and resolves /m route to signed source', async () => {
+  it('unwraps next/image and resolves /m route through internal storage', async () => {
     const input = '/_next/image?url=%2Fm%2Fpub-1&w=640&q=75'
     const normalized = await normalizeToOriginalMediaUrl(input)
-    expect(normalized).toBe('http://localhost:3000/signed/images/from-media.png')
+    expect(normalized).toBe('http://minio:9000/waoowaoo/images/from-media.png')
+    expect(internalObjectUrlMock).toHaveBeenCalledWith('images/from-media.png', 3600)
+    expect(signedUrlMock).not.toHaveBeenCalled()
   })
 
   it('fails explicitly when /m route cannot be resolved to storage key', async () => {
@@ -66,9 +72,11 @@ describe('outbound-image normalization', () => {
     })
   })
 
-  it('signs storage key inputs', async () => {
+  it('resolves storage key inputs through the server-only object endpoint', async () => {
     const normalized = await normalizeToOriginalMediaUrl('images/direct.png')
-    expect(normalized).toBe('http://localhost:3000/signed/images/direct.png')
+    expect(normalized).toBe('http://minio:9000/waoowaoo/images/direct.png')
+    expect(internalObjectUrlMock).toHaveBeenCalledWith('images/direct.png', 3600)
+    expect(signedUrlMock).not.toHaveBeenCalled()
   })
 
   it('normalizes api relative path to absolute fetchable url', async () => {
