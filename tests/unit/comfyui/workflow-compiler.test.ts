@@ -1095,6 +1095,7 @@ describe('ComfyUI workflow compiler', () => {
     ['Comfy node link output index', { length: ['2', 0] }, 'length.1'],
     ['boolean target', { length: true }, 'length'],
     ['nonnumeric string target', { length: 'auto' }, 'length'],
+    ['non-decimal numeric-looking string target', { length: '0x10' }, 'length'],
     ['placeholder target', { length: '${duration}' }, 'length'],
     ['infinite target', { length: Number.POSITIVE_INFINITY }, 'length'],
     ['NaN target', { length: Number.NaN }, 'length'],

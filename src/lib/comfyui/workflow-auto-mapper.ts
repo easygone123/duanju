@@ -5,6 +5,7 @@ import type {
   ComfyNumericBindingTransform,
   ComfyVariableType,
 } from './types'
+import { comfyNumericScalarOutput } from './workflow-schema'
 import {
   WORKFLOW_IMPORT_KIND_META,
   type CanonicalWorkflowInput,
@@ -116,12 +117,6 @@ const FRAME_INPUTS = new Set(['numframes', 'framecount', 'totalframes', 'videole
 const AMBIGUOUS_DURATION_INPUTS = new Set(['length', 'frames'])
 const FPS_INPUTS = new Set(['fps', 'framerate'])
 
-function finiteNumericLiteral(value: unknown): { output: 'number' | 'numeric_string' } | null {
-  if (typeof value === 'number') return Number.isFinite(value) ? { output: 'number' } : null
-  if (typeof value !== 'string' || !value.trim()) return null
-  return Number.isFinite(Number(value.trim())) ? { output: 'numeric_string' } : null
-}
-
 function numericTransform(
   targetUnit: 'seconds' | 'frames' | 'fps',
   output: 'number' | 'numeric_string',
@@ -148,8 +143,8 @@ function inferVideoNumericProposal(input: {
   title: string
   requiredInputs: readonly CanonicalWorkflowInput[]
 }): WorkflowMappingProposal | null {
-  const literal = finiteNumericLiteral(input.value)
-  if (!literal) return null
+  const output = comfyNumericScalarOutput(input.value)
+  if (!output) return null
   const inputName = normalize(input.inputPath)
   const videoEvidence = /(video|frame|fps|duration|temporal|timing)/.test(
     normalize(`${input.node.class_type} ${input.title}`),
@@ -160,11 +155,11 @@ function inferVideoNumericProposal(input: {
   if (SECOND_INPUTS.has(inputName)) {
     canonicalName = 'duration'
     targetUnit = 'seconds'
-    confidence = literal.output === 'number' ? 'high' : 'ambiguous'
+    confidence = output === 'number' ? 'high' : 'ambiguous'
   } else if (FRAME_INPUTS.has(inputName)) {
     canonicalName = 'duration'
     targetUnit = 'frames'
-    confidence = videoEvidence && literal.output === 'number' ? 'high' : 'ambiguous'
+    confidence = videoEvidence && output === 'number' ? 'high' : 'ambiguous'
   } else if (AMBIGUOUS_DURATION_INPUTS.has(inputName) && videoEvidence) {
     canonicalName = 'duration'
     targetUnit = 'frames'
@@ -172,7 +167,7 @@ function inferVideoNumericProposal(input: {
   } else if (FPS_INPUTS.has(inputName)) {
     canonicalName = 'fps'
     targetUnit = 'fps'
-    confidence = literal.output === 'number' ? 'high' : 'ambiguous'
+    confidence = output === 'number' ? 'high' : 'ambiguous'
   } else {
     return null
   }
@@ -182,7 +177,7 @@ function inferVideoNumericProposal(input: {
     nodeId: input.nodeId,
     inputPath: input.inputPath,
     valueType: 'number',
-    numericTransform: numericTransform(targetUnit, literal.output),
+    numericTransform: numericTransform(targetUnit, output),
     confidence,
     reasonCode: `COMFY_MAPPING_${canonicalName.toUpperCase()}_INPUT`,
     required: input.requiredInputs.includes(canonicalName),

@@ -94,8 +94,14 @@ describe('guided ComfyUI mapping draft', () => {
         roles: expect.arrayContaining(['sourceImage', 'referenceImages', 'firstFrame', 'lastFrame']),
       }),
       expect.objectContaining({ nodeId: 'video', inputPath: 'video', roles: ['sourceVideo'] }),
-      expect.objectContaining({ nodeId: 'size', inputPath: 'width', roles: ['width'] }),
-      expect.objectContaining({ nodeId: 'size', inputPath: 'height', roles: ['height'] }),
+      expect.objectContaining({
+        nodeId: 'size', inputPath: 'width',
+        roles: expect.arrayContaining(['width', 'duration', 'fps']),
+      }),
+      expect.objectContaining({
+        nodeId: 'size', inputPath: 'height',
+        roles: expect.arrayContaining(['height', 'duration', 'fps']),
+      }),
       expect.objectContaining({
         nodeId: 'timing', inputPath: 'length', roles: ['duration', 'fps'],
         numericTransformByRole: {
@@ -114,6 +120,40 @@ describe('guided ComfyUI mapping draft', () => {
     expect(candidates.find((item) => (
       item.nodeId === 'timing' && item.inputPath === 'invalid_rate'
     ))?.roles).not.toEqual(expect.arrayContaining(['duration', 'fps']))
+  })
+
+  it('offers nested decimal scalars without traversing Comfy link tuples', () => {
+    const draft = createGuidedMappingDraft(analysis({
+      graph: {
+        ...analysis().graph,
+        nested: {
+          class_type: 'VideoSettings',
+          inputs: {
+            size: [512, ' 768.5 '],
+            config: { seconds: '5.5' },
+            model: ['size', 0],
+            hex: '0x10',
+          },
+        },
+      },
+    }))
+    const candidates = guidedInputCandidates(draft.analysis, draft.inputs)
+
+    expect(candidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        nodeId: 'nested', inputPath: 'size.1', roles: ['duration', 'fps'],
+        numericTransformByRole: expect.objectContaining({
+          duration: expect.objectContaining({ output: 'numeric_string' }),
+        }),
+      }),
+      expect.objectContaining({
+        nodeId: 'nested', inputPath: 'config.seconds', roles: ['duration', 'fps'],
+      }),
+    ]))
+    expect(candidates.some((item) => item.nodeId === 'nested' && item.inputPath.startsWith('model.')))
+      .toBe(false)
+    expect(candidates.find((item) => item.nodeId === 'nested' && item.inputPath === 'hex')?.roles)
+      .not.toEqual(expect.arrayContaining(['duration', 'fps']))
   })
 
   it('maps a numeric-string scalar to duration and retains confirmed frame semantics', () => {

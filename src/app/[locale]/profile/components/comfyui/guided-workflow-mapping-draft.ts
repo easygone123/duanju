@@ -4,7 +4,11 @@ import type {
   WorkflowMappingProposal,
 } from '@/lib/comfyui/workflow-auto-mapping-types'
 import { defaultHistoryFieldForOutput } from '@/lib/comfyui/workflow-auto-mapper'
-import { isSafeDottedPath } from '@/lib/comfyui/workflow-schema'
+import {
+  comfyNumericScalarOutput,
+  isComfyWorkflowLinkTuple,
+  isSafeDottedPath,
+} from '@/lib/comfyui/workflow-schema'
 import type {
   ComfyBindingTransform,
   ComfyNumericBindingTransform,
@@ -89,12 +93,6 @@ function isVideoInput(classType: string, inputPath: string, value: unknown) {
     && /(video|filename|path)/.test(inputName)
 }
 
-function numericOutput(value: unknown): 'number' | 'numeric_string' | null {
-  if (typeof value === 'number') return Number.isFinite(value) ? 'number' : null
-  if (typeof value !== 'string' || !value.trim()) return null
-  return Number.isFinite(Number(value.trim())) ? 'numeric_string' : null
-}
-
 function numericTransforms(output: 'number' | 'numeric_string') {
   return {
     duration: { sourceUnit: 'seconds', targetUnit: 'seconds', output },
@@ -109,7 +107,7 @@ function candidateFor(
   value: unknown,
   videoWorkflow: boolean,
 ): GuidedInputCandidate | null {
-  if (!isSafeDottedPath(inputPath) || inputPath.includes('.')) return null
+  if (!isSafeDottedPath(inputPath)) return null
   const title = nodeTitle(node)
   const common = {
     id: candidateId(nodeId, inputPath),
@@ -148,12 +146,13 @@ function candidateFor(
     }
   }
 
-  const output = numericOutput(value)
+  const output = comfyNumericScalarOutput(value)
   if (videoWorkflow && output) {
-    const namedRole = NUMBER_ROLE_BY_INPUT.get(normalize(inputPath))
-    const roles = namedRole && namedRole !== 'duration' && namedRole !== 'fps'
-      ? [namedRole]
-      : ['duration', 'fps'] as CanonicalWorkflowInput[]
+    const inputName = inputPath.split('.').at(-1) ?? inputPath
+    const namedRole = NUMBER_ROLE_BY_INPUT.get(normalize(inputName))
+    const roles = [...new Set<CanonicalWorkflowInput>([
+      ...(namedRole ? [namedRole] : []), 'duration', 'fps',
+    ])]
     return {
       ...common,
       roles,
@@ -176,7 +175,8 @@ function candidateFor(
   }
 
   if (typeof value === 'number' && Number.isFinite(value)) {
-    const role = NUMBER_ROLE_BY_INPUT.get(normalize(inputPath))
+    const inputName = inputPath.split('.').at(-1) ?? inputPath
+    const role = NUMBER_ROLE_BY_INPUT.get(normalize(inputName))
     if (!role) return null
     return {
       ...common,
@@ -188,6 +188,48 @@ function candidateFor(
   }
 
   return null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function inputScalarEntries(
+  inputs: Record<string, unknown>,
+  nodeIds: ReadonlySet<string>,
+): Array<[string, unknown]> {
+  const scalars: Array<[string, unknown]> = []
+  const visit = (value: unknown, path: string) => {
+    if (!isSafeDottedPath(path) || isComfyWorkflowLinkTuple(value, nodeIds)) return
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, `${path}.${index}`))
+      return
+    }
+    if (isRecord(value)) {
+      for (const [key, item] of Object.entries(value)
+        .sort(([left], [right]) => compareNames(left, right))) {
+        visit(item, `${path}.${key}`)
+      }
+      return
+    }
+    scalars.push([path, value])
+  }
+  for (const [inputPath, value] of Object.entries(inputs)
+    .sort(([left], [right]) => compareNames(left, right))) {
+    visit(value, inputPath)
+  }
+  return scalars
+}
+
+function readInputValue(inputs: Record<string, unknown>, inputPath: string): unknown {
+  let current: unknown = inputs
+  for (const segment of inputPath.split('.')) {
+    if ((!isRecord(current) && !Array.isArray(current)) || !Object.hasOwn(current, segment)) {
+      return undefined
+    }
+    current = current[segment as keyof typeof current]
+  }
+  return current
 }
 
 export function createGuidedMappingDraft(
@@ -206,11 +248,14 @@ export function guidedInputCandidates(
 ): GuidedInputCandidate[] {
   const occupied = new Set(inputs.map((input) => pair(input.nodeId, input.inputPath)))
   const candidates: GuidedInputCandidate[] = []
+  const nodeIds = new Set(Object.keys(analysis.graph))
   for (const [nodeId, node] of Object.entries(analysis.graph)
     .sort(([left], [right]) => compareNames(left, right))) {
-    for (const [inputPath, value] of Object.entries(node.inputs)
-      .sort(([left], [right]) => compareNames(left, right))) {
-      if (occupied.has(pair(nodeId, inputPath))) continue
+    for (const [inputPath, value] of inputScalarEntries(node.inputs, nodeIds)) {
+      const occupiedByAncestor = inputPath.split('.').some((_, index, segments) => (
+        occupied.has(pair(nodeId, segments.slice(0, index + 1).join('.')))
+      ))
+      if (occupiedByAncestor) continue
       const candidate = candidateFor(
         nodeId, inputPath, node, value, analysis.mediaType === 'video',
       )
@@ -265,8 +310,11 @@ export function updateGuidedInputRole(
   if (index < 0) invalidDraft()
   const current = draft.inputs[index]!
   if (!guidedCompatibleRoles(current).includes(role)) invalidDraft()
-  const originalValue = draft.analysis.graph[current.nodeId]?.inputs[current.inputPath]
-  const output = numericOutput(originalValue)
+  const originalInputs = draft.analysis.graph[current.nodeId]?.inputs
+  const originalValue = originalInputs
+    ? readInputValue(originalInputs, current.inputPath)
+    : undefined
+  const output = comfyNumericScalarOutput(originalValue)
   const replacementNumericTransform = output && (role === 'duration' || role === 'fps')
     ? numericTransforms(output)[role]
     : undefined

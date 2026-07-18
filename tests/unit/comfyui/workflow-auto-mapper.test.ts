@@ -251,6 +251,18 @@ describe('ComfyUI API workflow auto mapper', () => {
     },
   )
 
+  it('does not treat a non-decimal numeric-looking string as duration', () => {
+    const result = analyzeComfyApiWorkflow({
+      kind: 'video_generation',
+      graph: {
+        video: { class_type: 'VideoLengthNode', inputs: { duration: '0x10' } },
+        out: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+      },
+    })
+
+    expect(result.proposals.some((item) => item.canonicalName === 'duration')).toBe(false)
+  })
+
   it('marks an unlabelled text encoder as ambiguous instead of silently positive', () => {
     const result = analyzeComfyApiWorkflow({
       graph: {

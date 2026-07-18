@@ -2,6 +2,7 @@ import { COMFY_ERROR_CODE, ComfyError } from './errors'
 import { decimalEquals } from './numeric-binding'
 import type {
   ComfyApiWorkflow,
+  ComfyNumericOutput,
   ComfyVariableDefinition,
   ComfyVariableType,
   ComfyVariableValue,
@@ -12,7 +13,7 @@ import type {
 import { COMFY_REFERENCE_UPLOAD_LIMIT } from './types'
 
 const PLACEHOLDER_PATTERN = /\$\{([^{}]+)\}/g
-const NUMERIC_LINK_INDEX = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
+const FINITE_DECIMAL_STRING = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
 const BLOCKED_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor'])
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9_-]+$/
 const VARIABLE_TYPES = new Set<ComfyVariableType>([
@@ -334,13 +335,19 @@ function validateNumericTransform(input: {
   ))
 }
 
-function isFiniteNumericScalarLiteral(value: unknown): boolean {
-  if (typeof value === 'number') return Number.isFinite(value)
-  if (typeof value !== 'string') return false
+export function comfyNumericScalarOutput(value: unknown): ComfyNumericOutput | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? 'number' : null
+  if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return trimmed.length > 0
-    && NUMERIC_LINK_INDEX.test(trimmed)
+    && FINITE_DECIMAL_STRING.test(trimmed)
     && Number.isFinite(Number(trimmed))
+    ? 'numeric_string'
+    : null
+}
+
+function isFiniteNumericScalarLiteral(value: unknown): boolean {
+  return comfyNumericScalarOutput(value) !== null
 }
 
 function readDottedPath(
@@ -350,7 +357,7 @@ function readDottedPath(
 ): unknown {
   let current: unknown = root
   for (const segment of path.split('.')) {
-    if (isPotentialLink(current, nodeIds)) return undefined
+    if (isComfyWorkflowLinkTuple(current, nodeIds)) return undefined
     if ((!isObject(current) && !Array.isArray(current)) || !Object.hasOwn(current, segment)) {
       return undefined
     }
@@ -609,7 +616,7 @@ function validateNode(
   }
 
   visitValues(value.inputs, (nestedValue, path) => {
-    if (!isPotentialLink(nestedValue, nodeIds)) return
+    if (!isComfyWorkflowLinkTuple(nestedValue, nodeIds)) return
     const [linkedNodeId, outputIndex] = nestedValue
     if (!nodeIds.has(linkedNodeId)) {
       issues.push(formatIssue(path, `Link references unknown node "${linkedNodeId}".`))
@@ -620,13 +627,16 @@ function validateNode(
   }, `${nodeId}.inputs`)
 }
 
-function isPotentialLink(value: unknown, nodeIds: Set<string>): value is [string, unknown] {
+export function isComfyWorkflowLinkTuple(
+  value: unknown,
+  nodeIds: ReadonlySet<string>,
+): value is [string, unknown] {
   if (!Array.isArray(value) || value.length !== 2
     || typeof value[0] !== 'string' || value[0].length === 0) return false
   return typeof value[1] === 'number'
     || (nodeIds.has(value[0])
       && typeof value[1] === 'string'
-      && NUMERIC_LINK_INDEX.test(value[1]))
+      && comfyNumericScalarOutput(value[1]) === 'numeric_string')
 }
 
 function isUiFormat(value: unknown): boolean {
