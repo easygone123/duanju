@@ -1,4 +1,7 @@
 import { ApiError } from '@/lib/api-errors'
+import { resolveComfyDurationContract } from '@/lib/comfyui/duration-contract'
+import { decimalEquals } from '@/lib/comfyui/numeric-binding'
+import type { ComfyInputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
 import {
   applyTrustedComfyVersionSnapshot,
   getProjectModelConfig,
@@ -75,8 +78,20 @@ function durationContractFor(
   modelKey: string,
   panel: VideoPanelRecord,
   variableDefinitions?: unknown,
+  bindings?: unknown,
+  runtimeFps?: number,
 ): AvailablePanelVideoModel['duration'] {
   const provider = parseModelKeyStrict(modelKey)?.provider
+  if (provider === 'comfyui') {
+    const resolved = resolveComfyDurationContract({
+      variableDefinitions: Array.isArray(variableDefinitions)
+        ? variableDefinitions as ComfyVariableDefinition[]
+        : [],
+      bindings: Array.isArray(bindings) ? bindings as ComfyInputBinding[] : [],
+      ...(positiveNumber(runtimeFps) ? { runtimeFps } : {}),
+    })
+    if (resolved.kind === 'fixed') return resolved
+  }
   const durationVariable = Array.isArray(variableDefinitions)
     ? variableDefinitions.find((value) => isRecord(value)
       && value.type === 'number'
@@ -146,6 +161,7 @@ async function loadAvailableVideoModel(input: {
   userId: string
   panel: VideoPanelRecord
   trustedComfyWorkflowVersionId?: string | null
+  runtimeFps?: number
 }): Promise<AvailablePanelVideoModel> {
   const parsed = parseModelKeyStrict(input.modelKey)
   if (!parsed) throw new ApiError('INVALID_PARAMS', { code: VIDEO_MODEL_INVALID })
@@ -169,17 +185,42 @@ async function loadAvailableVideoModel(input: {
         workflow: { id: parsed.modelId, userId: input.userId, mediaType: 'video', status: 'published' },
         lastTestConnection: { userId: input.userId },
       },
-      select: { id: true, variableDefinitions: true, contentHash: true },
+      select: { id: true, variableDefinitions: true, bindingSpec: true, contentHash: true },
     })
     : null
   if (comfyWorkflowVersionId && (!comfyVersion || !comfyVersion.contentHash.trim())) {
     throw new ApiError('INVALID_PARAMS', { code: VIDEO_MODEL_INVALID })
   }
+  const duration = durationContractFor(
+    input.modelKey,
+    input.panel,
+    comfyVersion?.variableDefinitions,
+    comfyVersion?.bindingSpec,
+    input.runtimeFps,
+  )
+  const hasNativeDurationChoices = Array.isArray(comfyVersion?.bindingSpec)
+    && comfyVersion.bindingSpec.some((binding) => isRecord(binding)
+      && binding.variable === 'duration'
+      && isRecord(binding.numericTransform)
+      && Array.isArray(binding.numericTransform.allowedTargetValues))
+  const requestedDuration = positiveNumber(input.panel.durationOverride)
+    ? input.panel.durationOverride
+    : positiveNumber(input.panel.estimatedDuration)
+      ? input.panel.estimatedDuration
+      : positiveNumber(input.panel.duration)
+        ? input.panel.duration
+        : null
+  if (hasNativeDurationChoices
+    && duration.kind === 'fixed'
+    && requestedDuration !== null
+    && !duration.options.some((option) => decimalEquals(option, requestedDuration))) {
+    throw new ApiError('INVALID_PARAMS', { code: VIDEO_DURATION_INVALID })
+  }
   return {
     modelKey: input.modelKey,
     available: true,
     comfyWorkflowVersionId,
-    duration: durationContractFor(input.modelKey, input.panel, comfyVersion?.variableDefinitions),
+    duration,
   }
 }
 
@@ -318,6 +359,7 @@ export async function resolveAuthoritativePanelPayload(input: {
   routingMode?: 'single' | 'batch'
 }) {
   const panel = await applyDurationOverrideCas(input.body, input.panel)
+  const runtimeSelections = toRuntimeSelections(input.body.generationOptions)
   const isBatch = input.routingMode === 'batch'
   const firstLast = !isBatch && isRecord(input.body.firstLastFrame) ? input.body.firstLastFrame : null
   const trustedFirstLastFrame = firstLast
@@ -346,6 +388,7 @@ export async function resolveAuthoritativePanelPayload(input: {
       userId: input.userId,
       panel,
       trustedComfyWorkflowVersionId: projectDefaultComfyWorkflowVersionId,
+      runtimeFps: positiveNumber(runtimeSelections.fps) ? runtimeSelections.fps : undefined,
     })]
   } catch (error) {
     if (!explicitModel && automaticDialogueModel) {
@@ -383,7 +426,7 @@ export async function resolveAuthoritativePanelPayload(input: {
   payload.requestedDuration = submission.requestedDuration
   payload.effectiveDuration = submission.effectiveDuration
   payload.durationSource = submission.durationSource
-  payload.generationOptions = { ...toRuntimeSelections(payload.generationOptions), duration: submission.effectiveDuration }
+  payload.generationOptions = { ...runtimeSelections, duration: submission.effectiveDuration }
   applyTrustedComfyVersionSnapshot(payload, submission.snapshot.comfyWorkflowVersionId)
   payload.comfyModelSnapshotVersion = 1
   return payload

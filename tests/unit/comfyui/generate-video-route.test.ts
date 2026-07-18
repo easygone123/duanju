@@ -579,6 +579,95 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     }))
   })
 
+  it('uses the pinned native frame contract instead of legacy canonical options', async () => {
+    comfyVersionFindFirstMock.mockResolvedValue({
+      id: 'video-version-1',
+      contentHash: 'video-content-hash',
+      variableDefinitions: [{ name: 'duration', type: 'number', options: [10] }],
+      bindingSpec: [{
+        nodeId: 'timing', inputPath: 'length', variable: 'duration', valueType: 'number',
+        numericTransform: {
+          sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+          fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+          rounding: 'round', frameOffset: 1, allowedTargetValues: [81, 161],
+        },
+      }],
+    })
+
+    const response = await POST(request({ videoModel: 'comfyui::wf-video' }), {
+      params: Promise.resolve({ projectId: 'project-1' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        requestedDuration: 5,
+        effectiveDuration: 5,
+        generationOptions: expect.objectContaining({ duration: 5 }),
+      }),
+    }))
+  })
+
+  it('rejects an unsupported Comfy duration exactly instead of snapping before billing', async () => {
+    panelFindFirstMock.mockResolvedValue({
+      id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+      hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+      includeDialogueInVideoPrompt: true, videoPrompt: 'server prompt',
+      estimatedDuration: 7.2, durationOverride: null, duration: 7.2,
+    })
+    comfyVersionFindFirstMock.mockResolvedValue({
+      id: 'video-version-1',
+      contentHash: 'video-content-hash',
+      variableDefinitions: [{ name: 'duration', type: 'number', options: [5, 10] }],
+      bindingSpec: [{
+        nodeId: 'timing', inputPath: 'length', variable: 'duration', valueType: 'number',
+        numericTransform: {
+          sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+          fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+          rounding: 'round', frameOffset: 1, allowedTargetValues: [81, 161],
+        },
+      }],
+    })
+
+    const response = await POST(request({ videoModel: 'comfyui::wf-video' }), {
+      params: Promise.resolve({ projectId: 'project-1' }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'VIDEO_DURATION_INVALID' })
+    expect(buildBillingInfoMock).not.toHaveBeenCalled()
+    expect(submitTaskMock).not.toHaveBeenCalled()
+  })
+
+  it('uses runtime FPS to expose the pinned native duration choice', async () => {
+    comfyVersionFindFirstMock.mockResolvedValue({
+      id: 'video-version-1',
+      contentHash: 'video-content-hash',
+      variableDefinitions: [{ name: 'duration', type: 'number', options: [7.5] }],
+      bindingSpec: [{
+        nodeId: 'timing', inputPath: 'length', variable: 'duration', valueType: 'number',
+        numericTransform: {
+          sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+          fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+          rounding: 'round', frameOffset: 1, allowedTargetValues: [121],
+        },
+      }],
+    })
+
+    const response = await POST(request({
+      videoModel: 'comfyui::wf-video',
+      generationOptions: { fps: 24 },
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        effectiveDuration: 5,
+        generationOptions: expect.objectContaining({ fps: 24, duration: 5 }),
+      }),
+    }))
+  })
+
   it('blocks an unavailable configured dialogue model before billing submission', async () => {
     panelFindFirstMock.mockResolvedValue({
       id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
