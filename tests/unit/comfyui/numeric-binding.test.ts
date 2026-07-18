@@ -46,6 +46,36 @@ describe('ComfyUI numeric bindings', () => {
     })
   })
 
+  it('preserves FPS identity', () => {
+    expect(convertComfyNumericBinding({
+      variable: 'fps',
+      value: 24,
+      variables: {},
+      transform: { sourceUnit: 'fps', targetUnit: 'fps', output: 'number' },
+    })).toEqual({
+      variable: 'fps',
+      sourceValue: 24,
+      targetValue: 24,
+      encodedValue: 24,
+      encodedAs: 'number',
+      sourceUnit: 'fps',
+      targetUnit: 'fps',
+    })
+  })
+
+  it('encodes seconds identity as a numeric string', () => {
+    expect(convertComfyNumericBinding({
+      variable: 'duration',
+      value: 5.5,
+      variables: {},
+      transform: {
+        sourceUnit: 'seconds',
+        targetUnit: 'seconds',
+        output: 'numeric_string',
+      },
+    }).encodedValue).toBe('5.5')
+  })
+
   it('uses runtime FPS before fallback', () => {
     expect(convertComfyNumericBinding({
       variable: 'duration', value: 5, variables: { fps: 24 }, transform: frames(),
@@ -69,10 +99,13 @@ describe('ComfyUI numeric bindings', () => {
   )
 
   it('rejects unsupported target values without snapping', () => {
-    expect(() => convertComfyNumericBinding({
+    const error = captureError(() => convertComfyNumericBinding({
       variable: 'duration', value: 6, variables: {},
       transform: frames({ allowedTargetValues: [81, 161] }),
-    })).toThrowError(/unsupported_target/)
+    }))
+
+    expect(error.code).toBe(COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID)
+    expect(error.details).toEqual({ variable: 'duration', reason: 'unsupported_target' })
   })
 
   it.each(['5', Number.NaN, Number.POSITIVE_INFINITY, 0, -1])(
@@ -146,6 +179,25 @@ describe('ComfyUI numeric bindings', () => {
       },
     }).targetValue).toBe(0.1 + 0.2)
   })
+
+  it.each([Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'rejects non-finite allowed target value %s', (allowedTarget) => {
+      const error = captureError(() => convertComfyNumericBinding({
+        variable: 'duration',
+        value: 0.3,
+        variables: {},
+        transform: {
+          sourceUnit: 'seconds',
+          targetUnit: 'seconds',
+          output: 'number',
+          allowedTargetValues: [allowedTarget],
+        },
+      }))
+
+      expect(error.code).toBe(COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID)
+      expect(error.details).toEqual({ variable: 'duration', reason: 'unsupported_target' })
+    },
+  )
 
   it('does not mutate its inputs', () => {
     const variables = { fps: 24 }

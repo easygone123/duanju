@@ -5,7 +5,13 @@ import type {
   ComfyVariableValue,
 } from './types'
 
-function invalid(variable: string, reason: string): never {
+type ComfyNumericBindingInvalidReason =
+  | 'invalid_source'
+  | 'missing_fps'
+  | 'invalid_frames'
+  | 'unsupported_target'
+
+function invalid(variable: string, reason: ComfyNumericBindingInvalidReason): never {
   throw new ComfyError(
     COMFY_ERROR_CODE.WORKFLOW_BINDING_INVALID,
     `Invalid numeric workflow binding: ${reason}`,
@@ -14,6 +20,7 @@ function invalid(variable: string, reason: string): never {
 }
 
 export function decimalEquals(left: number, right: number): boolean {
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return false
   const scale = Math.max(1, Math.abs(left), Math.abs(right))
   return Math.abs(left - right) <= Number.EPSILON * scale * 8
 }
