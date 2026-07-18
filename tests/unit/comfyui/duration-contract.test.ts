@@ -25,7 +25,7 @@ describe('ComfyUI canonical duration contract', () => {
         fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
         rounding: 'round', frameOffset: 1, allowedTargetValues: [81, 161],
       })],
-    })).toEqual({ kind: 'fixed', options: [5, 10] })
+    })).toEqual({ kind: 'fixed', options: [5, 10], nativeConstrained: true })
   })
 
   it('preserves fractional second options', () => {
@@ -35,7 +35,7 @@ describe('ComfyUI canonical duration contract', () => {
         sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
         allowedTargetValues: [2.5, 5.5],
       })],
-    })).toEqual({ kind: 'fixed', options: [2.5, 5.5] })
+    })).toEqual({ kind: 'fixed', options: [2.5, 5.5], nativeConstrained: true })
   })
 
   it('uses positive runtime FPS before the pinned fallback', () => {
@@ -47,7 +47,7 @@ describe('ComfyUI canonical duration contract', () => {
         rounding: 'round', frameOffset: 1, allowedTargetValues: [121],
       })],
       runtimeFps: 24,
-    })).toEqual({ kind: 'fixed', options: [5] })
+    })).toEqual({ kind: 'fixed', options: [5], nativeConstrained: true })
   })
 
   it('forward-checks rounding and offset and drops non-positive inverse choices', () => {
@@ -58,7 +58,7 @@ describe('ComfyUI canonical duration contract', () => {
         fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
         rounding: 'floor', frameOffset: 1, allowedTargetValues: [1, 82],
       })],
-    })).toEqual({ kind: 'fixed', options: [5.0625] })
+    })).toEqual({ kind: 'fixed', options: [5.0625], nativeConstrained: true })
   })
 
   it('falls back to legacy canonical duration options without a native target contract', () => {

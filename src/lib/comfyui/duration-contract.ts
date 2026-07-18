@@ -6,7 +6,7 @@ import type {
 } from './types'
 
 export type ComfyDurationContract =
-  | { kind: 'fixed'; options: number[] }
+  | { kind: 'fixed'; options: number[]; nativeConstrained?: true }
   | { kind: 'unconstrained' }
 
 function positive(value: unknown): value is number {
@@ -101,7 +101,7 @@ export function resolveComfyDurationContract(input: {
       .filter((seconds) => remaining.every((binding) => (
         forwardMatches(seconds, binding.numericTransform!, input.runtimeFps)
       )))
-    return { kind: 'fixed', options: sortedUnique(options) }
+    return { kind: 'fixed', options: sortedUnique(options), nativeConstrained: true }
   }
 
   const legacyOptions = definition.options?.filter(positive) ?? []

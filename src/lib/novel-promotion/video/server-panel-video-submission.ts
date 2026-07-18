@@ -89,7 +89,11 @@ function durationContractFor(
       bindings: Array.isArray(bindings) ? bindings as ComfyInputBinding[] : [],
       ...(positiveNumber(runtimeFps) ? { runtimeFps } : {}),
     })
-    if (resolved.kind === 'fixed') return resolved
+    if (resolved.kind === 'fixed') {
+      return resolved.nativeConstrained
+        ? { kind: 'fixed', options: resolved.options, resolution: 'exact' }
+        : resolved
+    }
   }
   const durationVariable = Array.isArray(variableDefinitions)
     ? variableDefinitions.find((value) => isRecord(value)
@@ -197,18 +201,11 @@ async function loadAvailableVideoModel(input: {
     comfyVersion?.bindingSpec,
     input.runtimeFps,
   )
-  const hasNativeDurationChoices = Array.isArray(comfyVersion?.bindingSpec)
-    && comfyVersion.bindingSpec.some((binding) => isRecord(binding)
-      && binding.variable === 'duration'
-      && isRecord(binding.numericTransform)
-      && Array.isArray(binding.numericTransform.allowedTargetValues))
   return {
     modelKey: input.modelKey,
     available: true,
     comfyWorkflowVersionId,
-    duration: hasNativeDurationChoices && duration.kind === 'fixed'
-      ? { ...duration, resolution: 'exact' }
-      : duration,
+    duration,
   }
 }
 

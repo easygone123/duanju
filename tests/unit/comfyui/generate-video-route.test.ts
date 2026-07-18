@@ -674,6 +674,107 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     expect(submitTaskMock).not.toHaveBeenCalled()
   })
 
+  it.each(['duration_seconds', 'seconds'])(
+    'rejects unsupported native %s duration aliases before billing or submission',
+    async (durationVariable) => {
+      panelFindFirstMock.mockResolvedValue({
+        id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: 'server prompt',
+        estimatedDuration: 7.2, durationOverride: null, duration: 7.2,
+      })
+      comfyVersionFindFirstMock.mockResolvedValue({
+        id: 'video-version-1',
+        contentHash: 'video-content-hash',
+        variableDefinitions: [{ name: durationVariable, type: 'number', options: [5, 10] }],
+        bindingSpec: [{
+          nodeId: 'timing', inputPath: 'duration', variable: durationVariable, valueType: 'number',
+          numericTransform: {
+            sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+            allowedTargetValues: [5, 10],
+          },
+        }],
+      })
+
+      const response = await POST(request({ videoModel: 'comfyui::wf-video' }), {
+        params: Promise.resolve({ projectId: 'project-1' }),
+      })
+
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({ code: 'VIDEO_DURATION_INVALID' })
+      expect(buildBillingInfoMock).not.toHaveBeenCalled()
+      expect(submitTaskMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each(['duration_seconds', 'seconds'])(
+    'normalizes decimal-equal native %s duration aliases to the canonical choice',
+    async (durationVariable) => {
+      panelFindFirstMock.mockResolvedValue({
+        id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: 'server prompt',
+        estimatedDuration: 5.000000000000001, durationOverride: null, duration: 5.000000000000001,
+      })
+      comfyVersionFindFirstMock.mockResolvedValue({
+        id: 'video-version-1',
+        contentHash: 'video-content-hash',
+        variableDefinitions: [{ name: durationVariable, type: 'number', options: [5, 10] }],
+        bindingSpec: [{
+          nodeId: 'timing', inputPath: 'duration', variable: durationVariable, valueType: 'number',
+          numericTransform: {
+            sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+            allowedTargetValues: [5, 10],
+          },
+        }],
+      })
+
+      const response = await POST(request({ videoModel: 'comfyui::wf-video' }), {
+        params: Promise.resolve({ projectId: 'project-1' }),
+      })
+
+      expect(response.status).toBe(200)
+      expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+        payload: expect.objectContaining({
+          requestedDuration: 5,
+          effectiveDuration: 5,
+          generationOptions: expect.objectContaining({ duration: 5 }),
+        }),
+      }))
+    },
+  )
+
+  it.each(['duration_seconds', 'seconds'])(
+    'preserves ceiling behavior for legacy %s aliases without native choices',
+    async (durationVariable) => {
+      panelFindFirstMock.mockResolvedValue({
+        id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: 'server prompt',
+        estimatedDuration: 7.2, durationOverride: null, duration: 7.2,
+      })
+      comfyVersionFindFirstMock.mockResolvedValue({
+        id: 'video-version-1',
+        contentHash: 'video-content-hash',
+        variableDefinitions: [{ name: durationVariable, type: 'number', options: [5, 10] }],
+        bindingSpec: [],
+      })
+
+      const response = await POST(request({ videoModel: 'comfyui::wf-video' }), {
+        params: Promise.resolve({ projectId: 'project-1' }),
+      })
+
+      expect(response.status).toBe(200)
+      expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+        payload: expect.objectContaining({
+          requestedDuration: 7.2,
+          effectiveDuration: 10,
+          generationOptions: expect.objectContaining({ duration: 10 }),
+        }),
+      }))
+    },
+  )
+
   it('uses runtime FPS to expose the pinned native duration choice', async () => {
     comfyVersionFindFirstMock.mockResolvedValue({
       id: 'video-version-1',
