@@ -249,21 +249,39 @@ export const DELETE = apiHandler(async (
 
   // 使用事务删除（Prisma 的 cascade 会自动处理关联删除，但我们显式删除以确保一致性）
   await prisma.$transaction(async (tx) => {
-    // 1. 删除所有关联的 Panels
+    // 1. 清除指向待删除分镜的语音匹配，避免留下陈旧的匹配元数据
+    await tx.novelPromotionVoiceLine.updateMany({
+      where: {
+        episodeId: storyboard.episodeId,
+        matchedStoryboardId: storyboardId,
+      },
+      data: {
+        matchedPanelId: null,
+        matchedStoryboardId: null,
+        matchedPanelIndex: null,
+      },
+    })
+
+    // 2. 删除所有关联的 Panels
     await tx.novelPromotionPanel.deleteMany({
       where: { storyboardId }
     })
 
-    // 2. 删除 Storyboard
+    // 3. 删除 Storyboard
     await tx.novelPromotionStoryboard.delete({
       where: { id: storyboardId }
     })
 
-    // 3. 删除关联的 Clip（如果存在）
+    // 4. 只有没有其他 Storyboard 引用时才删除关联的 Clip
     if (storyboard.clipId) {
-      await tx.novelPromotionClip.delete({
-        where: { id: storyboard.clipId }
+      const remainingStoryboardCount = await tx.novelPromotionStoryboard.count({
+        where: { clipId: storyboard.clipId },
       })
+      if (remainingStoryboardCount === 0) {
+        await tx.novelPromotionClip.delete({
+          where: { id: storyboard.clipId }
+        })
+      }
     }
   })
 

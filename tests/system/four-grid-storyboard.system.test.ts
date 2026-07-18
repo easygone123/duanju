@@ -332,6 +332,84 @@ describe('system - four-grid persisted generation chain', () => {
     })).toBe(4)
   })
 
+  it('deletes one shared-clip grid group without deleting its sibling and clears voice matches', async () => {
+    const user = await createFixtureUser()
+    const project = await createFixtureProject(user.id)
+    const novelProject = await createFixtureNovelProject(project.id)
+    const episode = await createFixtureEpisode(novelProject.id)
+    const clip = await prisma.novelPromotionClip.create({
+      data: { episodeId: episode.id, summary: 'shared scene', content: 'Two storyboard groups share this clip.' },
+    })
+    const selected = await prisma.novelPromotionStoryboard.create({
+      data: {
+        episodeId: episode.id,
+        clipId: clip.id,
+        layoutMode: 'four_grid',
+        groupSequence: 0,
+        panelCount: 4,
+        panels: {
+          create: Array.from({ length: 4 }, (_, panelIndex) => ({
+            panelIndex,
+            panelNumber: panelIndex + 1,
+            gridCellIndex: panelIndex,
+            description: `selected ${panelIndex}`,
+          })),
+        },
+      },
+      include: { panels: true },
+    })
+    const sibling = await prisma.novelPromotionStoryboard.create({
+      data: {
+        episodeId: episode.id,
+        clipId: clip.id,
+        layoutMode: 'four_grid',
+        groupSequence: 1,
+        panelCount: 4,
+        panels: {
+          create: Array.from({ length: 4 }, (_, panelIndex) => ({
+            panelIndex,
+            panelNumber: panelIndex + 1,
+            gridCellIndex: panelIndex,
+            description: `sibling ${panelIndex}`,
+          })),
+        },
+      },
+      include: { panels: true },
+    })
+    const voiceLine = await prisma.novelPromotionVoiceLine.create({
+      data: {
+        episodeId: episode.id,
+        lineIndex: 0,
+        speaker: 'Narrator',
+        content: 'Matched to the selected group.',
+        matchedStoryboardId: selected.id,
+        matchedPanelId: selected.panels[0]!.id,
+        matchedPanelIndex: 0,
+      },
+    })
+    mockAuthenticated(user.id)
+
+    const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-group/route')
+    const response = await callRoute(route.DELETE, 'DELETE', undefined, {
+      params: { projectId: project.id },
+      query: { storyboardId: selected.id },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await prisma.novelPromotionStoryboard.findUnique({ where: { id: selected.id } })).toBeNull()
+    expect(await prisma.novelPromotionStoryboard.findUnique({ where: { id: sibling.id } })).toMatchObject({
+      id: sibling.id,
+      clipId: clip.id,
+    })
+    expect(await prisma.novelPromotionClip.findUnique({ where: { id: clip.id } })).toMatchObject({ id: clip.id })
+    expect(await prisma.novelPromotionPanel.count({ where: { storyboardId: sibling.id } })).toBe(4)
+    expect(await prisma.novelPromotionVoiceLine.findUnique({ where: { id: voiceLine.id } })).toMatchObject({
+      matchedStoryboardId: null,
+      matchedPanelId: null,
+      matchedPanelIndex: null,
+    })
+  })
+
   it('REQ-NP-FOUR-GRID-03 persists planning lineage, generates one common-ratio sheet, and owns four crop media', async () => {
     const user = await createFixtureUser()
     const project = await createFixtureProject(user.id)
