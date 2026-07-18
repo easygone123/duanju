@@ -257,6 +257,21 @@ describe('WorkflowActivationPanel', () => {
     expect(requestWorkflowActionMock.mock.calls[0]?.[0]).toContain('/test-run')
   })
 
+  it('offers mapping repair only after a failed live test', async () => {
+    requestWorkflowActionMock.mockRejectedValueOnce(new Error('test failed'))
+    const onEditMappings = vi.fn()
+    const view = renderPanel({ onEditMappings })
+
+    expect(view.queryByRole('button', { name: 'Return to edit mappings' })).toBeNull()
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    await waitFor(() => expect(view.getByRole('button', {
+      name: 'Return to edit mappings',
+    })).toBeTruthy())
+
+    fireEvent.click(view.getByRole('button', { name: 'Return to edit mappings' }))
+    expect(onEditMappings).toHaveBeenCalledTimes(1)
+  })
+
   it('retries only the exact-version publish after publish failure', async () => {
     requestWorkflowActionMock
       .mockResolvedValueOnce({ success: true })

@@ -17,10 +17,11 @@ interface Props {
   workflowId: string
   version: WorkflowVersionView
   onClose(): void
+  onEditMappings?(): void
   onActivated?(): void | Promise<void>
 }
 
-export default function WorkflowActivationPanel({ workflowId, version, onClose, onActivated }: Props) {
+export default function WorkflowActivationPanel({ workflowId, version, onClose, onEditMappings, onActivated }: Props) {
   const t = useTranslations('comfyui.workflows')
   const queryClient = useQueryClient()
   const connectionsQuery = useComfyConnections()
@@ -198,13 +199,23 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
       {activation.error === 'publish' && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t('activation.publishFailed')}</p>}
       {requestError && <p className="text-xs text-[var(--glass-text-tertiary)]">{t(requestError)}</p>}
 
-      {activation.publishRequired
-        ? <button type="button" disabled={!canPublish} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50" onClick={() => void publishExactVersion()}>
-          {activation.error === 'publish' ? t('activation.retryPublish') : t('activation.publish')}
-        </button>
-        : <button type="button" disabled={!canTest} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50" onClick={() => void testAndPublish()}>
-          {activation.busy === 'testing' ? t('activation.testing') : t('activation.testAndEnable')}
+      <div className="flex flex-wrap gap-2">
+        {activation.publishRequired
+          ? <button type="button" disabled={!canPublish} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50" onClick={() => void publishExactVersion()}>
+            {activation.error === 'publish' ? t('activation.retryPublish') : t('activation.publish')}
+          </button>
+          : <button type="button" disabled={!canTest} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50" onClick={() => void testAndPublish()}>
+            {activation.busy === 'testing' ? t('activation.testing') : t('activation.testAndEnable')}
+          </button>}
+        {activation.error === 'test' && onEditMappings && <button
+          type="button"
+          disabled={busy}
+          className="glass-btn-base px-4 py-2 text-sm disabled:opacity-50"
+          onClick={onEditMappings}
+        >
+          {t('activation.editMappings')}
         </button>}
+      </div>
     </>}
   </section>
 }

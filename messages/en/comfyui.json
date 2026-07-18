@@ -96,6 +96,7 @@
       "publishing": "Publishing workflow…",
       "publish": "Publish workflow",
       "retryPublish": "Retry publish",
+      "editMappings": "Return to edit mappings",
       "testFailed": "The live test failed. Nothing was published.",
       "publishFailed": "The live test passed, but publishing failed. Retry publishing without testing again.",
       "close": "Close activation"

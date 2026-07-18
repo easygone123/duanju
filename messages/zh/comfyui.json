@@ -96,6 +96,7 @@
       "publishing": "正在发布工作流…",
       "publish": "发布工作流",
       "retryPublish": "重试发布",
+      "editMappings": "返回修改映射",
       "testFailed": "实时测试失败，工作流没有发布。",
       "publishFailed": "实时测试已通过，但发布失败；可以直接重试发布，无需再次测试。",
       "close": "关闭启用流程"
