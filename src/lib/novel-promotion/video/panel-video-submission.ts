@@ -1,4 +1,5 @@
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
+import { decimalEquals } from '@/lib/comfyui/numeric-binding'
 import {
   VIDEO_DURATION_INVALID,
   VIDEO_DURATION_TOO_SHORT,
@@ -17,7 +18,7 @@ export type VideoModelReason =
   | 'normal_project_model'
 
 export type VideoDurationContract =
-  | { kind: 'fixed'; options: readonly number[] }
+  | { kind: 'fixed'; options: readonly number[]; resolution?: 'exact' }
   | { kind: 'range'; min: number; max: number; step: number }
   | { kind: 'provider_default'; duration: number }
 
@@ -157,7 +158,14 @@ function resolveRangeDuration(requested: number, contract: Extract<VideoDuration
 }
 
 function resolveEffectiveDuration(requested: number, contract: VideoDurationContract): number {
-  if (contract.kind === 'fixed') return resolveSupportedDuration(requested, contract.options)
+  if (contract.kind === 'fixed') {
+    if (contract.resolution === 'exact') {
+      const matched = contract.options.find((option) => decimalEquals(option, requested))
+      if (matched === undefined) throw new Error(VIDEO_DURATION_INVALID)
+      return matched
+    }
+    return resolveSupportedDuration(requested, contract.options)
+  }
   if (contract.kind === 'range') return resolveRangeDuration(requested, contract)
   if (!positive(contract.duration)) throw new Error(VIDEO_DURATION_INVALID)
   if (contract.duration < requested) throw new Error(VIDEO_DURATION_TOO_SHORT)
@@ -186,6 +194,10 @@ export function resolvePanelVideoSubmission(input: PanelVideoSubmissionInput): P
   const dialogueTimingInstruction = dialogueFragment ? DIALOGUE_TIMING_INSTRUCTION : undefined
   const { requested, source } = resolveRequestedDuration(input.panel, model.duration)
   const effectiveDuration = resolveEffectiveDuration(requested, model.duration)
+  const canonicalRequestedDuration = model.duration.kind === 'fixed'
+    && model.duration.resolution === 'exact'
+    ? effectiveDuration
+    : requested
   const comfyWorkflowVersionId = model.comfyWorkflowVersionId?.trim() || undefined
   if (parseModelKeyStrict(model.modelKey)?.provider === 'comfyui' && !comfyWorkflowVersionId) {
     throw new Error(VIDEO_MODEL_INVALID)
@@ -198,14 +210,14 @@ export function resolvePanelVideoSubmission(input: PanelVideoSubmissionInput): P
     dialogueFragment,
     dialogueTimingInstruction,
     submittedPrompt: [visualPrompt, dialogueFragment, dialogueTimingInstruction].filter(Boolean).join(' '),
-    requestedDuration: requested,
+    requestedDuration: canonicalRequestedDuration,
     effectiveDuration,
     durationSource: source,
     snapshot: {
       model: model.modelKey,
       ...(comfyWorkflowVersionId ? { comfyWorkflowVersionId } : {}),
       modelReason: reason,
-      requestedDuration: requested,
+      requestedDuration: canonicalRequestedDuration,
       effectiveDuration,
     },
   }

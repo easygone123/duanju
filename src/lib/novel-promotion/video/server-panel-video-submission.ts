@@ -1,6 +1,5 @@
 import { ApiError } from '@/lib/api-errors'
 import { resolveComfyDurationContract } from '@/lib/comfyui/duration-contract'
-import { decimalEquals } from '@/lib/comfyui/numeric-binding'
 import type { ComfyInputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
 import {
   applyTrustedComfyVersionSnapshot,
@@ -203,24 +202,13 @@ async function loadAvailableVideoModel(input: {
       && binding.variable === 'duration'
       && isRecord(binding.numericTransform)
       && Array.isArray(binding.numericTransform.allowedTargetValues))
-  const requestedDuration = positiveNumber(input.panel.durationOverride)
-    ? input.panel.durationOverride
-    : positiveNumber(input.panel.estimatedDuration)
-      ? input.panel.estimatedDuration
-      : positiveNumber(input.panel.duration)
-        ? input.panel.duration
-        : null
-  if (hasNativeDurationChoices
-    && duration.kind === 'fixed'
-    && requestedDuration !== null
-    && !duration.options.some((option) => decimalEquals(option, requestedDuration))) {
-    throw new ApiError('INVALID_PARAMS', { code: VIDEO_DURATION_INVALID })
-  }
   return {
     modelKey: input.modelKey,
     available: true,
     comfyWorkflowVersionId,
-    duration,
+    duration: hasNativeDurationChoices && duration.kind === 'fixed'
+      ? { ...duration, resolution: 'exact' }
+      : duration,
   }
 }
 
