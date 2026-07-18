@@ -462,15 +462,27 @@ function discoverOutputs(
   const outputs: ComfyOutputBinding[] = []
   for (const [nodeId, node] of Object.entries(graph)) {
     if (!isOutputNode(node.class_type, mediaType)) continue
+    const fieldPath = defaultHistoryFieldForOutput(node.class_type, mediaType)
+    if (!fieldPath) continue
     outputs.push({
       name: `output_${nodeId}`,
       nodeId,
-      fieldPath: mediaType === 'image' ? 'images' : 'files',
+      fieldPath,
       mediaType,
       primary: false,
     })
   }
   return outputs
+}
+
+export function defaultHistoryFieldForOutput(
+  classType: string,
+  mediaType: 'image' | 'video',
+): string | null {
+  if (mediaType === 'image') return 'images'
+  const normalized = normalize(classType)
+  if (normalized === 'vhsvideocombine' || normalized === 'savevideo') return 'gifs'
+  return null
 }
 
 function isOutputNode(classType: string, mediaType: 'image' | 'video') {

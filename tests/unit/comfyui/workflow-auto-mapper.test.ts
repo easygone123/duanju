@@ -152,7 +152,7 @@ describe('ComfyUI API workflow auto mapper', () => {
 
     expect(result.outputs).toEqual([
       expect.objectContaining({
-        nodeId: '8', fieldPath: 'files', mediaType: 'video', primary: true,
+        nodeId: '8', fieldPath: 'gifs', mediaType: 'video', primary: true,
       }),
     ])
   })

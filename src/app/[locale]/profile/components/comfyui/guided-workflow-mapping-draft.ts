@@ -3,6 +3,7 @@ import type {
   WorkflowAutoMappingResult,
   WorkflowMappingProposal,
 } from '@/lib/comfyui/workflow-auto-mapping-types'
+import { defaultHistoryFieldForOutput } from '@/lib/comfyui/workflow-auto-mapper'
 import { isSafeDottedPath } from '@/lib/comfyui/workflow-schema'
 import type {
   ComfyBindingTransform,
@@ -242,11 +243,6 @@ export function removeGuidedInput(
   return { ...draft, inputs: draft.inputs.filter((proposal) => proposal.id !== proposalId) }
 }
 
-function suggestedOutputField(classType: string, mediaType: 'image' | 'video') {
-  if (mediaType === 'image') return 'images'
-  return normalize(classType) === 'vhsvideocombine' ? 'gifs' : ''
-}
-
 export function guidedOutputNodeCandidates(analysis: WorkflowAutoMappingResult) {
   return Object.entries(analysis.graph)
     .sort(([left], [right]) => compareNames(left, right))
@@ -254,7 +250,7 @@ export function guidedOutputNodeCandidates(analysis: WorkflowAutoMappingResult) 
       nodeId,
       classType: node.class_type,
       ...(nodeTitle(node) ? { nodeTitle: nodeTitle(node) } : {}),
-      suggestedField: suggestedOutputField(node.class_type, analysis.mediaType),
+      suggestedField: defaultHistoryFieldForOutput(node.class_type, analysis.mediaType) || '',
     }))
 }
 
