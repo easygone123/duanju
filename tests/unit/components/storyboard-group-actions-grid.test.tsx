@@ -49,10 +49,12 @@ describe('storyboard group cardinality actions', () => {
   it('hides add-panel for fixed-cardinality grid rows', () => {
     const view = renderActions(true)
     expect(view.queryByRole('button', { name: 'Add panel' })).toBeNull()
+    expect(view.queryByRole('button', { name: 'Regenerate text' })).toBeNull()
   })
 
   it('keeps add-panel for individual rows', () => {
     const view = renderActions(false)
     expect(view.getByRole('button', { name: 'Add panel' })).toBeTruthy()
+    expect(view.getByRole('button', { name: 'Regenerate text' })).toBeTruthy()
   })
 })

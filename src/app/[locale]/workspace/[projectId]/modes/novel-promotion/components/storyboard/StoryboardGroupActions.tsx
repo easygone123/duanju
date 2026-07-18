@@ -56,7 +56,7 @@ export default function StoryboardGroupActions({
 
   return (
     <div className="flex items-center gap-2">
-      <GlassButton
+      {!isGridLayout && <GlassButton
         variant="secondary"
         size="sm"
         onClick={onRegenerateText}
@@ -70,7 +70,7 @@ export default function StoryboardGroupActions({
             <span>{t('group.regenerateText')}</span>
           </>
         )}
-      </GlassButton>
+      </GlassButton>}
 
       {pendingCount > 0 && (
         <GlassButton

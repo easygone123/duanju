@@ -352,6 +352,9 @@ export const PATCH = apiHandler(async (
 
   // 如果 Panel 不存在，创建它（Panel 表是唯一数据源）
   if (updatedPanel.count === 0) {
+    if (isGridStoryboardMode(storyboard.layoutMode)) {
+      throw new ApiError('INVALID_PARAMS', { code: 'GRID_PANEL_COUNT_FIXED' })
+    }
     // 创建新的 Panel 记录
     await panelModel.create({
       data: {
@@ -472,6 +475,9 @@ export const PUT = apiHandler(async (
       data: updateData
     })
   } else {
+    if (isGridStoryboardMode(storyboard.layoutMode)) {
+      throw new ApiError('INVALID_PARAMS', { code: 'GRID_PANEL_COUNT_FIXED' })
+    }
     // 创建新的 Panel 记录
     await panelModel.create({
       data: {
