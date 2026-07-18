@@ -156,6 +156,22 @@ describe('guided ComfyUI mapping draft', () => {
       .not.toEqual(expect.arrayContaining(['duration', 'fps']))
   })
 
+  it.each([
+    ['top-level', { 'duration.seconds': '5.5' }, 'duration.seconds'],
+    ['nested', { config: { 'duration.seconds': '5.5' } }, 'config.duration.seconds'],
+  ] as const)('rejects a raw dotted key at the %s input level', (_case, inputs, inputPath) => {
+    const draft = createGuidedMappingDraft(analysis({
+      graph: {
+        ...analysis().graph,
+        dotted: { class_type: 'VideoSettings', inputs },
+      },
+    }))
+
+    expect(guidedInputCandidates(draft.analysis, draft.inputs)).not.toContainEqual(
+      expect.objectContaining({ nodeId: 'dotted', inputPath }),
+    )
+  })
+
   it('maps a numeric-string scalar to duration and retains confirmed frame semantics', () => {
     const draft = createGuidedMappingDraft(analysis())
     const candidate = guidedInputCandidates(draft.analysis, draft.inputs)

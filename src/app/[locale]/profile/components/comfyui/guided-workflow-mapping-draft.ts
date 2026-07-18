@@ -194,6 +194,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
+function isSafeRawPathSegment(segment: string): boolean {
+  return !segment.includes('.') && isSafeDottedPath(segment)
+}
+
 function inputScalarEntries(
   inputs: Record<string, unknown>,
   nodeIds: ReadonlySet<string>,
@@ -208,6 +212,7 @@ function inputScalarEntries(
     if (isRecord(value)) {
       for (const [key, item] of Object.entries(value)
         .sort(([left], [right]) => compareNames(left, right))) {
+        if (!isSafeRawPathSegment(key)) continue
         visit(item, `${path}.${key}`)
       }
       return
@@ -216,6 +221,7 @@ function inputScalarEntries(
   }
   for (const [inputPath, value] of Object.entries(inputs)
     .sort(([left], [right]) => compareNames(left, right))) {
+    if (!isSafeRawPathSegment(inputPath)) continue
     visit(value, inputPath)
   }
   return scalars
