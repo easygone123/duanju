@@ -350,7 +350,12 @@ export function updateGuidedNumericTransform(
   return {
     ...draft,
     inputs: draft.inputs.map((item, itemIndex) => itemIndex === index
-      ? { ...item, numericTransform: structuredClone(numericTransform) }
+      ? {
+        ...item,
+        numericTransform: structuredClone(numericTransform),
+        confidence: 'high',
+        reasonCode: 'COMFY_MAPPING_MANUAL',
+      }
       : item),
   }
 }

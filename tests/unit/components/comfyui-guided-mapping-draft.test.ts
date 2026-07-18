@@ -15,6 +15,8 @@ import {
   updateGuidedOutput,
 } from '@/app/[locale]/profile/components/comfyui/guided-workflow-mapping-draft'
 import type { WorkflowAutoMappingResult } from '@/lib/comfyui/workflow-auto-mapping-types'
+import { analyzeComfyApiWorkflow } from '@/lib/comfyui/workflow-auto-mapper'
+import { confirmWorkflowAnalysis } from '@/app/[locale]/profile/components/comfyui/workflow-ui'
 
 function analysis(overrides: Partial<WorkflowAutoMappingResult> = {}): WorkflowAutoMappingResult {
   return {
@@ -199,6 +201,38 @@ describe('guided ComfyUI mapping draft', () => {
         rounding: 'round', frameOffset: 1,
       },
     })
+  })
+
+  it('treats an explicit numeric transform edit as confirmation of ambiguous length', () => {
+    const analyzed = analyzeComfyApiWorkflow({
+      kind: 'video_generation',
+      graph: {
+        timing: { class_type: 'VideoTiming', inputs: { length: '81' } },
+        out: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+      },
+    })
+    const ambiguous = analyzed.proposals.find((proposal) => proposal.inputPath === 'length')!
+    expect(ambiguous.confidence).toBe('ambiguous')
+
+    const edited = updateGuidedNumericTransform(
+      createGuidedMappingDraft(analyzed),
+      ambiguous.id,
+      {
+        sourceUnit: 'seconds', targetUnit: 'frames', output: 'numeric_string',
+        fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+        rounding: 'round', frameOffset: 1,
+      },
+    )
+    const effective = effectiveGuidedAnalysis(edited)
+    const confirmed = confirmWorkflowAnalysis(effective, { roles: {} })
+
+    expect(effective.proposals.find((proposal) => proposal.id === ambiguous.id)).toMatchObject({
+      confidence: 'high', reasonCode: 'COMFY_MAPPING_MANUAL',
+    })
+    expect(confirmed.bindings).toContainEqual(expect.objectContaining({
+      nodeId: 'timing', inputPath: 'length', variable: 'duration',
+      numericTransform: expect.objectContaining({ targetUnit: 'frames' }),
+    }))
   })
 
   it('replaces incompatible duration settings when a numeric proposal changes to FPS', () => {

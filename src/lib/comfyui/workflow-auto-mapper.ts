@@ -5,7 +5,7 @@ import type {
   ComfyNumericBindingTransform,
   ComfyVariableType,
 } from './types'
-import { comfyNumericScalarOutput } from './workflow-schema'
+import { comfyNumericScalarOutput, isSafeDottedPath } from './workflow-schema'
 import {
   WORKFLOW_IMPORT_KIND_META,
   type CanonicalWorkflowInput,
@@ -143,6 +143,7 @@ function inferVideoNumericProposal(input: {
   title: string
   requiredInputs: readonly CanonicalWorkflowInput[]
 }): WorkflowMappingProposal | null {
+  if (!isSafeDottedPath(input.inputPath) || input.inputPath.includes('.')) return null
   const output = comfyNumericScalarOutput(input.value)
   if (!output) return null
   const inputName = normalize(input.inputPath)
@@ -155,11 +156,11 @@ function inferVideoNumericProposal(input: {
   if (SECOND_INPUTS.has(inputName)) {
     canonicalName = 'duration'
     targetUnit = 'seconds'
-    confidence = output === 'number' ? 'high' : 'ambiguous'
+    confidence = 'high'
   } else if (FRAME_INPUTS.has(inputName)) {
     canonicalName = 'duration'
     targetUnit = 'frames'
-    confidence = videoEvidence && output === 'number' ? 'high' : 'ambiguous'
+    confidence = videoEvidence ? 'high' : 'ambiguous'
   } else if (AMBIGUOUS_DURATION_INPUTS.has(inputName) && videoEvidence) {
     canonicalName = 'duration'
     targetUnit = 'frames'
@@ -167,7 +168,7 @@ function inferVideoNumericProposal(input: {
   } else if (FPS_INPUTS.has(inputName)) {
     canonicalName = 'fps'
     targetUnit = 'fps'
-    confidence = output === 'number' ? 'high' : 'ambiguous'
+    confidence = 'high'
   } else {
     return null
   }

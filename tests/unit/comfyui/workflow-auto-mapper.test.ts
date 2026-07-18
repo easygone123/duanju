@@ -211,6 +211,44 @@ describe('ComfyUI API workflow auto mapper', () => {
     },
   )
 
+  it.each([
+    ['duration', '5.5', 'seconds'],
+    ['seconds', '5.5', 'seconds'],
+    ['frame_count', '81', 'frames'],
+    ['fps', '16', 'fps'],
+  ] as const)('keeps exact numeric-string semantic %s high confidence', (
+    inputPath, value, targetUnit,
+  ) => {
+    const result = analyzeComfyApiWorkflow({
+      kind: 'video_generation',
+      graph: {
+        video: { class_type: 'VideoSettings', inputs: { [inputPath]: value } },
+        out: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+      },
+    })
+
+    expect(result.proposals).toContainEqual(expect.objectContaining({
+      inputPath,
+      confidence: 'high',
+      numericTransform: expect.objectContaining({ targetUnit, output: 'numeric_string' }),
+    }))
+  })
+
+  it.each(['duration.seconds', 'num.frames', 'frame.rate'])(
+    'does not infer a raw dotted input name: %s',
+    (inputPath) => {
+      const result = analyzeComfyApiWorkflow({
+        kind: 'video_generation',
+        graph: {
+          video: { class_type: 'VideoSettings', inputs: { [inputPath]: '81' } },
+          out: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+        },
+      })
+
+      expect(result.proposals.some((proposal) => proposal.inputPath === inputPath)).toBe(false)
+    },
+  )
+
   it('keeps a video length field confirmable but does not infer an unrelated length field', () => {
     const video = analyzeComfyApiWorkflow({
       kind: 'video_generation',

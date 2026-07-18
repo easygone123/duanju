@@ -8,6 +8,7 @@ import {
   isGuidedWorkflowReady,
 } from '@/app/[locale]/profile/components/comfyui/guided-workflow-creation'
 import { confirmWorkflowAnalysis } from '@/app/[locale]/profile/components/comfyui/workflow-ui'
+import { analyzeComfyApiWorkflow } from '@/lib/comfyui/workflow-auto-mapper'
 
 const analysis = (patch: Partial<WorkflowAutoMappingResult> = {}): WorkflowAutoMappingResult => ({
   graph: { '1': { class_type: 'CLIPTextEncode', inputs: { text: 'portrait' } } },
@@ -187,5 +188,24 @@ describe('guided ComfyUI workflow creation model', () => {
     expect(confirmed.bindings[0]?.numericTransform).toMatchObject({
       fps: { fallback: 16 }, allowedTargetValues: [81, 161],
     })
+  })
+
+  it('confirms an exact numeric-string frame_count proposal without an extra role choice', () => {
+    const analyzed = analyzeComfyApiWorkflow({
+      kind: 'video_generation',
+      graph: {
+        video: { class_type: 'VideoSettings', inputs: { frame_count: '81' } },
+        out: { class_type: 'SaveVideo', inputs: { filename_prefix: 'out' } },
+      },
+    })
+
+    const confirmed = confirmWorkflowAnalysis(analyzed, { roles: {} })
+
+    expect(confirmed.bindings).toContainEqual(expect.objectContaining({
+      nodeId: 'video', inputPath: 'frame_count', variable: 'duration',
+      numericTransform: expect.objectContaining({
+        sourceUnit: 'seconds', targetUnit: 'frames', output: 'numeric_string',
+      }),
+    }))
   })
 })
