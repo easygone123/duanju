@@ -12,7 +12,7 @@ import {
   type WorkflowAuthorDraft,
 } from './workflow-ui'
 
-interface Props { value: WorkflowAuthorDraft; disabled?: boolean; onChange(value: WorkflowAuthorDraft): void; onImportError(key: string): void }
+interface Props { value: WorkflowAuthorDraft; disabled?: boolean; mappingFocusRequestId?: number; onChange(value: WorkflowAuthorDraft): void; onImportError(key: string): void }
 const VARIABLE_TYPES: ComfyVariableType[] = ['string', 'number', 'boolean', 'image_ref', 'image_ref_list', 'video_ref']
 const inputClass = 'w-full min-w-0 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-sm'
 
@@ -23,7 +23,7 @@ function parseDefault(type: ComfyVariableType, raw: string) {
   return raw
 }
 
-export default function WorkflowEditor({ value, disabled, onChange, onImportError }: Props) {
+export default function WorkflowEditor({ value, disabled, mappingFocusRequestId, onChange, onImportError }: Props) {
   const t = useTranslations('comfyui.workflows')
   const fileRef = useRef<HTMLInputElement>(null)
   const placeholders = useMemo(() => discoverPlaceholderNames(value.apiFormatJson), [value.apiFormatJson])
@@ -65,7 +65,7 @@ export default function WorkflowEditor({ value, disabled, onChange, onImportErro
         <button type="button" className="self-end text-xs text-[var(--glass-danger)]" onClick={() => onChange({ ...value, variableDefinitions: value.variableDefinitions.filter((_, itemIndex) => itemIndex !== index) })}>{t('remove')}</button>
       </div>)}</div>
     </section>
-    <WorkflowMappingTable variables={value.variableDefinitions} bindings={value.bindings} outputs={value.outputs} mediaType={value.mediaType}
+    <WorkflowMappingTable focusRequestId={mappingFocusRequestId} variables={value.variableDefinitions} bindings={value.bindings} outputs={value.outputs} mediaType={value.mediaType}
       onBindingsChange={(bindings) => onChange({ ...value, bindings })} onOutputsChange={(outputs) => onChange({ ...value, outputs })} />
   </fieldset>
 }

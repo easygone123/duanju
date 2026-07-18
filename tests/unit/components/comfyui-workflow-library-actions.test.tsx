@@ -23,7 +23,15 @@ vi.mock('@/app/[locale]/profile/components/comfyui/hooks', () => ({
   useComfyConnections: () => ({ data: { connections: [] } }),
 }))
 vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowEditor', () => ({
-  default: ({ value }: { value: { name: string } }) => <output aria-label="draft-name">{value.name}</output>,
+  default: ({ value, disabled, mappingFocusRequestId }: {
+    value: { name: string }
+    disabled?: boolean
+    mappingFocusRequestId?: number
+  }) => <>
+    <output aria-label="draft-name">{value.name}</output>
+    <output aria-label="editor-disabled">{String(Boolean(disabled))}</output>
+    <output aria-label="mapping-focus-request">{mappingFocusRequestId ?? 0}</output>
+  </>,
 }))
 vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowTestForm', () => ({
   default: () => null,
@@ -33,9 +41,14 @@ vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowCompatibilityTable', 
   default: () => null,
 }))
 vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowActivationPanel', () => ({
-  default: ({ workflowId, onActivated }: { workflowId: string; onActivated?(): void | Promise<void> }) => <>
+  default: ({ workflowId, onActivated, onEditMappings }: {
+    workflowId: string
+    onActivated?(): void | Promise<void>
+    onEditMappings?(): void
+  }) => <>
     <output aria-label="activation-workflow">{workflowId}</output>
     <button type="button" onClick={() => void onActivated?.()}>COMPLETE ACTIVATION</button>
+    <button type="button" onClick={onEditMappings}>EDIT FAILED MAPPINGS</button>
   </>,
 }))
 
@@ -137,6 +150,71 @@ describe('ComfyUI workflow library removal', () => {
     await waitFor(() => expect(view.getByLabelText('activation-workflow').textContent).toBe(workflow.id))
     expect(view.queryByRole('button', { name: 'Publish' })).toBeNull()
     expect(view.queryByRole('button', { name: 'Delete workflow' })).toBeNull()
+  })
+
+  it('returns from activation to an unlocked mapping repair draft', async () => {
+    const view = renderLibrary()
+    await selectSavedWorkflow(view)
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+
+    expect(view.getByLabelText('editor-disabled').textContent).toBe('true')
+    fireEvent.click(view.getByRole('button', { name: 'EDIT FAILED MAPPINGS' }))
+
+    expect(view.queryByLabelText('activation-workflow')).toBeNull()
+    expect(view.getByLabelText('editor-disabled').textContent).toBe('false')
+    expect(view.getByLabelText('draft-name').textContent).toBe('Portrait')
+    expect(Number(view.getByLabelText('mapping-focus-request').textContent)).toBeGreaterThan(0)
+    expect(view.getByText(/Repair the input or output mappings/)).toBeTruthy()
+  })
+
+  it('clears mapping repair guidance when another workflow is selected', async () => {
+    apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/comfyui/workflows') return response({ workflows: [workflow, workflowB] })
+      if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const view = renderLibrary()
+    await selectSavedWorkflow(view)
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'EDIT FAILED MAPPINGS' }))
+    expect(view.getByText(/Repair the input or output mappings/)).toBeTruthy()
+
+    fireEvent.click(view.getByRole('button', { name: /Landscape/ }))
+
+    expect(view.queryByText(/Repair the input or output mappings/)).toBeNull()
+    expect(view.getByLabelText('mapping-focus-request').textContent).toBe('0')
+  })
+
+  it('keeps mapping repair guidance after save failure and clears it after save succeeds', async () => {
+    const nextVersion = { ...savedVersion, id: 'version-2', version: 2, contentHash: 'hash-2' }
+    const nextWorkflow = { ...workflow, versions: [nextVersion, savedVersion] }
+    let versionCalls = 0
+    apiFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/comfyui/workflows') {
+        return response({ workflows: versionCalls > 1 ? [nextWorkflow] : [workflow] })
+      }
+      if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
+      if (url.endsWith('/versions') && init?.method === 'POST') {
+        versionCalls += 1
+        return versionCalls === 1
+          ? response({ error: { code: 'UNKNOWN' } }, 500)
+          : response({ version: nextVersion }, 201)
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const view = renderLibrary()
+    await selectSavedWorkflow(view)
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'EDIT FAILED MAPPINGS' }))
+
+    fireEvent.click(view.getByRole('button', { name: 'Save draft' }))
+    await waitFor(() => expect(view.getByRole('alert')).toBeTruthy())
+    expect(view.getByText(/Repair the input or output mappings/)).toBeTruthy()
+
+    fireEvent.click(view.getByRole('button', { name: 'Save draft' }))
+    await waitFor(() => expect(versionCalls).toBe(2))
+    await waitFor(() => expect(view.queryByText(/Repair the input or output mappings/)).toBeNull())
+    expect(view.getByLabelText('Saved version').textContent).toContain('v2')
   })
 
   it('does not let a delayed activation reload steal a newer workflow selection', async () => {

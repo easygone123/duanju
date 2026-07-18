@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import { useTranslations } from 'next-intl'
 import type { ComfyInputBinding, ComfyOutputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
 import { removeWorkflowOutput, setPrimaryOutput } from './workflow-ui'
@@ -11,14 +12,19 @@ interface Props {
   bindings: ComfyInputBinding[]
   outputs: ComfyOutputBinding[]
   mediaType: 'image' | 'video'
+  focusRequestId?: number
   onBindingsChange(value: ComfyInputBinding[]): void
   onOutputsChange(value: ComfyOutputBinding[]): void
 }
 
 const inputClass = 'w-full min-w-0 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-2 py-1.5 text-xs'
 
-export default function WorkflowMappingTable({ variables, bindings, outputs, mediaType, onBindingsChange, onOutputsChange }: Props) {
+export default function WorkflowMappingTable({ variables, bindings, outputs, mediaType, focusRequestId = 0, onBindingsChange, onOutputsChange }: Props) {
   const t = useTranslations('comfyui.workflows')
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (focusRequestId > 0) headingRef.current?.focus()
+  }, [focusRequestId])
   const updateBinding = (index: number, patch: Partial<ComfyInputBinding>) => onBindingsChange(
     bindings.map((binding, itemIndex) => itemIndex === index ? { ...binding, ...patch } : binding),
   )
@@ -28,7 +34,7 @@ export default function WorkflowMappingTable({ variables, bindings, outputs, med
 
   return <div className="min-w-0 space-y-5">
     <section aria-labelledby="workflow-input-mappings">
-      <div className="flex items-center justify-between gap-3"><h4 id="workflow-input-mappings" className="font-medium">{t('inputMappings')}</h4>
+      <div className="flex items-center justify-between gap-3"><h4 ref={headingRef} tabIndex={-1} id="workflow-input-mappings" className="font-medium">{t('inputMappings')}</h4>
         <button type="button" className="glass-btn-base px-3 py-1.5 text-xs" onClick={() => onBindingsChange([...bindings, {
           nodeId: '', inputPath: '', variable: variables[0]?.name ?? '', valueType: variables[0]?.type ?? 'string',
         }])}>{t('addMapping')}</button></div>

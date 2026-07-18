@@ -101,6 +101,7 @@
       "publishFailed": "实时测试已通过，但发布失败；可以直接重试发布，无需再次测试。",
       "close": "关闭启用流程"
     },
+    "mappingRepairHint": "请修改输入或输出映射并保存草稿；保存后再测试，系统会测试新版本。",
     "guided": {
       "wizardTitle": "创建 ComfyUI 工作流",
       "wizardHint": "选择工作流类型，上传 API Format JSON，然后确认识别到的输入和输出。",

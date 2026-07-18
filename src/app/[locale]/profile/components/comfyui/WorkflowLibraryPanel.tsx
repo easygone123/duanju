@@ -70,6 +70,8 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   const [compatibilityLoadingMore, setCompatibilityLoadingMore] = useState(false)
   const [compatibilityCoordinator] = useState(() => createWorkflowCompatibilityCoordinator())
   const [testPayload, setTestPayload] = useState<WorkflowTestPayload | null>(emptyWorkflowTestPayload)
+  const [mappingRepairMode, setMappingRepairMode] = useState(false)
+  const [mappingFocusRequestId, setMappingFocusRequestId] = useState(0)
   const connectionsQuery = useComfyConnections()
 
   if (activationWorkflowIdRef.current !== activationWorkflowId) {
@@ -128,6 +130,8 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   const selectWorkflow = (id: string) => {
     selectionRevisionRef.current += 1
     if (id !== selectedIdRef.current) closeActivationForSelection(id)
+    setMappingRepairMode(false)
+    setMappingFocusRequestId(0)
     updateSelectedId(id); setError(null)
     const workflow = workflows.find((item) => item.id === id)
     if (!workflow) return
@@ -152,6 +156,7 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
     })
     setSavedVersion(result.version)
     await load(selectedId)
+    setMappingRepairMode(false)
   })
   const archiveSelectedWorkflow = async () => {
     if (!selectedId || archiveInFlightRef.current) return
@@ -263,6 +268,11 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   const closeSelectedWorkflowActivation = () => {
     closeActivationForSelection(null)
   }
+  const editFailedMappings = () => {
+    closeSelectedWorkflowActivation()
+    setMappingRepairMode(true)
+    setMappingFocusRequestId((current) => current + 1)
+  }
 
   return <section aria-labelledby="comfyui-workflow-library-heading" className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--glass-stroke-base)] px-5 py-4 sm:px-6">
@@ -274,7 +284,7 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
         {workflows.map((workflow) => <button key={workflow.id} type="button" onClick={() => selectWorkflow(workflow.id)} aria-current={selectedId === workflow.id ? 'page' : undefined}
           className="glass-surface-soft w-full rounded-xl p-3 text-left"><span className="block truncate font-medium">{workflow.name}</span><span className="text-xs text-[var(--glass-text-tertiary)]">{t(workflow.mediaType)} · {t(`purposes.${workflow.purpose}`)} · {t(`statuses.${workflow.status}`)}</span></button>)}</nav>
       <div className="min-w-0 space-y-6">
-        {selectedId && authorDraft && <WorkflowEditor key={selectedId} value={authorDraft} disabled={busy || activationOpen} onChange={setAuthorDraft} onImportError={(key) => setError(key as ErrorKey)} />}
+        {selectedId && authorDraft && <WorkflowEditor key={selectedId} value={authorDraft} disabled={busy || activationOpen} mappingFocusRequestId={mappingFocusRequestId} onChange={setAuthorDraft} onImportError={(key) => setError(key as ErrorKey)} />}
         {savedVersion && <div className="glass-surface-soft rounded-xl p-3 text-xs" aria-label={t('savedVersion')}>
           {t('savedVersion')} v{savedVersion.version} · {savedVersion.validation.valid ? t('staticValid') : t('staticInvalid')} · {savedVersion.lastSuccessfulTestAt ? t('tested') : t('notTested')}
         </div>}
@@ -283,8 +293,12 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
           workflowId={selectedId}
           version={savedVersion}
           onClose={closeSelectedWorkflowActivation}
+          onEditMappings={editFailedMappings}
           onActivated={() => load(selectedId)}
         />}
+        {mappingRepairMode && !activationOpen && <p role="status" className="text-sm text-[var(--glass-text-secondary)]">
+          {t('mappingRepairHint')}
+        </p>}
         {selectedId && authorDraft && !activationOpen && <div className="flex flex-wrap items-end gap-2">
           <button type="button" onClick={() => void saveDraft()} disabled={busy || !authorDraft.name || !authorDraft.apiFormatJson} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('saveDraft')}</button>
           <button type="button" onClick={openSelectedWorkflowActivation} disabled={busy || !savedVersion} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('testAndEnable')}</button>

@@ -101,6 +101,7 @@
       "publishFailed": "The live test passed, but publishing failed. Retry publishing without testing again.",
       "close": "Close activation"
     },
+    "mappingRepairHint": "Repair the input or output mappings and save the draft before testing the new version.",
     "guided": {
       "wizardTitle": "Create a ComfyUI workflow",
       "wizardHint": "Choose a workflow type, upload its API Format JSON, then confirm the detected inputs and output.",
