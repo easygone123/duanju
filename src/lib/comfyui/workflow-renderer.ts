@@ -190,14 +190,14 @@ function transformBindingValue(
   onNumericConversion: RenderWorkflowInput['onNumericConversion'],
 ): unknown {
   if (binding.numericTransform) {
-    const converted = convertComfyNumericBinding({
+    const { encodedValue, ...diagnostic } = convertComfyNumericBinding({
       variable: binding.variable,
       value,
       variables,
       transform: binding.numericTransform,
     })
-    onNumericConversion?.(converted)
-    return converted.encodedValue
+    onNumericConversion?.(diagnostic)
+    return encodedValue
   }
   if (!binding.transform) return cloneValue(value)
 

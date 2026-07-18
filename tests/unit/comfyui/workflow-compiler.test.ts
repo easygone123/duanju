@@ -1042,7 +1042,17 @@ describe('ComfyUI workflow compiler', () => {
     })
 
     expect(rendered['1'].inputs.length).toBe(81)
-    expect(diagnostics).toEqual([expect.objectContaining({ targetValue: 81 })])
+    expect(diagnostics).toEqual([{
+      variable: 'duration',
+      sourceValue: 5,
+      targetValue: 81,
+      encodedAs: 'number',
+      sourceUnit: 'seconds',
+      targetUnit: 'frames',
+      effectiveFps: 16,
+      rounding: 'round',
+      frameOffset: 1,
+    }])
   })
 
   it('rejects frame transforms without a required fallback FPS', () => {
@@ -1074,6 +1084,49 @@ describe('ComfyUI workflow compiler', () => {
     }, 'fps'],
   ])('accepts legal numeric transform pair: %s', (_case, numericTransform, variable) => {
     expect(validateWorkflowContract(numericContract(numericTransform, { variable }))).toEqual([])
+  })
+
+  it.each([
+    ['missing target path', { length: 81 }, 'missing'],
+    ['plain object target', { config: { value: 81 } }, 'config'],
+    ['array target', { length: [81] }, 'length'],
+    ['Comfy node link target', { length: ['2', 0] }, 'length'],
+    ['boolean target', { length: true }, 'length'],
+    ['nonnumeric string target', { length: 'auto' }, 'length'],
+    ['placeholder target', { length: '${duration}' }, 'length'],
+    ['infinite target', { length: Number.POSITIVE_INFINITY }, 'length'],
+    ['NaN target', { length: Number.NaN }, 'length'],
+  ])('rejects numeric transform bound to %s', (_case, inputs, inputPath) => {
+    const contract = numericContract({
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+    }, {
+      inputPath,
+      graph: {
+        '1': { class_type: 'VideoNode', inputs },
+        '2': { class_type: 'SourceNode', inputs: {} },
+      },
+    })
+
+    expect(validateWorkflowContract(contract)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'COMFY_BINDING_NUMERIC_TRANSFORM_INVALID',
+        path: 'bindings.0.numericTransform',
+      }),
+    ]))
+  })
+
+  it.each([
+    ['finite number', { length: 81 }, 'length'],
+    ['trimmed finite numeric string', { config: { length: ' 81.5 ' } }, 'config.length'],
+  ])('accepts numeric transform bound to %s without mutation', (_case, inputs, inputPath) => {
+    const graph = { '1': { class_type: 'VideoNode', inputs } }
+    const original = structuredClone(graph)
+    const contract = numericContract({
+      sourceUnit: 'seconds', targetUnit: 'seconds', output: 'number',
+    }, { inputPath, graph })
+
+    expect(validateWorkflowContract(contract)).toEqual([])
+    expect(graph).toEqual(original)
   })
 
   it.each([
@@ -1359,12 +1412,14 @@ function numericContract(
   const definitionType = overrides.definitionType ?? 'number'
   const variable = overrides.variable ?? 'duration'
   const binding = {
-    nodeId: '1', inputPath: 'length', variable,
+    nodeId: '1', inputPath: overrides.inputPath ?? 'length', variable,
     valueType: overrides.valueType ?? 'number', numericTransform,
     ...(Object.hasOwn(overrides, 'transform') ? { transform: overrides.transform } : {}),
   }
   return {
-    graph: { '1': { class_type: 'VideoNode', inputs: { length: 81 } } },
+    graph: overrides.graph ?? {
+      '1': { class_type: 'VideoNode', inputs: { length: 81 } },
+    },
     variableDefinitions: [
       { name: 'duration', type: definitionType, required: true },
       { name: 'fps', type: 'number', required: false, defaultValue: 16 },

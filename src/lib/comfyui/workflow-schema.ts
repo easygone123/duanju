@@ -107,6 +107,8 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
     }
     const binding = rawBinding
     const nodeIdValid = typeof binding.nodeId === 'string' && binding.nodeId.length > 0
+    const nodeExists = nodeIdValid && Object.hasOwn(graph, binding.nodeId as string)
+    const inputPathValid = isSafeDottedPath(binding.inputPath)
     const variableValid = isValidVariableName(binding.variable)
     const valueTypeValid = typeof binding.valueType === 'string'
       && VARIABLE_TYPES.has(binding.valueType as ComfyVariableType)
@@ -125,10 +127,10 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
       issues.push(issue(
         'COMFY_BINDING_NODE_INVALID', `${path}.nodeId`, 'Binding nodeId is invalid.',
       ))
-    } else if (!Object.hasOwn(graph, binding.nodeId as string)) {
+    } else if (!nodeExists) {
       issues.push(issue('COMFY_BINDING_NODE_MISSING', `${path}.nodeId`, 'Binding node is missing.'))
     }
-    if (!isSafeDottedPath(binding.inputPath)) {
+    if (!inputPathValid) {
       issues.push(issue('COMFY_BINDING_PATH_UNSAFE', `${path}.inputPath`, 'Binding path is unsafe.'))
     }
     if (!variableValid) {
@@ -170,6 +172,9 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
       mediaTransform: binding.transform,
       definition,
       definitions,
+      targetValue: nodeExists && inputPathValid
+        ? readDottedPath(graph[binding.nodeId as string].inputs, binding.inputPath as string)
+        : undefined,
     })) {
       issues.push(issue(
         'COMFY_BINDING_NUMERIC_TRANSFORM_INVALID', `${path}.numericTransform`,
@@ -268,6 +273,7 @@ function validateNumericTransform(input: {
   mediaTransform: unknown
   definition: ComfyVariableDefinition | undefined
   definitions: Map<string, ComfyVariableDefinition>
+  targetValue: unknown
 }): boolean {
   const transform = input.transform
   if (!isObject(transform) || !hasOnlyKeys(transform, NUMERIC_TRANSFORM_KEYS)) return false
@@ -275,6 +281,7 @@ function validateNumericTransform(input: {
     input.bindingValueType !== 'number'
     || input.definition?.type !== 'number'
     || input.mediaTransform !== undefined
+    || !isFiniteNumericScalarLiteral(input.targetValue)
   ) return false
 
   const legalPair = (transform.sourceUnit === 'seconds'
@@ -320,6 +327,26 @@ function validateNumericTransform(input: {
       ? sorted[index - 1] !== value
       : !decimalEquals(sorted[index - 1], value)
   ))
+}
+
+function isFiniteNumericScalarLiteral(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  return trimmed.length > 0
+    && NUMERIC_LINK_INDEX.test(trimmed)
+    && Number.isFinite(Number(trimmed))
+}
+
+function readDottedPath(root: Record<string, unknown>, path: string): unknown {
+  let current: unknown = root
+  for (const segment of path.split('.')) {
+    if ((!isObject(current) && !Array.isArray(current)) || !Object.hasOwn(current, segment)) {
+      return undefined
+    }
+    current = current[segment as keyof typeof current]
+  }
+  return current
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, keys: Set<string>): boolean {
