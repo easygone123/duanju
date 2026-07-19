@@ -188,6 +188,7 @@ describe('WorkflowCreationWizard', () => {
     expect((name as HTMLInputElement).value).toBe('portrait.v2')
     fireEvent.change(name, { target: { value: 'Portrait Retouch' } })
     fireEvent.click(view.getByRole('radio', { name: 'Source image' }))
+    fireEvent.click(view.getByRole('button', { name: 'Remove Reference images mapping' }))
     fireEvent.click(view.getByRole('radio', { name: 'resultB' }))
     await act(async () => { fireEvent.click(view.getByRole('button', { name: 'Create workflow' })) })
 
@@ -278,6 +279,64 @@ describe('WorkflowCreationWizard', () => {
     expect(onCreate.mock.calls[0]![0].bindings).not.toContainEqual(expect.objectContaining({
       nodeId: 'duration', inputPath: 'duration',
     }))
+  })
+
+  it('requires explicit first and last frame choices and saves both variables', async () => {
+    const frameAnalysis = analysis({
+      graph: {
+        prompt: { class_type: 'PrimitiveStringMultiline', inputs: { value: 'animate' } },
+        first: { class_type: 'LoadImage', inputs: { image: 'first.png' } },
+        last: { class_type: 'LoadImage', inputs: { image: 'last.png' } },
+        output: { class_type: 'VHS_VideoCombine', inputs: { images: ['first', 0] } },
+      },
+      mediaType: 'video',
+      proposals: [
+        {
+          id: 'prompt', canonicalName: 'prompt', nodeId: 'prompt', inputPath: 'value',
+          valueType: 'string', confidence: 'high', required: true,
+          reasonCode: 'COMFY_MAPPING_PROMPT_POSITIVE_LABEL',
+        },
+        {
+          id: 'first-guess', canonicalName: 'firstFrame', nodeId: 'first', inputPath: 'image',
+          valueType: 'image_ref', transform: 'filename', confidence: 'ambiguous', required: false,
+          reasonCode: 'COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS',
+        },
+        {
+          id: 'last-guess', canonicalName: 'firstFrame', nodeId: 'last', inputPath: 'image',
+          valueType: 'image_ref', transform: 'filename', confidence: 'ambiguous', required: false,
+          reasonCode: 'COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS',
+        },
+      ],
+      outputs: [{ name: 'video', nodeId: 'output', fieldPath: 'gifs', mediaType: 'video', primary: true }],
+    })
+    const onCreate = vi.fn<(_: WorkflowAuthorDraft, creationId: string) => Promise<string>>()
+      .mockResolvedValue('frame-workflow')
+    const { view } = renderWizard({
+      analyze: vi.fn().mockResolvedValue({ sourceText: '{}', analysis: frameAnalysis }),
+      onCreate,
+    })
+
+    selectKindAndAdvance(view, 'Video generation')
+    await act(async () => { upload(view, 'first-last-frame.json') })
+
+    const roleSelectors = view.getAllByLabelText(/Mapping role for/) as HTMLSelectElement[]
+    expect(roleSelectors.map((select) => select.value)).toEqual(['', ''])
+    expect((view.getByRole('button', { name: 'Create workflow' }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.change(roleSelectors[0]!, { target: { value: 'firstFrame' } })
+    fireEvent.change(roleSelectors[1]!, { target: { value: 'lastFrame' } })
+    await act(async () => { fireEvent.click(view.getByRole('button', { name: 'Create workflow' })) })
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      variableDefinitions: expect.arrayContaining([
+        expect.objectContaining({ name: 'firstFrame' }),
+        expect.objectContaining({ name: 'lastFrame' }),
+      ]),
+      bindings: expect.arrayContaining([
+        expect.objectContaining({ nodeId: 'first', variable: 'firstFrame' }),
+        expect.objectContaining({ nodeId: 'last', variable: 'lastFrame' }),
+      ]),
+    }), expect.any(String))
   })
 
   it('adds, edits, selects, and removes output mappings before creation', async () => {

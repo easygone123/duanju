@@ -42,6 +42,7 @@ export type GuidedMappingDraftIssue =
   | 'unsafeField'
   | 'duplicateTarget'
   | 'numericTransformInvalid'
+  | 'unconfirmedInput'
 
 const NUMBER_ROLE_BY_INPUT = new Map<string, CanonicalWorkflowInput>([
   ['width', 'width'],
@@ -532,6 +533,7 @@ export function guidedMappingDraftIssues(
   const targets = new Set<string>()
   const names = new Set<string>()
   for (const input of draft.inputs) {
+    if (input.confidence === 'ambiguous') issues.add('unconfirmedInput')
     if ((input.canonicalName === 'duration' || input.canonicalName === 'fps')
       && !validNumericTransform(input.canonicalName, input.numericTransform)) {
       issues.add('numericTransformInvalid')

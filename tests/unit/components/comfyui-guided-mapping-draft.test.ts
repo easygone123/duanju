@@ -124,6 +124,32 @@ describe('guided ComfyUI mapping draft', () => {
     ))?.roles).not.toEqual(expect.arrayContaining(['duration', 'fps']))
   })
 
+  it('blocks an ambiguous frame guess until its displayed role is explicitly confirmed', () => {
+    const ambiguous = analysis({
+      proposals: [{
+        id: 'first-frame-guess',
+        canonicalName: 'firstFrame',
+        nodeId: 'image',
+        inputPath: 'image',
+        valueType: 'image_ref',
+        transform: 'filename',
+        confidence: 'ambiguous',
+        reasonCode: 'COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS',
+        required: false,
+      }],
+    })
+    const draft = createGuidedMappingDraft(ambiguous)
+
+    expect(guidedMappingDraftIssues(draft)).toContain('unconfirmedInput')
+    const confirmed = updateGuidedInputRole(draft, 'first-frame-guess', 'firstFrame')
+    expect(guidedMappingDraftIssues(confirmed)).not.toContain('unconfirmedInput')
+    expect(confirmWorkflowAnalysis(effectiveGuidedAnalysis(confirmed), { roles: {} }))
+      .toMatchObject({
+        variableDefinitions: [expect.objectContaining({ name: 'firstFrame' })],
+        bindings: [expect.objectContaining({ variable: 'firstFrame', nodeId: 'image' })],
+      })
+  })
+
   it('offers nested decimal scalars without traversing Comfy link tuples', () => {
     const draft = createGuidedMappingDraft(analysis({
       graph: {

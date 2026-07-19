@@ -223,7 +223,8 @@
         "primaryRequired": "请选择且仅选择一个主要输出。",
         "unsafeField": "请输入有效的 ComfyUI 历史记录字段。",
         "duplicateTarget": "输出名称以及节点字段不能重复。",
-        "numericTransformInvalid": "请完整填写时长或帧率转换设置。"
+        "numericTransformInvalid": "请完整填写时长或帧率转换设置。",
+        "unconfirmedInput": "请为每个候选输入明确选择用途，或删除该映射。"
       },
       "questionsTitle": "需要你确认",
       "questionCandidate": "{question}（{candidate}）",

@@ -5,6 +5,10 @@ import {
   createGuidedMappingDraftFromAuthorDraft,
   workflowImportKindForDraft,
 } from '@/app/[locale]/profile/components/comfyui/guided-workflow-edit'
+import {
+  guidedMappingDraftIssues,
+  updateGuidedInputRole,
+} from '@/app/[locale]/profile/components/comfyui/guided-workflow-mapping-draft'
 import type { WorkflowAuthorDraft } from '@/app/[locale]/profile/components/comfyui/workflow-ui'
 
 function firstLastFrameDraft(): WorkflowAuthorDraft {
@@ -83,5 +87,25 @@ describe('guided ComfyUI workflow editing', () => {
       expect.objectContaining({ variable: 'firstFrame', nodeId: '269' }),
       expect.objectContaining({ variable: 'lastFrame', nodeId: '370' }),
     ]))
+  })
+
+  it('surfaces the only unbound image loader as an explicitly confirmed missing first frame', () => {
+    const original = firstLastFrameDraft()
+    original.variableDefinitions = original.variableDefinitions.filter((item) => item.name !== 'firstFrame')
+    original.bindings = original.bindings.filter((item) => item.variable !== 'firstFrame')
+
+    const recovered = createGuidedMappingDraftFromAuthorDraft(original)
+    const firstFrame = recovered.inputs.find((proposal) => proposal.nodeId === '269')
+    expect(firstFrame).toMatchObject({
+      canonicalName: 'firstFrame', confidence: 'ambiguous',
+    })
+    expect(guidedMappingDraftIssues(recovered)).toContain('unconfirmedInput')
+
+    const confirmed = updateGuidedInputRole(recovered, firstFrame!.id, 'firstFrame')
+    const prepared = buildEditedWorkflowDraft(original, original.name, confirmed)
+    expect(prepared.variableDefinitions).toContainEqual(expect.objectContaining({ name: 'firstFrame' }))
+    expect(prepared.bindings).toContainEqual(expect.objectContaining({
+      variable: 'firstFrame', nodeId: '269', inputPath: 'image',
+    }))
   })
 })

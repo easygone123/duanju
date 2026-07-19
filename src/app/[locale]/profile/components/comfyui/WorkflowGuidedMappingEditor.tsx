@@ -102,16 +102,21 @@ export default function WorkflowGuidedMappingEditor({
           <label className="min-w-0 text-xs text-[var(--glass-text-secondary)]">
             {t('mappedRole')}
             <select
-              value={proposal.canonicalName}
+              value={proposal.confidence === 'ambiguous' ? '' : proposal.canonicalName}
               disabled={disabled}
               aria-label={t('mappingRoleFor', { field: `${proposal.nodeId}.${proposal.inputPath}` })}
-              onChange={(event) => onChange(updateGuidedInputRole(
-                value,
-                proposal.id,
-                event.target.value as CanonicalWorkflowInput,
-              ))}
+              onChange={(event) => {
+                if (!event.target.value) return
+                onChange(updateGuidedInputRole(
+                  value,
+                  proposal.id,
+                  event.target.value as CanonicalWorkflowInput,
+                ))
+              }}
               className="glass-input mt-1 w-full min-w-0 px-2 py-2 text-sm"
             >
+              {proposal.confidence === 'ambiguous'
+                && <option value="">{t('chooseMappingRole')}</option>}
               {guidedDraftCompatibleRoles(value, proposal.id).map((role) => <option key={role} value={role}>
                 {canonical(role)}
               </option>)}

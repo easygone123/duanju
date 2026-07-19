@@ -7,8 +7,10 @@ import type {
 import { discoverComfyPlaceholders, validateComfyApiWorkflow } from '@/lib/comfyui/workflow-schema'
 import type { ComfyInputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
 import {
+  addGuidedInput,
   createGuidedMappingDraft,
   effectiveGuidedAnalysis,
+  guidedInputCandidates,
   type GuidedWorkflowMappingDraft,
 } from './guided-workflow-mapping-draft'
 import {
@@ -96,7 +98,28 @@ export function createGuidedMappingDraftFromAuthorDraft(
       )
       : 0,
   }
-  return createGuidedMappingDraft(analysis)
+  let guidedDraft = createGuidedMappingDraft(analysis)
+  if (draft.mediaType !== 'video') return guidedDraft
+
+  for (const role of ['firstFrame', 'lastFrame'] as const) {
+    if (guidedDraft.inputs.some((proposal) => proposal.canonicalName === role)) continue
+    const candidates = guidedInputCandidates(guidedDraft.analysis, guidedDraft.inputs)
+      .filter((candidate) => candidate.roles.includes(role))
+    if (candidates.length !== 1) continue
+    const candidate = candidates[0]!
+    guidedDraft = addGuidedInput(guidedDraft, candidate.id, role)
+    guidedDraft = {
+      ...guidedDraft,
+      inputs: guidedDraft.inputs.map((proposal) => proposal.id === candidate.id
+        ? {
+            ...proposal,
+            confidence: 'ambiguous' as const,
+            reasonCode: 'COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS',
+          }
+        : proposal),
+    }
+  }
+  return guidedDraft
 }
 
 function mergeDefinitionMetadata(

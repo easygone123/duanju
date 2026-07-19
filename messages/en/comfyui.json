@@ -223,7 +223,8 @@
         "primaryRequired": "Choose exactly one primary output.",
         "unsafeField": "Enter a valid ComfyUI history field.",
         "duplicateTarget": "Each output name and node field must be unique.",
-        "numericTransformInvalid": "Complete the duration or FPS conversion settings."
+        "numericTransformInvalid": "Complete the duration or FPS conversion settings.",
+        "unconfirmedInput": "Choose a role for every suggested input, or remove the mapping."
       },
       "questionsTitle": "A few details need your confirmation",
       "questionCandidate": "{question} ({candidate})",
