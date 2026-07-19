@@ -117,6 +117,7 @@ export interface ComfyPollResult {
   resultStorageKeys?: string[]
   stage: ComfyProgressStage
   waitingForCapacity: boolean
+  errorCode?: string
   error?: string
 }
 
@@ -127,16 +128,21 @@ export async function pollComfyGenerationRequest(input: {
 }): Promise<ComfyPollResult> {
   const request = await prisma.comfyGenerationRequest.findFirst({
     where: { id: input.requestId, userId: input.userId, mediaType: input.mediaType },
-    select: { status: true, outputRefs: true, errorMessage: true },
+    select: { status: true, outputRefs: true, errorCode: true, errorMessage: true },
   })
   if (!request) throw new ApiError('NOT_FOUND')
   const stage = stageForStatus(request.status)
   const waitingForCapacity = request.status === 'waiting_capacity'
     || request.status === 'blocked_no_compatible_instance'
   if (request.status === 'failed' || request.status === 'canceled') {
+    const fallback = request.status === 'canceled' ? 'Generation canceled' : 'ComfyUI generation failed'
+    const message = request.errorMessage || fallback
     return {
       status: 'failed', stage, waitingForCapacity,
-      error: request.errorMessage || (request.status === 'canceled' ? 'Generation canceled' : 'ComfyUI generation failed'),
+      ...(request.errorCode ? { errorCode: request.errorCode } : {}),
+      error: request.errorCode && !message.includes(request.errorCode)
+        ? `${request.errorCode}: ${message}`
+        : message,
     }
   }
   if (request.status !== 'completed') return { status: 'pending', stage, waitingForCapacity }

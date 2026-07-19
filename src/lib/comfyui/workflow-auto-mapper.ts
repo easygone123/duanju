@@ -558,7 +558,8 @@ export function defaultHistoryFieldForOutput(
 ): string | null {
   if (mediaType === 'image') return 'images'
   const normalized = normalize(classType)
-  if (normalized === 'vhsvideocombine' || normalized === 'savevideo') return 'gifs'
+  if (normalized === 'vhsvideocombine') return 'gifs'
+  if (normalized === 'savevideo') return 'videos'
   return null
 }
 

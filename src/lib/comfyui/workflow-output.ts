@@ -14,7 +14,7 @@ export function extractComfyOutputs(
     const nodeOutput = historyOutputs && Object.hasOwn(historyOutputs, binding.nodeId)
       ? historyOutputs[binding.nodeId]
       : undefined
-    const declaredValue = getPath(nodeOutput, binding.fieldPath)
+    const declaredValue = resolveOutputValue(nodeOutput, binding)
     const values = Array.isArray(declaredValue) ? declaredValue : [declaredValue]
     if (declaredValue === undefined || values.length === 0) throw outputMissing(binding)
 
@@ -33,6 +33,23 @@ export function extractComfyOutputs(
   }
 
   return extracted
+}
+
+const VIDEO_OUTPUT_FIELD_ALIASES = ['gifs', 'videos', 'files'] as const
+
+function resolveOutputValue(nodeOutput: unknown, binding: ComfyOutputBinding): unknown {
+  const declared = getPath(nodeOutput, binding.fieldPath)
+  if (declared !== undefined) return declared
+  if (binding.mediaType !== 'video'
+    || !VIDEO_OUTPUT_FIELD_ALIASES.includes(
+      binding.fieldPath as (typeof VIDEO_OUTPUT_FIELD_ALIASES)[number],
+    )) return undefined
+
+  const compatible = VIDEO_OUTPUT_FIELD_ALIASES
+    .filter((field) => field !== binding.fieldPath)
+    .map((field) => getPath(nodeOutput, field))
+    .filter((value) => value !== undefined)
+  return compatible.length === 1 ? compatible[0] : undefined
 }
 
 function assertOutputSpec(spec: ComfyOutputBinding[]): void {
