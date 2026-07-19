@@ -237,6 +237,12 @@ model NovelPromotionPanel {
   dialogueText     String?
   dialogueEmotion  String?
   includeDialogueInVideoPrompt Boolean       @default(true)
+  narrationMode        String                @default("auto")
+  narrationRecommended Boolean               @default(false)
+  narrationSuggestedText String?
+  narrationSuggestedEmotion String?
+  narrationText        String?
+  narrationEmotion     String?
   estimatedDuration Float?
   durationOverride Float?
   firstFrameSourceMeta String?
@@ -520,6 +526,9 @@ model NovelPromotionVoiceLine {
   id                  String                @id @default(uuid())
   episodeId           String
   lineIndex           Int
+  lineType            String                @default("dialogue")
+  enabled             Boolean               @default(true)
+  sourceKey           String?               @unique
   speaker             String
   content             String
   voicePresetId       String?

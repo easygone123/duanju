@@ -177,6 +177,8 @@ export interface NovelPromotionClip {
   screenplay?: string | null  // 剧本JSON（Phase 0输出）
 }
 
+export type PanelNarrationMode = 'auto' | 'on' | 'off'
+
 export interface NovelPromotionPanel {
   id: string
   storyboardId: string
@@ -223,6 +225,12 @@ export interface NovelPromotionPanel {
   dialogueText?: string | null
   dialogueEmotion?: string | null
   includeDialogueInVideoPrompt?: boolean
+  narrationMode?: PanelNarrationMode
+  narrationRecommended?: boolean
+  narrationSuggestedText?: string | null
+  narrationSuggestedEmotion?: string | null
+  narrationText?: string | null
+  narrationEmotion?: string | null
   estimatedDuration?: number | null
   durationOverride?: number | null
   firstFrameSourceMeta?: string | null
