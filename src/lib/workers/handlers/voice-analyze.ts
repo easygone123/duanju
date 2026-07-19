@@ -14,6 +14,7 @@ import {
 } from './voice-analyze-helpers'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
 import { resolveAnalysisModel } from './resolve-analysis-model'
+import { relocateNarrationIndexConflicts } from '@/lib/novel-promotion/narration/sync'
 
 const MAX_VOICE_ANALYZE_ATTEMPTS = 2
 
@@ -237,6 +238,15 @@ export async function handleVoiceAnalyzeTask(job: Job<TaskJobData>) {
   await assertTaskActive(job, 'voice_analyze_persist')
 
   const createdVoiceLines = await prisma.$transaction(async (tx) => {
+    const incomingLineIndexes = Array.from(new Set(
+      voiceLinesData.map((item) => item.lineIndex),
+    ))
+    await relocateNarrationIndexConflicts({
+      tx,
+      episodeId,
+      incomingDialogueIndexes: incomingLineIndexes,
+    })
+
     const voiceLineModel = tx.novelPromotionVoiceLine as unknown as {
       upsert?: (args: unknown) => Promise<{
         id: string
@@ -269,6 +279,8 @@ export async function handleVoiceAnalyzeTask(job: Job<TaskJobData>) {
         create: {
           episodeId,
           lineIndex: lineData.lineIndex,
+          lineType: 'dialogue',
+          enabled: true,
           speaker: lineData.speaker,
           content: lineData.content,
           emotionStrength: lineData.emotionStrength,
@@ -277,6 +289,8 @@ export async function handleVoiceAnalyzeTask(job: Job<TaskJobData>) {
           matchedPanelIndex: lineData.matchedPanelIndex,
         },
         update: {
+          lineType: 'dialogue',
+          enabled: true,
           speaker: lineData.speaker,
           content: lineData.content,
           emotionStrength: lineData.emotionStrength,
@@ -303,19 +317,20 @@ export async function handleVoiceAnalyzeTask(job: Job<TaskJobData>) {
       created.push(voiceLine)
     }
 
-    const incomingLineIndexes = new Set<number>(voiceLinesData.map((item) => item.lineIndex))
-    if (incomingLineIndexes.size === 0) {
+    if (incomingLineIndexes.length === 0) {
       await voiceLineModel.deleteMany({
         where: {
           episodeId,
+          lineType: 'dialogue',
         },
       })
     } else {
       await voiceLineModel.deleteMany({
         where: {
           episodeId,
+          lineType: 'dialogue',
           lineIndex: {
-            notIn: Array.from(incomingLineIndexes),
+            notIn: incomingLineIndexes,
           },
         },
       })

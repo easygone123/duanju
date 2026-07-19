@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client'
+import { relocateNarrationIndexConflicts } from '@/lib/novel-promotion/narration/sync'
 import type { JsonRecord } from './persistence-contract'
 
 export async function persistSixGridVoiceLines(params: {
@@ -20,6 +21,15 @@ export async function persistGridVoiceLines(params: {
   expectedPanelCount: 4 | 6
 }) {
   const created: Array<{ id: string }> = []
+  const lineIndexes = params.voiceLineRows.map((row, index) => (
+    readPositiveInt(row.lineIndex, `voice line ${index + 1} has invalid lineIndex`)
+  ))
+  await relocateNarrationIndexConflicts({
+    tx: params.tx,
+    episodeId: params.episodeId,
+    incomingDialogueIndexes: lineIndexes,
+  })
+
   for (let index = 0; index < params.voiceLineRows.length; index += 1) {
     const row = params.voiceLineRows[index]
     const matchedPanel = isRecord(row.matchedPanel) ? row.matchedPanel : null
@@ -38,7 +48,7 @@ export async function persistGridVoiceLines(params: {
         throw new Error(`voice line ${index + 1} references non-existent panel`)
       }
     }
-    const lineIndex = readPositiveInt(row.lineIndex, `voice line ${index + 1} has invalid lineIndex`)
+    const lineIndex = lineIndexes[index]
     const speaker = readRequiredText(row.speaker, `voice line ${index + 1} is missing valid speaker`)
     const content = readRequiredText(row.content, `voice line ${index + 1} is missing valid content`)
     if (typeof row.emotionStrength !== 'number' || !Number.isFinite(row.emotionStrength)) {
@@ -50,6 +60,8 @@ export async function persistGridVoiceLines(params: {
       create: {
         episodeId: params.episodeId,
         lineIndex,
+        lineType: 'dialogue',
+        enabled: true,
         speaker,
         content,
         emotionStrength,
@@ -58,6 +70,8 @@ export async function persistGridVoiceLines(params: {
         matchedPanelIndex,
       },
       update: {
+        lineType: 'dialogue',
+        enabled: true,
         speaker,
         content,
         emotionStrength,
@@ -68,10 +82,10 @@ export async function persistGridVoiceLines(params: {
       select: { id: true },
     }))
   }
-  const lineIndexes = params.voiceLineRows.map((row) => row.lineIndex as number)
   await params.tx.novelPromotionVoiceLine.deleteMany({
     where: {
       episodeId: params.episodeId,
+      lineType: 'dialogue',
       ...(lineIndexes.length > 0 ? { lineIndex: { notIn: lineIndexes } } : {}),
     },
   })

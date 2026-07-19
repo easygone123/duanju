@@ -123,6 +123,7 @@ describe('worker voice-analyze behavior', () => {
 
     prismaMock.$transaction.mockImplementation(async (fn: (tx: {
       novelPromotionVoiceLine: {
+        findMany: () => Promise<Array<{ id: string; lineIndex: number }>>
         deleteMany: (args: { where: Record<string, unknown> }) => Promise<unknown>
         create: (args: { data: Record<string, unknown>; select: { id: boolean; speaker: boolean; matchedStoryboardId: boolean } }) => Promise<{
           id: string
@@ -133,6 +134,7 @@ describe('worker voice-analyze behavior', () => {
     }) => Promise<unknown>) => {
       const tx = {
         novelPromotionVoiceLine: {
+          findMany: async () => [],
           deleteMany: async (args: { where: Record<string, unknown> }) => {
             txState.deletedWhereClauses.push(args.where)
             return undefined
@@ -177,6 +179,8 @@ describe('worker voice-analyze behavior', () => {
     expect(txState.createdRows[0]).toEqual(expect.objectContaining({
       episodeId: 'episode-1',
       lineIndex: 1,
+      lineType: 'dialogue',
+      enabled: true,
       speaker: 'Hero',
       content: '第一句台词',
       matchedPanelId: 'panel-1',
@@ -185,6 +189,7 @@ describe('worker voice-analyze behavior', () => {
     }))
     expect(txState.deletedWhereClauses[0]).toEqual({
       episodeId: 'episode-1',
+      lineType: 'dialogue',
       lineIndex: {
         notIn: [1, 2],
       },
@@ -206,6 +211,7 @@ describe('worker voice-analyze behavior', () => {
     expect(txState.createdRows).toEqual([])
     expect(txState.deletedWhereClauses[0]).toEqual({
       episodeId: 'episode-1',
+      lineType: 'dialogue',
     })
   })
 

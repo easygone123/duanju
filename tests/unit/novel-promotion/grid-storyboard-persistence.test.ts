@@ -44,6 +44,7 @@ const tx = vi.hoisted(() => ({
     }),
   },
   novelPromotionVoiceLine: {
+    findMany: vi.fn(async () => [] as Array<{ id: string; lineIndex: number }>),
     updateMany: vi.fn(async () => ({ count: 0 })),
     deleteMany: vi.fn(async () => ({ count: 0 })),
     upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => {
