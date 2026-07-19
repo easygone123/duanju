@@ -117,12 +117,22 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function renderLibrary(props: { initialWorkflowId?: string | null; activationWorkflowId?: string | null; onCreateNew?: () => void } = {}) {
+function renderLibrary(props: {
+  initialWorkflowId?: string | null
+  activationWorkflowId?: string | null
+  onCreateNew?: () => void
+  onEditWorkflow?: (workflowId: string, draft: unknown) => void
+} = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <NextIntlClientProvider locale="en" messages={{ comfyui: enComfyui }} timeZone="UTC">
-        <WorkflowLibraryPanel initialWorkflowId={props.initialWorkflowId} activationWorkflowId={props.activationWorkflowId} onCreateNew={props.onCreateNew ?? vi.fn()} />
+        <WorkflowLibraryPanel
+          initialWorkflowId={props.initialWorkflowId}
+          activationWorkflowId={props.activationWorkflowId}
+          onCreateNew={props.onCreateNew ?? vi.fn()}
+          onEditWorkflow={props.onEditWorkflow ?? vi.fn()}
+        />
       </NextIntlClientProvider>
     </QueryClientProvider>,
   )
@@ -152,7 +162,7 @@ describe('ComfyUI workflow library removal', () => {
   it('selects the first saved workflow when there is no valid preferred or current selection', async () => {
     const view = renderLibrary()
 
-    await waitFor(() => expect(view.getByLabelText('draft-name').textContent).toBe('Portrait'))
+    await waitFor(() => expect(view.getByLabelText('Workflow summary').textContent).toContain('Portrait'))
     expect(view.getByRole('button', { name: /Portrait/ }).getAttribute('aria-current')).toBe('page')
     expect(view.getByRole('button', { name: 'Delete workflow' })).toBeTruthy()
   })
@@ -168,10 +178,28 @@ describe('ComfyUI workflow library removal', () => {
     expect(apiFetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
+  it('opens the selected workflow in the dedicated edit window without rendering the raw editor', async () => {
+    const onEditWorkflow = vi.fn()
+    const view = renderLibrary({ onEditWorkflow })
+
+    await selectSavedWorkflow(view)
+    expect(view.queryByLabelText('draft-name')).toBeNull()
+    fireEvent.click(view.getByRole('button', { name: 'Edit workflow' }))
+
+    expect(onEditWorkflow).toHaveBeenCalledWith(
+      workflow.id,
+      expect.objectContaining({
+        name: 'Portrait',
+        variableDefinitions: savedVersion.variableDefinitions,
+        bindings: savedVersion.bindings,
+      }),
+    )
+  })
+
   it('selects the newly-created workflow when its initial id becomes available', async () => {
     const view = renderLibrary({ initialWorkflowId: workflow.id })
 
-    await waitFor(() => expect(view.getByLabelText('draft-name').textContent).toBe('Portrait'))
+    await waitFor(() => expect(view.getByLabelText('Workflow summary').textContent).toContain('Portrait'))
     expect(view.getByRole('button', { name: /Portrait/ }).getAttribute('aria-current')).toBe('page')
     expect(view.getByRole('button', { name: 'Delete workflow' })).toBeTruthy()
   })
@@ -184,7 +212,7 @@ describe('ComfyUI workflow library removal', () => {
     expect(view.queryByRole('button', { name: 'Delete workflow' })).toBeNull()
   })
 
-  it('prepares the shortest supported duration for standalone video tests and forwards video activation context', async () => {
+  it('forwards video workflow context to the dedicated activation panel', async () => {
     const videoWorkflow: WorkflowView = {
       ...workflow,
       mediaType: 'video',
@@ -197,18 +225,12 @@ describe('ComfyUI workflow library removal', () => {
     })
     const view = renderLibrary()
 
-    await waitFor(() => expect(view.getByLabelText('test-definitions')).toBeTruthy())
-    expect(JSON.parse(view.getByLabelText('test-definitions').textContent ?? '[]')).toEqual([
-      expect.objectContaining({ name: 'duration', required: true, defaultValue: 5, options: [5, 10] }),
-      expect.objectContaining({ name: 'fps', defaultValue: 16 }),
-    ])
-    expect(JSON.parse(view.getByLabelText('positive-number-variables').textContent ?? '[]')).toEqual(['duration'])
-
+    await waitFor(() => expect(view.getByRole('button', { name: 'Test and enable' })).toBeTruthy())
     fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
     expect(view.getByLabelText('activation-media-type').textContent).toBe('video')
   })
 
-  it('blocks video test actions and explains how to repair a missing duration mapping', async () => {
+  it('keeps mapping repair available through the dedicated edit window', async () => {
     const videoWorkflow: WorkflowView = {
       ...workflow,
       mediaType: 'video',
@@ -219,100 +241,16 @@ describe('ComfyUI workflow library removal', () => {
       if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
       throw new Error(`Unexpected request: ${url}`)
     })
-    const view = renderLibrary()
+    const onEditWorkflow = vi.fn()
+    const view = renderLibrary({ onEditWorkflow })
 
     await waitFor(() => expect(view.getByRole('button', { name: 'Test and enable' })).toBeTruthy())
-    expect(view.getByRole('button', { name: 'Test and enable' }).hasAttribute('disabled')).toBe(true)
-    expect(view.getByRole('button', { name: 'Test workflow' }).hasAttribute('disabled')).toBe(true)
-    expect(view.getByText('Add a duration or total-frame mapping before testing this video workflow.')).toBeTruthy()
-  })
-
-  it('returns from activation to an unlocked mapping repair draft', async () => {
-    const view = renderLibrary()
-    await selectSavedWorkflow(view)
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
-
-    expect(view.getByLabelText('editor-disabled').textContent).toBe('true')
-    fireEvent.click(view.getByRole('button', { name: 'EDIT FAILED MAPPINGS' }))
-
-    expect(view.queryByLabelText('activation-workflow')).toBeNull()
-    expect(view.getByLabelText('editor-disabled').textContent).toBe('false')
-    expect(view.getByLabelText('draft-name').textContent).toBe('Portrait')
-    expect(Number(view.getByLabelText('mapping-focus-request').textContent)).toBeGreaterThan(0)
-    expect(view.getByText(/Repair the input or output mappings/)).toBeTruthy()
-  })
-
-  it('clears mapping repair guidance when another workflow is selected', async () => {
-    apiFetchMock.mockImplementation(async (url: string) => {
-      if (url === '/api/comfyui/workflows') return response({ workflows: [workflow, workflowB] })
-      if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
-      throw new Error(`Unexpected request: ${url}`)
-    })
-    const view = renderLibrary()
-    await selectSavedWorkflow(view)
     fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
     fireEvent.click(view.getByRole('button', { name: 'EDIT FAILED MAPPINGS' }))
-    expect(view.getByText(/Repair the input or output mappings/)).toBeTruthy()
-
-    fireEvent.click(view.getByRole('button', { name: /Landscape/ }))
-
-    expect(view.queryByText(/Repair the input or output mappings/)).toBeNull()
-    expect(view.getByLabelText('mapping-focus-request').textContent).toBe('0')
-  })
-
-  it('keeps mapping repair guidance after save failure and clears it after save succeeds', async () => {
-    const nextVersion = {
-      ...savedVersion,
-      id: 'version-2', version: 2, contentHash: 'hash-2',
-      bindings: savedVersion.bindings.map((binding) => ({
-        ...binding,
-        numericTransform: { ...binding.numericTransform, frameOffset: 0 as const },
-      })),
-    }
-    const nextWorkflow = { ...workflow, versions: [nextVersion, savedVersion] }
-    let versionCalls = 0
-    apiFetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url === '/api/comfyui/workflows') {
-        return response({ workflows: versionCalls > 1 ? [nextWorkflow] : [workflow] })
-      }
-      if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
-      if (url.endsWith('/versions') && init?.method === 'POST') {
-        versionCalls += 1
-        return versionCalls === 1
-          ? response({ error: { code: 'UNKNOWN' } }, 500)
-          : response({ version: nextVersion }, 201)
-      }
-      throw new Error(`Unexpected request: ${url}`)
-    })
-    const view = renderLibrary()
-    await selectSavedWorkflow(view)
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
-    fireEvent.click(view.getByRole('button', { name: 'EDIT FAILED MAPPINGS' }))
-
-    expect(view.getByLabelText('duration-frame-offset').textContent).toBe('1')
-    fireEvent.click(view.getByRole('button', { name: 'CORRECT DURATION OFFSET' }))
-    expect(view.getByLabelText('duration-frame-offset').textContent).toBe('0')
-
-    fireEvent.click(view.getByRole('button', { name: 'Save draft' }))
-    await waitFor(() => expect(view.getByRole('alert')).toBeTruthy())
-    expect(view.getByText(/Repair the input or output mappings/)).toBeTruthy()
-
-    fireEvent.click(view.getByRole('button', { name: 'Save draft' }))
-    await waitFor(() => expect(versionCalls).toBe(2))
-    const versionPosts = apiFetchMock.mock.calls.filter(([url, init]) => (
-      String(url).endsWith('/versions') && init?.method === 'POST'
-    ))
-    expect(JSON.parse(String(versionPosts.at(-1)?.[1]?.body))).toMatchObject({
-      bindings: [{
-        variable: 'duration',
-        numericTransform: {
-          targetUnit: 'frames', frameOffset: 0, allowedTargetValues: [81, 161],
-        },
-      }],
-    })
-    await waitFor(() => expect(view.queryByText(/Repair the input or output mappings/)).toBeNull())
-    expect(view.getByLabelText('Saved version').textContent).toContain('v2')
-    expect(view.getByLabelText('duration-frame-offset').textContent).toBe('0')
+    expect(onEditWorkflow).toHaveBeenCalledWith(
+      videoWorkflow.id,
+      expect.objectContaining({ bindings: [] }),
+    )
   })
 
   it('does not let a delayed activation reload steal a newer workflow selection', async () => {
@@ -332,10 +270,10 @@ describe('ComfyUI workflow library removal', () => {
     fireEvent.click(view.getByRole('button', { name: 'COMPLETE ACTIVATION' }))
     await waitFor(() => expect(listCalls).toBe(2))
     fireEvent.click(view.getByRole('button', { name: /Landscape/ }))
-    expect(view.getByLabelText('draft-name').textContent).toBe('Landscape')
+    expect(view.getByLabelText('Workflow summary').textContent).toContain('Landscape')
     reload.resolve(response({ workflows: [workflow] }))
 
-    await waitFor(() => expect(view.getByLabelText('draft-name').textContent).toBe('Landscape'))
+    await waitFor(() => expect(view.getByLabelText('Workflow summary').textContent).toContain('Landscape'))
     expect(view.getByRole('button', { name: /Landscape/ }).getAttribute('aria-current')).toBe('page')
   })
 
@@ -428,11 +366,11 @@ describe('ComfyUI workflow library removal', () => {
 
     fireEvent.click(view.getByRole('button', { name: 'Delete workflow' }))
     fireEvent.click(view.getByRole('button', { name: /Landscape/ }))
-    await waitFor(() => expect(view.getByLabelText('draft-name').textContent).toBe('Landscape'))
+    await waitFor(() => expect(view.getByLabelText('Workflow summary').textContent).toContain('Landscape'))
     deletion.resolve(response({ success: true }))
 
     await waitFor(() => expect(listCalls).toBe(2))
-    expect(view.getByLabelText('draft-name').textContent).toBe('Landscape')
+    expect(view.getByLabelText('Workflow summary').textContent).toContain('Landscape')
     expect(view.getByRole('button', { name: 'Delete workflow' })).toBeTruthy()
     expect(view.queryByRole('button', { name: /Portrait/ })).toBeNull()
   })

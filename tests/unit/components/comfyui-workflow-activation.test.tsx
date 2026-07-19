@@ -113,7 +113,7 @@ describe('WorkflowActivationPanel', () => {
     const view = renderPanel()
 
     expect(view.getByText('No enabled ComfyUI instance is available.')).toBeTruthy()
-    expect((view.getByRole('button', { name: 'Test and enable' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((view.getByRole('button', { name: 'Test workflow' }) as HTMLButtonElement).disabled).toBe(true)
     expect(requestWorkflowActionMock).not.toHaveBeenCalled()
   })
 
@@ -125,17 +125,17 @@ describe('WorkflowActivationPanel', () => {
     connections.current = [{ id: 'connection-late', name: 'Late ComfyUI', enabled: true }]
     view.rerender(activationTree(queryClient))
 
-    await waitFor(() => expect((view.getByRole('button', { name: 'Test and enable' }) as HTMLButtonElement).disabled).toBe(false))
+    await waitFor(() => expect((view.getByRole('button', { name: 'Test workflow' }) as HTMLButtonElement).disabled).toBe(false))
   })
 
   it('blocks activation until all required live-test inputs are provided', async () => {
     const requiredPrompt = version([{ name: 'prompt', type: 'string', required: true }])
     const view = renderPanel({ version: requiredPrompt })
 
-    expect((view.getByRole('button', { name: 'Test and enable' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((view.getByRole('button', { name: 'Test workflow' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.change(view.getByLabelText('prompt *'), { target: { value: 'a portrait' } })
 
-    await waitFor(() => expect((view.getByRole('button', { name: 'Test and enable' }) as HTMLButtonElement).disabled).toBe(false))
+    await waitFor(() => expect((view.getByRole('button', { name: 'Test workflow' }) as HTMLButtonElement).disabled).toBe(false))
   })
 
   it('shows optional media uploads while hiding unrelated optional scalar variables', () => {
@@ -159,7 +159,7 @@ describe('WorkflowActivationPanel', () => {
 
     expect((view.getByLabelText(/Test duration \(seconds\)/) as HTMLSelectElement).value).toBe('5')
     expect(view.getByText('Converted to total frames by this mapping.')).toBeTruthy()
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
 
     await waitFor(() => expect(requestWorkflowActionMock).toHaveBeenCalled())
     expect(JSON.parse(String(requestWorkflowActionMock.mock.calls[0]?.[1]?.body))).toMatchObject({
@@ -172,7 +172,7 @@ describe('WorkflowActivationPanel', () => {
     const view = renderPanel({ mediaType: 'video', version: version(), onEditMappings })
 
     expect(view.getByText('Add a duration or total-frame mapping before testing this video workflow.')).toBeTruthy()
-    expect((view.getByRole('button', { name: 'Test and enable' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((view.getByRole('button', { name: 'Test workflow' }) as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(view.getByRole('button', { name: 'Return to edit mappings' }))
     expect(onEditMappings).toHaveBeenCalledTimes(1)
     expect(requestWorkflowActionMock).not.toHaveBeenCalled()
@@ -182,15 +182,15 @@ describe('WorkflowActivationPanel', () => {
     const testRun = deferred<unknown>()
     requestWorkflowActionMock.mockReturnValueOnce(testRun.promise).mockResolvedValueOnce({ success: true })
     const view = renderPanel()
-    const activate = view.getByRole('button', { name: 'Test and enable' })
+    const activate = view.getByRole('button', { name: 'Test workflow' })
 
     fireEvent.click(activate)
     fireEvent.click(activate)
 
     expect(requestWorkflowActionMock).toHaveBeenCalledTimes(1)
     testRun.resolve({ success: true })
-    await waitFor(() => expect(view.getByText('Available as model')).toBeTruthy())
-    expect(requestWorkflowActionMock).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(view.getByRole('button', { name: 'Publish workflow' })).toBeTruthy())
+    expect(requestWorkflowActionMock).toHaveBeenCalledTimes(1)
   })
 
   it('does not publish a delayed test result after activation is closed', async () => {
@@ -200,7 +200,7 @@ describe('WorkflowActivationPanel', () => {
     const onActivated = vi.fn()
     const view = renderPanel({ onClose, onActivated })
 
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
     fireEvent.click(view.getByRole('button', { name: 'Close activation' }))
     testRun.resolve({ success: true })
     await Promise.resolve()
@@ -217,7 +217,7 @@ describe('WorkflowActivationPanel', () => {
     requestWorkflowActionMock.mockReturnValueOnce(testRun.promise)
     const view = renderPanel()
 
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
     view.unmount()
     testRun.resolve({ success: true })
     await Promise.resolve()
@@ -233,14 +233,14 @@ describe('WorkflowActivationPanel', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const view = render(activationTree(queryClient))
 
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
     view.rerender(activationTree(queryClient, { version: { ...version(), id: 'version-8', version: 8 } }))
     testRun.resolve({ success: true })
     await Promise.resolve()
     await Promise.resolve()
 
     expect(requestWorkflowActionMock).toHaveBeenCalledTimes(1)
-    expect(view.getByRole('button', { name: 'Test and enable' })).toBeTruthy()
+    expect(view.getByRole('button', { name: 'Test workflow' })).toBeTruthy()
   })
 
   it('announces publishing and exposes busy state while publish is delayed', async () => {
@@ -248,7 +248,9 @@ describe('WorkflowActivationPanel', () => {
     requestWorkflowActionMock.mockResolvedValueOnce({ success: true }).mockReturnValueOnce(publish.promise)
     const view = renderPanel()
 
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
+    await waitFor(() => expect(view.getByRole('button', { name: 'Publish workflow' })).toBeTruthy())
+    fireEvent.click(view.getByRole('button', { name: 'Publish workflow' }))
     await waitFor(() => expect(requestWorkflowActionMock).toHaveBeenCalledTimes(2))
 
     const region = view.getByRole('region', { name: 'Test and enable' })
@@ -266,7 +268,9 @@ describe('WorkflowActivationPanel', () => {
     requestWorkflowActionMock.mockResolvedValueOnce({ success: true }).mockReturnValueOnce(publish.promise)
     const view = renderPanel({ onClose, onActivated })
 
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
+    await waitFor(() => expect(view.getByRole('button', { name: 'Publish workflow' })).toBeTruthy())
+    fireEvent.click(view.getByRole('button', { name: 'Publish workflow' }))
     await waitFor(() => expect(requestWorkflowActionMock).toHaveBeenCalledTimes(2))
     fireEvent.click(view.getByRole('button', { name: 'Close activation' }))
     publish.resolve({ success: true })
@@ -283,7 +287,9 @@ describe('WorkflowActivationPanel', () => {
     requestWorkflowActionMock.mockResolvedValueOnce({ success: true }).mockReturnValueOnce(publish.promise)
     const view = renderPanel({ onActivated })
 
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
+    await waitFor(() => expect(view.getByRole('button', { name: 'Publish workflow' })).toBeTruthy())
+    fireEvent.click(view.getByRole('button', { name: 'Publish workflow' }))
     await waitFor(() => expect(requestWorkflowActionMock).toHaveBeenCalledTimes(2))
     view.unmount()
     publish.resolve({ success: true })
@@ -296,7 +302,7 @@ describe('WorkflowActivationPanel', () => {
     requestWorkflowActionMock.mockRejectedValueOnce(new Error('test failed'))
     const view = renderPanel()
 
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
 
     await waitFor(() => expect(view.getByText('The live test failed. Nothing was published.')).toBeTruthy())
     expect(requestWorkflowActionMock).toHaveBeenCalledTimes(1)
@@ -309,7 +315,7 @@ describe('WorkflowActivationPanel', () => {
     const view = renderPanel({ onEditMappings })
 
     expect(view.queryByRole('button', { name: 'Return to edit mappings' })).toBeNull()
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
     await waitFor(() => expect(view.getByRole('button', {
       name: 'Return to edit mappings',
     })).toBeTruthy())
@@ -326,7 +332,9 @@ describe('WorkflowActivationPanel', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const view = render(activationTree(queryClient))
 
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
+    await waitFor(() => expect(view.getByRole('button', { name: 'Publish workflow' })).toBeTruthy())
+    fireEvent.click(view.getByRole('button', { name: 'Publish workflow' }))
     await waitFor(() => expect(view.getByRole('button', { name: 'Retry publish' })).toBeTruthy())
     connections.current = []
     view.rerender(activationTree(queryClient))
@@ -350,29 +358,40 @@ describe('WorkflowActivationPanel', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const view = render(activationTree(queryClient))
 
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
+    await waitFor(() => expect(view.getByRole('button', { name: 'Publish workflow' })).toBeTruthy())
+    fireEvent.click(view.getByRole('button', { name: 'Publish workflow' }))
     await waitFor(() => expect(view.getByRole('button', { name: 'Retry publish' })).toBeTruthy())
     view.rerender(activationTree(queryClient, { version: { ...version(), id: 'version-8', version: 8 } }))
 
-    await waitFor(() => expect(view.getByRole('button', { name: 'Test and enable' })).toBeTruthy())
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    await waitFor(() => expect(view.getByRole('button', { name: 'Test workflow' })).toBeTruthy())
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
+    await waitFor(() => expect(view.getByRole('button', { name: 'Publish workflow' })).toBeTruthy())
+    fireEvent.click(view.getByRole('button', { name: 'Publish workflow' }))
     await waitFor(() => expect(view.getByText('Available as model')).toBeTruthy())
     expect(JSON.parse(requestWorkflowActionMock.mock.calls[2]?.[1]?.body)).toMatchObject({ versionId: 'version-8' })
     expect(JSON.parse(requestWorkflowActionMock.mock.calls[3]?.[1]?.body)).toEqual({ versionId: 'version-8' })
   })
 
-  it('publishes the tested exact version and invalidates user models', async () => {
+  it('waits for explicit confirmation before publishing the tested exact version', async () => {
     requestWorkflowActionMock.mockResolvedValue({ success: true })
     const onActivated = vi.fn()
     const view = renderPanel({ onActivated })
 
-    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    fireEvent.click(view.getByRole('button', { name: 'Test workflow' }))
 
-    await waitFor(() => expect(view.getByText('Available as model')).toBeTruthy())
+    await waitFor(() => expect(view.getByRole('button', { name: 'Publish workflow' })).toBeTruthy())
     expect(JSON.parse(requestWorkflowActionMock.mock.calls[0]?.[1]?.body)).toMatchObject({
       versionId: 'version-7',
       connectionId: 'connection-1',
     })
+    expect(requestWorkflowActionMock).toHaveBeenCalledTimes(1)
+    expect(invalidateUserModelsMock).not.toHaveBeenCalled()
+    expect(onActivated).not.toHaveBeenCalled()
+
+    fireEvent.click(view.getByRole('button', { name: 'Publish workflow' }))
+
+    await waitFor(() => expect(view.getByText('Available as model')).toBeTruthy())
     expect(JSON.parse(requestWorkflowActionMock.mock.calls[1]?.[1]?.body)).toEqual({ versionId: 'version-7' })
     expect(invalidateUserModelsMock).toHaveBeenCalledTimes(1)
     expect(onActivated).toHaveBeenCalledTimes(1)

@@ -55,6 +55,8 @@
     "description": "导入 ComfyUI API Format JSON，并映射 waoowaoo 输入和输出。",
     "library": "工作流库",
     "newWorkflow": "新建工作流",
+    "editWorkflow": "编辑工作流",
+    "workflowSummary": "工作流摘要",
     "loading": "正在加载工作流…",
     "editor": "工作流编辑器",
     "name": "工作流名称",
@@ -91,6 +93,7 @@
       "available": "已加入模型列表",
       "noEnabledInstance": "当前没有已启用的 ComfyUI 实例。",
       "instance": "测试实例",
+      "test": "测试工作流",
       "testAndEnable": "测试并启用",
       "testing": "正在测试工作流…",
       "publishing": "正在发布工作流…",
@@ -131,6 +134,18 @@
     "guided": {
       "wizardTitle": "创建 ComfyUI 工作流",
       "wizardHint": "选择工作流类型，上传 API Format JSON，然后确认识别到的输入和输出。",
+      "editTitle": "编辑 ComfyUI 工作流",
+      "editHint": "修改当前映射，然后测试并发布这次修改后的准确版本。",
+      "editStepsLabel": "工作流编辑步骤",
+      "editSteps": {
+        "review": "编辑映射",
+        "test": "测试并发布"
+      },
+      "editReviewTitle": "编辑工作流映射",
+      "editReviewHint": "可以新增、修改或删除输入输出映射。点击继续测试时，系统会自动准备当前修改，无需先保存草稿。",
+      "continueToTest": "继续测试",
+      "retryPrepareTest": "重新准备测试",
+      "preparingTestStatus": "正在准备修改后的工作流用于测试…",
       "stepsLabel": "工作流创建步骤",
       "steps": {
         "type": "选择类型",

@@ -150,7 +150,7 @@ export default function WorkflowActivationPanel({ workflowId, mediaType = 'image
     finishOperation(epoch)
   }
 
-  const testAndPublish = async () => {
+  const testExactVersion = async () => {
     if (!connectionId || !testPayload) return
     const epoch = beginOperation()
     if (epoch === null || !isCurrentOperation(epoch)) return
@@ -176,7 +176,7 @@ export default function WorkflowActivationPanel({ workflowId, mediaType = 'image
     }
     if (!isCurrentOperation(epoch)) return
     transition('test_succeeded')
-    await publishExactVersion(epoch)
+    finishOperation(epoch)
   }
 
   const busy = activation.busy !== null
@@ -238,8 +238,8 @@ export default function WorkflowActivationPanel({ workflowId, mediaType = 'image
           ? <button type="button" disabled={!canPublish} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50" onClick={() => void publishExactVersion()}>
             {activation.error === 'publish' ? t('activation.retryPublish') : t('activation.publish')}
           </button>
-          : <button type="button" disabled={!canTest} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50" onClick={() => void testAndPublish()}>
-            {activation.busy === 'testing' ? t('activation.testing') : t('activation.testAndEnable')}
+          : <button type="button" disabled={!canTest} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50" onClick={() => void testExactVersion()}>
+            {activation.busy === 'testing' ? t('activation.testing') : t('activation.test')}
           </button>}
         {(activation.error === 'test' || durationBlocked) && onEditMappings && <button
           type="button"

@@ -1,19 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api-fetch'
-import { invalidateUserModels } from '@/lib/query/hooks/useUserModels'
-import {
-  deriveVideoTestDurationContract,
-  prepareVideoTestVariableDefinitions,
-} from '@/lib/comfyui/video-test-duration'
 import WorkflowCompatibilityTable, { type WorkflowCompatibilityView } from './WorkflowCompatibilityTable'
 import WorkflowActivationPanel from './WorkflowActivationPanel'
-import WorkflowEditor from './WorkflowEditor'
-import WorkflowTestForm, { emptyWorkflowTestPayload, type WorkflowTestPayload } from './WorkflowTestForm'
-import { useComfyConnections } from './hooks'
 import {
   draftFromWorkflow,
   createWorkflowCompatibilityCoordinator,
@@ -21,7 +12,6 @@ import {
   safeWorkflowErrorKey,
   WorkflowRequestError,
   workflowRequestErrorFromPayload,
-  workflowPayload,
   type WorkflowAuthorDraft,
   type WorkflowCompatibilityResponseItem,
   type WorkflowVersionView,
@@ -29,7 +19,7 @@ import {
   type WorkflowErrorKey,
 } from './workflow-ui'
 
-type ErrorKey = WorkflowErrorKey | 'testUploadInvalid' | 'testUploadTotalTooLarge'
+type ErrorKey = WorkflowErrorKey
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(url, init)
@@ -44,12 +34,12 @@ interface Props {
   initialWorkflowId?: string | null
   activationWorkflowId?: string | null
   onCreateNew(): void
+  onEditWorkflow(workflowId: string, draft: WorkflowAuthorDraft): void
   onActivationClosed?(): void
 }
 
-export default function WorkflowLibraryPanel({ initialWorkflowId, activationWorkflowId, onCreateNew, onActivationClosed }: Props) {
+export default function WorkflowLibraryPanel({ initialWorkflowId, activationWorkflowId, onCreateNew, onEditWorkflow, onActivationClosed }: Props) {
   const t = useTranslations('comfyui.workflows')
-  const queryClient = useQueryClient()
   const [workflows, setWorkflows] = useState<WorkflowView[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [localActivationWorkflowId, setLocalActivationWorkflowId] = useState<string | null>(null)
@@ -63,7 +53,6 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   const newWorkflowButtonRef = useRef<HTMLButtonElement>(null)
   const [authorDraft, setAuthorDraft] = useState<WorkflowAuthorDraft | null>(null)
   const [savedVersion, setSavedVersion] = useState<WorkflowVersionView | null>(null)
-  const [connectionId, setConnectionId] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ErrorKey | null>(null)
@@ -73,35 +62,8 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   const [compatibilityError, setCompatibilityError] = useState(false)
   const [compatibilityLoadingMore, setCompatibilityLoadingMore] = useState(false)
   const [compatibilityCoordinator] = useState(() => createWorkflowCompatibilityCoordinator())
-  const [testPayload, setTestPayload] = useState<WorkflowTestPayload | null>(emptyWorkflowTestPayload)
-  const [mappingRepairMode, setMappingRepairMode] = useState(false)
-  const [mappingFocusRequestId, setMappingFocusRequestId] = useState(0)
-  const connectionsQuery = useComfyConnections()
   const selectedWorkflow = workflows.find((workflow) => workflow.id === selectedId)
   const selectedMediaType = selectedWorkflow?.mediaType ?? authorDraft?.mediaType ?? 'image'
-  const durationTest = useMemo(() => deriveVideoTestDurationContract({
-    mediaType: selectedMediaType,
-    variableDefinitions: savedVersion?.variableDefinitions ?? [],
-    bindings: savedVersion?.bindings ?? [],
-  }), [savedVersion?.bindings, savedVersion?.variableDefinitions, selectedMediaType])
-  const testDefinitions = useMemo(() => prepareVideoTestVariableDefinitions(
-    savedVersion?.variableDefinitions ?? [],
-    durationTest,
-  ), [durationTest, savedVersion?.variableDefinitions])
-  const durationVariableNames = useMemo(() => new Set(
-    durationTest.required && durationTest.eligible ? [durationTest.variableName] : [],
-  ), [durationTest])
-  const durationLabels = useMemo(() => (
-    durationTest.required && durationTest.eligible
-      ? { [durationTest.variableName]: t('videoTestDuration') }
-      : {}
-  ), [durationTest, t])
-  const durationHints = useMemo(() => (
-    durationTest.required && durationTest.eligible && durationTest.targetUnit === 'frames'
-      ? { [durationTest.variableName]: t('videoTestFramesHint') }
-      : {}
-  ), [durationTest, t])
-  const durationBlocked = durationTest.required && !durationTest.eligible
 
   if (activationWorkflowIdRef.current !== activationWorkflowId) {
     activationWorkflowIdRef.current = activationWorkflowId
@@ -159,34 +121,12 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   const selectWorkflow = (id: string) => {
     selectionRevisionRef.current += 1
     if (id !== selectedIdRef.current) closeActivationForSelection(id)
-    setMappingRepairMode(false)
-    setMappingFocusRequestId(0)
     updateSelectedId(id); setError(null)
     const workflow = workflows.find((item) => item.id === id)
     if (!workflow) return
     const version = workflow.versions[0] ?? workflow.currentVersion
     setSavedVersion(version); setAuthorDraft(draftFromWorkflow(workflow, version))
   }
-  const runAction = async (operation: () => Promise<void>) => {
-    setBusy(true); setError(null)
-    try { await operation() } catch (actionError) { setError(safeWorkflowErrorKey(actionError)) } finally { setBusy(false) }
-  }
-  const saveDraft = () => runAction(async () => {
-    if (!selectedId || !authorDraft) return
-    const contract = workflowPayload(authorDraft)
-    const current = workflows.find((workflow) => workflow.id === selectedId)
-    if (current && current.name !== authorDraft.name.trim()) {
-      await requestJson(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: authorDraft.name }),
-      })
-    }
-    const result = await requestJson<{ version: WorkflowVersionView }>(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/versions`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(contract),
-    })
-    setSavedVersion(result.version)
-    await load(selectedId)
-    setMappingRepairMode(false)
-  })
   const archiveSelectedWorkflow = async () => {
     if (!selectedId || archiveInFlightRef.current) return
     const targetId = selectedId
@@ -242,23 +182,6 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
       .finally(() => compatibilityCoordinator.finish(ticket))
     return () => compatibilityCoordinator.cancel(selection)
   }, [compatibilityCoordinator, savedVersionId, selectedId])
-  const publishVersion = () => runAction(async () => {
-    if (!selectedId || !savedVersion?.validation.valid) return
-    await requestJson(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/publish`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ versionId: savedVersion.id }),
-    })
-    await invalidateUserModels(queryClient)
-    await load(selectedId)
-  })
-  const testVersion = () => runAction(async () => {
-    if (!selectedId || !savedVersion || !connectionId) return
-    if (!testPayload) return
-    await requestJson(`/api/comfyui/workflows/${encodeURIComponent(selectedId)}/test-run`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ versionId: savedVersion.id, connectionId, variables: testPayload.variables, uploads: testPayload.uploads }),
-    })
-    await Promise.resolve(invalidateUserModels(queryClient)).catch(() => undefined)
-    await load(selectedId)
-  })
   const loadMoreCompatibility = async () => {
     if (!selectedId || !savedVersion || !compatibilityCursor || compatibilityLoadingMore) return
     const ticket = compatibilityCoordinator.beginLoadMore(compatibilityCursor)
@@ -299,8 +222,7 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   }
   const editFailedMappings = () => {
     closeSelectedWorkflowActivation()
-    setMappingRepairMode(true)
-    setMappingFocusRequestId((current) => current + 1)
+    if (selectedId && authorDraft) onEditWorkflow(selectedId, authorDraft)
   }
 
   return <section aria-labelledby="comfyui-workflow-library-heading" className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
@@ -313,7 +235,12 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
         {workflows.map((workflow) => <button key={workflow.id} type="button" onClick={() => selectWorkflow(workflow.id)} aria-current={selectedId === workflow.id ? 'page' : undefined}
           className="glass-surface-soft w-full rounded-xl p-3 text-left"><span className="block truncate font-medium">{workflow.name}</span><span className="text-xs text-[var(--glass-text-tertiary)]">{t(workflow.mediaType)} · {t(`purposes.${workflow.purpose}`)} · {t(`statuses.${workflow.status}`)}</span></button>)}</nav>
       <div className="min-w-0 space-y-6">
-        {selectedId && authorDraft && <WorkflowEditor key={selectedId} value={authorDraft} disabled={busy || activationOpen} mappingFocusRequestId={mappingFocusRequestId} onChange={setAuthorDraft} onImportError={(key) => setError(key as ErrorKey)} />}
+        {selectedWorkflow && <div className="glass-surface-soft space-y-2 rounded-xl p-4" aria-label={t('workflowSummary')}>
+          <h3 className="break-words font-semibold">{selectedWorkflow.name}</h3>
+          <p className="text-sm text-[var(--glass-text-secondary)]">
+            {t(selectedWorkflow.mediaType)} · {t(`purposes.${selectedWorkflow.purpose}`)} · {t(`statuses.${selectedWorkflow.status}`)}
+          </p>
+        </div>}
         {savedVersion && <div className="glass-surface-soft rounded-xl p-3 text-xs" aria-label={t('savedVersion')}>
           {t('savedVersion')} v{savedVersion.version} · {savedVersion.validation.valid ? t('staticValid') : t('staticInvalid')} · {savedVersion.lastSuccessfulTestAt ? t('tested') : t('notTested')}
         </div>}
@@ -326,29 +253,12 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
           onEditMappings={editFailedMappings}
           onActivated={() => load(selectedId)}
         />}
-        {mappingRepairMode && !activationOpen && <p role="status" className="text-sm text-[var(--glass-text-secondary)]">
-          {t('mappingRepairHint')}
-        </p>}
         {selectedId && authorDraft && !activationOpen && <div className="flex flex-wrap items-end gap-2">
-          <button type="button" onClick={() => void saveDraft()} disabled={busy || !authorDraft.name || !authorDraft.apiFormatJson} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('saveDraft')}</button>
-          <button type="button" onClick={openSelectedWorkflowActivation} disabled={busy || !savedVersion || durationBlocked} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('testAndEnable')}</button>
-          <button type="button" onClick={() => void publishVersion()} disabled={busy || !savedVersion?.validation.valid} className="glass-btn-base px-4 py-2 text-sm">{t('publish')}</button>
-          <label className="min-w-[12rem] text-xs">{t('testInstance')}<select value={connectionId} onChange={(event) => setConnectionId(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-2 py-2">
-            <option value="">{t('selectInstance')}</option>{(connectionsQuery.data?.connections ?? []).filter((connection) => connection.enabled).map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label>
-          <button type="button" onClick={() => void testVersion()} disabled={busy || !savedVersion || !connectionId || !testPayload || durationBlocked} className="glass-btn-base px-4 py-2 text-sm">{t('test')}</button>
+          <button type="button" onClick={() => onEditWorkflow(selectedId, authorDraft)} disabled={busy} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('editWorkflow')}</button>
+          <button type="button" onClick={openSelectedWorkflowActivation} disabled={busy || !savedVersion} className="glass-btn-base px-4 py-2 text-sm">{t('testAndEnable')}</button>
           <button type="button" onClick={() => void archiveSelectedWorkflow()} disabled={busy}
             className="glass-btn-base glass-btn-tone-danger px-4 py-2 text-sm">{t('deleteWorkflow')}</button>
         </div>}
-        {savedVersion && !activationOpen && <WorkflowTestForm
-          key={savedVersion.id}
-          definitions={testDefinitions}
-          positiveNumberVariables={durationVariableNames}
-          labelOverrides={durationLabels}
-          hintOverrides={durationHints}
-          onChange={setTestPayload}
-          onError={(key) => setError(key as ErrorKey)}
-        />}
-        {durationBlocked && !activationOpen && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t('videoTestDurationMappingRequired')}</p>}
         {workflowDeleted && <p role="status" className="text-sm text-[var(--glass-tone-success-fg)]">{t('workflowDeleted')}</p>}
         {error && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t(error)}</p>}
         {selectedId && <WorkflowCompatibilityTable issues={issues} compatibility={compatibility} />}

@@ -23,6 +23,7 @@ import {
   workflowRequestErrorFromPayload,
   WorkflowRequestError,
   type WorkflowAuthorDraft,
+  type WorkflowVersionView,
 } from './workflow-ui'
 
 const ANALYZE_ENDPOINT = '/api/comfyui/workflows/analyze'
@@ -320,4 +321,44 @@ export async function createWorkflowDraft(
   const normalizedId = id.trim()
   if (!normalizedId) throw malformedWorkflowResponse()
   return normalizedId
+}
+
+function isWorkflowVersionView(value: unknown): value is WorkflowVersionView {
+  return isRecord(value)
+    && isNonEmptyString(value.id)
+    && Number.isInteger(value.version)
+    && (value.purpose === 'generation' || value.purpose === 'upscale')
+    && Array.isArray(value.variableDefinitions)
+    && Array.isArray(value.bindings)
+    && Array.isArray(value.outputs)
+    && isNonEmptyString(value.contentHash)
+    && isRecord(value.validation)
+    && typeof value.validation.valid === 'boolean'
+    && Array.isArray(value.validation.issues)
+}
+
+export async function prepareWorkflowVersionForTest(
+  workflowId: string,
+  previousName: string,
+  draft: WorkflowAuthorDraft,
+): Promise<WorkflowVersionView> {
+  const encodedId = encodeURIComponent(workflowId)
+  const nextName = draft.name.trim()
+  if (nextName !== previousName.trim()) {
+    await requestWorkflowAction(`/api/comfyui/workflows/${encodedId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: nextName }),
+    })
+  }
+  const payload = await requestWorkflowAction<{ version?: unknown }>(
+    `/api/comfyui/workflows/${encodedId}/versions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(workflowPayload(draft)),
+    },
+  )
+  if (!isWorkflowVersionView(payload?.version)) throw malformedWorkflowResponse()
+  return payload.version
 }

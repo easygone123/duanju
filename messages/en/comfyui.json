@@ -55,6 +55,8 @@
     "description": "Import ComfyUI API Format JSON and map waoowaoo inputs and outputs.",
     "library": "Workflow library",
     "newWorkflow": "New workflow",
+    "editWorkflow": "Edit workflow",
+    "workflowSummary": "Workflow summary",
     "loading": "Loading workflows…",
     "editor": "Workflow editor",
     "name": "Workflow name",
@@ -91,6 +93,7 @@
       "available": "Available as model",
       "noEnabledInstance": "No enabled ComfyUI instance is available.",
       "instance": "Test instance",
+      "test": "Test workflow",
       "testAndEnable": "Test and enable",
       "testing": "Testing workflow…",
       "publishing": "Publishing workflow…",
@@ -131,6 +134,18 @@
     "guided": {
       "wizardTitle": "Create a ComfyUI workflow",
       "wizardHint": "Choose a workflow type, upload its API Format JSON, then confirm the detected inputs and output.",
+      "editTitle": "Edit ComfyUI workflow",
+      "editHint": "Update the current mappings, then test and publish the exact edited version.",
+      "editStepsLabel": "Workflow editing steps",
+      "editSteps": {
+        "review": "Edit mappings",
+        "test": "Test and publish"
+      },
+      "editReviewTitle": "Edit workflow mappings",
+      "editReviewHint": "Add, change, or remove input and output mappings. Your current changes will be prepared automatically when you continue to test.",
+      "continueToTest": "Continue to test",
+      "retryPrepareTest": "Retry preparing test",
+      "preparingTestStatus": "Preparing the edited workflow for testing…",
       "stepsLabel": "Workflow creation steps",
       "steps": {
         "type": "Choose type",

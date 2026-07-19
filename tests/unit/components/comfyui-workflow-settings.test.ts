@@ -266,11 +266,12 @@ describe('ComfyUI workflow settings UI contract', () => {
     }] }, { roles: { required: 'preserve_original' } })).toThrow('workflowMappingConfirmationRequired')
   })
 
-  it('keeps creation in the guided wizard and saved editing out of the legacy upload stage', () => {
+  it('keeps creation and saved editing in dedicated guided windows', () => {
     const editor = read(`${base}/WorkflowEditor.tsx`)
     const settings = read(`${base}/ComfyUiSettings.tsx`)
     expect(existsSync(`${base}/WorkflowUploadStep.tsx`)).toBe(false)
     expect(settings).toContain('WorkflowCreationWizard')
+    expect(settings).toContain('WorkflowEditWizard')
     expect(settings).toContain('createWorkflowDraft')
     expect(editor).not.toContain('WorkflowUploadStep')
     expect(editor).not.toContain('WorkflowEditorStage')
@@ -287,27 +288,27 @@ describe('ComfyUI workflow settings UI contract', () => {
     expect(library).not.toContain('emptyWorkflowDraft')
   })
 
-  it('keeps the author form separate from saved versions and exposes draft actions', () => {
-    const source = read(`${base}/WorkflowLibraryPanel.tsx`)
-    expect(source).toContain('authorDraft')
-    expect(source).toContain('savedVersion')
-    expect(source).toContain('saveDraft')
-    expect(source).toContain('publishVersion')
-    expect(source).toContain('testVersion')
-    expect(source).toContain('lastSuccessfulTestAt')
+  it('keeps the workflow overview compact and delegates mapping changes to edit mode', () => {
+    const library = read(`${base}/WorkflowLibraryPanel.tsx`)
+    const editor = read(`${base}/WorkflowEditWizard.tsx`)
+    expect(library).toContain('onEditWorkflow')
+    expect(library).not.toContain('<WorkflowEditor')
+    expect(library).not.toContain('saveDraft')
+    expect(editor).toContain('WorkflowGuidedMappingEditor')
+    expect(editor).toContain('onPrepareTest')
   })
 
   it('collects typed live-test values and bounded media uploads instead of fixed empty objects', () => {
     const form = read(`${base}/WorkflowTestForm.tsx`)
-    const library = read(`${base}/WorkflowLibraryPanel.tsx`)
+    const activation = read(`${base}/WorkflowActivationPanel.tsx`)
     expect(form).toContain('buildWorkflowTestPayload')
     expect(form).toContain('fileToLiveTestUpload')
     expect(form).toContain('variable.options')
     expect(form).toContain('type="file"')
     expect(form).toContain('required')
-    expect(library).toContain('testPayload.variables')
-    expect(library).toContain('testPayload.uploads')
-    expect(library).not.toContain('variables: {}, uploads: {}')
+    expect(activation).toContain('testPayload.variables')
+    expect(activation).toContain('testPayload.uploads')
+    expect(activation).not.toContain('variables: {}, uploads: {}')
   })
 
   it('builds typed test variables and media payloads while failing closed on missing required values', () => {

@@ -8,11 +8,13 @@ import ComfyUiSettings from '@/app/[locale]/profile/components/comfyui/ComfyUiSe
 import { emptyWorkflowDraft } from '@/app/[locale]/profile/components/comfyui/workflow-ui'
 
 const createWorkflowDraftMock = vi.hoisted(() => vi.fn())
+const prepareWorkflowVersionForTestMock = vi.hoisted(() => vi.fn())
 
 ;(globalThis as typeof globalThis & { React: typeof React }).React = React
 
 vi.mock('@/app/[locale]/profile/components/comfyui/workflow-requests', () => ({
   createWorkflowDraft: createWorkflowDraftMock,
+  prepareWorkflowVersionForTest: prepareWorkflowVersionForTestMock,
 }))
 vi.mock('@/app/[locale]/profile/components/comfyui/ConnectionPoolPanel', () => ({
   default: () => <section>CONNECTION POOL</section>,
@@ -22,15 +24,21 @@ vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowLibraryPanel', () => 
     initialWorkflowId,
     activationWorkflowId,
     onCreateNew,
+    onEditWorkflow,
   }: {
     initialWorkflowId?: string | null
     activationWorkflowId?: string | null
     onCreateNew(): void
+    onEditWorkflow(workflowId: string, draft: ReturnType<typeof emptyWorkflowDraft>): void
   }) => <section aria-label="WORKFLOW LIBRARY"
     data-initial-workflow-id={initialWorkflowId ?? ''}
     data-activation-workflow-id={activationWorkflowId ?? ''}
   >
     <button type="button" onClick={onCreateNew}>NEW WORKFLOW</button>
+    <button type="button" onClick={() => onEditWorkflow(
+      'workflow-edit',
+      { ...emptyWorkflowDraft(), name: 'Editable workflow' },
+    )}>EDIT WORKFLOW</button>
   </section>,
 }))
 vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowCreationWizard', () => ({
@@ -50,11 +58,17 @@ vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowCreationWizard', () =
     }}>FINISH CREATE</button>
   </section>,
 }))
+vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowEditWizard', () => ({
+  default: ({ onCancel }: { onCancel(): void }) => <section aria-label="WORKFLOW EDIT WIZARD">
+    <button type="button" onClick={onCancel}>CANCEL EDIT</button>
+  </section>,
+}))
 
 describe('ComfyUI settings workflow creation shell', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     createWorkflowDraftMock.mockResolvedValue('workflow-created')
+    prepareWorkflowVersionForTestMock.mockReset()
   })
 
   afterEach(cleanup)
@@ -91,5 +105,20 @@ describe('ComfyUI settings workflow creation shell', () => {
     const library = await view.findByRole('region', { name: 'WORKFLOW LIBRARY' })
     expect(library.getAttribute('data-initial-workflow-id')).toBe('workflow-created')
     expect(library.getAttribute('data-activation-workflow-id')).toBe('workflow-created')
+  })
+
+  it('opens saved workflow editing as a full-width window and restores overview on cancel', () => {
+    const view = render(<ComfyUiSettings />)
+
+    fireEvent.click(view.getByRole('button', { name: 'EDIT WORKFLOW' }))
+
+    expect(view.getByRole('region', { name: 'WORKFLOW EDIT WIZARD' })).toBeTruthy()
+    expect(view.queryByText('CONNECTION POOL')).toBeNull()
+    expect(view.getByLabelText('ComfyUI settings').getAttribute('data-mode')).toBe('edit')
+
+    fireEvent.click(view.getByRole('button', { name: 'CANCEL EDIT' }))
+
+    expect(view.getByText('CONNECTION POOL')).toBeTruthy()
+    expect(view.getByRole('region', { name: 'WORKFLOW LIBRARY' })).toBeTruthy()
   })
 })
