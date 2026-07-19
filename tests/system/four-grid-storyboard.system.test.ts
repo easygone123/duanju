@@ -95,6 +95,25 @@ vi.mock('@/lib/media/outbound-image', async () => {
   }
 })
 
+vi.mock('@/lib/ai-runtime/client', () => ({
+  executeAiVisionStep: vi.fn(async () => ({
+    text: JSON.stringify({
+      panels: Array.from({ length: 4 }, (_, index) => ({
+        panel_number: index + 1,
+        description: `grounded panel ${index + 1}`,
+        image_prompt: `image prompt ${index + 1}`,
+        video_prompt: `video prompt ${index + 1}`,
+        duration: 2 + index,
+        shot_type: '中景',
+        camera_move: '固定',
+      })),
+    }),
+    reasoning: '',
+    usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    completion: {},
+  })),
+}))
+
 vi.mock('@/lib/novel-promotion/six-grid/crop-service', async () => {
   const actual = await vi.importActual<typeof import('@/lib/novel-promotion/six-grid/crop-service')>(
     '@/lib/novel-promotion/six-grid/crop-service',

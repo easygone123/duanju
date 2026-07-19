@@ -87,6 +87,7 @@ describe('six-grid image task immutable contract', () => {
     expect(buildSixGridTaskDedupeKey({ ...base, expectedSheetArtifactVersion: 4 })).not.toBe(key)
     expect(buildSixGridTaskDedupeKey({ ...base, promptSnapshot: 'changed prompt' })).not.toBe(key)
     expect(buildSixGridTaskDedupeKey({ ...base, modelSnapshot: 'changed-model' })).not.toBe(key)
+    expect(buildSixGridTaskDedupeKey({ ...base, analysisModelSnapshot: 'vision-model-1' })).not.toBe(key)
     expect(buildSixGridTaskDedupeKey({ ...base, optionsSnapshot: { seed: 8 } })).not.toBe(key)
     const changed = structuredClone(base)
     changed.cropRects![0]!.normalizedCropRect.x = 0.01
@@ -949,6 +950,70 @@ describe('six-grid crop atomic persistence', () => {
     }))
     expect(JSON.stringify(update.mock.calls)).not.toContain('dialogueText')
     expect(JSON.stringify(update.mock.calls)).not.toContain('estimatedDuration')
+  })
+
+  it('binds four analyzed prompts and durations to their matching crop cells atomically', async () => {
+    const fourGridSpec = {
+      version: 1 as const, mode: 'four_grid' as const, columns: 2 as const, rows: 2 as const,
+      panelCount: 4 as const, cellAspectRatio: '16:9' as const, sheetAspectRatio: '16:9' as const,
+    }
+    const lockStoryboard = vi.fn(async () => true)
+    const update = vi.fn(async () => ({}))
+    const findMany = vi.fn(async () => Array.from({ length: 4 }, (_, gridCellIndex) => ({
+      id: `panel-${gridCellIndex}`, gridCellIndex, imageMediaId: null, imageUrl: null,
+    })))
+    const transaction = vi.fn(async (callback: (tx: {
+      lockStoryboard: typeof lockStoryboard
+      novelPromotionPanel: { update: typeof update; findMany: typeof findMany }
+    }) => Promise<void>) => {
+      await callback({ lockStoryboard, novelPromotionPanel: { update, findMany } })
+    })
+    const artifacts = Array.from({ length: 4 }, (_, cellIndex) => ({
+      cellIndex,
+      mediaId: `crop-${cellIndex}`,
+      url: `/m/crop-${cellIndex}`,
+      normalizedCropRect: {
+        x: (cellIndex % 2) / 2, y: Math.floor(cellIndex / 2) / 2, width: 0.5, height: 0.5,
+      },
+      lineage: { sourceMediaId: 'media-sheet-1', artifactVersion: 1 },
+    }))
+    const panelAnalysis = artifacts.map((_, index) => ({
+      panel_number: index + 1,
+      description: `actual cell ${index + 1}`,
+      image_prompt: `image ${index + 1}`,
+      video_prompt: `video ${index + 1}`,
+      duration: index + 1.5,
+      shot_type: '中景',
+      camera_move: '固定',
+    }))
+
+    await commitSixGridCropBatch({
+      storyboardId: 'storyboard-1',
+      sourceMediaId: 'media-sheet-1',
+      expectedSheetArtifactVersion: 3,
+      processingOrder: 'crop_then_panel_upscale',
+      taskLineage: 'crop-task-lineage',
+      gridSpec: fourGridSpec,
+      artifacts,
+      panelAnalysis,
+    }, { transaction })
+
+    expect(update).toHaveBeenCalledTimes(4)
+    expect(update).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: { id: 'panel-0' },
+      data: expect.objectContaining({
+        imageMediaId: 'crop-0',
+        description: 'actual cell 1',
+        imagePrompt: 'image 1',
+        videoPrompt: 'video 1',
+        duration: 1.5,
+        estimatedDuration: 1.5,
+      }),
+    }))
+    expect(update).toHaveBeenNthCalledWith(4, expect.objectContaining({
+      where: { id: 'panel-3' },
+      data: expect.objectContaining({ imageMediaId: 'crop-3', videoPrompt: 'video 4', duration: 4.5 }),
+    }))
   })
 
   it('does not open the panel transaction when crop production fails', async () => {

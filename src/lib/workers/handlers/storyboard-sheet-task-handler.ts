@@ -47,6 +47,7 @@ const snapshotSchema = z.object({
   cropRectSource: z.enum(['auto', 'manual']).optional(),
   cropRects: z.array(z.object({ cellIndex: z.number().int().min(0).max(5), normalizedCropRect: rectSchema }).strict()).min(1).max(6).optional(),
   promptSnapshot: z.string(), modelSnapshot: z.string().min(1), optionsSnapshot: z.record(z.unknown()),
+  analysisModelSnapshot: z.string().min(1).optional(),
   imageModel: z.string().min(1).optional(), generationOptions: z.record(z.unknown()).optional(),
   comfyWorkflowVersionId: z.string().min(1).optional(), comfyModelSnapshotVersion: z.literal(1).optional(),
   referenceImages: z.array(z.union([z.object({
@@ -72,6 +73,7 @@ export type SixGridImageTaskSnapshot = {
   cropRectSource?: 'auto' | 'manual'
   cropRects?: Array<{ cellIndex: number; normalizedCropRect: NormalizedCropRect }>
   promptSnapshot: string; modelSnapshot: string; optionsSnapshot: Record<string, unknown>; locale: 'zh' | 'en'
+  analysisModelSnapshot?: string
   imageModel?: string; generationOptions?: Record<string, unknown>; comfyWorkflowVersionId?: string; comfyModelSnapshotVersion?: 1
   referenceImages?: Array<{ source: string; kind: 'character' | 'location' | 'prop' | 'sketch'; name: string }>
 }
@@ -154,6 +156,9 @@ export function buildSixGridTaskDedupeKey(snapshot: SixGridImageTaskSnapshot) {
     ...(snapshot.cropRectSource ? { cropRectSource: snapshot.cropRectSource } : {}),
     cropRects: snapshot.cropRects ? [...snapshot.cropRects].sort((a, b) => a.cellIndex - b.cellIndex) : undefined,
     promptSnapshot: snapshot.promptSnapshot, modelSnapshot: snapshot.modelSnapshot,
+    ...(snapshot.analysisModelSnapshot
+      ? { analysisModelSnapshot: snapshot.analysisModelSnapshot }
+      : {}),
     options: snapshot.optionsSnapshot, generationOptions: snapshot.generationOptions,
     referenceImages: snapshot.referenceImages,
     expectedSheetArtifactVersion: snapshot.expectedSheetArtifactVersion,

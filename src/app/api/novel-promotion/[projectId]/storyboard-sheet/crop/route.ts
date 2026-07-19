@@ -7,6 +7,7 @@ import { TASK_TYPE } from '@/lib/task/types'
 import { resolveRequiredTaskLocale } from '@/lib/task/resolve-locale'
 import { defaultGridCropRects, finalizeSnapshot, loadOwnedGridStoryboard, sourceForGridCrop } from '@/lib/novel-promotion/six-grid/image-task-route'
 import type { SixGridImageTaskSnapshot } from '@/lib/workers/handlers/storyboard-sheet-task-handler'
+import { getProjectModelConfig } from '@/lib/config-service'
 
 const rect = z.object({ x: z.number().finite().min(0), y: z.number().finite().min(0), width: z.number().finite().positive(), height: z.number().finite().positive() }).strict()
   .refine((value) => value.x + value.width <= 1 && value.y + value.height <= 1, 'out of bounds')
@@ -31,6 +32,14 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_CROP_INDEXES_INVALID', field: 'cropRects' })
   }
   const locale = resolveRequiredTaskLocale(request, body)
+  const analysisModelSnapshot = storyboard.gridSpec.mode === 'four_grid'
+    ? (await getProjectModelConfig(projectId, auth.session.user.id)).analysisModel
+    : null
+  if (storyboard.gridSpec.mode === 'four_grid' && !analysisModelSnapshot) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'ANALYSIS_MODEL_NOT_CONFIGURED', field: 'analysisModel',
+    })
+  }
   const snapshot: SixGridImageTaskSnapshot = {
     operation: 'crop', projectId, episodeId: body.episodeId, storyboardId: storyboard.id, groupSequence: storyboard.groupSequence ?? 0,
     sourceMediaId: media.id, sourceChecksum: media.sha256 || `media:${media.id}`, sourceVersion: media.updatedAt.toISOString(),
@@ -38,6 +47,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     gridSpec: storyboard.gridSpec,
     expectedSheetArtifactVersion: storyboard.sheetArtifactVersion, cropRectSource, cropRects,
     promptSnapshot: storyboard.sheetPromptSnapshot || '', modelSnapshot: storyboard.sheetModelSnapshot || 'local:sharp', optionsSnapshot: {}, locale,
+    ...(analysisModelSnapshot ? { analysisModelSnapshot } : {}),
   }
   const { dedupeKey } = finalizeSnapshot(snapshot)
   const result = await submitTask({ userId: auth.session.user.id, locale, requestId: getRequestId(request), projectId, episodeId: body.episodeId,

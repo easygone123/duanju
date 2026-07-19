@@ -7,6 +7,11 @@ import { buildSixGridTaskDedupeKey, gridStoryboardOwnershipWhere, parseSixGridIm
 import { getObjectBuffer } from '@/lib/storage'
 import { assertTaskActive } from '@/lib/workers/utils'
 import { resolveStoryboardGridSpec, type GridStoryboardMode, type StoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
+import {
+  analyzeFourGridSheet,
+  type FourGridPlannedPanel,
+  type FourGridSheetAnalysisRow,
+} from '@/lib/novel-promotion/grid-storyboard/sheet-analysis'
 
 type CropArtifact = Pick<SixGridCropArtifact, 'cellIndex' | 'mediaId' | 'url' | 'normalizedCropRect'> & { lineage: unknown }
 type CurrentCropPanel = {
@@ -45,12 +50,19 @@ export async function commitSixGridCropBatch(input: {
   projectId?: string
   episodeId?: string
   artifacts: CropArtifact[]
+  panelAnalysis?: FourGridSheetAnalysisRow[]
 }, dependencies: { transaction?: Transaction } = {}) {
   const gridSpec = input.gridSpec ?? resolveStoryboardGridSpec('six_grid', '16:9')
   if (input.artifacts.length !== gridSpec.panelCount
     || new Set(input.artifacts.map((item) => item.cellIndex)).size !== gridSpec.panelCount
     || input.artifacts.some((item) => item.cellIndex < 0 || item.cellIndex >= gridSpec.panelCount)) {
     throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
+  }
+  if (input.panelAnalysis
+    && (gridSpec.mode !== 'four_grid'
+      || input.panelAnalysis.length !== gridSpec.panelCount
+      || input.panelAnalysis.some((row, index) => row.panel_number !== index + 1))) {
+    throw new Error('FOUR_GRID_SHEET_ANALYSIS_INVALID')
   }
   const runTransaction = dependencies.transaction ?? defaultCropTransaction
   await runTransaction(async (tx) => {
@@ -74,6 +86,7 @@ export async function commitSixGridCropBatch(input: {
     for (const artifact of [...input.artifacts].sort((a, b) => a.cellIndex - b.cellIndex)) {
       const previous = currentByCell.get(artifact.cellIndex)
       if (!previous) throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
+      const analysis = input.panelAnalysis?.[artifact.cellIndex]
       await tx.novelPromotionPanel.update({
         where: { id: previous.id },
         data: {
@@ -88,6 +101,16 @@ export async function commitSixGridCropBatch(input: {
           imageUrl: artifact.url,
           imageDerivation: 'six_grid_crop',
           imageLineage: JSON.stringify({ artifact: artifact.lineage, taskLineage: input.taskLineage }),
+          ...(analysis ? {
+            description: analysis.description,
+            imagePrompt: analysis.image_prompt,
+            videoPrompt: analysis.video_prompt,
+            shotType: analysis.shot_type,
+            cameraMove: analysis.camera_move,
+            duration: analysis.duration,
+            estimatedDuration: analysis.duration,
+            durationOverride: null,
+          } : {}),
         },
       })
     }
@@ -197,10 +220,21 @@ export async function handleStoryboardCropTask(job: Job<TaskJobData>) {
   await assertTaskActive(job, 'six_grid_crop_entry')
   const snapshot = parseSixGridImageTaskSnapshot(job.data.payload)
   if (!snapshot.sourceMediaId || !snapshot.cropRects) throw new Error('SIX_GRID_CROP_SNAPSHOT_INVALID')
-  const source = await prisma.mediaObject.findUnique({ where: { id: snapshot.sourceMediaId }, select: { id: true, sha256: true, updatedAt: true } })
+  const source = await prisma.mediaObject.findUnique({
+    where: { id: snapshot.sourceMediaId },
+    select: { id: true, sha256: true, updatedAt: true, storageKey: true, mimeType: true },
+  })
   if (!source || !sourceMatchesSnapshot(source, snapshot)) throw new Error('SIX_GRID_SOURCE_STALE')
   const reconciled = await reconcileCommittedCrop(snapshot, job.data.userId)
   if (reconciled) return { storyboardId: snapshot.storyboardId, mediaIds: reconciled, reconciled: true }
+  const panelAnalysis = snapshot.gridSpec.mode === 'four_grid'
+    ? await analyzeFourGridBeforeCrop({
+        snapshot,
+        userId: job.data.userId,
+        source,
+        assertActive: async (stage) => await assertTaskActive(job, stage),
+      })
+    : undefined
   await assertTaskActive(job, 'six_grid_crop_before_crop')
   let artifacts: SixGridCropArtifact[]
   try {
@@ -231,8 +265,81 @@ export async function handleStoryboardCropTask(job: Job<TaskJobData>) {
     projectId: snapshot.projectId,
     episodeId: snapshot.episodeId,
     artifacts,
+    panelAnalysis,
   })
   return { storyboardId: snapshot.storyboardId, mediaIds: artifacts.map((item) => item.mediaId) }
+}
+
+async function analyzeFourGridBeforeCrop(input: {
+  snapshot: ReturnType<typeof parseSixGridImageTaskSnapshot>
+  userId: string
+  source: {
+    id: string
+    storageKey: string | null
+    mimeType: string | null
+  }
+  assertActive(stage: string): Promise<void>
+}) {
+  const model = input.snapshot.analysisModelSnapshot
+  if (!model) throw new Error('ANALYSIS_MODEL_NOT_CONFIGURED')
+  if (!input.source.storageKey || !input.source.mimeType?.startsWith('image/')) {
+    throw new Error('FOUR_GRID_SHEET_SOURCE_INVALID')
+  }
+  const sourceColumn = input.snapshot.processingOrder === 'sheet_upscale_then_crop'
+    ? { upscaledSheetImageMediaId: input.source.id }
+    : { sheetImageMediaId: input.source.id }
+  const storyboard = await prisma.novelPromotionStoryboard.findFirst({
+    where: {
+      ...gridStoryboardOwnershipWhere(input.snapshot, input.userId),
+      sheetArtifactVersion: input.snapshot.expectedSheetArtifactVersion,
+      ...sourceColumn,
+    },
+    select: {
+      panels: {
+        orderBy: { gridCellIndex: 'asc' },
+        select: {
+          panelIndex: true,
+          gridCellIndex: true,
+          description: true,
+          imagePrompt: true,
+          videoPrompt: true,
+          shotType: true,
+          cameraMove: true,
+          location: true,
+          characters: true,
+          props: true,
+          srtSegment: true,
+          dialogueSpeaker: true,
+          dialogueText: true,
+          dialogueEmotion: true,
+          duration: true,
+          estimatedDuration: true,
+        },
+      },
+    },
+  })
+  if (!storyboard || storyboard.panels.length !== input.snapshot.gridSpec.panelCount
+    || storyboard.panels.some((panel, index) => panel.gridCellIndex !== index)) {
+    throw new Error('FOUR_GRID_SHEET_ANALYSIS_INVALID')
+  }
+
+  await input.assertActive('four_grid_sheet_analysis_before_read')
+  const bytes = await getObjectBuffer(input.source.storageKey)
+  const imageDataUrl = `data:${input.source.mimeType};base64,${bytes.toString('base64')}`
+  await input.assertActive('four_grid_sheet_analysis_before_provider')
+  const analysis = await analyzeFourGridSheet({
+    userId: input.userId,
+    projectId: input.snapshot.projectId,
+    model,
+    imageDataUrl,
+    locale: input.snapshot.locale,
+    panels: storyboard.panels.map((panel, index): FourGridPlannedPanel => ({
+      ...panel,
+      panelIndex: index,
+    })),
+  })
+  await input.assertActive('four_grid_sheet_analysis_after_provider')
+  return analysis
 }
 
 async function reconcileCommittedCrop(snapshot: ReturnType<typeof parseSixGridImageTaskSnapshot>, userId: string) {
