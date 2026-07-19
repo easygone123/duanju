@@ -190,7 +190,10 @@ function normalizeSystemVariables(
   normalizeSystemFirstFrame(normalized, names)
   normalizeSystemAlias({
     normalized, names, legacy: 'last_frame', canonical: 'lastFrame',
-    omitLegacyWhenUndeclared: true,
+    undeclaredBindingError: {
+      code: 'COMFY_LAST_FRAME_BINDING_REQUIRED',
+      field: 'lastFrame',
+    },
   })
   if (!names.has('fps')) delete normalized.fps
   const aspectDefinition = definitions.find((definition) => (
@@ -237,7 +240,7 @@ function normalizeSystemAlias(input: {
   names: Set<string>
   legacy: string
   canonical: string
-  omitLegacyWhenUndeclared?: boolean
+  undeclaredBindingError?: { code: string; field: string }
 }) {
   const declaresLegacy = input.names.has(input.legacy)
   const declaresCanonical = input.names.has(input.canonical)
@@ -252,8 +255,12 @@ function normalizeSystemAlias(input: {
     delete input.normalized[input.legacy]
     return
   }
-  if (!declaresLegacy && !declaresCanonical && input.omitLegacyWhenUndeclared) {
-    delete input.normalized[input.legacy]
+  if (!declaresLegacy && !declaresCanonical && hasLegacy && input.undeclaredBindingError) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: input.undeclaredBindingError.code,
+      field: input.undeclaredBindingError.field,
+      message: input.undeclaredBindingError.code,
+    })
   }
 }
 
@@ -270,7 +277,10 @@ function normalizeSystemFirstFrame(
   }
   normalizeSystemAlias({
     normalized, names, legacy: 'first_frame', canonical: 'firstFrame',
-    omitLegacyWhenUndeclared: true,
+    undeclaredBindingError: {
+      code: 'COMFY_FIRST_FRAME_BINDING_REQUIRED',
+      field: 'firstFrame',
+    },
   })
 }
 
@@ -285,7 +295,13 @@ function normalizeSystemDuration(
   const durationDefinition = canonicalDurationDefinition(definitions)
   const target = durationDefinition?.name
   if (!target) {
-    delete normalized.duration_seconds
+    if (Object.hasOwn(normalized, 'duration_seconds')) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'COMFY_DURATION_BINDING_REQUIRED',
+        field: 'duration',
+        message: 'COMFY_DURATION_BINDING_REQUIRED',
+      })
+    }
     return
   }
   if (target === 'duration_seconds') return

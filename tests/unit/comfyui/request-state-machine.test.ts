@@ -443,24 +443,39 @@ describe('ComfyUI request state machine', () => {
     }))
   })
 
-  it('omits inapplicable system video hints when the workflow does not declare them', async () => {
+  it.each([
+    [
+      'duration',
+      { duration_seconds: 6 },
+      { code: 'COMFY_DURATION_BINDING_REQUIRED', field: 'duration' },
+    ],
+    [
+      'first frame',
+      { first_frame: { storageKey: 'images/first.png' } },
+      { code: 'COMFY_FIRST_FRAME_BINDING_REQUIRED', field: 'firstFrame' },
+    ],
+    [
+      'last frame',
+      { last_frame: { storageKey: 'images/last.png' } },
+      { code: 'COMFY_LAST_FRAME_BINDING_REQUIRED', field: 'lastFrame' },
+    ],
+  ])('rejects a supplied %s when the workflow does not declare its binding', async (
+    _label,
+    variables,
+    details,
+  ) => {
     const dependencies = requestDependenciesWithDefinitions([
       { name: 'prompt', type: 'string', required: true },
     ])
 
-    await createComfyGenerationRequest({
-      invocationKey: 'invoke-fixed-video', userId: 'user-1', projectId: 'project-1',
-      taskId: 'task-1', mediaType: 'video', workflowId: 'workflow-1',
-      variables: {
-        prompt: 'move', duration_seconds: 6, fps: 24,
-        first_frame: { storageKey: 'images/first.png' },
-        last_frame: { storageKey: 'images/last.png' },
-      },
-    }, dependencies)
+    await expect(createComfyGenerationRequest({
+      invocationKey: `invoke-missing-${details.field}`,
+      userId: 'user-1', projectId: 'project-1', taskId: 'task-1',
+      mediaType: 'video', workflowId: 'workflow-1',
+      variables: { prompt: 'move', ...variables },
+    }, dependencies)).rejects.toMatchObject({ code: 'INVALID_PARAMS', details })
 
-    expect(dependencies.create).toHaveBeenCalledWith(expect.objectContaining({
-      variableSnapshot: { prompt: 'move' },
-    }))
+    expect(dependencies.create).not.toHaveBeenCalled()
     expect(dependencies.resolveOwnedMedia).not.toHaveBeenCalled()
   })
 
