@@ -102,6 +102,10 @@
       "close": "Close activation"
     },
     "mappingRepairHint": "Repair the input or output mappings and save the draft before testing the new version.",
+    "videoTestDuration": "Test duration (seconds)",
+    "videoTestFramesHint": "Converted to total frames by this mapping.",
+    "videoTestDurationMappingRequired": "Add a duration or total-frame mapping before testing this video workflow.",
+    "videoTestDurationInvalid": "Enter a supported positive test duration.",
     "numeric": {
       "targetUnit": "Target unit",
       "sampleDuration": "Sample duration",

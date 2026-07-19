@@ -102,6 +102,10 @@
       "close": "关闭启用流程"
     },
     "mappingRepairHint": "请修改输入或输出映射并保存草稿；保存后再测试，系统会测试新版本。",
+    "videoTestDuration": "测试时长（秒）",
+    "videoTestFramesHint": "该映射会自动转换为工作流总帧数。",
+    "videoTestDurationMappingRequired": "测试视频工作流前，请先添加时长或总帧数映射。",
+    "videoTestDurationInvalid": "请输入工作流支持的正数测试时长。",
     "numeric": {
       "targetUnit": "目标单位",
       "sampleDuration": "示例时长",

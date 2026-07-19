@@ -44,6 +44,23 @@ const version = (definitions: WorkflowVersionView['variableDefinitions'] = []): 
   validation: { valid: true, issues: [] },
 })
 
+const videoFrameVersion = (): WorkflowVersionView => ({
+  ...version([{ name: 'duration', type: 'number', required: false }]),
+  apiFormatJson: {
+    '1': { class_type: 'VideoSampler', inputs: { length: 81 } },
+    '2': { class_type: 'SaveVideo', inputs: { video: ['1', 0] } },
+  },
+  bindings: [{
+    nodeId: '1', inputPath: 'length', variable: 'duration', valueType: 'number',
+    numericTransform: {
+      sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+      fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+      rounding: 'round', frameOffset: 1, allowedTargetValues: [81, 161],
+    },
+  }],
+  outputs: [{ name: 'video', nodeId: '2', fieldPath: 'videos', mediaType: 'video', primary: true }],
+})
+
 function activationTree(queryClient: QueryClient, props: Partial<React.ComponentProps<typeof WorkflowActivationPanel>> = {}) {
   return (
     <QueryClientProvider client={queryClient}>
@@ -130,6 +147,31 @@ describe('WorkflowActivationPanel', () => {
 
     expect(view.getByLabelText('prompt *')).toBeTruthy()
     expect(view.queryByLabelText('optionalStyle')).toBeNull()
+  })
+
+  it('defaults a frame-mapped video test to its shortest supported duration', async () => {
+    requestWorkflowActionMock.mockResolvedValue({ success: true })
+    const view = renderPanel({ mediaType: 'video', version: videoFrameVersion() })
+
+    expect((view.getByLabelText(/Test duration \(seconds\)/) as HTMLSelectElement).value).toBe('5')
+    expect(view.getByText('Converted to total frames by this mapping.')).toBeTruthy()
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+
+    await waitFor(() => expect(requestWorkflowActionMock).toHaveBeenCalled())
+    expect(JSON.parse(String(requestWorkflowActionMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      variables: { duration: 5 },
+    })
+  })
+
+  it('blocks a video test without a duration mapping and offers mapping repair immediately', () => {
+    const onEditMappings = vi.fn()
+    const view = renderPanel({ mediaType: 'video', version: version(), onEditMappings })
+
+    expect(view.getByText('Add a duration or total-frame mapping before testing this video workflow.')).toBeTruthy()
+    expect((view.getByRole('button', { name: 'Test and enable' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(view.getByRole('button', { name: 'Return to edit mappings' }))
+    expect(onEditMappings).toHaveBeenCalledTimes(1)
+    expect(requestWorkflowActionMock).not.toHaveBeenCalled()
   })
 
   it('uses a synchronous lock to ignore same-frame activation double clicks', async () => {

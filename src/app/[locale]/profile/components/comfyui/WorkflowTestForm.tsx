@@ -19,9 +19,13 @@ export function emptyWorkflowTestPayload(): WorkflowTestPayload { return { varia
 
 type RawValues = Record<string, string | boolean>
 type UploadValues = Record<string, LiveTestUploadPayload[]>
+interface BuildWorkflowTestPayloadOptions {
+  positiveNumberVariables?: ReadonlySet<string>
+}
 
 export function buildWorkflowTestPayload(
   definitions: ComfyVariableDefinition[], rawValues: RawValues, uploadValues: UploadValues,
+  options: BuildWorkflowTestPayloadOptions = {},
 ): { payload: WorkflowTestPayload | null; missing: string[] } {
   const variables: Record<string, ComfyVariableValue> = {}
   const uploads: WorkflowTestPayload['uploads'] = {}
@@ -45,6 +49,9 @@ export function buildWorkflowTestPayload(
     }
     const parsed = variable.type === 'number' ? Number(raw) : variable.type === 'boolean' ? raw === true || raw === 'true' : String(raw)
     if (variable.type === 'number' && !Number.isFinite(parsed)) { missing.push(variable.name); continue }
+    if (variable.type === 'number'
+      && options.positiveNumberVariables?.has(variable.name)
+      && Number(parsed) <= 0) { missing.push(variable.name); continue }
     if (variable.options?.length && !variable.options.includes(parsed as never)) { missing.push(variable.name); continue }
     variables[variable.name] = parsed as ComfyVariableValue
   }
@@ -105,10 +112,24 @@ export function createWorkflowUploadSelectionController(convert: UploadConverter
   }
 }
 
-interface Props { definitions: ComfyVariableDefinition[]; onChange(payload: WorkflowTestPayload | null): void; onError(key: string): void }
+interface Props {
+  definitions: ComfyVariableDefinition[]
+  positiveNumberVariables?: ReadonlySet<string>
+  labelOverrides?: Readonly<Record<string, string>>
+  hintOverrides?: Readonly<Record<string, string>>
+  onChange(payload: WorkflowTestPayload | null): void
+  onError(key: string): void
+}
 const inputClass = 'mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-2 py-2 text-xs'
 
-export default function WorkflowTestForm({ definitions, onChange, onError }: Props) {
+export default function WorkflowTestForm({
+  definitions,
+  positiveNumberVariables,
+  labelOverrides = {},
+  hintOverrides = {},
+  onChange,
+  onError,
+}: Props) {
   const t = useTranslations('comfyui.workflows')
   const [rawValues, setRawValues] = useState<RawValues>(() => Object.fromEntries(definitions.flatMap((item) =>
     item.defaultValue !== undefined && ['string', 'number', 'boolean'].includes(item.type) ? [[item.name, String(item.defaultValue)]] : [])))
@@ -116,11 +137,13 @@ export default function WorkflowTestForm({ definitions, onChange, onError }: Pro
   const uploadController = useRef<ReturnType<typeof createWorkflowUploadSelectionController> | null>(null)
   if (!uploadController.current) uploadController.current = createWorkflowUploadSelectionController()
   useEffect(() => () => uploadController.current?.dispose(), [])
-  const result = useMemo(() => buildWorkflowTestPayload(definitions, rawValues, uploadValues), [definitions, rawValues, uploadValues])
+  const result = useMemo(() => buildWorkflowTestPayload(
+    definitions, rawValues, uploadValues, { positiveNumberVariables },
+  ), [definitions, positiveNumberVariables, rawValues, uploadValues])
   useEffect(() => onChange(result.payload), [onChange, result.payload])
   if (definitions.length === 0) return null
   return <fieldset className="space-y-2 rounded-xl border border-[var(--glass-stroke-base)] p-3"><legend className="px-1 text-sm font-medium">{t('testInputs')}</legend>
-    {definitions.map((variable) => <label key={variable.name} className="block text-xs">{variable.name}{variable.required ? ' *' : ''}
+    {definitions.map((variable) => <label key={variable.name} className="block text-xs">{labelOverrides[variable.name] ?? variable.name}{variable.required ? ' *' : ''}
       {['image_ref', 'video_ref', 'image_ref_list'].includes(variable.type) ? <input className={inputClass} type="file" multiple={variable.type === 'image_ref_list'} accept={variable.type === 'video_ref' ? 'video/mp4,video/webm,video/quicktime' : 'image/png,image/jpeg,image/webp'} onChange={(event) => {
         void uploadController.current?.select(variable.name, Array.from(event.target.files ?? []), variable.type, (files) => {
           setUploadValues((current) => {
@@ -133,7 +156,12 @@ export default function WorkflowTestForm({ definitions, onChange, onError }: Pro
       }} /> : variable.options?.length ? <select className={inputClass} required={variable.required} value={String(rawValues[variable.name] ?? '')} onChange={(event) => setRawValues((current) => ({ ...current, [variable.name]: event.target.value }))}>
         <option value="">{t('selectValue')}</option>{variable.options.map((option) => <option key={String(option)} value={String(option)}>{String(option)}</option>)}</select> : variable.type === 'boolean' ? <select className={inputClass} required={variable.required} value={String(rawValues[variable.name] ?? '')} onChange={(event) => setRawValues((current) => ({ ...current, [variable.name]: event.target.value }))}>
         <option value="">{t('selectValue')}</option><option value="true">true</option><option value="false">false</option></select> : <input className={inputClass} required={variable.required} type={variable.type === 'number' ? 'number' : 'text'} value={String(rawValues[variable.name] ?? '')} onChange={(event) => setRawValues((current) => ({ ...current, [variable.name]: event.target.value }))} />}
+      {hintOverrides[variable.name] && <span className="mt-1 block text-[var(--glass-text-tertiary)]">{hintOverrides[variable.name]}</span>}
     </label>)}
-    {result.missing.length > 0 && <p role="alert" className="text-xs text-[var(--glass-danger)]">{t('testInputsMissing', { fields: result.missing.join(', ') })}</p>}
+    {result.missing.length > 0 && <p role="alert" className="text-xs text-[var(--glass-danger)]">{
+      result.missing.some((name) => positiveNumberVariables?.has(name))
+        ? t('videoTestDurationInvalid')
+        : t('testInputsMissing', { fields: result.missing.join(', ') })
+    }</p>}
   </fieldset>
 }

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslations } from 'next-intl'
 import { invalidateUserModels } from '@/lib/query/hooks/useUserModels'
+import type { ComfyMediaType, ComfyVariableDefinition } from '@/lib/comfyui/types'
+import { deriveVideoTestDurationContract } from '@/lib/comfyui/video-test-duration'
 import { useComfyConnections } from './hooks'
 import { requestWorkflowAction } from './workflow-requests'
 import WorkflowTestForm, { emptyWorkflowTestPayload, type WorkflowTestPayload } from './WorkflowTestForm'
@@ -15,23 +17,54 @@ import { safeWorkflowErrorKey, type WorkflowVersionView } from './workflow-ui'
 
 interface Props {
   workflowId: string
+  mediaType?: ComfyMediaType
   version: WorkflowVersionView
   onClose(): void
   onEditMappings?(): void
   onActivated?(): void | Promise<void>
 }
 
-export default function WorkflowActivationPanel({ workflowId, version, onClose, onEditMappings, onActivated }: Props) {
+export default function WorkflowActivationPanel({ workflowId, mediaType = 'image', version, onClose, onEditMappings, onActivated }: Props) {
   const t = useTranslations('comfyui.workflows')
   const queryClient = useQueryClient()
   const connectionsQuery = useComfyConnections()
   const enabledConnections = useMemo(() => (
     connectionsQuery.data?.connections ?? []
   ).filter((connection) => connection.enabled), [connectionsQuery.data?.connections])
-  const requiredDefinitions = useMemo(
-    () => version.variableDefinitions.filter((definition) => definition.required),
-    [version.variableDefinitions],
-  )
+  const durationTest = useMemo(() => deriveVideoTestDurationContract({
+    mediaType,
+    variableDefinitions: version.variableDefinitions,
+    bindings: version.bindings,
+  }), [mediaType, version.bindings, version.variableDefinitions])
+  const requiredDefinitions = useMemo(() => {
+    const definitions = version.variableDefinitions.filter((definition) => definition.required)
+    if (!durationTest.required || !durationTest.eligible) return definitions
+    const durationDefinition: ComfyVariableDefinition = {
+      ...durationTest.definition,
+      required: true,
+      defaultValue: durationTest.defaultSeconds,
+      ...(durationTest.durationContract.kind === 'fixed'
+        ? { options: durationTest.durationContract.options }
+        : {}),
+    }
+    return [
+      ...definitions.filter((definition) => definition.name !== durationTest.variableName),
+      durationDefinition,
+    ]
+  }, [durationTest, version.variableDefinitions])
+  const durationVariableNames = useMemo(() => new Set(
+    durationTest.required && durationTest.eligible ? [durationTest.variableName] : [],
+  ), [durationTest])
+  const durationLabels = useMemo(() => (
+    durationTest.required && durationTest.eligible
+      ? { [durationTest.variableName]: t('videoTestDuration') }
+      : {}
+  ), [durationTest, t])
+  const durationHints = useMemo(() => (
+    durationTest.required && durationTest.eligible && durationTest.targetUnit === 'frames'
+      ? { [durationTest.variableName]: t('videoTestFramesHint') }
+      : {}
+  ), [durationTest, t])
   const [connectionId, setConnectionId] = useState(() => enabledConnections[0]?.id ?? '')
   useEffect(() => {
     if (enabledConnections.some((connection) => connection.id === connectionId)) return
@@ -152,7 +185,8 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
   }
 
   const busy = activation.busy !== null
-  const canTest = version.validation.valid && Boolean(connectionId) && Boolean(testPayload) && !busy
+  const durationBlocked = durationTest.required && !durationTest.eligible
+  const canTest = version.validation.valid && !durationBlocked && Boolean(connectionId) && Boolean(testPayload) && !busy
   const canPublish = version.validation.valid && !busy
   const statusKey = activation.status === 'needs_test'
     ? 'needsTest'
@@ -191,9 +225,14 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
       {!activation.testComplete && <WorkflowTestForm
         key={version.id}
         definitions={requiredDefinitions}
+        positiveNumberVariables={durationVariableNames}
+        labelOverrides={durationLabels}
+        hintOverrides={durationHints}
         onChange={setTestPayload}
         onError={(key) => setRequestError(key)}
       />}
+
+      {durationBlocked && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t('videoTestDurationMappingRequired')}</p>}
 
       {activation.error === 'test' && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t('activation.testFailed')}</p>}
       {activation.error === 'publish' && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t('activation.publishFailed')}</p>}
@@ -207,7 +246,7 @@ export default function WorkflowActivationPanel({ workflowId, version, onClose, 
           : <button type="button" disabled={!canTest} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm disabled:opacity-50" onClick={() => void testAndPublish()}>
             {activation.busy === 'testing' ? t('activation.testing') : t('activation.testAndEnable')}
           </button>}
-        {activation.error === 'test' && onEditMappings && <button
+        {(activation.error === 'test' || durationBlocked) && onEditMappings && <button
           type="button"
           disabled={busy}
           className="glass-btn-base px-4 py-2 text-sm disabled:opacity-50"

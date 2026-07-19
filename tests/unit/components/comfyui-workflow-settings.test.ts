@@ -328,6 +328,27 @@ describe('ComfyUI workflow settings UI contract', () => {
     })
   })
 
+  it('builds the prepared one-second video test duration', () => {
+    expect(buildWorkflowTestPayload(
+      [{ name: 'duration', type: 'number', required: true, defaultValue: 1 }],
+      { duration: '1' },
+      {},
+      { positiveNumberVariables: new Set(['duration']) },
+    )).toEqual({
+      missing: [],
+      payload: { variables: { duration: 1 }, uploads: {} },
+    })
+  })
+
+  it.each(['0', '-1', 'NaN'])('rejects invalid video test duration %s', (raw) => {
+    expect(buildWorkflowTestPayload(
+      [{ name: 'duration', type: 'number', required: true, defaultValue: 1 }],
+      { duration: raw },
+      {},
+      { positiveNumberVariables: new Set(['duration']) },
+    )).toMatchObject({ payload: null, missing: ['duration'] })
+  })
+
   it('renders path-aware static validation and owned-instance compatibility without secrets', () => {
     const source = read(`${base}/WorkflowCompatibilityTable.tsx`)
     expect(source).toContain('missingNodes')
