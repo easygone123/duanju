@@ -36,7 +36,16 @@ export async function resolveOwnedComfyMedia(
     where: ownedMediaWhere(input),
     select: { id: true },
   })
-  return record !== null
+  if (record !== null) return true
+
+  // Generation requests validate media a second time while pinning the request
+  // snapshot. Older panel/asset rows may still only carry imageUrl and have a
+  // null imageMediaId, so repair that exact owner-scoped relation here too.
+  // Custom stores are kept strict for callers that intentionally supply their
+  // own ownership boundary.
+  if (store !== defaultStore) return false
+  const repaired = await repairLegacyOwnedProjectAsset(input)
+  return isOwnedMediaRecord(repaired, input.storageKey, input.mediaType)
 }
 
 export interface ResolveOwnedComfyMediaRefDependencies {

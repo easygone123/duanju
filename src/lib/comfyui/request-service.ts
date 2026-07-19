@@ -488,7 +488,7 @@ async function sanitizeVariableSnapshot(
       })
     }
     snapshot[definition.name] = await sanitizeVariableValue(
-      value, definition.type, userId, projectId, resolveOwnedMedia,
+      value, definition.name, definition.type, userId, projectId, resolveOwnedMedia,
     )
   }
   if (!isBoundedLiveVariables(snapshot)) throw new ApiError('INVALID_PARAMS')
@@ -510,6 +510,7 @@ function isVariableDefinition(value: unknown): value is ComfyVariableDefinition 
 
 async function sanitizeVariableValue(
   value: ComfyVariableValue,
+  variableName: string,
   type: ComfyVariableDefinition['type'],
   userId: string,
   projectId: string,
@@ -517,12 +518,12 @@ async function sanitizeVariableValue(
 ): Promise<ComfyVariableValue> {
   if (type === 'image_ref_list') {
     return Promise.all((value as ComfyMediaRef[]).map((ref) => sanitizeMediaRef(
-      ref, userId, projectId, 'image', resolveOwnedMedia,
+      ref, variableName, userId, projectId, 'image', resolveOwnedMedia,
     )))
   }
   if (type === 'image_ref' || type === 'video_ref') {
     return sanitizeMediaRef(
-      value as ComfyMediaRef, userId, projectId,
+      value as ComfyMediaRef, variableName, userId, projectId,
       type === 'video_ref' ? 'video' : 'image', resolveOwnedMedia,
     )
   }
@@ -531,6 +532,7 @@ async function sanitizeVariableValue(
 
 async function sanitizeMediaRef(
   value: ComfyMediaRef,
+  variableName: string,
   userId: string,
   projectId: string,
   mediaType: ComfyMediaType,
@@ -538,7 +540,12 @@ async function sanitizeMediaRef(
 ) {
   if (!isOpaqueStorageKey(value.storageKey) || !resolveOwnedMedia
     || !await resolveOwnedMedia({ userId, projectId, storageKey: value.storageKey, mediaType })) {
-    throw new ApiError('INVALID_PARAMS')
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'COMFY_MEDIA_NOT_OWNED',
+      field: variableName,
+      mediaType,
+      message: 'COMFY_MEDIA_NOT_OWNED',
+    })
   }
   return {
     storageKey: value.storageKey,

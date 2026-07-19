@@ -222,7 +222,7 @@ function transformBindingValue(
         `Upload at index ${String(valueIndex)} for "${binding.variable}" is missing or malformed.`,
       )
     }
-    return indexedUpload.name
+    return comfyUploadedImagePath(indexedUpload)
   }
   if (binding.transform === 'filename_list') {
     if (
@@ -236,12 +236,12 @@ function transformBindingValue(
         `Upload list for "${binding.variable}" is missing, partial, or malformed.`,
       )
     }
-    return upload.map((file) => file.name)
+    return upload.map((file) => comfyUploadedImagePath(file))
   }
   if (!isUploadedFile(upload)) {
     throw bindingError(binding, `Upload for "${binding.variable}" is missing.`)
   }
-  if (binding.transform === 'filename') return upload.name
+  if (binding.transform === 'filename') return comfyUploadedImagePath(upload)
   return {
     filename: upload.name,
     subfolder: upload.subfolder,

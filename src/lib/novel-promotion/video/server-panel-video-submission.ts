@@ -117,16 +117,20 @@ function durationContractFor(
     ? durationVariable.defaultValue
     : null
   const requestedDefault = provider === 'comfyui'
-    ? workflowDefault
+    ? positiveNumber(panel.durationOverride)
+      ? panel.durationOverride
+      : positiveNumber(panel.estimatedDuration)
+        ? panel.estimatedDuration
+        : positiveNumber(panel.duration)
+          ? panel.duration
+          : workflowDefault
     : positiveNumber(panel.duration)
       ? panel.duration
       : positiveNumber(panel.estimatedDuration)
         ? panel.estimatedDuration
         : positiveNumber(panel.durationOverride)
           ? panel.durationOverride
-          : provider === 'comfyui'
-            ? null
-            : LEGACY_REMOTE_VIDEO_DEFAULT_DURATION_SECONDS
+          : LEGACY_REMOTE_VIDEO_DEFAULT_DURATION_SECONDS
   if (!requestedDefault) throw new ApiError('INVALID_PARAMS', { code: VIDEO_DURATION_INVALID })
   return { kind: 'provider_default', duration: requestedDefault }
 }

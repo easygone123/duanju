@@ -1,5 +1,6 @@
 import sharp from 'sharp'
 import { DelayedError, type Job } from 'bullmq'
+import { ApiError } from '@/lib/api-errors'
 import { createScopedLogger } from '@/lib/logging/core'
 import { withLogContext } from '@/lib/logging/context'
 import { generateImage, generateVideo } from '@/lib/generator-api'
@@ -100,21 +101,28 @@ export async function buildComfyProviderInvocation(
 ): Promise<ComfyProviderInvocation | undefined> {
   if (parseModelKeyStrict(input.modelKey)?.provider !== 'comfyui') return undefined
   if (!input.invocationKey.trim()) throw new Error('COMFY_INVOCATION_KEY_REQUIRED')
-  const resolveImage = async (value: string): Promise<ComfyMediaRef> => {
+  const resolveImage = async (value: string, variableName: string): Promise<ComfyMediaRef> => {
     const ref = await resolveOwnedComfyMediaRefFromValue({
       userId: input.userId,
       projectId: input.projectId,
       value,
       mediaType: 'image',
     }, mediaDependencies)
-    if (!ref) throw new Error('COMFY_MEDIA_NOT_OWNED')
+    if (!ref) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'COMFY_MEDIA_NOT_OWNED',
+        field: variableName,
+        mediaType: 'image',
+        message: 'COMFY_MEDIA_NOT_OWNED',
+      })
+    }
     return ref
   }
   const inputImages = input.inputImages?.length
-    ? await Promise.all(input.inputImages.map(resolveImage))
+    ? await Promise.all(input.inputImages.map((value) => resolveImage(value, 'referenceImages')))
     : undefined
-  const firstFrame = input.firstFrame ? await resolveImage(input.firstFrame) : undefined
-  const lastFrame = input.lastFrame ? await resolveImage(input.lastFrame) : undefined
+  const firstFrame = input.firstFrame ? await resolveImage(input.firstFrame, 'firstFrame') : undefined
+  const lastFrame = input.lastFrame ? await resolveImage(input.lastFrame, 'lastFrame') : undefined
   return {
     context: {
       projectId: input.projectId,
