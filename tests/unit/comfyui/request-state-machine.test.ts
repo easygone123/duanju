@@ -392,6 +392,31 @@ describe('ComfyUI request state machine', () => {
     }))
   })
 
+  it('maps the runtime first frame onto a video workflow sourceImage definition', async () => {
+    const dependencies = requestDependenciesWithDefinitions([
+      { name: 'prompt', type: 'string', required: true },
+      { name: 'duration', type: 'number', required: true },
+      { name: 'sourceImage', type: 'image_ref', required: true },
+    ])
+    dependencies.resolveOwnedMedia.mockResolvedValue(true)
+
+    await createComfyGenerationRequest({
+      invocationKey: 'invoke-source-image-video', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'video', workflowId: 'workflow-1',
+      variables: {
+        prompt: 'move', duration_seconds: 5,
+        first_frame: { storageKey: 'images/first.png' },
+      },
+    }, dependencies)
+
+    expect(dependencies.create).toHaveBeenCalledWith(expect.objectContaining({
+      variableSnapshot: {
+        prompt: 'move', duration: 5,
+        sourceImage: { storageKey: 'images/first.png' },
+      },
+    }))
+  })
+
   it('preserves video runtime aliases for legacy workflow definitions', async () => {
     const dependencies = requestDependenciesWithDefinitions([
       { name: 'prompt', type: 'string', required: true },

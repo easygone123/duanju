@@ -28,7 +28,7 @@ const utilsMock = vi.hoisted(() => ({
   assertTaskActive: vi.fn(async () => undefined),
   getProjectModels: vi.fn(async () => ({ videoRatio: '16:9' })),
   resolveLipSyncVideoSource: vi.fn(async () => 'https://provider.example/lipsync.mp4'),
-  resolveVideoSourceFromGeneration: vi.fn<(...args: unknown[]) => Promise<{ url: string; actualVideoTokens?: number; downloadHeaders?: Record<string, string> }>>(async () => ({ url: 'https://provider.example/video.mp4' })),
+  resolveVideoSourceFromGeneration: vi.fn<(...args: unknown[]) => Promise<{ url: string; storageKey?: string; actualVideoTokens?: number; downloadHeaders?: Record<string, string> }>>(async () => ({ url: 'https://provider.example/video.mp4' })),
   toSignedUrlIfCos: vi.fn((url: string | null) => (url ? `https://signed.example/${url}` : null)),
   uploadVideoSourceToCos: vi.fn(async () => 'cos/lip-sync/video.mp4'),
 }))
@@ -306,6 +306,7 @@ describe('worker video processor behavior', () => {
       payload: {
         videoModel: 'comfyui::wf-video',
         videoPrompt: 'SERVER FIRST LAST PROMPT',
+        generationOptions: { duration: 5 },
         firstLastFrame: {
           flModel: 'comfyui::wf-video',
           sourcePanelId: 'last-panel',
@@ -328,11 +329,37 @@ describe('worker video processor behavior', () => {
         imageUrl: 'cos/panel-image.png',
         comfyFirstFrameSource: 'cos/panel-image.png',
         comfyLastFrameSource: 'cos/last.png',
-        options: expect.objectContaining({ prompt: 'SERVER FIRST LAST PROMPT' }),
+        options: expect.objectContaining({ prompt: 'SERVER FIRST LAST PROMPT', duration: 5 }),
       }),
     )
     expect(normalizeToBase64ForGenerationMock).not.toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('VIDEO_PANEL: reuses the durable ComfyUI output instead of downloading a container-inaccessible signed URL', async () => {
+    utilsMock.resolveVideoSourceFromGeneration.mockResolvedValueOnce({
+      url: 'http://localhost:19000/signed-result.mp4',
+      storageKey: 'comfyui/user-1/project-1/result.mp4',
+    })
+
+    const result = await workerState.processor!(buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: {
+        videoModel: 'comfyui::wf-video',
+        videoPrompt: 'SERVER PROMPT',
+        generationOptions: { duration: 5 },
+      },
+    }))
+
+    expect(utilsMock.uploadVideoSourceToCos).not.toHaveBeenCalled()
+    expect(prismaMock.novelPromotionPanel.update).toHaveBeenCalledWith({
+      where: { id: 'panel-1' },
+      data: {
+        videoUrl: 'comfyui/user-1/project-1/result.mp4',
+        videoGenerationMode: 'normal',
+      },
+    })
+    expect(result).toMatchObject({ videoUrl: 'comfyui/user-1/project-1/result.mp4' })
   })
 
   it('VIDEO_PANEL: uses the trusted manual first-frame panel image instead of the target image', async () => {

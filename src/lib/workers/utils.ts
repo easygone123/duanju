@@ -662,7 +662,12 @@ export async function resolveVideoSourceFromGeneration(
     }
     pollProgress?: { start?: number; end?: number }
   },
-): Promise<{ url: string; actualVideoTokens?: number; downloadHeaders?: Record<string, string> }> {
+): Promise<{
+  url: string
+  storageKey?: string
+  actualVideoTokens?: number
+  downloadHeaders?: Record<string, string>
+}> {
   const snapshot = await resolveVideoGenerationSnapshot(job, params)
   const logger = scopedWorkerUtilLogger(job, 'worker.video.generate_source')
   const startedAt = Date.now()
@@ -780,6 +785,9 @@ export async function resolveVideoSourceFromGeneration(
   })
   return {
     url: polled.url,
+    ...(isComfyInvocation && polled.status.resultStorageKey
+      ? { storageKey: polled.status.resultStorageKey }
+      : {}),
     ...(typeof polled.actualVideoTokens === 'number' ? { actualVideoTokens: polled.actualVideoTokens } : {}),
     ...(polled.downloadHeaders ? { downloadHeaders: polled.downloadHeaders } : {}),
   }

@@ -187,10 +187,7 @@ function normalizeSystemVariables(
     normalized, names, legacy: 'input_images', canonical: 'referenceImages',
   })
   normalizeSystemDuration(normalized, names, definitions as unknown as ComfyVariableDefinition[])
-  normalizeSystemAlias({
-    normalized, names, legacy: 'first_frame', canonical: 'firstFrame',
-    omitLegacyWhenUndeclared: true,
-  })
+  normalizeSystemFirstFrame(normalized, names)
   normalizeSystemAlias({
     normalized, names, legacy: 'last_frame', canonical: 'lastFrame',
     omitLegacyWhenUndeclared: true,
@@ -258,6 +255,23 @@ function normalizeSystemAlias(input: {
   if (!declaresLegacy && !declaresCanonical && input.omitLegacyWhenUndeclared) {
     delete input.normalized[input.legacy]
   }
+}
+
+function normalizeSystemFirstFrame(
+  normalized: Record<string, ComfyVariableValue>,
+  names: Set<string>,
+) {
+  const declaresGuidedFirstFrame = names.has('firstFrame') || names.has('first_frame')
+  if (!declaresGuidedFirstFrame && names.has('sourceImage') && Object.hasOwn(normalized, 'first_frame')) {
+    if (Object.hasOwn(normalized, 'sourceImage')) throw new ApiError('INVALID_PARAMS')
+    normalized.sourceImage = normalized.first_frame
+    delete normalized.first_frame
+    return
+  }
+  normalizeSystemAlias({
+    normalized, names, legacy: 'first_frame', canonical: 'firstFrame',
+    omitLegacyWhenUndeclared: true,
+  })
 }
 
 function normalizeSystemDuration(

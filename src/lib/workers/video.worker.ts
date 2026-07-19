@@ -234,7 +234,8 @@ async function generateVideoForPanel(
     }
   }
 
-  const cosKey = await uploadVideoSourceToCos(videoSource, 'panel-video', panel.id, downloadHeaders)
+  const cosKey = generatedVideo.storageKey
+    ?? await uploadVideoSourceToCos(videoSource, 'panel-video', panel.id, downloadHeaders)
   return {
     cosKey,
     generationMode,

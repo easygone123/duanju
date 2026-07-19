@@ -178,6 +178,30 @@ describe('worker utils video generation resume', () => {
     expect(result).toBe('comfyui/user-1/project-1/result.png')
   })
 
+  it('returns the already-durable ComfyUI video storage key with the polling result', async () => {
+    generatorApiMock.generateVideo.mockResolvedValueOnce({
+      success: true,
+      async: true,
+      externalId: 'COMFY:VIDEO:same-invocation',
+    })
+    asyncPollMock.pollAsyncTask.mockResolvedValueOnce({
+      status: 'completed',
+      resultUrl: 'http://localhost:19000/signed-result.mp4',
+      resultStorageKey: 'comfyui/user-1/project-1/result.mp4',
+    })
+
+    const result = await resolveVideoSourceFromGeneration(buildJob(), {
+      userId: 'user-1', modelId: 'comfyui::wf-video',
+      invocationKey: 'task-1:panel:p1:video', imageUrl: '',
+      options: { prompt: 'move', duration: 5 },
+    })
+
+    expect(result).toEqual({
+      url: 'http://localhost:19000/signed-result.mp4',
+      storageKey: 'comfyui/user-1/project-1/result.mp4',
+    })
+  })
+
   it('backfills the trusted pin for an old unmarked Comfy image task when current selection is unchanged', async () => {
     const job = buildJob()
     job.data.payload = { imageModel: 'comfyui::wf-image' }
