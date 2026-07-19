@@ -310,7 +310,7 @@ export async function dispatchComfyRequest(
         ...owner,
         ...(promptId ? { promptId } : {}),
         errorCode: error.code,
-        errorMessage: 'ComfyUI operation failed',
+        errorMessage: error.message,
       }).catch(() => false)
       if (!persisted) {
         dependencies.observation?.increment('reconciliation', { outcome: 'terminal_write_failed' })
@@ -404,7 +404,13 @@ async function consumePromptEvents(
 ) {
   for await (const event of client.watchPrompt(promptId, clientId, signal)) {
     if (event.type === 'execution_error') {
-      throw new ComfyError(COMFY_ERROR_CODE.EXECUTION_FAILED, 'ComfyUI execution failed')
+      throw new ComfyError(
+        COMFY_ERROR_CODE.EXECUTION_FAILED,
+        event.nodeId
+          ? `ComfyUI execution failed at node ${event.nodeId}`
+          : 'ComfyUI execution failed',
+        { details: event.nodeId ? { nodeId: event.nodeId } : undefined },
+      )
     }
     if (event.type === 'progress') {
       await mustOwn(dependencies.persistProgress({

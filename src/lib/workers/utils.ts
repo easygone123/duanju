@@ -205,16 +205,19 @@ export async function waitExternalResult(
 
     if (status.status === 'failed') {
       await clearComfyCapacityResumeMarker(job)
+      const failureMessage = status.errorCode && !status.error?.includes(status.errorCode)
+        ? `${status.errorCode}: ${status.error || 'ComfyUI generation failed'}`
+        : status.error || `External task failed: ${externalId}`
       logger.error({
-        message: status.error || 'external task failed',
-        errorCode: 'EXTERNAL_ERROR',
+        message: failureMessage,
+        errorCode: status.errorCode || 'EXTERNAL_ERROR',
         retryable: true,
         durationMs: Date.now() - startAt,
         details: {
           externalId,
         },
       })
-      throw new Error(status.error || `External task failed: ${externalId}`)
+      throw new Error(failureMessage)
     }
 
     if (status.waitingForCapacity === true) {

@@ -40,6 +40,7 @@ export interface PollResult {
     resultStorageKey?: string
     resultStorageKeys?: string[]
     waitingForCapacity?: boolean
+    errorCode?: string
 }
 
 export interface ExternalExecutionClock {
