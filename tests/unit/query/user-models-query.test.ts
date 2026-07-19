@@ -58,6 +58,34 @@ describe('user model query cache', () => {
     })
   })
 
+  it('advertises first-last-frame support only for a fully bound video workflow contract', () => {
+    const workflow = {
+      id: 'wf-first-last', name: 'First Last', mediaType: 'video',
+      currentVersion: {
+        id: 'version-first-last', purpose: 'generation',
+        variableDefinitions: [
+          { name: 'sourceImage', type: 'image_ref', required: true },
+          { name: 'lastFrame', type: 'image_ref', required: true },
+        ],
+        bindingSpec: [
+          { nodeId: '1', inputPath: 'image', variable: 'sourceImage', valueType: 'image_ref' },
+          { nodeId: '2', inputPath: 'image', variable: 'lastFrame', valueType: 'image_ref' },
+        ],
+      },
+    }
+
+    expect(buildComfyWorkflowModelOption(workflow).capabilities).toEqual({
+      video: { firstlastframe: true },
+    })
+    expect(buildComfyWorkflowModelOption({
+      ...workflow,
+      currentVersion: {
+        ...workflow.currentVersion,
+        bindingSpec: workflow.currentVersion.bindingSpec.slice(0, 1),
+      },
+    }).capabilities).toBeUndefined()
+  })
+
   it('does not advertise another user or untested upscale workflow as executable', () => {
     const base = {
       id: 'wf-upscale', name: 'Upscale', mediaType: 'image',

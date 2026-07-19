@@ -121,7 +121,15 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     comfyVersionFindFirstMock.mockResolvedValue({
       id: 'video-version-1',
       contentHash: 'video-content-hash',
-      variableDefinitions: [{ name: 'duration', type: 'number', options: [5, 10] }],
+      variableDefinitions: [
+        { name: 'duration', type: 'number', required: true, options: [5, 10] },
+        { name: 'firstFrame', type: 'image_ref', required: true },
+        { name: 'lastFrame', type: 'image_ref', required: true },
+      ],
+      bindingSpec: [
+        { nodeId: '1', inputPath: 'image', variable: 'firstFrame', valueType: 'image_ref' },
+        { nodeId: '2', inputPath: 'image', variable: 'lastFrame', valueType: 'image_ref' },
+      ],
     })
     userPreferenceFindUniqueMock.mockResolvedValue({
       customModels: JSON.stringify([
@@ -373,6 +381,42 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
       firstLastFrame: { flModel: 'cloud::unsupported' },
     }), { params: Promise.resolve({ projectId: 'project-1' }) })
     expect(response.status).toBe(400)
+    expect(submitTaskMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a ComfyUI first-last-frame model whose published contract lacks frame bindings', async () => {
+    panelFindFirstMock
+      .mockResolvedValueOnce({
+        id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: 'first prompt', firstLastFramePrompt: null,
+        estimatedDuration: 5, durationOverride: null, duration: 5,
+        firstFrameSourceMeta: null,
+        lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'last-panel' }),
+        storyboard: { episodeId: 'episode-1' },
+      })
+      .mockResolvedValueOnce({ id: 'last-panel', videoPrompt: 'last prompt' })
+    comfyVersionFindFirstMock.mockResolvedValueOnce({
+      id: 'video-version-1', contentHash: 'video-content-hash',
+      variableDefinitions: [
+        { name: 'duration', type: 'number', required: true, options: [5, 10] },
+        { name: 'firstFrame', type: 'image_ref', required: true },
+      ],
+      bindingSpec: [
+        { nodeId: '1', inputPath: 'image', variable: 'firstFrame', valueType: 'image_ref' },
+      ],
+    })
+
+    const response = await POST(request({
+      firstLastFrame: {
+        flModel: 'comfyui::wf-video',
+        lastFrameStoryboardId: 'storyboard-1',
+        lastFramePanelIndex: 1,
+      },
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'FIRSTLASTFRAME_MODEL_UNSUPPORTED' })
     expect(submitTaskMock).not.toHaveBeenCalled()
   })
 

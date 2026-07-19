@@ -13,7 +13,21 @@ const prismaMock = vi.hoisted(() => ({
   comfyWorkflow: {
     findMany: vi.fn(async (): Promise<Array<Record<string, unknown>>> => [
       { id: 'image-workflow', name: 'Portrait workflow', mediaType: 'image', currentVersionId: 'image-v1', currentVersion: { id: 'image-v1', purpose: 'generation', publishedAt: new Date(), contentHash: 'image-hash', lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' } } },
-      { id: 'video-workflow', name: 'Video workflow', mediaType: 'video', currentVersionId: 'video-v1', currentVersion: { id: 'video-v1', purpose: 'generation', publishedAt: new Date(), contentHash: 'video-hash', lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' } } },
+      {
+        id: 'video-workflow', name: 'Video workflow', mediaType: 'video', currentVersionId: 'video-v1',
+        currentVersion: {
+          id: 'video-v1', purpose: 'generation', publishedAt: new Date(), contentHash: 'video-hash',
+          lastSuccessfulTestAt: new Date(), lastTestConnection: { userId: 'user-1' },
+          variableDefinitions: [
+            { name: 'firstFrame', type: 'image_ref', required: true },
+            { name: 'lastFrame', type: 'image_ref', required: true },
+          ],
+          bindingSpec: [
+            { nodeId: '1', inputPath: 'image', variable: 'firstFrame', valueType: 'image_ref' },
+            { nodeId: '2', inputPath: 'image', variable: 'lastFrame', valueType: 'image_ref' },
+          ],
+        },
+      },
     ]),
   },
   comfyWorkflowVersion: {
@@ -52,6 +66,7 @@ describe('api specific - dynamic ComfyUI user models', () => {
       providerName: 'ComfyUI',
       workflowPurpose: 'generation',
       workflowVersionId: 'video-v1',
+      capabilities: { video: { firstlastframe: true } },
     })
     expect(prismaMock.comfyWorkflow.findMany).toHaveBeenCalledWith({
       where: {
@@ -63,6 +78,7 @@ describe('api specific - dynamic ComfyUI user models', () => {
         currentVersion: {
           select: {
             id: true, purpose: true, publishedAt: true, contentHash: true, lastSuccessfulTestAt: true,
+            variableDefinitions: true, bindingSpec: true,
             lastTestConnection: { select: { userId: true } },
           },
         },

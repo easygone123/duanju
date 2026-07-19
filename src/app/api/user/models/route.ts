@@ -2,7 +2,7 @@
  * 获取用户的模型列表
  *
  * 返回用户在个人中心启用的模型，供项目配置下拉框使用。
- * capabilities 仅来自系统内置目录（不信任用户提交的 model.capabilities）。
+ * capabilities 仅来自系统内置目录或已发布并测试通过的 ComfyUI 版本契约。
  */
 
 import { NextResponse } from 'next/server'
@@ -201,6 +201,7 @@ export const GET = apiHandler(async () => {
         currentVersion: {
           select: {
             id: true, purpose: true, publishedAt: true, contentHash: true, lastSuccessfulTestAt: true,
+            variableDefinitions: true, bindingSpec: true,
             lastTestConnection: { select: { userId: true } },
           },
         },

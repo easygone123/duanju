@@ -1,6 +1,7 @@
 import { ApiError } from '@/lib/api-errors'
 import { resolveComfyDurationContract } from '@/lib/comfyui/duration-contract'
 import type { ComfyInputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
+import { supportsComfyFirstLastFrameContract } from '@/lib/comfyui/workflow-model-option'
 import {
   applyTrustedComfyVersionSnapshot,
   getProjectModelConfig,
@@ -170,6 +171,7 @@ async function loadAvailableVideoModel(input: {
   panel: VideoPanelRecord
   trustedComfyWorkflowVersionId?: string | null
   runtimeFps?: number
+  requireFirstLastFrame?: boolean
 }): Promise<AvailablePanelVideoModel> {
   const parsed = parseModelKeyStrict(input.modelKey)
   if (!parsed) throw new ApiError('INVALID_PARAMS', { code: VIDEO_MODEL_INVALID })
@@ -198,6 +200,19 @@ async function loadAvailableVideoModel(input: {
     : null
   if (comfyWorkflowVersionId && (!comfyVersion || !comfyVersion.contentHash.trim())) {
     throw new ApiError('INVALID_PARAMS', { code: VIDEO_MODEL_INVALID })
+  }
+  if (
+    parsed.provider === 'comfyui'
+    && input.requireFirstLastFrame
+    && !supportsComfyFirstLastFrameContract(
+      comfyVersion?.variableDefinitions,
+      comfyVersion?.bindingSpec,
+    )
+  ) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'FIRSTLASTFRAME_MODEL_UNSUPPORTED',
+      field: 'firstLastFrame.flModel',
+    })
   }
   const duration = durationContractFor(
     input.modelKey,
@@ -394,6 +409,7 @@ export async function resolveAuthoritativePanelPayload(input: {
       panel,
       trustedComfyWorkflowVersionId: projectDefaultComfyWorkflowVersionId,
       runtimeFps: positiveNumber(runtimeSelections.fps) ? runtimeSelections.fps : undefined,
+      requireFirstLastFrame: Boolean(trustedFirstLastFrame),
     })]
   } catch (error) {
     if (!explicitModel && automaticDialogueModel) {
