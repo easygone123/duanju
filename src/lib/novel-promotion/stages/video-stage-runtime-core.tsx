@@ -450,7 +450,6 @@ export function useVideoStageRuntime({
     incomingSourcePanelIdsByPanelId,
     videoModelOptions: allVideoModelOptions,
     onGenerateVideo: handleGenerateVideoWithImmediateLock,
-    t: (key) => t(key as never),
   })
 
   useEffect(() => {

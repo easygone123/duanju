@@ -17,6 +17,7 @@ import {
   resolveFrameLinkSubmission,
   type FrameLinkChoices,
 } from '@/lib/novel-promotion/video/frame-link-resolver'
+import { buildFirstLastFramePrompt } from '@/lib/novel-promotion/video/first-last-frame-prompt'
 
 interface FirstLastFrameCapabilityField {
   field: string
@@ -65,7 +66,6 @@ interface UseVideoFirstLastFrameFlowParams {
     generationOptions?: VideoGenerationOptions,
     panelId?: string,
   ) => Promise<boolean>
-  t: (key: string) => string
 }
 
 export function useVideoFirstLastFrameFlow({
@@ -78,7 +78,6 @@ export function useVideoFirstLastFrameFlow({
   incomingSourcePanelIdsByPanelId,
   videoModelOptions,
   onGenerateVideo,
-  t,
 }: UseVideoFirstLastFrameFlowParams) {
   const compatibleModelOptions = useMemo(
     () => videoModelOptions.filter((option) => supportsFirstLastFrame(option)),
@@ -96,8 +95,8 @@ export function useVideoFirstLastFrameFlow({
       for (const panel of allPanels) {
         const panelKey = `${panel.storyboardId}-${panel.panelIndex}`
         existingPanelKeys.add(panelKey)
-        if (!next.has(panelKey)) {
-          next.set(panelKey, panel.firstLastFramePrompt || '')
+        if (!next.has(panelKey) && panel.firstLastFramePrompt?.trim()) {
+          next.set(panelKey, panel.firstLastFramePrompt)
         }
       }
 
@@ -242,7 +241,7 @@ export function useVideoFirstLastFrameFlow({
         panel.storyboardId === firstStoryboardId
         && panel.panelIndex === firstPanelIndex,
     )?.firstLastFramePrompt
-    const customPrompt = flCustomPrompts.get(panelKey) ?? persistedCustomPrompt
+    const customPrompt = (flCustomPrompts.get(panelKey) ?? persistedCustomPrompt)?.trim() || undefined
     await onGenerateVideo(firstStoryboardId, firstPanelIndex, flModel, {
       firstFrameSourcePanelId: resolvedFrameLink.submission.firstFrameSourcePanelId,
       lastFrameStoryboardId: lastStoryboardId,
@@ -254,13 +253,8 @@ export function useVideoFirstLastFrameFlow({
   }, [allPanels, flCustomPrompts, flGenerationOptions, flModel, flModelSupportsFirstLastFrame, frameLinkChoices, onGenerateVideo])
 
   const getDefaultFlPrompt = useCallback((firstPrompt?: string, lastPrompt?: string): string => {
-    const first = firstPrompt || ''
-    const last = lastPrompt || ''
-    if (last) {
-      return `${first} ${t('firstLastFrame.thenTransitionTo')}: ${last}`
-    }
-    return first
-  }, [t])
+    return buildFirstLastFramePrompt(firstPrompt, lastPrompt)
+  }, [])
 
   const getNextPanel = useCallback((currentIndex: number): VideoPanel | null => {
     const current = allPanels[currentIndex]

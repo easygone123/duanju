@@ -413,7 +413,7 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     }))
   })
 
-  it('removes forged root and first-last-frame prompts from the submitted task payload', async () => {
+  it('builds an authoritative first-last-frame prompt and removes forged client prompts', async () => {
     panelFindFirstMock
       .mockResolvedValueOnce({
         id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
@@ -424,7 +424,7 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
         lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'panel-2' }),
         storyboard: { episodeId: 'episode-1' },
       })
-      .mockResolvedValueOnce({ id: 'panel-2' })
+      .mockResolvedValueOnce({ id: 'panel-2', videoPrompt: 'last frame visual prompt' })
     const response = await POST(request({
       customPrompt: 'FORGED ROOT PROMPT',
       firstLastFrame: {
@@ -435,7 +435,9 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
 
     expect(response.status).toBe(200)
     const submitted = submitTaskMock.mock.calls[0]?.[0] as { payload: Record<string, unknown> }
-    expect(submitted.payload.videoPrompt).toBe('server visual prompt')
+    expect(submitted.payload.videoPrompt).toBe(
+      'server visual prompt\n\n然后自然过渡到：last frame visual prompt',
+    )
     expect(submitted.payload).not.toHaveProperty('customPrompt')
     expect(submitted.payload.firstLastFrame).toEqual({
       flModel: 'comfyui::wf-video', firstFrameSourcePanelId: 'panel-1', sourcePanelId: 'panel-2',

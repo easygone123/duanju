@@ -104,7 +104,11 @@ export function useVideoPromptState({
   ): string => {
     const stateKey = buildPromptStateKey(panelKey, field)
     if (panelPrompts.has(stateKey)) {
-      return panelPrompts.get(stateKey) || ''
+      const localPrompt = panelPrompts.get(stateKey) || ''
+      if (field === 'firstLastFramePrompt' && !localPrompt.trim()) {
+        return externalPrompt || ''
+      }
+      return localPrompt
     }
     return externalPrompt || ''
   }, [panelPrompts])

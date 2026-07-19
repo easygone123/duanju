@@ -23,6 +23,7 @@ import {
   parseFrameSourceMeta,
   type FrameLinkStoryboard,
 } from './frame-link-resolver'
+import { buildFirstLastFramePrompt } from './first-last-frame-prompt'
 
 const LEGACY_REMOTE_VIDEO_DEFAULT_DURATION_SECONDS = 5
 
@@ -250,7 +251,12 @@ async function resolveTrustedFirstLastFrame(
   panel: VideoPanelRecord,
   projectId: string,
   userId: string,
-): Promise<{ flModel: string; firstFrameSourcePanelId: string; sourcePanelId?: string }> {
+): Promise<{
+  flModel: string
+  firstFrameSourcePanelId: string
+  sourcePanelId?: string
+  lastFrameVideoPrompt?: string | null
+}> {
   const flModel = typeof input.flModel === 'string' ? input.flModel : ''
   const storedFirstFrame = parseFrameSourceMeta(panel.firstFrameSourceMeta)
   const storedLastFrame = parseFrameSourceMeta(panel.lastFrameSourceMeta)
@@ -271,24 +277,27 @@ async function resolveTrustedFirstLastFrame(
     }
     return sourcePanel.id
   }
-  const resolvePersistedLastFrameSourcePanelId = async (): Promise<string | undefined> => {
-    if (storedLastFrame === null) return undefined
+  const resolvePersistedLastFrameSource = async (): Promise<{
+    sourcePanelId?: string
+    videoPrompt?: string | null
+  }> => {
+    if (storedLastFrame === null) return {}
     if (storedLastFrame) {
       const sourcePanel = await prisma.novelPromotionPanel.findFirst({
         where: {
           id: storedLastFrame.sourcePanelId,
           storyboard: { episode: { novelPromotionProject: { projectId, project: { userId } } } },
         },
-        select: { id: true },
+        select: { id: true, videoPrompt: true },
       })
       if (!sourcePanel) {
         throw new ApiError('INVALID_PARAMS', { code: 'VIDEO_LAST_FRAME_SOURCE_FORBIDDEN' })
       }
-      return sourcePanel.id
+      return { sourcePanelId: sourcePanel.id, videoPrompt: sourcePanel.videoPrompt }
     }
 
     const episodeId = panel.storyboard?.episodeId
-    if (!episodeId) return undefined
+    if (!episodeId) return {}
     const storyboardRows = await prisma.novelPromotionStoryboard.findMany({
       where: {
         episodeId,
@@ -311,6 +320,7 @@ async function resolveTrustedFirstLastFrame(
             firstFrameSourceMeta: true,
             lastFrameSourceMeta: true,
             linkedToNextPanel: true,
+            videoPrompt: true,
           },
         },
       },
@@ -324,12 +334,17 @@ async function resolveTrustedFirstLastFrame(
       clipCreatedAt: storyboard.clip?.createdAt,
       panels: storyboard.panels,
     }))
-    return buildFrameLinkResolutionIndex({ storyboards })
+    const sourcePanelId = buildFrameLinkResolutionIndex({ storyboards })
       .automaticChoicesByPanelId.get(panel.id)?.lastFrame?.sourcePanelId
+    const sourcePanel = storyboardRows
+      .flatMap((storyboard) => storyboard.panels)
+      .find((candidate) => candidate.id === sourcePanelId)
+    return { sourcePanelId, videoPrompt: sourcePanel?.videoPrompt }
   }
 
   const firstFrameSourcePanelId = await resolveFirstFrameSourcePanelId()
-  const sourcePanelId = await resolvePersistedLastFrameSourcePanelId()
+  const lastFrameSource = await resolvePersistedLastFrameSource()
+  const sourcePanelId = lastFrameSource?.sourcePanelId
   if (!firstFrameSourcePanelId || !sourcePanelId) {
     throw new ApiError('INVALID_PARAMS', { code: 'FIRSTLASTFRAME_SOURCE_INVALID' })
   }
@@ -337,6 +352,7 @@ async function resolveTrustedFirstLastFrame(
     flModel,
     firstFrameSourcePanelId,
     sourcePanelId,
+    lastFrameVideoPrompt: lastFrameSource?.videoPrompt,
   }
 }
 
@@ -387,10 +403,14 @@ export async function resolveAuthoritativePanelPayload(input: {
   }
   let submission
   try {
+    const firstLastFramePrompt = trustedFirstLastFrame
+      ? panel.firstLastFramePrompt?.trim()
+        || buildFirstLastFramePrompt(panel.videoPrompt, trustedFirstLastFrame.lastFrameVideoPrompt)
+      : panel.videoPrompt
     submission = resolvePanelVideoSubmission({
       panel: {
         ...panel,
-        videoPrompt: trustedFirstLastFrame ? panel.firstLastFramePrompt || panel.videoPrompt : panel.videoPrompt,
+        videoPrompt: firstLastFramePrompt,
         legacyDuration: panel.duration,
       },
       project: { videoModel: projectModels.videoModel, dialogueVideoModel: projectModels.dialogueVideoModel },
@@ -408,7 +428,13 @@ export async function resolveAuthoritativePanelPayload(input: {
   delete payload.effectiveDuration
   delete payload.comfyWorkflowVersionId
   delete payload.firstLastFrame
-  if (trustedFirstLastFrame) payload.firstLastFrame = trustedFirstLastFrame
+  if (trustedFirstLastFrame) {
+    payload.firstLastFrame = {
+      flModel: trustedFirstLastFrame.flModel,
+      firstFrameSourcePanelId: trustedFirstLastFrame.firstFrameSourcePanelId,
+      sourcePanelId: trustedFirstLastFrame.sourcePanelId,
+    }
+  }
   payload.videoModel = submission.selectedModel
   payload.videoModelReason = submission.modelReason
   payload.videoPrompt = submission.submittedPrompt
