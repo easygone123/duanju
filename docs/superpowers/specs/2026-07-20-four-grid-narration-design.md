@@ -59,10 +59,10 @@ Validation fails the complete analysis when any row is missing, duplicated, cont
 
 - `narrationMode`: string enum value `auto | on | off`, default `auto`.
 - `narrationRecommended`: boolean, default `false`.
-- `narrationText`: nullable text.
-- `narrationEmotion`: nullable string.
+- `narrationSuggestedText` and `narrationSuggestedEmotion`: latest AI suggestion.
+- `narrationText` and `narrationEmotion`: nullable manual override preserved across mode changes.
 
-These fields are the authoritative narration configuration. MySQL and SQLite Prisma schemas receive equivalent fields and a migration supplies backward-compatible defaults.
+These fields are the authoritative narration configuration. In `auto`, effective text/emotion comes from the suggestion fields; in `on` or `off`, it comes from the manual fields, initialized from the current suggestion when the user first leaves `auto`. This separation lets switching back to `auto` restore the latest AI result without deleting the user's manual draft. MySQL and SQLite Prisma schemas receive equivalent fields and a migration supplies backward-compatible defaults.
 
 ### Voice-line projection
 
@@ -90,9 +90,10 @@ For each four-grid cell, the crop transaction writes the crop media, grounded pr
 
 The merge rule is explicit:
 
-- New or `auto` panel: refresh `narrationRecommended`, `narrationText`, and `narrationEmotion` from analysis, then synchronize the voice line.
-- Manual `on` panel: refresh only `narrationRecommended`; preserve manual text/emotion and keep the voice line enabled.
-- Manual `off` panel: refresh only `narrationRecommended`; preserve manual text/emotion/audio and keep the voice line disabled.
+- Every panel refreshes `narrationRecommended`, `narrationSuggestedText`, and `narrationSuggestedEmotion` from analysis.
+- New or `auto` panel: project the refreshed suggestion into the voice line.
+- Manual `on` panel: preserve manual text/emotion and keep the voice line enabled.
+- Manual `off` panel: preserve manual text/emotion/audio and keep the voice line disabled.
 
 This makes retry and reanalysis idempotent and prevents AI output from undoing user decisions.
 
