@@ -27,6 +27,8 @@ interface Props {
   onActivated?(): void | Promise<void>
 }
 
+const LIVE_TEST_MEDIA_TYPES = new Set(['image_ref', 'image_ref_list', 'video_ref'])
+
 export default function WorkflowActivationPanel({ workflowId, mediaType = 'image', version, onClose, onEditMappings, onActivated }: Props) {
   const t = useTranslations('comfyui.workflows')
   const queryClient = useQueryClient()
@@ -39,8 +41,10 @@ export default function WorkflowActivationPanel({ workflowId, mediaType = 'image
     variableDefinitions: version.variableDefinitions,
     bindings: version.bindings,
   }), [mediaType, version.bindings, version.variableDefinitions])
-  const requiredDefinitions = useMemo(() => {
-    const definitions = version.variableDefinitions.filter((definition) => definition.required)
+  const testDefinitions = useMemo(() => {
+    const definitions = version.variableDefinitions.filter((definition) => (
+      definition.required || LIVE_TEST_MEDIA_TYPES.has(definition.type)
+    ))
     return prepareVideoTestVariableDefinitions(definitions, durationTest)
   }, [durationTest, version.variableDefinitions])
   const durationVariableNames = useMemo(() => new Set(
@@ -62,7 +66,7 @@ export default function WorkflowActivationPanel({ workflowId, mediaType = 'image
     setConnectionId(enabledConnections[0]?.id ?? '')
   }, [connectionId, enabledConnections])
   const [testPayload, setTestPayload] = useState<WorkflowTestPayload | null>(() => (
-    requiredDefinitions.length === 0 ? emptyWorkflowTestPayload() : null
+    testDefinitions.length === 0 ? emptyWorkflowTestPayload() : null
   ))
   const [activation, setActivation] = useState(() => initialWorkflowActivationState({
     valid: version.validation.valid,
@@ -215,7 +219,7 @@ export default function WorkflowActivationPanel({ workflowId, mediaType = 'image
 
       {!activation.testComplete && <WorkflowTestForm
         key={version.id}
-        definitions={requiredDefinitions}
+        definitions={testDefinitions}
         positiveNumberVariables={durationVariableNames}
         labelOverrides={durationLabels}
         hintOverrides={durationHints}

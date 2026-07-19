@@ -138,15 +138,19 @@ describe('WorkflowActivationPanel', () => {
     await waitFor(() => expect((view.getByRole('button', { name: 'Test and enable' }) as HTMLButtonElement).disabled).toBe(false))
   })
 
-  it('asks only for required live-test variables', () => {
+  it('shows optional media uploads while hiding unrelated optional scalar variables', () => {
     const liveVersion = version([
       { name: 'prompt', type: 'string', required: true },
       { name: 'optionalStyle', type: 'string', required: false, missingValuePolicy: 'preserve_original' },
+      { name: 'firstFrame', type: 'image_ref', required: false, missingValuePolicy: 'preserve_original' },
+      { name: 'lastFrame', type: 'image_ref', required: false, missingValuePolicy: 'preserve_original' },
     ])
     const view = renderPanel({ version: liveVersion })
 
     expect(view.getByLabelText('prompt *')).toBeTruthy()
     expect(view.queryByLabelText('optionalStyle')).toBeNull()
+    expect(view.getByLabelText('firstFrame')).toBeTruthy()
+    expect(view.getByLabelText('lastFrame')).toBeTruthy()
   })
 
   it('defaults a frame-mapped video test to its shortest supported duration', async () => {
