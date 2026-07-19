@@ -19,6 +19,7 @@ import {
 import { useLipSync } from '@/lib/query/hooks/useStoryboards'
 import ImagePreviewModal from '@/components/ui/ImagePreviewModal'
 import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapabilityDropdown'
+import { CombinedPreviewPanel } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/combined-preview'
 import VideoTimelinePanel from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/VideoTimelinePanel'
 import VideoRenderPanel from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/VideoRenderPanel'
 import type { VideoStageShellProps } from './video-stage-runtime/types'
@@ -567,6 +568,12 @@ export function useVideoStageRuntime({
         onBack={onBack}
         onEnterEditor={onEnterEditor}
         videosReady={videosWithUrl > 0}
+      />
+
+      <CombinedPreviewPanel
+        panels={projectedPanels}
+        panelVideoPreference={panelVideoPreference}
+        videoRatio={videoRatio}
       />
 
       <VideoTimelinePanel
