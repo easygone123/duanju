@@ -47,19 +47,27 @@ vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowEditor', () => ({
   </>,
 }))
 vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowTestForm', () => ({
-  default: () => null,
+  default: ({ definitions, positiveNumberVariables }: {
+    definitions: Array<{ name: string; defaultValue?: unknown; options?: unknown[] }>
+    positiveNumberVariables?: ReadonlySet<string>
+  }) => <>
+    <output aria-label="test-definitions">{JSON.stringify(definitions)}</output>
+    <output aria-label="positive-number-variables">{JSON.stringify([...(positiveNumberVariables ?? [])])}</output>
+  </>,
   emptyWorkflowTestPayload: () => null,
 }))
 vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowCompatibilityTable', () => ({
   default: () => null,
 }))
 vi.mock('@/app/[locale]/profile/components/comfyui/WorkflowActivationPanel', () => ({
-  default: ({ workflowId, onActivated, onEditMappings }: {
+  default: ({ workflowId, mediaType, onActivated, onEditMappings }: {
     workflowId: string
+    mediaType?: string
     onActivated?(): void | Promise<void>
     onEditMappings?(): void
   }) => <>
     <output aria-label="activation-workflow">{workflowId}</output>
+    <output aria-label="activation-media-type">{mediaType}</output>
     <button type="button" onClick={() => void onActivated?.()}>COMPLETE ACTIVATION</button>
     <button type="button" onClick={onEditMappings}>EDIT FAILED MAPPINGS</button>
   </>,
@@ -174,6 +182,49 @@ describe('ComfyUI workflow library removal', () => {
     await waitFor(() => expect(view.getByLabelText('activation-workflow').textContent).toBe(workflow.id))
     expect(view.queryByRole('button', { name: 'Publish' })).toBeNull()
     expect(view.queryByRole('button', { name: 'Delete workflow' })).toBeNull()
+  })
+
+  it('prepares the shortest supported duration for standalone video tests and forwards video activation context', async () => {
+    const videoWorkflow: WorkflowView = {
+      ...workflow,
+      mediaType: 'video',
+      versions: [{ ...savedVersion, outputs: [{ ...savedVersion.outputs[0], mediaType: 'video' }] }],
+    }
+    apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/comfyui/workflows') return response({ workflows: [videoWorkflow] })
+      if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const view = renderLibrary()
+
+    await waitFor(() => expect(view.getByLabelText('test-definitions')).toBeTruthy())
+    expect(JSON.parse(view.getByLabelText('test-definitions').textContent ?? '[]')).toEqual([
+      expect.objectContaining({ name: 'duration', required: true, defaultValue: 5, options: [5, 10] }),
+      expect.objectContaining({ name: 'fps', defaultValue: 16 }),
+    ])
+    expect(JSON.parse(view.getByLabelText('positive-number-variables').textContent ?? '[]')).toEqual(['duration'])
+
+    fireEvent.click(view.getByRole('button', { name: 'Test and enable' }))
+    expect(view.getByLabelText('activation-media-type').textContent).toBe('video')
+  })
+
+  it('blocks video test actions and explains how to repair a missing duration mapping', async () => {
+    const videoWorkflow: WorkflowView = {
+      ...workflow,
+      mediaType: 'video',
+      versions: [{ ...savedVersion, bindings: [], outputs: [{ ...savedVersion.outputs[0], mediaType: 'video' }] }],
+    }
+    apiFetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/comfyui/workflows') return response({ workflows: [videoWorkflow] })
+      if (url.includes('/compatibility')) return response({ compatibility: [], nextCursor: null })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const view = renderLibrary()
+
+    await waitFor(() => expect(view.getByRole('button', { name: 'Test and enable' })).toBeTruthy())
+    expect(view.getByRole('button', { name: 'Test and enable' }).hasAttribute('disabled')).toBe(true)
+    expect(view.getByRole('button', { name: 'Test workflow' }).hasAttribute('disabled')).toBe(true)
+    expect(view.getByText('Add a duration or total-frame mapping before testing this video workflow.')).toBeTruthy()
   })
 
   it('returns from activation to an unlocked mapping repair draft', async () => {

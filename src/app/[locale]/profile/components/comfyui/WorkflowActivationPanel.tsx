@@ -4,8 +4,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslations } from 'next-intl'
 import { invalidateUserModels } from '@/lib/query/hooks/useUserModels'
-import type { ComfyMediaType, ComfyVariableDefinition } from '@/lib/comfyui/types'
-import { deriveVideoTestDurationContract } from '@/lib/comfyui/video-test-duration'
+import type { ComfyMediaType } from '@/lib/comfyui/types'
+import {
+  deriveVideoTestDurationContract,
+  prepareVideoTestVariableDefinitions,
+} from '@/lib/comfyui/video-test-duration'
 import { useComfyConnections } from './hooks'
 import { requestWorkflowAction } from './workflow-requests'
 import WorkflowTestForm, { emptyWorkflowTestPayload, type WorkflowTestPayload } from './WorkflowTestForm'
@@ -38,19 +41,7 @@ export default function WorkflowActivationPanel({ workflowId, mediaType = 'image
   }), [mediaType, version.bindings, version.variableDefinitions])
   const requiredDefinitions = useMemo(() => {
     const definitions = version.variableDefinitions.filter((definition) => definition.required)
-    if (!durationTest.required || !durationTest.eligible) return definitions
-    const durationDefinition: ComfyVariableDefinition = {
-      ...durationTest.definition,
-      required: true,
-      defaultValue: durationTest.defaultSeconds,
-      ...(durationTest.durationContract.kind === 'fixed'
-        ? { options: durationTest.durationContract.options }
-        : {}),
-    }
-    return [
-      ...definitions.filter((definition) => definition.name !== durationTest.variableName),
-      durationDefinition,
-    ]
+    return prepareVideoTestVariableDefinitions(definitions, durationTest)
   }, [durationTest, version.variableDefinitions])
   const durationVariableNames = useMemo(() => new Set(
     durationTest.required && durationTest.eligible ? [durationTest.variableName] : [],

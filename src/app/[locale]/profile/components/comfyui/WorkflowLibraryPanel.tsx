@@ -1,10 +1,14 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api-fetch'
 import { invalidateUserModels } from '@/lib/query/hooks/useUserModels'
+import {
+  deriveVideoTestDurationContract,
+  prepareVideoTestVariableDefinitions,
+} from '@/lib/comfyui/video-test-duration'
 import WorkflowCompatibilityTable, { type WorkflowCompatibilityView } from './WorkflowCompatibilityTable'
 import WorkflowActivationPanel from './WorkflowActivationPanel'
 import WorkflowEditor from './WorkflowEditor'
@@ -73,6 +77,31 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
   const [mappingRepairMode, setMappingRepairMode] = useState(false)
   const [mappingFocusRequestId, setMappingFocusRequestId] = useState(0)
   const connectionsQuery = useComfyConnections()
+  const selectedWorkflow = workflows.find((workflow) => workflow.id === selectedId)
+  const selectedMediaType = selectedWorkflow?.mediaType ?? authorDraft?.mediaType ?? 'image'
+  const durationTest = useMemo(() => deriveVideoTestDurationContract({
+    mediaType: selectedMediaType,
+    variableDefinitions: savedVersion?.variableDefinitions ?? [],
+    bindings: savedVersion?.bindings ?? [],
+  }), [savedVersion?.bindings, savedVersion?.variableDefinitions, selectedMediaType])
+  const testDefinitions = useMemo(() => prepareVideoTestVariableDefinitions(
+    savedVersion?.variableDefinitions ?? [],
+    durationTest,
+  ), [durationTest, savedVersion?.variableDefinitions])
+  const durationVariableNames = useMemo(() => new Set(
+    durationTest.required && durationTest.eligible ? [durationTest.variableName] : [],
+  ), [durationTest])
+  const durationLabels = useMemo(() => (
+    durationTest.required && durationTest.eligible
+      ? { [durationTest.variableName]: t('videoTestDuration') }
+      : {}
+  ), [durationTest, t])
+  const durationHints = useMemo(() => (
+    durationTest.required && durationTest.eligible && durationTest.targetUnit === 'frames'
+      ? { [durationTest.variableName]: t('videoTestFramesHint') }
+      : {}
+  ), [durationTest, t])
+  const durationBlocked = durationTest.required && !durationTest.eligible
 
   if (activationWorkflowIdRef.current !== activationWorkflowId) {
     activationWorkflowIdRef.current = activationWorkflowId
@@ -291,6 +320,7 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
         {activationOpen && selectedId && savedVersion && <WorkflowActivationPanel
           key={savedVersion.id}
           workflowId={selectedId}
+          mediaType={selectedMediaType}
           version={savedVersion}
           onClose={closeSelectedWorkflowActivation}
           onEditMappings={editFailedMappings}
@@ -301,15 +331,24 @@ export default function WorkflowLibraryPanel({ initialWorkflowId, activationWork
         </p>}
         {selectedId && authorDraft && !activationOpen && <div className="flex flex-wrap items-end gap-2">
           <button type="button" onClick={() => void saveDraft()} disabled={busy || !authorDraft.name || !authorDraft.apiFormatJson} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('saveDraft')}</button>
-          <button type="button" onClick={openSelectedWorkflowActivation} disabled={busy || !savedVersion} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('testAndEnable')}</button>
+          <button type="button" onClick={openSelectedWorkflowActivation} disabled={busy || !savedVersion || durationBlocked} className="glass-btn-base glass-btn-tone-info px-4 py-2 text-sm">{t('testAndEnable')}</button>
           <button type="button" onClick={() => void publishVersion()} disabled={busy || !savedVersion?.validation.valid} className="glass-btn-base px-4 py-2 text-sm">{t('publish')}</button>
           <label className="min-w-[12rem] text-xs">{t('testInstance')}<select value={connectionId} onChange={(event) => setConnectionId(event.target.value)} className="mt-1 w-full rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-2 py-2">
             <option value="">{t('selectInstance')}</option>{(connectionsQuery.data?.connections ?? []).filter((connection) => connection.enabled).map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}</select></label>
-          <button type="button" onClick={() => void testVersion()} disabled={busy || !savedVersion || !connectionId || !testPayload} className="glass-btn-base px-4 py-2 text-sm">{t('test')}</button>
+          <button type="button" onClick={() => void testVersion()} disabled={busy || !savedVersion || !connectionId || !testPayload || durationBlocked} className="glass-btn-base px-4 py-2 text-sm">{t('test')}</button>
           <button type="button" onClick={() => void archiveSelectedWorkflow()} disabled={busy}
             className="glass-btn-base glass-btn-tone-danger px-4 py-2 text-sm">{t('deleteWorkflow')}</button>
         </div>}
-        {savedVersion && !activationOpen && <WorkflowTestForm key={savedVersion.id} definitions={savedVersion.variableDefinitions} onChange={setTestPayload} onError={(key) => setError(key as ErrorKey)} />}
+        {savedVersion && !activationOpen && <WorkflowTestForm
+          key={savedVersion.id}
+          definitions={testDefinitions}
+          positiveNumberVariables={durationVariableNames}
+          labelOverrides={durationLabels}
+          hintOverrides={durationHints}
+          onChange={setTestPayload}
+          onError={(key) => setError(key as ErrorKey)}
+        />}
+        {durationBlocked && !activationOpen && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t('videoTestDurationMappingRequired')}</p>}
         {workflowDeleted && <p role="status" className="text-sm text-[var(--glass-tone-success-fg)]">{t('workflowDeleted')}</p>}
         {error && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t(error)}</p>}
         {selectedId && <WorkflowCompatibilityTable issues={issues} compatibility={compatibility} />}

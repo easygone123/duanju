@@ -22,6 +22,12 @@ import type {
 import { extractComfyOutputs } from './workflow-output'
 import { renderComfyWorkflow } from './workflow-renderer'
 import { validateWorkflowContract } from './workflow-schema'
+import {
+  COMFY_VIDEO_TEST_DURATION_INVALID,
+  COMFY_VIDEO_TEST_DURATION_REQUIRED,
+  deriveVideoTestDurationContract,
+  validateVideoTestDurationValue,
+} from './video-test-duration'
 
 const TEST_LEASE_TTL_MS = 5 * 60 * 1000
 const TEST_RUN_TIMEOUT_MS = 5 * 60 * 1000
@@ -105,6 +111,24 @@ async function runOwnedWorkflowTestInternal(
   if (!version) throw new ApiError('NOT_FOUND')
   const issues = validationForVersion(version)
   if (issues.length > 0) throw new ApiError('INVALID_PARAMS', { validationIssues: issues })
+  const durationTest = deriveVideoTestDurationContract({
+    mediaType: workflow.mediaType === 'video' ? 'video' : 'image',
+    variableDefinitions: version.variableDefinitions as unknown as ComfyVariableDefinition[],
+    bindings: versionBindings(version),
+  })
+  if (durationTest.required && !durationTest.eligible) {
+    throw new ApiError('INVALID_PARAMS', { validationIssues: [{
+      code: COMFY_VIDEO_TEST_DURATION_REQUIRED,
+      message: 'Video workflow live tests require a duration or total-frame mapping.',
+    }] })
+  }
+  if (durationTest.required && durationTest.eligible
+    && !validateVideoTestDurationValue(durationTest, input.variables[durationTest.variableName])) {
+    throw new ApiError('INVALID_PARAMS', { validationIssues: [{
+      code: COMFY_VIDEO_TEST_DURATION_INVALID,
+      message: 'Video workflow live tests require a supported positive duration.',
+    }] })
+  }
   const connection = await prisma.comfyConnection.findFirst({
     where: { id: input.connectionId, userId, enabled: true },
   })

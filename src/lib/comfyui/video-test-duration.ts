@@ -91,3 +91,21 @@ export function validateVideoTestDurationValue(
   return contract.durationContract.kind !== 'fixed'
     || contract.durationContract.options.some((option) => decimalEquals(option, value))
 }
+
+export function prepareVideoTestVariableDefinitions(
+  definitions: readonly ComfyVariableDefinition[],
+  contract: VideoTestDurationContract,
+): ComfyVariableDefinition[] {
+  if (!contract.required || !contract.eligible) return [...definitions]
+  const durationDefinition: ComfyVariableDefinition = {
+    ...contract.definition,
+    required: true,
+    defaultValue: contract.defaultSeconds,
+    ...(contract.durationContract.kind === 'fixed'
+      ? { options: contract.durationContract.options }
+      : {}),
+  }
+  return definitions.map((definition) => (
+    definition.name === contract.variableName ? durationDefinition : definition
+  ))
+}

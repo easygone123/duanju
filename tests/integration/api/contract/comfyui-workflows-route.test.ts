@@ -908,6 +908,86 @@ describe('ComfyUI workflow library', () => {
     expect(redisMock.eval).toHaveBeenCalled()
   })
 
+  it('rejects a video live test without a duration mapping before connection or network access', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow({ mediaType: 'video' }))
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version({
+      apiFormatJson: {
+        '1': { class_type: 'VideoNode', inputs: {} },
+        '2': { class_type: 'SaveVideo', inputs: { video: ['1', 0] } },
+      },
+      variableDefinitions: [],
+      bindingSpec: [],
+      outputSpec: [{ name: 'video', nodeId: '2', fieldPath: 'gifs', mediaType: 'video', primary: true }],
+      requirements: { nodeClasses: ['VideoNode', 'SaveVideo'], candidateLoaderInputs: [] },
+    }))
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/test-run/route')
+
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/test-run', method: 'POST',
+      body: { versionId: 'version-1', connectionId: 'connection-1', variables: {} },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+
+    expect(response.status).toBe(400)
+    expect((await body(response)).error).toEqual(expect.objectContaining({
+      code: 'INVALID_PARAMS',
+      details: expect.objectContaining({
+        validationIssues: expect.arrayContaining([
+          expect.objectContaining({ code: 'COMFY_VIDEO_TEST_DURATION_REQUIRED' }),
+        ]),
+      }),
+    }))
+    expect(prismaMock.comfyConnection.findFirst).not.toHaveBeenCalled()
+    expect(authorizeComfyTargetMock).not.toHaveBeenCalled()
+    expect(getQueueMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unsupported video test duration before connection or network access', async () => {
+    installAuthMocks()
+    mockAuthenticated('user-1')
+    prismaMock.comfyWorkflow.findFirst.mockResolvedValue(workflow({ mediaType: 'video' }))
+    prismaMock.comfyWorkflowVersion.findFirst.mockResolvedValue(version({
+      apiFormatJson: {
+        '1': { class_type: 'VideoNode', inputs: { length: 81 } },
+        '2': { class_type: 'SaveVideo', inputs: { video: ['1', 0] } },
+      },
+      variableDefinitions: [
+        { name: 'duration', type: 'number', required: true },
+        { name: 'fps', type: 'number', required: false, defaultValue: 16 },
+      ],
+      bindingSpec: [{
+        nodeId: '1', inputPath: 'length', variable: 'duration', valueType: 'number',
+        numericTransform: {
+          sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+          fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+          rounding: 'round', frameOffset: 1, allowedTargetValues: [81, 161],
+        },
+      }],
+      outputSpec: [{ name: 'video', nodeId: '2', fieldPath: 'gifs', mediaType: 'video', primary: true }],
+      requirements: { nodeClasses: ['VideoNode', 'SaveVideo'], candidateLoaderInputs: [] },
+    }))
+    const route = await import('@/app/api/comfyui/workflows/[workflowId]/test-run/route')
+
+    const response = await route.POST(buildMockRequest({
+      path: '/api/comfyui/workflows/workflow-1/test-run', method: 'POST',
+      body: { versionId: 'version-1', connectionId: 'connection-1', variables: { duration: 6 } },
+    }), { params: Promise.resolve({ workflowId: 'workflow-1' }) })
+
+    expect(response.status).toBe(400)
+    expect((await body(response)).error).toEqual(expect.objectContaining({
+      code: 'INVALID_PARAMS',
+      details: expect.objectContaining({
+        validationIssues: expect.arrayContaining([
+          expect.objectContaining({ code: 'COMFY_VIDEO_TEST_DURATION_INVALID' }),
+        ]),
+      }),
+    }))
+    expect(prismaMock.comfyConnection.findFirst).not.toHaveBeenCalled()
+    expect(authorizeComfyTargetMock).not.toHaveBeenCalled()
+    expect(getQueueMock).not.toHaveBeenCalled()
+  })
+
   it('live-tests with trusted network mode when network variables are absent', async () => {
     delete process.env.COMFYUI_NETWORK_MODE
     delete process.env.COMFYUI_ALLOWED_HOSTS
@@ -1017,16 +1097,26 @@ describe('ComfyUI workflow library', () => {
       purpose: 'generation',
       apiFormatJson: {
         '1': { class_type: 'LoadImage', inputs: { image: 'placeholder.png' } },
-        '2': { class_type: 'SaveVideo', inputs: { images: ['1', 0], video: ['3', 0] } },
+        '2': { class_type: 'SaveVideo', inputs: { images: ['1', 0], video: ['3', 0], length: 81 } },
         '3': { class_type: 'LoadVideo', inputs: { video: 'placeholder.mp4' } },
       },
       variableDefinitions: [
         { name: 'first_frame', type: 'image_ref', required: true },
         { name: 'source_video', type: 'video_ref', required: true },
+        { name: 'duration', type: 'number', required: true },
+        { name: 'fps', type: 'number', required: false, defaultValue: 16 },
       ],
       bindings: [
         { nodeId: '1', inputPath: 'image', variable: 'first_frame', valueType: 'image_ref', transform: 'filename' },
         { nodeId: '3', inputPath: 'video', variable: 'source_video', valueType: 'video_ref', transform: 'filename' },
+        {
+          nodeId: '2', inputPath: 'length', variable: 'duration', valueType: 'number',
+          numericTransform: {
+            sourceUnit: 'seconds', targetUnit: 'frames', output: 'number',
+            fps: { source: 'runtime_then_fallback', variable: 'fps', fallback: 16 },
+            rounding: 'round', frameOffset: 1, allowedTargetValues: [81],
+          },
+        },
       ],
       outputs: [{ name: 'video', nodeId: '2', fieldPath: 'gifs', mediaType: 'video', primary: true }],
     }
@@ -1054,6 +1144,7 @@ describe('ComfyUI workflow library', () => {
         versionId: 'version-1', connectionId: 'connection-1', variables: {
           first_frame: { storageKey: 'inline:first_frame', mimeType: 'image/png', filename: 'input.png' },
           source_video: { storageKey: 'inline:source_video', mimeType: 'video/mp4', filename: 'input.mp4' },
+          duration: 5,
         },
         uploads: {
           first_frame: { filename: 'input.png', contentType: 'image/png', base64: 'AQID' },
@@ -1068,6 +1159,7 @@ describe('ComfyUI workflow library', () => {
     expect(submitPromptMock).toHaveBeenCalledWith(expect.objectContaining({
       '1': expect.objectContaining({ inputs: { image: 'input.png' } }),
       '3': expect.objectContaining({ inputs: { video: 'input.mp4' } }),
+      '2': expect.objectContaining({ inputs: expect.objectContaining({ length: 81 }) }),
     }), expect.any(String))
   })
 
