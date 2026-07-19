@@ -20,6 +20,7 @@ import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { getProviderConfig } from '@/lib/api-config'
 import { resolveVideoGenerationModel } from '@/lib/video/model-selection'
 import { resolvePinnedVideoPrompt } from '@/lib/novel-promotion/video/panel-video-submission'
+import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
 
 type AnyObj = Record<string, unknown>
 type VideoOptionValue = string | number | boolean
@@ -269,19 +270,22 @@ async function handleVideoPanelTask(job: Job<TaskJobData>) {
     projectModels.videoRatio,
     generationOptions,
   )
+  const videoMedia = await ensureMediaObjectFromStorageKey(cosKey)
 
   await assertTaskActive(job, 'persist_panel_video')
   await prisma.novelPromotionPanel.update({
     where: { id: panel.id },
     data: {
       videoUrl: cosKey,
+      videoMediaId: videoMedia.id,
       videoGenerationMode: generationMode,
     },
   })
 
   return {
     panelId: panel.id,
-    videoUrl: cosKey,
+    videoUrl: videoMedia.url,
+    videoMediaId: videoMedia.id,
     ...(typeof actualVideoTokens === 'number' ? { actualVideoTokens } : {}),
   }
 }
@@ -343,12 +347,14 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
   await reportTaskProgress(job, 93, { stage: 'persist_lip_sync' })
 
   const cosKey = await uploadVideoSourceToCos(source, 'lip-sync', panel.id)
+  const lipSyncVideoMedia = await ensureMediaObjectFromStorageKey(cosKey)
 
   await assertTaskActive(job, 'persist_lip_sync_video')
   await prisma.novelPromotionPanel.update({
     where: { id: panel.id },
     data: {
       lipSyncVideoUrl: cosKey,
+      lipSyncVideoMediaId: lipSyncVideoMedia.id,
       lipSyncTaskId: null,
     },
   })
@@ -356,7 +362,8 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
   return {
     panelId: panel.id,
     voiceLineId,
-    lipSyncVideoUrl: cosKey,
+    lipSyncVideoUrl: lipSyncVideoMedia.url,
+    lipSyncVideoMediaId: lipSyncVideoMedia.id,
   }
 }
 
