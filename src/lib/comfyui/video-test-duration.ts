@@ -105,7 +105,10 @@ export function prepareVideoTestVariableDefinitions(
       ? { options: contract.durationContract.options }
       : {}),
   }
-  return definitions.map((definition) => (
+  const prepared = definitions.map((definition) => (
     definition.name === contract.variableName ? durationDefinition : definition
   ))
+  return definitions.some((definition) => definition.name === contract.variableName)
+    ? prepared
+    : [...prepared, durationDefinition]
 }
