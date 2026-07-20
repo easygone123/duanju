@@ -124,9 +124,10 @@ export function buildFourGridSheetAnalysisPrompt(input: {
     total + (typeof panel.planned_duration === 'number' ? panel.planned_duration : 0)
   ), 0)
   const language = input.locale === 'zh' ? 'Simplified Chinese' : 'English'
+  const exampleNarrationPanelIndex = orderedPanels.findIndex((panel) => !panel.dialogueText?.trim())
   const jsonExample = {
     panels: Array.from({ length: FOUR_GRID_PANEL_COUNT }, (_, index) => {
-      const demonstratesNarration = index === 1
+      const demonstratesNarration = index === exampleNarrationPanelIndex
       return {
         panel_number: index + 1,
         description: '...',
@@ -154,6 +155,7 @@ export function buildFourGridSheetAnalysisPrompt(input: {
     'Evaluate every eligible dialogue-free panel independently against those criteria; never default all eligible panels to narration_recommended false.',
     'Never use narration to restate visible action.',
     'When narration_recommended is true, provide non-empty narration_text; otherwise set narration_text and narration_emotion to null.',
+    'Eligible-panel true branch semantics (not a numbered panel recommendation): {"narration_recommended":true,"narration_text":"Time passed before they reached the city.","narration_emotion":"reflective"}.',
     'Allocate duration from dialogue length, action complexity, and camera movement. Every duration must be a positive number of seconds.',
     'Include narration speaking time in duration allocation.',
     targetDuration > 0

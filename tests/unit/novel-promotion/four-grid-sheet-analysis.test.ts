@@ -37,6 +37,19 @@ const plannedPanels = rows.map((row, panelIndex) => ({
   estimatedDuration: row.duration,
 }))
 
+function promptExample(prompt: string) {
+  const jsonLine = prompt.split('\n').find((line) => line.startsWith('{"panels":'))
+  if (!jsonLine) throw new Error('Missing four-grid prompt example')
+  return JSON.parse(jsonLine) as {
+    panels: Array<{
+      panel_number: number
+      narration_recommended: boolean
+      narration_text: string | null
+      narration_emotion: string | null
+    }>
+  }
+}
+
 describe('four-grid sheet analysis', () => {
   it('sorts exactly four grounded rows by panel number', () => {
     expect(parseFourGridSheetAnalysis(JSON.stringify({ panels: [...rows].reverse() }), plannedPanels))
@@ -66,10 +79,14 @@ describe('four-grid sheet analysis', () => {
           narration_emotion: 'reflective',
         }
       : row)
-    const shuffledPanels = [plannedPanels[2], plannedPanels[0], plannedPanels[3], plannedPanels[1]]
+    const shuffledPanels = [plannedPanels[2], plannedPanels[3], plannedPanels[0], plannedPanels[1]]
+    const shuffledRows = [...narratedRows].reverse()
+
+    expect(shuffledRows[2]).toMatchObject({ panel_number: 2, narration_recommended: true })
+    expect(shuffledPanels[2]).toMatchObject({ panelIndex: 0, dialogueText: 'dialogue 1' })
 
     expect(parseFourGridSheetAnalysis(
-      JSON.stringify({ panels: [...narratedRows].reverse() }),
+      JSON.stringify({ panels: shuffledRows }),
       shuffledPanels,
     )).toEqual(narratedRows)
   })
@@ -152,6 +169,48 @@ describe('four-grid sheet analysis', () => {
     expect(prompt).toContain('"narration_recommended":true,"narration_text":"Time passed before they reached the city.","narration_emotion":"reflective"')
     expect(prompt.match(/"narration_recommended":false,"narration_text":null,"narration_emotion":null/g))
       .toHaveLength(3)
+  })
+
+  it('keeps numbered prompt examples narration-free on dialogue panels', () => {
+    const panelsWithPanelTwoDialogue = plannedPanels.map((panel, index) => index === 1
+      ? {
+          ...panel,
+          dialogueSpeaker: 'hero',
+          dialogueText: 'dialogue 2',
+          dialogueEmotion: 'calm',
+        }
+      : panel)
+    const example = promptExample(buildFourGridSheetAnalysisPrompt({
+      locale: 'en',
+      panels: panelsWithPanelTwoDialogue,
+    }))
+
+    for (const panel of panelsWithPanelTwoDialogue.filter((panel) => panel.dialogueText?.trim())) {
+      expect(example.panels.find((row) => row.panel_number === panel.panelIndex + 1))
+        .toMatchObject({
+          narration_recommended: false,
+          narration_text: null,
+          narration_emotion: null,
+        })
+    }
+  })
+
+  it('keeps all numbered prompt examples non-narrated when every panel has dialogue', () => {
+    const allDialoguePanels = plannedPanels.map((panel, index) => ({
+      ...panel,
+      dialogueSpeaker: 'hero',
+      dialogueText: `dialogue ${index + 1}`,
+      dialogueEmotion: 'calm',
+    }))
+    const prompt = buildFourGridSheetAnalysisPrompt({ locale: 'en', panels: allDialoguePanels })
+    const example = promptExample(prompt)
+
+    expect(example.panels).toHaveLength(4)
+    expect(example.panels.every((row) => !row.narration_recommended
+      && row.narration_text === null
+      && row.narration_emotion === null)).toBe(true)
+    expect(prompt).toContain('Eligible-panel true branch semantics (not a numbered panel recommendation)')
+    expect(prompt).toContain('"narration_recommended":true,"narration_text":"Time passed before they reached the city.","narration_emotion":"reflective"')
   })
 
   it('sends the complete sheet and authoritative plot plan to one vision request', async () => {
