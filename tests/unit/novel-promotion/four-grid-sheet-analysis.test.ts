@@ -57,6 +57,23 @@ describe('four-grid sheet analysis', () => {
       .toEqual(narratedRows)
   })
 
+  it('binds shuffled model rows to shuffled planned panels by panel number and panel index', () => {
+    const narratedRows = rows.map((row, index) => index === 1
+      ? {
+          ...row,
+          narration_recommended: true,
+          narration_text: 'Night fell before they reached the city.',
+          narration_emotion: 'reflective',
+        }
+      : row)
+    const shuffledPanels = [plannedPanels[2], plannedPanels[0], plannedPanels[3], plannedPanels[1]]
+
+    expect(parseFourGridSheetAnalysis(
+      JSON.stringify({ panels: [...narratedRows].reverse() }),
+      shuffledPanels,
+    )).toEqual(narratedRows)
+  })
+
   it('accepts non-recommended narration fields as null', () => {
     expect(parseFourGridSheetAnalysis(JSON.stringify({ panels: rows }), plannedPanels))
       .toEqual(rows)
@@ -69,6 +86,18 @@ describe('four-grid sheet analysis', () => {
     ['invalid duration', rows.map((row, index) => index === 0 ? { ...row, duration: 0 } : row)],
   ])('rejects %s', (_case, value) => {
     expect(() => parseFourGridSheetAnalysis(JSON.stringify({ panels: value }), plannedPanels))
+      .toThrow('FOUR_GRID_SHEET_ANALYSIS_INVALID')
+  })
+
+  it.each([
+    ['duplicate', plannedPanels.map((panel, index) => (
+      index === 3 ? { ...panel, panelIndex: 2 } : panel
+    ))],
+    ['gapped', plannedPanels.map((panel, index) => (
+      index === 3 ? { ...panel, panelIndex: 4 } : panel
+    ))],
+  ])('rejects %s planned panel indexes', (_case, value) => {
+    expect(() => parseFourGridSheetAnalysis(JSON.stringify({ panels: rows }), value))
       .toThrow('FOUR_GRID_SHEET_ANALYSIS_INVALID')
   })
 
@@ -118,8 +147,11 @@ describe('four-grid sheet analysis', () => {
     expect(prompt).toContain('time/location transition, inner thought, off-screen background information, or necessary causal context')
     expect(prompt).toContain('Never use narration to restate visible action')
     expect(prompt).toContain('Include narration speaking time in duration allocation')
+    expect(prompt).toContain('Evaluate every eligible dialogue-free panel independently')
+    expect(prompt).toContain('never default all eligible panels to narration_recommended false')
+    expect(prompt).toContain('"narration_recommended":true,"narration_text":"Time passed before they reached the city.","narration_emotion":"reflective"')
     expect(prompt.match(/"narration_recommended":false,"narration_text":null,"narration_emotion":null/g))
-      .toHaveLength(4)
+      .toHaveLength(3)
   })
 
   it('sends the complete sheet and authoritative plot plan to one vision request', async () => {

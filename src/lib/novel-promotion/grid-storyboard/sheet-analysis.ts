@@ -125,18 +125,21 @@ export function buildFourGridSheetAnalysisPrompt(input: {
   ), 0)
   const language = input.locale === 'zh' ? 'Simplified Chinese' : 'English'
   const jsonExample = {
-    panels: Array.from({ length: FOUR_GRID_PANEL_COUNT }, (_, index) => ({
-      panel_number: index + 1,
-      description: '...',
-      image_prompt: '...',
-      video_prompt: '...',
-      duration: 3.5,
-      shot_type: '...',
-      camera_move: '...',
-      narration_recommended: false,
-      narration_text: null,
-      narration_emotion: null,
-    })),
+    panels: Array.from({ length: FOUR_GRID_PANEL_COUNT }, (_, index) => {
+      const demonstratesNarration = index === 1
+      return {
+        panel_number: index + 1,
+        description: '...',
+        image_prompt: '...',
+        video_prompt: '...',
+        duration: 3.5,
+        shot_type: '...',
+        camera_move: '...',
+        narration_recommended: demonstratesNarration,
+        narration_text: demonstratesNarration ? 'Time passed before they reached the city.' : null,
+        narration_emotion: demonstratesNarration ? 'reflective' : null,
+      }
+    }),
   }
 
   return [
@@ -148,6 +151,7 @@ export function buildFourGridSheetAnalysisPrompt(input: {
     'For each cell, produce a grounded still-image prompt and a video prompt whose starting state exactly matches that cell.',
     'Narration is allowed only on panels whose authoritative dialogue is empty after trimming; never add narration to a dialogue panel.',
     'Set narration_recommended to true only for a time/location transition, inner thought, off-screen background information, or necessary causal context not clear from the image or action.',
+    'Evaluate every eligible dialogue-free panel independently against those criteria; never default all eligible panels to narration_recommended false.',
     'Never use narration to restate visible action.',
     'When narration_recommended is true, provide non-empty narration_text; otherwise set narration_text and narration_emotion to null.',
     'Allocate duration from dialogue length, action complexity, and camera movement. Every duration must be a positive number of seconds.',
