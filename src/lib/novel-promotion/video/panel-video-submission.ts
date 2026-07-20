@@ -35,6 +35,9 @@ export interface PanelVideoMetadata {
   dialogueText?: string | null
   dialogueEmotion?: string | null
   includeDialogueInVideoPrompt?: boolean | null
+  narrationEnabled?: boolean | null
+  narrationText?: string | null
+  narrationEmotion?: string | null
   videoPrompt?: string | null
   estimatedDuration?: number | null
   durationOverride?: number | null
@@ -54,6 +57,8 @@ export interface PanelVideoSubmission {
   visualPrompt: string
   dialogueFragment?: string
   dialogueTimingInstruction?: string
+  narrationFragment?: string
+  narrationTimingInstruction?: string
   submittedPrompt: string
   requestedDuration: number
   effectiveDuration: number
@@ -187,11 +192,28 @@ function buildDialogueFragment(panel: PanelVideoMetadata): string | undefined {
 
 const DIALOGUE_TIMING_INSTRUCTION = '[DIALOGUE_TIMING] Fit the complete literal dialogue naturally within the requested shot duration, preserving brief acting and reaction beats.'
 
+function buildNarrationFragment(panel: PanelVideoMetadata): string | undefined {
+  if (panel.narrationEnabled !== true) return undefined
+  const text = singleLine(panel.narrationText, 1000)
+  if (!text) return undefined
+  const data = {
+    speaker: '旁白',
+    emotion: singleLine(panel.narrationEmotion, 120),
+    delivery: 'natural off-screen voice-over narration',
+    text,
+  }
+  return `[NARRATION_DATA] ${JSON.stringify(data)}`
+}
+
+const NARRATION_TIMING_INSTRUCTION = '[NARRATION_TIMING] Fit the complete literal narration naturally within the requested shot duration as off-screen voice-over.'
+
 export function resolvePanelVideoSubmission(input: PanelVideoSubmissionInput): PanelVideoSubmission {
   const { model, reason } = resolveModel(input)
   const visualPrompt = singleLine(input.panel.videoPrompt, 8000)
   const dialogueFragment = buildDialogueFragment(input.panel)
   const dialogueTimingInstruction = dialogueFragment ? DIALOGUE_TIMING_INSTRUCTION : undefined
+  const narrationFragment = buildNarrationFragment(input.panel)
+  const narrationTimingInstruction = narrationFragment ? NARRATION_TIMING_INSTRUCTION : undefined
   const { requested, source } = resolveRequestedDuration(input.panel, model.duration)
   const effectiveDuration = resolveEffectiveDuration(requested, model.duration)
   const canonicalRequestedDuration = model.duration.kind === 'fixed'
@@ -209,7 +231,15 @@ export function resolvePanelVideoSubmission(input: PanelVideoSubmissionInput): P
     visualPrompt,
     dialogueFragment,
     dialogueTimingInstruction,
-    submittedPrompt: [visualPrompt, dialogueFragment, dialogueTimingInstruction].filter(Boolean).join(' '),
+    narrationFragment,
+    narrationTimingInstruction,
+    submittedPrompt: [
+      visualPrompt,
+      dialogueFragment,
+      dialogueTimingInstruction,
+      narrationFragment,
+      narrationTimingInstruction,
+    ].filter(Boolean).join(' '),
     requestedDuration: canonicalRequestedDuration,
     effectiveDuration,
     durationSource: source,

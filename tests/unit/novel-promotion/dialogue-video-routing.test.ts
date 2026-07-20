@@ -112,6 +112,45 @@ describe('resolvePanelVideoSubmission', () => {
     expect(result.modelReason).toBe('normal_project_model')
   })
 
+  it('appends enabled narration and its delivery timing to the video prompt', () => {
+    const result = resolve({
+      panel: {
+        hasDialogue: false,
+        videoPrompt: '空镜扫过十年后的旧城',
+        narrationEnabled: true,
+        narrationText: '十年后，她终于回到了故乡。',
+        narrationEmotion: '克制而怀念',
+        estimatedDuration: 5,
+        durationOverride: null,
+      },
+    })
+
+    expect(result.narrationFragment).toBe(
+      '[NARRATION_DATA] {"speaker":"旁白","emotion":"克制而怀念","delivery":"natural off-screen voice-over narration","text":"十年后，她终于回到了故乡。"}',
+    )
+    expect(result.submittedPrompt).toContain('[NARRATION_DATA]')
+    expect(result.submittedPrompt).toContain('十年后，她终于回到了故乡。')
+    expect(result.submittedPrompt).toContain(result.narrationTimingInstruction)
+  })
+
+  it('does not append narration when the effective narration state is disabled', () => {
+    const result = resolve({
+      panel: {
+        hasDialogue: false,
+        videoPrompt: '空镜扫过街道',
+        narrationEnabled: false,
+        narrationText: '这段旁白已被关闭。',
+        narrationEmotion: '平静',
+        estimatedDuration: 5,
+        durationOverride: null,
+      },
+    })
+
+    expect(result.narrationFragment).toBeUndefined()
+    expect(result.narrationTimingInstruction).toBeUndefined()
+    expect(result.submittedPrompt).toBe('空镜扫过街道')
+  })
+
   it('explicitly reports normal fallback only when no dialogue model is configured', () => {
     const result = resolve({ project: { videoModel: 'cloud::normal', dialogueVideoModel: null } })
 
