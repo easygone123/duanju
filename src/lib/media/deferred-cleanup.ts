@@ -221,7 +221,11 @@ export async function inspectDeferredAudioCleanupCandidate(
   | { state: 'grace_period'; referenced: null }
   | { state: 'referenced'; referenced: true }
   | { state: 'eligible_for_future_gc'; referenced: false }
+  | { state: 'unsupported_media_kind'; referenced: null }
 > {
+  if (candidate.mediaKind !== 'audio') {
+    return { state: 'unsupported_media_kind', referenced: null }
+  }
   if (candidate.notBefore.getTime() > now.getTime()) {
     return { state: 'grace_period', referenced: null }
   }

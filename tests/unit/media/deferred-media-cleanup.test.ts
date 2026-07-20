@@ -103,11 +103,44 @@ describe('deferred media cleanup', () => {
     }))
   })
 
+  it('records the media kind and replacement reason for deferred video cleanup', async () => {
+    const now = new Date('2026-07-20T00:00:00.000Z')
+
+    await scheduleMediaCleanupCandidate({
+      storageKey: 'video/lip-sync-old.mp4',
+      mediaId: 'video-media-old',
+      mediaKind: 'video',
+      reason: 'panel_lip_sync_replaced',
+      now,
+    })
+
+    expect(prismaMock.mediaCleanupCandidate.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        mediaKind: 'video',
+        reason: 'panel_lip_sync_replaced',
+      }),
+      create: expect.objectContaining({
+        mediaKind: 'video',
+        reason: 'panel_lip_sync_replaced',
+      }),
+    }))
+  })
+
   it('does not probe or delete a candidate before its grace period expires', async () => {
     await expect(inspectDeferredAudioCleanupCandidate(
       candidate(),
       new Date('2026-07-20T00:00:00.000Z'),
     )).resolves.toEqual({ state: 'grace_period', referenced: null })
+
+    expect(prismaMock.mediaObject.findFirst).not.toHaveBeenCalled()
+    expect(prismaMock.novelPromotionVoiceLine.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('marks video candidates unsupported instead of reporting them safe for audio GC', async () => {
+    await expect(inspectDeferredAudioCleanupCandidate(
+      candidate({ mediaKind: 'video', reason: 'panel_lip_sync_replaced' }),
+      new Date('2026-08-20T00:00:00.000Z'),
+    )).resolves.toEqual({ state: 'unsupported_media_kind', referenced: null })
 
     expect(prismaMock.mediaObject.findFirst).not.toHaveBeenCalled()
     expect(prismaMock.novelPromotionVoiceLine.findFirst).not.toHaveBeenCalled()

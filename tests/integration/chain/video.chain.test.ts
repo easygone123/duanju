@@ -47,6 +47,7 @@ const prismaMock = vi.hoisted(() => ({
     findUnique: vi.fn(),
     findFirst: vi.fn(),
     update: vi.fn(async () => undefined),
+    updateMany: vi.fn(async () => ({ count: 1 })),
   },
   novelPromotionVoiceLine: {
     findFirst: vi.fn(),
@@ -90,6 +91,18 @@ vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/media/outbound-image', () => ({
   normalizeToBase64ForGeneration: vi.fn(async (input: string) => input),
 }))
+vi.mock('@/lib/media/service', () => ({
+  ensureMediaObjectFromStorageKey: vi.fn(async (storageKey: string) => ({
+    id: `media:${storageKey}`,
+    url: storageKey,
+  })),
+  getMediaObjectById: vi.fn(async () => null),
+  resolveStorageKeyFromMediaValue: vi.fn(async (value: string | null) => value),
+}))
+vi.mock('@/lib/media/deferred-cleanup', () => ({
+  scheduleMediaCleanupCandidate: vi.fn(async () => ({ id: 'candidate-1' })),
+}))
+vi.mock('@/lib/storage', () => ({ deleteObject: vi.fn(async () => undefined) }))
 vi.mock('@/lib/model-capabilities/lookup', () => ({
   resolveBuiltinCapabilitiesByModelKey: vi.fn(() => ({ video: { firstlastframe: true } })),
 }))
@@ -115,6 +128,8 @@ describe('chain contract - video queue behavior', () => {
       id: 'panel-1',
       videoUrl: 'cos/base-video.mp4',
       storyboardId: 'storyboard-1',
+      lipSyncVideoUrl: null,
+      lipSyncVideoMediaId: null,
     }
     prismaMock.novelPromotionPanel.findUnique.mockResolvedValue(panel)
     prismaMock.novelPromotionPanel.findFirst.mockResolvedValue(panel)
@@ -200,11 +215,17 @@ describe('chain contract - video queue behavior', () => {
       panelId: 'panel-1',
       voiceLineId: 'line-1',
       lipSyncVideoUrl: 'cos/lip-sync/video.mp4',
+      lipSyncVideoMediaId: 'media:cos/lip-sync/video.mp4',
     })
-    expect(prismaMock.novelPromotionPanel.update).toHaveBeenCalledWith({
-      where: { id: 'panel-1' },
+    expect(prismaMock.novelPromotionPanel.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: 'panel-1',
+        lipSyncVideoUrl: null,
+        lipSyncVideoMediaId: null,
+      }),
       data: {
         lipSyncVideoUrl: 'cos/lip-sync/video.mp4',
+        lipSyncVideoMediaId: 'media:cos/lip-sync/video.mp4',
         lipSyncTaskId: null,
       },
     })

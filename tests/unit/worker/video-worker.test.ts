@@ -13,6 +13,8 @@ type PanelRow = {
   description: string | null
   firstLastFramePrompt: string | null
   duration: number | null
+  lipSyncVideoUrl: string | null
+  lipSyncVideoMediaId: string | null
 }
 
 const workerState = vi.hoisted(() => ({
@@ -56,6 +58,9 @@ const ensureMediaObjectMock = vi.hoisted(() => vi.fn(async (storageKey: string) 
   id: `media:${storageKey}`,
   url: storageKey,
 })))
+const getMediaObjectByIdMock = vi.hoisted(() => vi.fn())
+const resolveStorageKeyFromMediaValueMock = vi.hoisted(() => vi.fn(async (value: string | null) => value))
+const scheduleMediaCleanupCandidateMock = vi.hoisted(() => vi.fn(async () => ({ id: 'candidate-1' })))
 
 const prismaMock = vi.hoisted(() => ({
   novelPromotionPanel: {
@@ -105,6 +110,11 @@ vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/storage', () => ({ deleteObject: deleteObjectMock }))
 vi.mock('@/lib/media/service', () => ({
   ensureMediaObjectFromStorageKey: ensureMediaObjectMock,
+  getMediaObjectById: getMediaObjectByIdMock,
+  resolveStorageKeyFromMediaValue: resolveStorageKeyFromMediaValueMock,
+}))
+vi.mock('@/lib/media/deferred-cleanup', () => ({
+  scheduleMediaCleanupCandidate: scheduleMediaCleanupCandidateMock,
 }))
 vi.mock('@/lib/media/outbound-image', () => ({
   normalizeToBase64ForGeneration: normalizeToBase64ForGenerationMock,
@@ -127,6 +137,8 @@ function buildPanel(overrides?: Partial<PanelRow>): PanelRow {
     description: 'panel description',
     firstLastFramePrompt: null,
     duration: 5,
+    lipSyncVideoUrl: null,
+    lipSyncVideoMediaId: null,
     ...(overrides || {}),
   }
 }
@@ -197,6 +209,7 @@ describe('worker video processor behavior', () => {
       lineType: 'dialogue',
       matchedPanelId: 'panel-1',
     })
+    getMediaObjectByIdMock.mockResolvedValue(null)
 
     const mod = await import('@/lib/workers/video.worker')
     mod.createVideoWorker()
@@ -576,14 +589,78 @@ describe('worker video processor behavior', () => {
       'lip-sync',
       'panel-1-task-1',
     )
-    expect(prismaMock.novelPromotionPanel.update).toHaveBeenCalledWith({
-      where: { id: 'panel-1' },
+    expect(prismaMock.novelPromotionPanel.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: 'panel-1',
+        videoUrl: 'cos/base-video.mp4',
+        lipSyncVideoUrl: null,
+        lipSyncVideoMediaId: null,
+      }),
       data: {
         lipSyncVideoUrl: 'cos/lip-sync/video.mp4',
         lipSyncVideoMediaId: 'media:cos/lip-sync/video.mp4',
         lipSyncTaskId: null,
       },
     })
+  })
+
+  it('LIP_SYNC: defers the replaced video only after a successful publish CAS', async () => {
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(buildPanel({
+      lipSyncVideoUrl: 'cos/lip-sync/old.mp4',
+      lipSyncVideoMediaId: 'media-old',
+    }))
+    getMediaObjectByIdMock.mockResolvedValueOnce({
+      id: 'media-old',
+      storageKey: 'cos/lip-sync/old.mp4',
+    })
+
+    await workerState.processor!(buildJob({
+      type: TASK_TYPE.LIP_SYNC,
+      payload: { voiceLineId: 'line-1' },
+    }))
+
+    expect(scheduleMediaCleanupCandidateMock).toHaveBeenCalledWith({
+      storageKey: 'cos/lip-sync/old.mp4',
+      mediaId: 'media-old',
+      mediaKind: 'video',
+      reason: 'panel_lip_sync_replaced',
+    })
+    expect(deleteObjectMock).not.toHaveBeenCalledWith('cos/lip-sync/old.mp4')
+  })
+
+  it('LIP_SYNC: does not schedule deferred cleanup when there is no prior video', async () => {
+    await workerState.processor!(buildJob({
+      type: TASK_TYPE.LIP_SYNC,
+      payload: { voiceLineId: 'line-1' },
+    }))
+
+    expect(scheduleMediaCleanupCandidateMock).not.toHaveBeenCalled()
+  })
+
+  it('LIP_SYNC: records a shared prior video as a candidate without deleting shared media inline', async () => {
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(buildPanel({
+      lipSyncVideoUrl: '/m/shared-video',
+      lipSyncVideoMediaId: 'media-shared',
+    }))
+    getMediaObjectByIdMock.mockResolvedValueOnce({
+      id: 'media-shared',
+      storageKey: 'cos/lip-sync/shared.mp4',
+    })
+
+    await workerState.processor!(buildJob({
+      type: TASK_TYPE.LIP_SYNC,
+      payload: { voiceLineId: 'line-1' },
+    }))
+
+    expect(scheduleMediaCleanupCandidateMock).toHaveBeenCalledWith(expect.objectContaining({
+      storageKey: 'cos/lip-sync/shared.mp4',
+      mediaId: 'media-shared',
+      mediaKind: 'video',
+    }))
+    expect(prismaMock.mediaObject.deleteMany).not.toHaveBeenCalledWith({
+      where: { id: 'media-shared' },
+    })
+    expect(deleteObjectMock).not.toHaveBeenCalledWith('cos/lip-sync/shared.mp4')
   })
 
   it('LIP_SYNC: drops narration output when narration is disabled after provider completion', async () => {
@@ -667,6 +744,7 @@ describe('worker video processor behavior', () => {
       where: { id: 'media:cos/lip-sync/video.mp4' },
     })
     expect(deleteObjectMock).toHaveBeenCalledWith('cos/lip-sync/video.mp4')
+    expect(scheduleMediaCleanupCandidateMock).not.toHaveBeenCalled()
   })
 
   it('未知任务类型: 显式报错', async () => {

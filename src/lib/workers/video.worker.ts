@@ -21,8 +21,13 @@ import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { getProviderConfig } from '@/lib/api-config'
 import { resolveVideoGenerationModel } from '@/lib/video/model-selection'
 import { resolvePinnedVideoPrompt } from '@/lib/novel-promotion/video/panel-video-submission'
-import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
+import {
+  ensureMediaObjectFromStorageKey,
+  getMediaObjectById,
+  resolveStorageKeyFromMediaValue,
+} from '@/lib/media/service'
 import { deleteObject } from '@/lib/storage'
+import { scheduleMediaCleanupCandidate } from '@/lib/media/deferred-cleanup'
 
 type AnyObj = Record<string, unknown>
 type VideoOptionValue = string | number | boolean
@@ -56,6 +61,34 @@ async function cleanupUnpublishedLipSyncResult(input: {
   } catch (error) {
     _ulogError('[VideoWorker] failed to clean unpublished lip-sync object', {
       storageKey: input.storageKey,
+      error,
+    })
+  }
+}
+
+async function deferReplacedLipSyncVideoCleanup(input: {
+  lipSyncVideoUrl: string | null
+  lipSyncVideoMediaId: string | null
+  replacementStorageKey: string
+}) {
+  try {
+    const media = input.lipSyncVideoMediaId
+      ? await getMediaObjectById(input.lipSyncVideoMediaId)
+      : null
+    const storageKey = media?.storageKey
+      || await resolveStorageKeyFromMediaValue(input.lipSyncVideoUrl)
+    if (!storageKey || storageKey === input.replacementStorageKey) return
+
+    await scheduleMediaCleanupCandidate({
+      storageKey,
+      mediaId: input.lipSyncVideoMediaId,
+      mediaKind: 'video',
+      reason: 'panel_lip_sync_replaced',
+    })
+  } catch (error) {
+    _ulogError('[VideoWorker] failed to defer replaced lip-sync video cleanup', {
+      lipSyncVideoMediaId: input.lipSyncVideoMediaId,
+      lipSyncVideoUrl: input.lipSyncVideoUrl,
       error,
     })
   }
@@ -426,30 +459,25 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
       lipSyncVideoMediaId: lipSyncVideoMedia.id,
       lipSyncTaskId: null,
     }
-    if (isNarration) {
-      const persisted = await prisma.novelPromotionPanel.updateMany({
-        where: {
-          id: panel.id,
-          videoUrl: panel.videoUrl,
-          matchedVoiceLines: {
-            some: {
-              id: voiceLine.id,
-              lineType: 'narration',
-              enabled: true,
-              audioUrl: voiceLine.audioUrl,
-            },
+    const persisted = await prisma.novelPromotionPanel.updateMany({
+      where: {
+        id: panel.id,
+        videoUrl: panel.videoUrl,
+        lipSyncVideoUrl: panel.lipSyncVideoUrl,
+        lipSyncVideoMediaId: panel.lipSyncVideoMediaId,
+        matchedVoiceLines: {
+          some: {
+            id: voiceLine.id,
+            lineType: voiceLine.lineType,
+            enabled: true,
+            audioUrl: voiceLine.audioUrl,
           },
         },
-        data,
-      })
-      if (persisted.count === 0) {
-        throw new Error('LIP_SYNC_INPUT_STALE')
-      }
-    } else {
-      await prisma.novelPromotionPanel.update({
-        where: { id: panel.id },
-        data,
-      })
+      },
+      data,
+    })
+    if (persisted.count === 0) {
+      throw new Error('LIP_SYNC_INPUT_STALE')
     }
     published = true
   } catch (error) {
@@ -461,6 +489,12 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
     }
     throw error
   }
+
+  await deferReplacedLipSyncVideoCleanup({
+    lipSyncVideoUrl: panel.lipSyncVideoUrl,
+    lipSyncVideoMediaId: panel.lipSyncVideoMediaId,
+    replacementStorageKey: cosKey,
+  })
 
   return {
     panelId: panel.id,
