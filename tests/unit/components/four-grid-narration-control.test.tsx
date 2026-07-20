@@ -76,6 +76,33 @@ function response(body: unknown, status = 200) {
   })
 }
 
+function expectAmbiguousRecovery(view: ReturnType<typeof renderControl>) {
+  expect(view.invalidate).toHaveBeenCalledTimes(4)
+  expect(view.invalidate).toHaveBeenCalledWith({
+    queryKey: queryKeys.episodeStage('project-1', 'episode-1', 'storyboard'),
+    refetchType: 'none',
+  })
+  expect(view.invalidate).toHaveBeenCalledWith({
+    queryKey: queryKeys.episodeData('project-1', 'episode-1'),
+    refetchType: 'none',
+  })
+  expect(view.invalidate).toHaveBeenCalledWith({
+    queryKey: queryKeys.voiceLines.all('episode-1'),
+    refetchType: 'none',
+  })
+  expect(view.invalidate).toHaveBeenCalledWith({
+    queryKey: queryKeys.voiceLines.matched('project-1', 'episode-1'),
+    refetchType: 'none',
+  })
+  expect(view.refetch).toHaveBeenCalledTimes(2)
+  expect(view.refetch).toHaveBeenCalledWith({
+    queryKey: queryKeys.episodeStage('project-1', 'episode-1', 'storyboard'),
+  })
+  expect(view.refetch).toHaveBeenCalledWith({
+    queryKey: queryKeys.episodeData('project-1', 'episode-1'),
+  })
+}
+
 type NarrationFields = Pick<StoryboardPanel,
   | 'narrationMode'
   | 'narrationRecommended'
@@ -130,7 +157,7 @@ describe('four-grid panel narration control', () => {
     expect(view.getByRole('textbox', { name: 'Emotion' })).toHaveValue('reflective')
   })
 
-  it('saves untouched auto to off with exactly one atomic patch', async () => {
+  it('saves untouched auto to off with exactly one mode-only patch', async () => {
     apiFetchMock.mockResolvedValueOnce(response({ success: true, narration: canonical({
       narrationMode: 'off',
       narrationText: 'Years later, Ming returned.',
@@ -147,13 +174,12 @@ describe('four-grid panel narration control', () => {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode: 'off', locale: 'en', expectedPanelUpdatedAt: '2026-07-20T03:00:00.000Z',
-          manualText: 'Years later, Ming returned.', manualEmotion: 'reflective',
         }),
       },
     ])
   })
 
-  it('saves untouched auto to on with exactly one atomic patch containing the manual draft', async () => {
+  it('saves untouched auto to on with exactly one mode-only patch', async () => {
     apiFetchMock.mockResolvedValueOnce(response({ success: true, narration: canonical({
       narrationText: 'Years later, Ming returned.',
       narrationEmotion: 'reflective',
@@ -168,7 +194,7 @@ describe('four-grid panel narration control', () => {
       {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          mode: 'on', manualText: 'Years later, Ming returned.', manualEmotion: 'reflective', locale: 'en',
+          mode: 'on', locale: 'en',
           expectedPanelUpdatedAt: '2026-07-20T03:00:00.000Z',
         }),
       },
@@ -254,7 +280,6 @@ describe('four-grid panel narration control', () => {
       locale: 'en',
       expectedPanelUpdatedAt: '2026-07-20T03:00:00.000Z',
       manualText: 'Unsaved off draft',
-      manualEmotion: 'reflective',
     })
   })
 
@@ -319,7 +344,7 @@ describe('four-grid panel narration control', () => {
     await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
     expect(JSON.parse((apiFetchMock.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
       mode: 'off', locale: 'en', expectedPanelUpdatedAt: '2026-07-20T03:00:00.000Z',
-      manualText: null, manualEmotion: 'steady',
+      manualText: null,
     })
   })
 
@@ -369,8 +394,8 @@ describe('four-grid panel narration control', () => {
 
     await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent('This panel changed elsewhere. Refresh and try again.'))
     expect(apiFetchMock).toHaveBeenCalledTimes(1)
-    expect(view.invalidate).toHaveBeenCalledTimes(2)
-    expect(view.refetch).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(view.refetch).toHaveBeenCalledTimes(2))
+    expectAmbiguousRecovery(view)
     view.rerenderPanel({
       ...basePanel,
       narrationSuggestedText: 'New server suggestion',
@@ -381,7 +406,7 @@ describe('four-grid panel narration control', () => {
     await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(2))
     expect(JSON.parse((apiFetchMock.mock.calls[1]?.[1] as RequestInit).body as string)).toEqual({
       mode: 'off', locale: 'en', expectedPanelUpdatedAt: '2026-07-20T03:04:00.000Z',
-      manualText: 'Unsaved after stale', manualEmotion: 'reflective',
+      manualText: 'Unsaved after stale',
     })
   })
 
@@ -477,7 +502,14 @@ describe('four-grid panel narration control', () => {
     fireEvent.click(view.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent(message))
     expect(view.getByRole('textbox', { name: 'Narration text' })).toHaveValue('Unsaved manual draft')
-    expect(view.refetch).toHaveBeenCalledTimes(recovers ? 2 : 0)
+    if (recovers) {
+      await waitFor(() => expect(view.refetch).toHaveBeenCalledTimes(2))
+      expectAmbiguousRecovery(view)
+    }
+    } else {
+      expect(view.invalidate).not.toHaveBeenCalled()
+      expect(view.refetch).not.toHaveBeenCalled()
+    }
   })
 
   it.each([
@@ -501,8 +533,8 @@ describe('four-grid panel narration control', () => {
     const view = renderControl()
     fireEvent.click(view.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(view.getByRole('alert')).toHaveTextContent('Could not save narration. Please try again.'))
-    expect(view.invalidate).toHaveBeenCalledTimes(2)
-    expect(view.refetch).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(view.refetch).toHaveBeenCalledTimes(2))
+    expectAmbiguousRecovery(view)
     expect(view.getByRole('button', { name: 'Auto' }).getAttribute('aria-pressed')).toBe('true')
   })
 
@@ -515,8 +547,78 @@ describe('four-grid panel narration control', () => {
     fireEvent.click(view.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(view.refetch).toHaveBeenCalledTimes(2))
+    expectAmbiguousRecovery(view)
     expect(view.getByRole('textbox', { name: 'Narration text' })).toHaveValue('Possibly committed draft')
     expect(view.getByRole('alert')).toHaveTextContent('Could not save narration. Please try again.')
+  })
+
+  it('merges remote manual fields into a mode-only local edit', async () => {
+    apiFetchMock.mockResolvedValueOnce(response({ success: true, narration: canonical({
+      narrationMode: 'off',
+      narrationText: 'Remote manual text',
+      narrationEmotion: 'remote emotion',
+      updatedAt: '2026-07-20T03:11:00.000Z',
+    }) }))
+    const view = renderControl({
+      ...basePanel,
+      narrationMode: 'on',
+      narrationText: 'Original manual text',
+      narrationEmotion: 'steady',
+    })
+    fireEvent.click(view.getByRole('button', { name: 'Off' }))
+    view.rerenderPanel({
+      ...basePanel,
+      narrationMode: 'on',
+      narrationText: 'Remote manual text',
+      narrationEmotion: 'remote emotion',
+      updatedAt: '2026-07-20T03:10:00.000Z',
+    })
+    expect(view.getByRole('button', { name: 'Off' }).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(view.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
+    expect(JSON.parse((apiFetchMock.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
+      mode: 'off', locale: 'en', expectedPanelUpdatedAt: '2026-07-20T03:10:00.000Z',
+    })
+    await waitFor(() => expect(view.getByRole('button', { name: 'Save' })).not.toBeDisabled())
+    fireEvent.click(view.getByRole('button', { name: 'On' }))
+    expect(view.getByRole('textbox', { name: 'Narration text' })).toHaveValue('Remote manual text')
+    expect(view.getByRole('textbox', { name: 'Emotion' })).toHaveValue('remote emotion')
+  })
+
+  it('preserves an emotion-only edit while merging newer remote manual text', async () => {
+    apiFetchMock.mockResolvedValueOnce(response({ success: true, narration: canonical({
+      narrationText: 'Remote manual text',
+      narrationEmotion: 'locally urgent',
+      updatedAt: '2026-07-20T03:11:00.000Z',
+    }) }))
+    const view = renderControl({
+      ...basePanel,
+      narrationMode: 'on',
+      narrationText: 'Original manual text',
+      narrationEmotion: 'steady',
+    })
+    fireEvent.change(view.getByRole('textbox', { name: 'Emotion' }), {
+      target: { value: 'locally urgent' },
+    })
+    view.rerenderPanel({
+      ...basePanel,
+      narrationMode: 'on',
+      narrationText: 'Remote manual text',
+      narrationEmotion: 'remote calm',
+      updatedAt: '2026-07-20T03:10:00.000Z',
+    })
+    expect(view.getByRole('textbox', { name: 'Narration text' })).toHaveValue('Remote manual text')
+    expect(view.getByRole('textbox', { name: 'Emotion' })).toHaveValue('locally urgent')
+    fireEvent.click(view.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
+    expect(JSON.parse((apiFetchMock.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
+      mode: 'on',
+      locale: 'en',
+      expectedPanelUpdatedAt: '2026-07-20T03:10:00.000Z',
+      manualEmotion: 'locally urgent',
+    })
   })
 
   it('queues a newer canonical prop during save and prefers it to the older response', async () => {
@@ -536,7 +638,7 @@ describe('four-grid panel narration control', () => {
 
     view.rerenderPanel({
       ...basePanel,
-      narrationMode: 'off',
+      narrationMode: 'on',
       narrationText: 'Newer remote draft',
       narrationEmotion: 'remote',
       updatedAt: '2026-07-20T03:10:00.000Z',
@@ -550,9 +652,8 @@ describe('four-grid panel narration control', () => {
         updatedAt: '2026-07-20T03:05:00.000Z',
       }) }))
     })
-    await waitFor(() => expect(view.getByRole('button', { name: 'Off' }).getAttribute('aria-pressed')).toBe('true'))
-    fireEvent.click(view.getByRole('button', { name: 'On' }))
-    expect(view.getByRole('textbox', { name: 'Narration text' })).toHaveValue('Newer remote draft')
+    await waitFor(() => expect(view.getByRole('textbox', { name: 'Narration text' })).toHaveValue('Newer remote draft'))
+    expect(view.getByRole('textbox', { name: 'Emotion' })).toHaveValue('remote')
   })
 
   it('preserves an unsaved draft across prop refresh and saves against the newest timestamp', async () => {

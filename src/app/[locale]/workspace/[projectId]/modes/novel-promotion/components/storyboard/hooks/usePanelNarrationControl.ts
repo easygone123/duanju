@@ -29,15 +29,11 @@ const narrationResponseSchema = z.object({
 export type NarrationSnapshot = z.infer<typeof narrationSnapshotSchema>
 
 type NarrationPatchBody = {
-  mode: PanelNarrationMode
-  locale: 'zh' | 'en'
-  expectedPanelUpdatedAt: string
-  manualText?: string | null
-  manualEmotion?: string | null
+  mode: PanelNarrationMode; locale: 'zh' | 'en'; expectedPanelUpdatedAt: string
+  manualText?: string | null; manualEmotion?: string | null
 }
 
-type NarrationPatchResult =
-  | { ok: true; narration: NarrationSnapshot }
+type NarrationPatchResult = { ok: true; narration: NarrationSnapshot }
   | { ok: false; message: string; recoverCanonical: boolean }
 
 interface NarrationControlState {
@@ -45,15 +41,14 @@ interface NarrationControlState {
   draftMode: PanelNarrationMode
   manualText: string | null
   manualEmotion: string | null
+  modeDirty: boolean
+  manualTextDirty: boolean
+  manualEmotionDirty: boolean
   saving: boolean
   errorMessage: string | null
 }
 
-interface UsePanelNarrationControlArgs {
-  projectId: string
-  episodeId: string
-  panel: StoryboardPanel
-}
+interface UsePanelNarrationControlArgs { projectId: string; episodeId: string; panel: StoryboardPanel }
 
 function parsePanelSnapshot(panel: StoryboardPanel): NarrationSnapshot | null {
   const parsed = narrationSnapshotSchema.safeParse({
@@ -68,13 +63,9 @@ function parsePanelSnapshot(panel: StoryboardPanel): NarrationSnapshot | null {
   return parsed.success ? parsed.data : null
 }
 
-function normalizeDraftValue(value: string | null) {
-  return value?.trim() || null
-}
+function normalizeDraftValue(value: string | null) { return value?.trim() || null }
 
-function timestamp(value: string) {
-  return Date.parse(value)
-}
+function timestamp(value: string) { return Date.parse(value) }
 
 function newestSnapshot(
   first: NarrationSnapshot,
@@ -84,12 +75,43 @@ function newestSnapshot(
   return timestamp(second.updatedAt) > timestamp(first.updatedAt) ? second : first
 }
 
-function draftDiffersFromCanonical(state: NarrationControlState) {
-  const canonical = state.canonical
-  if (!canonical) return false
-  return state.draftMode !== canonical.narrationMode
-    || normalizeDraftValue(state.manualText) !== normalizeDraftValue(canonical.narrationText)
-    || normalizeDraftValue(state.manualEmotion) !== normalizeDraftValue(canonical.narrationEmotion)
+function hasDirtyFields(state: NarrationControlState) {
+  return state.modeDirty || state.manualTextDirty || state.manualEmotionDirty
+}
+
+function mergeCanonical(
+  current: NarrationControlState,
+  incoming: NarrationSnapshot,
+): NarrationControlState {
+  const modeDirty = current.modeDirty && current.draftMode !== incoming.narrationMode
+  const manualTextDirty = current.manualTextDirty
+    && normalizeDraftValue(current.manualText) !== normalizeDraftValue(incoming.narrationText)
+  const manualEmotionDirty = current.manualEmotionDirty
+    && normalizeDraftValue(current.manualEmotion) !== normalizeDraftValue(incoming.narrationEmotion)
+  return {
+    ...current,
+    canonical: incoming,
+    draftMode: modeDirty ? current.draftMode : incoming.narrationMode,
+    manualText: manualTextDirty ? current.manualText : incoming.narrationText,
+    manualEmotion: manualEmotionDirty ? current.manualEmotion : incoming.narrationEmotion,
+    modeDirty,
+    manualTextDirty,
+    manualEmotionDirty,
+  }
+}
+
+function adoptCanonical(canonical: NarrationSnapshot, saving: boolean): NarrationControlState {
+  return {
+    canonical,
+    draftMode: canonical.narrationMode,
+    manualText: canonical.narrationText,
+    manualEmotion: canonical.narrationEmotion,
+    modeDirty: false,
+    manualTextDirty: false,
+    manualEmotionDirty: false,
+    saving,
+    errorMessage: null,
+  }
 }
 
 function isStaleError(value: unknown) {
@@ -110,6 +132,9 @@ function initialState(panel: StoryboardPanel): NarrationControlState {
     draftMode: canonical?.narrationMode ?? 'auto',
     manualText: canonical?.narrationText ?? null,
     manualEmotion: canonical?.narrationEmotion ?? null,
+    modeDirty: false,
+    manualTextDirty: false,
+    manualEmotionDirty: false,
     saving: false,
     errorMessage: null,
   }
@@ -129,11 +154,14 @@ export function usePanelNarrationControl({
   const queuedCanonicalRef = useRef<NarrationSnapshot | null>(null)
   const savingRef = useRef(false)
 
-  const setState = useCallback((update: (current: NarrationControlState) => NarrationControlState) => {
-    const next = update(stateRef.current)
-    stateRef.current = next
-    setReactState(next)
-  }, [])
+  const setState = useCallback(
+    (update: (current: NarrationControlState) => NarrationControlState) => {
+      const next = update(stateRef.current)
+      stateRef.current = next
+      setReactState(next)
+    },
+    [],
+  )
 
   useEffect(() => {
     const incoming = parsePanelSnapshot(panel)
@@ -145,26 +173,10 @@ export function usePanelNarrationControl({
 
     canonicalRef.current = incoming
     if (savingRef.current) queuedCanonicalRef.current = incoming
-    setState((current) => {
-      const preserveDraft = current.saving || draftDiffersFromCanonical(current)
-      return {
-        ...current,
-        canonical: incoming,
-        draftMode: preserveDraft ? current.draftMode : incoming.narrationMode,
-        manualText: preserveDraft ? current.manualText : incoming.narrationText,
-        manualEmotion: preserveDraft ? current.manualEmotion : incoming.narrationEmotion,
-      }
-    })
-  }, [
-    panel.narrationEmotion,
-    panel.narrationMode,
-    panel.narrationRecommended,
-    panel.narrationSuggestedEmotion,
-    panel.narrationSuggestedText,
-    panel.narrationText,
-    panel.updatedAt,
-    setState,
-  ])
+    setState((current) => mergeCanonical(current, incoming))
+  }, [panel.narrationEmotion, panel.narrationMode, panel.narrationRecommended,
+    panel.narrationSuggestedEmotion, panel.narrationSuggestedText, panel.narrationText,
+    panel.updatedAt, setState])
 
   const initializeManualDraft = useCallback((current: NarrationControlState) => ({
     text: current.manualText === null
@@ -186,6 +198,7 @@ export function usePanelNarrationControl({
         draftMode: mode,
         manualText: draft.text,
         manualEmotion: draft.emotion,
+        modeDirty: mode !== current.canonical?.narrationMode,
         errorMessage: null,
       }
     })
@@ -202,6 +215,11 @@ export function usePanelNarrationControl({
         draftMode: current.draftMode === 'auto' ? 'on' : current.draftMode,
         manualText: value,
         manualEmotion: draft.emotion,
+        modeDirty: current.draftMode === 'auto'
+          ? current.canonical?.narrationMode !== 'on'
+          : current.modeDirty,
+        manualTextDirty: normalizeDraftValue(value)
+          !== normalizeDraftValue(current.canonical?.narrationText ?? null),
         errorMessage: null,
       }
     })
@@ -218,6 +236,11 @@ export function usePanelNarrationControl({
         draftMode: current.draftMode === 'auto' ? 'on' : current.draftMode,
         manualText: draft.text,
         manualEmotion: value,
+        modeDirty: current.draftMode === 'auto'
+          ? current.canonical?.narrationMode !== 'on'
+          : current.modeDirty,
+        manualEmotionDirty: normalizeDraftValue(value)
+          !== normalizeDraftValue(current.canonical?.narrationEmotion ?? null),
         errorMessage: null,
       }
     })
@@ -237,10 +260,14 @@ export function usePanelNarrationControl({
   const refreshCanonicalQueries = useCallback(async () => {
     const storyboardKey = queryKeys.episodeStage(projectId, episodeId, 'storyboard')
     const episodeKey = queryKeys.episodeData(projectId, episodeId)
+    const allVoiceLinesKey = queryKeys.voiceLines.all(episodeId)
+    const matchedVoiceLinesKey = queryKeys.voiceLines.matched(projectId, episodeId)
     try {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: storyboardKey, refetchType: 'none' }),
         queryClient.invalidateQueries({ queryKey: episodeKey, refetchType: 'none' }),
+        queryClient.invalidateQueries({ queryKey: allVoiceLinesKey, refetchType: 'none' }),
+        queryClient.invalidateQueries({ queryKey: matchedVoiceLinesKey, refetchType: 'none' }),
       ])
       await Promise.all([
         queryClient.refetchQueries({ queryKey: storyboardKey }),
@@ -295,15 +322,17 @@ export function usePanelNarrationControl({
       return
     }
 
-    const manualDraftChanged = normalizedText !== normalizeDraftValue(canonical.narrationText)
-      || normalizedEmotion !== normalizeDraftValue(canonical.narrationEmotion)
-    const localDirtyAtSave = draftDiffersFromCanonical(current)
     const body: NarrationPatchBody = {
       mode: current.draftMode,
       locale: locale.toLowerCase().startsWith('zh') ? 'zh' : 'en',
       expectedPanelUpdatedAt: canonical.updatedAt,
-      ...(manualDraftChanged
-        ? { manualText: normalizedText, manualEmotion: normalizedEmotion }
+      ...(current.manualTextDirty
+        && normalizedText !== normalizeDraftValue(canonical.narrationText)
+        ? { manualText: normalizedText }
+        : {}),
+      ...(current.manualEmotionDirty
+        && normalizedEmotion !== normalizeDraftValue(canonical.narrationEmotion)
+        ? { manualEmotion: normalizedEmotion }
         : {}),
     }
 
@@ -323,14 +352,7 @@ export function usePanelNarrationControl({
       const adopted = newestSnapshot(result.narration, latestProp)
       canonicalRef.current = adopted
       queuedCanonicalRef.current = null
-      setState(() => ({
-        canonical: adopted,
-        draftMode: adopted.narrationMode,
-        manualText: adopted.narrationText,
-        manualEmotion: adopted.narrationEmotion,
-        saving: true,
-        errorMessage: null,
-      }))
+      setState(() => adoptCanonical(adopted, true))
       invalidateDependentQueries()
     } finally {
       savingRef.current = false
@@ -341,23 +363,16 @@ export function usePanelNarrationControl({
           : queued
       }
       queuedCanonicalRef.current = null
-      setState((value) => ({
-        ...value,
-        canonical: canonicalRef.current,
-        saving: false,
-        ...((recognizedSuccess || !localDirtyAtSave) && canonicalRef.current
-          ? {
-              draftMode: canonicalRef.current.narrationMode,
-              manualText: canonicalRef.current.narrationText,
-              manualEmotion: canonicalRef.current.narrationEmotion,
-            }
-          : {}),
-      }))
+      setState((value) => {
+        const latest = canonicalRef.current
+        if (!latest) return { ...value, saving: false }
+        if (recognizedSuccess) return adoptCanonical(latest, false)
+        return { ...mergeCanonical(value, latest), saving: false }
+      })
     }
   }, [invalidateDependentQueries, locale, patchNarration, refreshCanonicalQueries, setState, t])
 
-  const draftDirty = draftDiffersFromCanonical(state)
-  useVirtualCardRetention(draftDirty || state.saving || state.errorMessage !== null)
+  useVirtualCardRetention(hasDirtyFields(state) || state.saving || state.errorMessage !== null)
 
   const canonical = state.canonical
   return {
