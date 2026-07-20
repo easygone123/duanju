@@ -48,6 +48,9 @@ export async function resetSystemState() {
   await resetTaskState()
   await resetAssetHubState()
   await resetNovelPromotionState()
+  await (prisma as unknown as {
+    mediaCleanupCandidate: { deleteMany: () => Promise<unknown> }
+  }).mediaCleanupCandidate.deleteMany()
   await prisma.mediaObject.deleteMany()
   // Break the workflow -> current version Restrict cycle before deleting users.
   // User deletion cascades through both workflow records afterwards.

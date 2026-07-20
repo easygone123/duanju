@@ -6,10 +6,11 @@ import { getAudioApiKey, getProviderConfig, getProviderKey, resolveModelSelectio
 import { normalizeToBase64ForGeneration } from '@/lib/media/outbound-image'
 import { deleteObject, extractStorageKey, getSignedUrl, toFetchableUrl, uploadObject } from '@/lib/storage'
 import {
-  deleteMediaObjectIfUnreferenced,
   ensureMediaObjectFromStorageKey,
+  getMediaObjectById,
   resolveStorageKeyFromMediaValue,
 } from '@/lib/media/service'
+import { scheduleMediaCleanupCandidate } from '@/lib/media/deferred-cleanup'
 import type { MediaRef } from '@/lib/media/types'
 import { synthesizeWithBailianTTS } from '@/lib/providers/bailian'
 import {
@@ -56,10 +57,18 @@ async function cleanupUnpublishedVoiceMedia(input: {
 }) {
   try {
     if (input.media) {
-      await deleteMediaObjectIfUnreferenced({
-        mediaId: input.media.id,
-        expectedStorageKey: input.storageKey,
+      // This is deliberately private compensation for a UUID-keyed object that
+      // failed before its URL/media id was published. Published media must use
+      // the deferred, legacy-aware cleanup path below.
+      const deleted = await prisma.mediaObject.deleteMany({
+        where: {
+          id: input.media.id,
+          storageKey: input.storageKey,
+        },
       })
+      if (deleted.count > 0) {
+        await deleteObject(input.storageKey)
+      }
     } else {
       await deleteObject(input.storageKey)
     }
@@ -72,12 +81,31 @@ async function cleanupUnpublishedVoiceMedia(input: {
   }
 }
 
-async function cleanupReplacedVoiceMedia(mediaId: string | null) {
-  if (!mediaId) return
+async function deferReplacedVoiceMediaCleanup(input: {
+  audioMediaId: string | null
+  audioUrl: string | null
+  replacementStorageKey: string
+}) {
   try {
-    await deleteMediaObjectIfUnreferenced({ mediaId })
+    const media = input.audioMediaId
+      ? await getMediaObjectById(input.audioMediaId)
+      : null
+    const storageKey = media?.storageKey
+      || await resolveStorageKeyFromMediaValue(input.audioUrl)
+    if (!storageKey || storageKey === input.replacementStorageKey) return
+
+    await scheduleMediaCleanupCandidate({
+      storageKey,
+      mediaId: input.audioMediaId,
+      mediaKind: 'audio',
+      reason: 'voice_line_replaced',
+    })
   } catch (error) {
-    _ulogError('[Voice] failed to clean replaced audio media', { mediaId, error })
+    _ulogError('[Voice] failed to defer replaced audio media cleanup', {
+      audioMediaId: input.audioMediaId,
+      audioUrl: input.audioUrl,
+      error,
+    })
   }
 }
 
@@ -421,7 +449,11 @@ export async function generateVoiceLine(params: {
     throw new Error('VOICE_MEDIA_REGISTRATION_FAILED')
   }
   if (generationSnapshot.audioMediaId !== audioMedia.id) {
-    await cleanupReplacedVoiceMedia(generationSnapshot.audioMediaId)
+    await deferReplacedVoiceMediaCleanup({
+      audioMediaId: generationSnapshot.audioMediaId,
+      audioUrl: generationSnapshot.audioUrl,
+      replacementStorageKey: cosKey,
+    })
   }
 
   const signedUrl = getSignedUrl(cosKey, 7200)

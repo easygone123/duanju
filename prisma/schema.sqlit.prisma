@@ -879,6 +879,20 @@ model MediaObject {
   @@map("media_objects")
 }
 
+model MediaCleanupCandidate {
+  id         String   @id @default(uuid())
+  storageKey String   @unique
+  mediaId    String?
+  mediaKind  String   @default("unknown")
+  reason     String
+  notBefore  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@index([notBefore])
+  @@map("media_cleanup_candidates")
+}
+
 model SixGridCropClaim {
   id         String   @id @default(uuid())
   claimKey   String   @unique

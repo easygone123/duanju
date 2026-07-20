@@ -11,6 +11,9 @@ const prismaMock = vi.hoisted(() => ({
   novelPromotionEpisode: {
     findUnique: vi.fn(),
   },
+  mediaObject: {
+    deleteMany: vi.fn(async () => ({ count: 1 })),
+  },
 }))
 
 const resolveModelSelectionOrSingleMock = vi.hoisted(() => vi.fn())
@@ -35,7 +38,8 @@ const ensureMediaObjectFromStorageKeyMock = vi.hoisted(() => vi.fn(async (storag
   height: null,
   durationMs: 1,
 })))
-const deleteMediaObjectIfUnreferencedMock = vi.hoisted(() => vi.fn(async () => true))
+const getMediaObjectByIdMock = vi.hoisted(() => vi.fn())
+const scheduleMediaCleanupCandidateMock = vi.hoisted(() => vi.fn(async () => undefined))
 const synthesizeWithBailianTTSMock = vi.hoisted(() => vi.fn())
 const falSubscribeMock = vi.hoisted(() => vi.fn())
 const getProviderConfigMock = vi.hoisted(() => vi.fn())
@@ -64,9 +68,13 @@ vi.mock('@/lib/storage', () => ({
 }))
 
 vi.mock('@/lib/media/service', () => ({
-  deleteMediaObjectIfUnreferenced: deleteMediaObjectIfUnreferencedMock,
   ensureMediaObjectFromStorageKey: ensureMediaObjectFromStorageKeyMock,
+  getMediaObjectById: getMediaObjectByIdMock,
   resolveStorageKeyFromMediaValue: resolveStorageKeyFromMediaValueMock,
+}))
+
+vi.mock('@/lib/media/deferred-cleanup', () => ({
+  scheduleMediaCleanupCandidate: scheduleMediaCleanupCandidateMock,
 }))
 
 vi.mock('@/lib/providers/bailian', () => ({
@@ -128,6 +136,9 @@ describe('generate voice line with bailian provider', () => {
       audioData: Buffer.from(audioBytes),
       audioDuration: 1,
     })
+    resolveStorageKeyFromMediaValueMock.mockImplementation(async (value: unknown) => (
+      typeof value === 'string' && value.startsWith('voice/') ? value : null
+    ))
   })
 
   it('uses speaker voiceId to generate and persists uploaded audio', async () => {
@@ -179,7 +190,12 @@ describe('generate voice line with bailian provider', () => {
       'voice/storage/line-1.wav',
       { mimeType: 'audio/wav', durationMs: 1 },
     )
-    expect(deleteMediaObjectIfUnreferencedMock).not.toHaveBeenCalled()
+    expect(scheduleMediaCleanupCandidateMock).toHaveBeenCalledWith({
+      storageKey: 'voice/storage/previous.wav',
+      mediaId: null,
+      mediaKind: 'audio',
+      reason: 'voice_line_replaced',
+    })
   })
 
   it('does not upload when narration is disabled while the provider is running', async () => {
@@ -239,17 +255,18 @@ describe('generate voice line with bailian provider', () => {
       audioModel: 'bailian::qwen3-tts-vd-2026-01-26',
     })).rejects.toThrow('VOICE_LINE_STALE')
 
-    expect(deleteMediaObjectIfUnreferencedMock).toHaveBeenCalledWith({
-      mediaId: 'media-new',
-      expectedStorageKey: 'voice/storage/line-1.wav',
+    expect(prismaMock.mediaObject.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: 'media-new',
+        storageKey: 'voice/storage/line-1.wav',
+      },
     })
-    expect(deleteMediaObjectIfUnreferencedMock).not.toHaveBeenCalledWith({
-      mediaId: 'media-old',
-    })
+    expect(deleteObjectMock).toHaveBeenCalledWith('voice/storage/line-1.wav')
+    expect(scheduleMediaCleanupCandidateMock).not.toHaveBeenCalled()
     expect(prismaMock.novelPromotionVoiceLine.updateMany).toHaveBeenCalledTimes(1)
   })
 
-  it('replaces a non-null old audioMediaId and asks canonical cleanup to retain shared old media', async () => {
+  it('replaces a non-null old audioMediaId and defers shared old media instead of deleting it', async () => {
     prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue({
       id: 'line-1',
       episodeId: 'episode-1',
@@ -262,7 +279,10 @@ describe('generate voice line with bailian provider', () => {
       audioMediaId: 'media-shared-old',
       updatedAt: new Date('2026-07-20T00:00:00.000Z'),
     })
-    deleteMediaObjectIfUnreferencedMock.mockResolvedValueOnce(false)
+    getMediaObjectByIdMock.mockResolvedValueOnce({
+      id: 'media-shared-old',
+      storageKey: 'voice/storage/previous.wav',
+    })
 
     await generateVoiceLine({
       projectId: 'project-1',
@@ -279,9 +299,13 @@ describe('generate voice line with bailian provider', () => {
         audioMediaId: 'media-new',
       }),
     }))
-    expect(deleteMediaObjectIfUnreferencedMock).toHaveBeenCalledWith({
+    expect(scheduleMediaCleanupCandidateMock).toHaveBeenCalledWith({
+      storageKey: 'voice/storage/previous.wav',
       mediaId: 'media-shared-old',
+      mediaKind: 'audio',
+      reason: 'voice_line_replaced',
     })
+    expect(prismaMock.mediaObject.deleteMany).not.toHaveBeenCalled()
     expect(deleteObjectMock).not.toHaveBeenCalled()
   })
 

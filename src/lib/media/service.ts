@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { prisma } from '@/lib/prisma'
-import { deleteObject, extractStorageKey } from '@/lib/storage'
+import { extractStorageKey } from '@/lib/storage'
 import { stablePublicIdFromStorageKey } from './hash'
 import type { MediaRef } from './types'
 
@@ -21,7 +21,6 @@ type MediaModel = {
   findMany: (args: unknown) => Promise<unknown>
   findUnique: (args: unknown) => Promise<unknown>
   upsert: (args: unknown) => Promise<unknown>
-  deleteMany: (args: unknown) => Promise<unknown>
 }
 
 const mediaModel = (prisma as unknown as { mediaObject: MediaModel }).mediaObject
@@ -215,65 +214,6 @@ export async function ensureMediaObjectFromStorageKey(
     }
     throw error
   }
-}
-
-/**
- * Claim and remove a canonical media object only when no typed relation still
- * references it. The relation predicates are part of the delete itself so a
- * concurrent attachment cannot be silently detached through onDelete:SetNull.
- */
-export async function deleteMediaObjectIfUnreferenced(input: {
-  mediaId: string
-  expectedStorageKey?: string
-}): Promise<boolean> {
-  const row = (await mediaModel.findUnique({
-    where: { id: input.mediaId },
-  })) as Pick<MediaObjectRow, 'id' | 'storageKey'> | null
-  if (!row) return false
-
-  const storageKey = normalizeStorageKey(row.storageKey)
-  if (
-    input.expectedStorageKey
-    && normalizeStorageKey(input.expectedStorageKey) !== storageKey
-  ) {
-    return false
-  }
-
-  const deleted = await mediaModel.deleteMany({
-    where: {
-      id: row.id,
-      storageKey,
-      characterAppearanceImages: { none: {} },
-      locationImages: { none: {} },
-      novelPromotionCharacterVoices: { none: {} },
-      novelPromotionEpisodeAudios: { none: {} },
-      novelPromotionPanelImages: { none: {} },
-      novelPromotionPanelVideos: { none: {} },
-      novelPromotionPanelLipSyncVideos: { none: {} },
-      novelPromotionPanelSketchImages: { none: {} },
-      novelPromotionPanelPreviousImages: { none: {} },
-      novelPromotionPanelCroppedImages: { none: {} },
-      novelPromotionPanelUpscaledImages: { none: {} },
-      novelPromotionStoryboardSheetImages: { none: {} },
-      novelPromotionStoryboardUpscaledSheetImages: { none: {} },
-      novelPromotionShotImages: { none: {} },
-      supplementaryPanelImages: { none: {} },
-      novelPromotionVoiceLineAudios: { none: {} },
-      voicePresetAudios: { none: {} },
-      globalCharacterVoices: { none: {} },
-      globalCharacterAppearanceImages: { none: {} },
-      globalCharacterAppearancePreviousImgs: { none: {} },
-      globalLocationImageImages: { none: {} },
-      globalLocationImagePreviousImages: { none: {} },
-      globalVoiceCustomVoices: { none: {} },
-      viralReplicationSourceVideo: { is: null },
-      viralReplicationFrames: { none: {} },
-    },
-  }) as { count: number }
-  if (deleted.count === 0) return false
-
-  await deleteObject(storageKey)
-  return true
 }
 
 export async function getMediaObjectByPublicId(publicId: string) {

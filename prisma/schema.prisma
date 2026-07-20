@@ -1056,6 +1056,20 @@ model MediaObject {
   @@map("media_objects")
 }
 
+model MediaCleanupCandidate {
+  id         String   @id @default(uuid())
+  storageKey String   @unique @db.VarChar(512)
+  mediaId    String?
+  mediaKind  String   @default("unknown")
+  reason     String
+  notBefore  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@index([notBefore])
+  @@map("media_cleanup_candidates")
+}
+
 model ViralReplication {
   id                    String                    @id @default(uuid())
   userId                String
