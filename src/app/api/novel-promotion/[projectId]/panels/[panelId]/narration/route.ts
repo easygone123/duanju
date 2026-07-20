@@ -14,9 +14,26 @@ const narrationPatchSchema = z.object({
   mode: z.enum(['auto', 'on', 'off']),
   text: z.string().nullable().optional(),
   emotion: z.string().nullable().optional(),
+  manualText: z.string().nullable().optional(),
+  manualEmotion: z.string().nullable().optional(),
   locale: z.enum(['zh', 'en']).optional(),
   expectedPanelUpdatedAt: z.string().datetime({ offset: true }),
-}).strict()
+}).strict().superRefine((body, context) => {
+  if (body.text !== undefined && body.manualText !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['manualText'],
+      message: 'text and manualText are mutually exclusive',
+    })
+  }
+  if (body.emotion !== undefined && body.manualEmotion !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['manualEmotion'],
+      message: 'emotion and manualEmotion are mutually exclusive',
+    })
+  }
+})
 
 const narrationPanelSelect = {
   id: true,
@@ -78,6 +95,8 @@ export const PATCH = apiHandler(async (
 
   const textSupplied = Object.prototype.hasOwnProperty.call(rawBody, 'text')
   const emotionSupplied = Object.prototype.hasOwnProperty.call(rawBody, 'emotion')
+  const manualTextSupplied = Object.prototype.hasOwnProperty.call(rawBody, 'manualText')
+  const manualEmotionSupplied = Object.prototype.hasOwnProperty.call(rawBody, 'manualEmotion')
   const requestedMode = parseNarrationMode(
     textSupplied || emotionSupplied ? 'on' : body.mode,
   )
@@ -86,6 +105,8 @@ export const PATCH = apiHandler(async (
 
   if (textSupplied) {
     narrationText = trimNullable(body.text ?? null)
+  } else if (manualTextSupplied) {
+    narrationText = trimNullable(body.manualText ?? null)
   } else if (
     panel.narrationMode === 'auto'
     && requestedMode !== 'auto'
@@ -96,6 +117,8 @@ export const PATCH = apiHandler(async (
 
   if (emotionSupplied) {
     narrationEmotion = trimNullable(body.emotion ?? null)
+  } else if (manualEmotionSupplied) {
+    narrationEmotion = trimNullable(body.manualEmotion ?? null)
   } else if (
     panel.narrationMode === 'auto'
     && requestedMode !== 'auto'

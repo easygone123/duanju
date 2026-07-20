@@ -181,6 +181,7 @@ export interface NovelPromotionClip {
 
 export interface NovelPromotionPanel {
   id: string
+  updatedAt?: string | Date
   storyboardId: string
   panelIndex: number
   panelNumber: number | null

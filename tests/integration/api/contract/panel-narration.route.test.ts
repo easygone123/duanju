@@ -308,6 +308,92 @@ describe('panel narration PATCH contract', () => {
     })
   })
 
+  it.each(['off', 'auto'] as const)(
+    'atomically stores a changed manual draft while the final mode remains %s',
+    async (mode) => {
+      const response = await narrationPatch({
+        mode,
+        manualText: '  稍后再用的旁白  ',
+        manualEmotion: '  restrained  ',
+        expectedPanelUpdatedAt: panelUpdatedAt,
+      })
+
+      expect(response.status).toBe(200)
+      expect(state.transactionCalls).toBe(1)
+      expect(panelUpdateMany).toHaveBeenCalledTimes(1)
+      expect(state.panel).toMatchObject({
+        narrationMode: mode,
+        narrationText: '稍后再用的旁白',
+        narrationEmotion: 'restrained',
+      })
+      expect(syncMock).toHaveBeenCalledTimes(1)
+      expect(syncMock).toHaveBeenCalledWith(expect.objectContaining({
+        tx,
+        mode,
+        text: '稍后再用的旁白',
+        emotion: 'restrained',
+      }))
+    },
+  )
+
+  it('allows an off panel to atomically clear its saved manual draft', async () => {
+    state.panel = makePanel({
+      narrationMode: 'on',
+      narrationText: '旧旁白',
+      narrationEmotion: 'dramatic',
+    })
+
+    const response = await narrationPatch({
+      mode: 'off',
+      manualText: '   ',
+      manualEmotion: null,
+      expectedPanelUpdatedAt: panelUpdatedAt,
+    })
+
+    expect(response.status).toBe(200)
+    expect(state.panel).toMatchObject({
+      narrationMode: 'off',
+      narrationText: null,
+      narrationEmotion: null,
+    })
+  })
+
+  it('rejects a blank effective manual draft when the final mode is on', async () => {
+    state.panel = makePanel({ narrationText: '旧旁白' })
+
+    const response = await narrationPatch({
+      mode: 'on',
+      manualText: '   ',
+      expectedPanelUpdatedAt: panelUpdatedAt,
+    })
+
+    await expectApiError(response, 400, 'INVALID_PARAMS', 'PANEL_NARRATION_TEXT_REQUIRED')
+    expect(prismaMock.$transaction).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [{ text: '直接编辑', manualText: '草稿' }, 'manualText'],
+    [{ emotion: 'tense', manualEmotion: 'calm' }, 'manualEmotion'],
+  ])('rejects conflicting direct and manual draft aliases %#', async (aliases, field) => {
+    const response = await narrationPatch({
+      mode: 'off',
+      ...aliases,
+      expectedPanelUpdatedAt: panelUpdatedAt,
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'INVALID_PARAMS',
+        details: {
+          code: 'PANEL_NARRATION_PAYLOAD_INVALID',
+          field,
+        },
+      },
+    })
+    expect(prismaMock.$transaction).not.toHaveBeenCalled()
+  })
+
   it('preserves a manual draft through off and restores suggestions in auto', async () => {
     state.panel = makePanel({
       narrationMode: 'on',
@@ -357,6 +443,26 @@ describe('panel narration PATCH contract', () => {
     expect(response.status).toBe(500)
     expect(state.panel).toMatchObject({ narrationMode: 'auto' })
     expect(state.transactionCalls).toBe(1)
+  })
+
+  it('rolls back an atomic final-mode and manual-draft update when synchronization fails', async () => {
+    syncMock.mockRejectedValueOnce(new Error('sync failed'))
+
+    const response = await narrationPatch({
+      mode: 'off',
+      manualText: '未提交旁白',
+      manualEmotion: 'tense',
+      expectedPanelUpdatedAt: panelUpdatedAt,
+    })
+
+    expect(response.status).toBe(500)
+    expect(state.panel).toMatchObject({
+      narrationMode: 'auto',
+      narrationText: null,
+      narrationEmotion: null,
+    })
+    expect(state.transactionCalls).toBe(1)
+    expect(syncMock).toHaveBeenCalledTimes(1)
   })
 
   it('does not delete or clear narration audio when mode is off', async () => {

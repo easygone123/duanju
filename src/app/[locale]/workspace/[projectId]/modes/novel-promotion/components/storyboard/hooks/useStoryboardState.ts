@@ -43,7 +43,7 @@ export interface StoryboardPanel {
   narrationSuggestedEmotion: string | null
   narrationText: string | null
   narrationEmotion: string | null
-  updatedAt: string
+  updatedAt: string | null
   photographyRules?: string | null  // 单镜头摄影规则JSON
   actingNotes?: string | null       // 演技指导数据JSON
   imageTaskRunning?: boolean  // 任务态运行状态（由 tasks 派生）
@@ -145,7 +145,15 @@ export function useStoryboardState({
       (a.panelIndex || 0) - (b.panelIndex || 0)
     )
     return sortedPanels.map((p) => {
-      const panelWithTimestamp = p as NovelPromotionPanel & { updatedAt?: string | Date }
+      const rawUpdatedAt = p.updatedAt
+      const parsedUpdatedAt = rawUpdatedAt instanceof Date
+        ? rawUpdatedAt.getTime()
+        : typeof rawUpdatedAt === 'string'
+          ? Date.parse(rawUpdatedAt)
+          : Number.NaN
+      const updatedAt = Number.isFinite(parsedUpdatedAt)
+        ? new Date(parsedUpdatedAt).toISOString()
+        : null
       const parsedChars = p.characters ? JSON.parse(p.characters) : []
       const characters = Array.isArray(parsedChars)
         ? parsedChars.flatMap((item): Array<{ name: string; appearance: string; slot?: string }> => {
@@ -193,9 +201,7 @@ export function useStoryboardState({
         narrationSuggestedEmotion: p.narrationSuggestedEmotion ?? null,
         narrationText: p.narrationText ?? null,
         narrationEmotion: p.narrationEmotion ?? null,
-        updatedAt: typeof panelWithTimestamp.updatedAt === 'string'
-          ? panelWithTimestamp.updatedAt
-          : panelWithTimestamp.updatedAt?.toISOString() ?? '',
+        updatedAt,
         photographyRules: p.photographyRules,
         actingNotes: p.actingNotes,
         imageTaskRunning: p.imageTaskRunning || false,

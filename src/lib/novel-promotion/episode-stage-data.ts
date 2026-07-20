@@ -60,7 +60,7 @@ export type StoryboardEpisodeStagePanel = Pick<NovelPromotionPanel, StoryboardPa
   upscaledImageMediaId?: string | null
   media?: MediaRef | null
   imageMedia?: MediaRef | null
-  updatedAt?: string
+  updatedAt: string
 }
 
 type VideoPanelFields =
