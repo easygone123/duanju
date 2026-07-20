@@ -472,6 +472,8 @@
         "status": "Task status: {status}",
         "idle": "Idle",
         "running": "Running",
+        "sheetGenerationRunning": "Generating one complete 3×2 sheet…",
+        "sheetGenerationStatus": "One complete 3×2 six-grid sheet is being generated, not six independent images.",
         "manageComfyui": "Manage ComfyUI pool",
         "comfyuiHint": "Open Settings Center to add a ComfyUI IP and publish and test your private upscale workflow.",
         "workflowRequired": "Publish and test an upscale workflow available to your account first",

@@ -62,6 +62,8 @@ const messages = {
     orderLabel: 'Processing order', orders: { sheet_upscale_then_crop: 'Upscale sheet then crop', crop_then_panel_upscale: 'Crop then upscale panels' },
     sourceLabel: 'Current source', sourceOriginal: 'Original sheet', sourceUpscaled: 'Upscaled sheet', sourceMissing: 'No sheet',
     artifactVersion: 'Artifact version {version}', status: 'Task status: {status}', idle: 'Idle', running: 'Running',
+    sheetGenerationRunning: 'Generating one complete 3×2 sheet…',
+    sheetGenerationStatus: 'One complete 3×2 six-grid sheet is being generated, not six independent images.',
     manageComfyui: 'Manage ComfyUI pool', comfyuiHint: 'Configure and test your private ComfyUI upscale workflow in Settings Center.',
     workflowRequired: 'A published and tested upscale workflow is required', sheetRequired: 'Generate the original sheet first',
     upscaledSheetRequired: 'Upscale the sheet before cropping',
@@ -78,9 +80,9 @@ const sixGrid = (overrides: Partial<NovelPromotionStoryboard> = {}): NovelPromot
   panels: [], ...overrides,
 })
 
-function renderWithIntl(node: React.ReactNode) {
+function renderWithIntl(node: React.ReactNode, onError?: (error: unknown) => void) {
   return renderToStaticMarkup(createElement(NextIntlClientProvider, {
-    locale: 'en', messages, timeZone: 'UTC',
+    locale: 'en', messages, timeZone: 'UTC', onError,
   } as unknown as React.ComponentProps<typeof NextIntlClientProvider>, node))
 }
 
@@ -112,7 +114,7 @@ describe('six-grid storyboard controls', () => {
   })
 
   it('keeps prompt and upload actions independent from sheet, prompt, and workflow availability', () => {
-    const renderControls = (isTaskRunning: boolean) => renderWithIntl(createElement(SixGridGroupControls, {
+    const renderControls = (isTaskRunning: boolean, onError?: (error: unknown) => void) => renderWithIntl(createElement(SixGridGroupControls, {
       storyboard: sixGrid({ sheetImageUrl: null, sheetPromptSnapshot: null }),
       isTaskRunning,
       upscaleWorkflow: null,
@@ -122,7 +124,7 @@ describe('six-grid storyboard controls', () => {
       onOpenCrop: () => undefined,
       onViewPrompt: () => undefined,
       onUploadSheet: () => undefined,
-    }))
+    }), onError)
 
     const idle = renderControls(false)
     expect(idle).toMatch(/<button[^>]*>[^<]*(?:<span[^>]*><\/span>)?View prompt<\/button>/)
@@ -130,10 +132,16 @@ describe('six-grid storyboard controls', () => {
     // The sheet is previewed inline, so only upscale and crop are unavailable before a sheet exists.
     expect(idle.match(/disabled=""/g)).toHaveLength(2)
 
-    const busy = renderControls(true)
+    const onIntlError = vi.fn()
+    const busy = renderControls(true, onIntlError)
     const uploadButton = busy.match(/<button[^>]*disabled=""[^>]*>[^<]*(?:<span[^>]*><\/span>)?Upload six-grid<\/button>/)
     expect(uploadButton).toBeTruthy()
     expect(busy).not.toMatch(/<button[^>]*disabled=""[^>]*>[^<]*(?:<span[^>]*><\/span>)?View prompt<\/button>/)
+    expect(busy).toContain('Generating one complete 3×2 sheet…')
+    expect(busy).toContain('One complete 3×2 six-grid sheet is being generated, not six independent images.')
+    expect(busy).toContain('aria-busy="true"')
+    expect(busy).toContain('role="status"')
+    expect(onIntlError).not.toHaveBeenCalled()
   })
 
   it('marks dialogue cards with color plus visible text and an aria label', () => {

@@ -18,8 +18,23 @@ const input = (storyboardId = 'storyboard-1') => ({
   storyboardId,
 })
 
-function createHarness(queryClient: QueryClient) {
-  const errors: Record<string, string> = { 'storyboard-2': 'keep this error' }
+function createAttemptAccess() {
+  const attempts: Record<string, number> = {}
+  return {
+    nextAttempt: (storyboardId: string) => {
+      const attempt = (attempts[storyboardId] ?? 0) + 1
+      attempts[storyboardId] = attempt
+      return attempt
+    },
+    currentAttempt: (storyboardId: string) => attempts[storyboardId],
+  }
+}
+
+function createHarness(
+  queryClient: QueryClient,
+  attemptAccess = createAttemptAccess(),
+  errors: Record<string, string> = { 'storyboard-2': 'keep this error' },
+) {
   const options = createSheetTaskMutationOptions(
     queryClient,
     'project-1',
@@ -28,6 +43,8 @@ function createHarness(queryClient: QueryClient) {
       if (error) errors[storyboardId] = error
       else delete errors[storyboardId]
     },
+    attemptAccess.nextAttempt,
+    attemptAccess.currentAttempt,
   )
   return { errors, options }
 }
@@ -127,6 +144,30 @@ describe('grid sheet submit mutation', () => {
     })
 
     options.onError(new Error('current failure'), variables, second)
+    expect(errors['storyboard-1']).toBe('current failure')
+    expect(queryClient.getQueryData(queryKeys.tasks.targetStateOverlay('project-1'))).toEqual({})
+  })
+
+  it('preserves attempt ordering when mutation options are recreated between pending attempts', () => {
+    const queryClient = new QueryClient()
+    const attemptAccess = createAttemptAccess()
+    const errors: Record<string, string> = {}
+    const firstOptions = createHarness(queryClient, attemptAccess, errors).options
+    const variables = input()
+    const first = firstOptions.onMutate(variables)
+    const secondOptions = createHarness(queryClient, attemptAccess, errors).options
+    const second = secondOptions.onMutate(variables)
+
+    firstOptions.onError(new Error('stale failure from previous options'), variables, first)
+
+    expect(errors['storyboard-1']).toBeUndefined()
+    expect(queryClient.getQueryData(queryKeys.tasks.targetStateOverlay('project-1'))).toMatchObject({
+      'NovelPromotionStoryboard:storyboard-1': {
+        runningTaskType: TASK_TYPE.STORYBOARD_SHEET_GENERATE,
+      },
+    })
+
+    secondOptions.onError(new Error('current failure'), variables, second)
     expect(errors['storyboard-1']).toBe('current failure')
     expect(queryClient.getQueryData(queryKeys.tasks.targetStateOverlay('project-1'))).toEqual({})
   })

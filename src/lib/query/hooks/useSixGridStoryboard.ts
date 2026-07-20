@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api-fetch'
 import { resolveTaskErrorMessage } from '@/lib/task/error-message'
@@ -170,14 +170,13 @@ export function createSheetTaskMutationOptions(
   projectId: string,
   episodeId: string,
   setGenerationError: (storyboardId: string, error: string | null) => void,
+  nextAttempt: (storyboardId: string) => number,
+  currentAttempt: (storyboardId: string) => number | undefined,
 ) {
-  const attemptByStoryboardId: Record<string, number> = {}
-
   return {
     mutationFn: (input: SheetTaskInput) => submitTask(buildSheetTaskRequest(projectId, input)),
     onMutate: (input: SheetTaskInput) => {
-      const attempt = (attemptByStoryboardId[input.storyboardId] ?? 0) + 1
-      attemptByStoryboardId[input.storyboardId] = attempt
+      const attempt = nextAttempt(input.storyboardId)
       if (input.operation === 'generate') setGenerationError(input.storyboardId, null)
       upsertTaskTargetOverlay(queryClient, {
         projectId,
@@ -191,7 +190,7 @@ export function createSheetTaskMutationOptions(
       return { attempt }
     },
     onError: (error: Error, input: SheetTaskInput, context: { attempt: number } | undefined) => {
-      if (context?.attempt !== attemptByStoryboardId[input.storyboardId]) return
+      if (context?.attempt !== currentAttempt(input.storyboardId)) return
       clearTaskTargetOverlay(queryClient, {
         projectId,
         targetType: 'NovelPromotionStoryboard',
@@ -203,7 +202,7 @@ export function createSheetTaskMutationOptions(
     },
     onSuccess: (_data: unknown, input: SheetTaskInput, context: { attempt: number } | undefined) => {
       if (input.operation === 'generate'
-        && context?.attempt === attemptByStoryboardId[input.storyboardId]) {
+        && context?.attempt === currentAttempt(input.storyboardId)) {
         setGenerationError(input.storyboardId, null)
       }
       return refreshStoryboardGroupQueries(queryClient, projectId, episodeId, input.storyboardId)
@@ -293,6 +292,21 @@ function rollbackPanelImageIfStillOptimistic(
 export function useSixGridStoryboard(projectId: string, episodeId: string) {
   const queryClient = useQueryClient()
   const [generationErrorsByStoryboardId, setGenerationErrorsByStoryboardId] = useState<Record<string, string>>({})
+  const sheetAttemptByStoryboardId = useRef<Record<string, number>>({})
+  const nextSheetAttempt = useCallback((storyboardId: string) => {
+    const attempt = (sheetAttemptByStoryboardId.current[storyboardId] ?? 0) + 1
+    sheetAttemptByStoryboardId.current[storyboardId] = attempt
+    return attempt
+  }, [])
+  const currentSheetAttempt = useCallback(
+    (storyboardId: string) => sheetAttemptByStoryboardId.current[storyboardId],
+    [],
+  )
+  const setGenerationError = useCallback((storyboardId: string, error: string | null) => {
+    setGenerationErrorsByStoryboardId((errors) => error === null
+      ? clearStoryboardError(errors, storyboardId)
+      : { ...errors, [storyboardId]: error })
+  }, [])
   const refreshGroup = (storyboardId: string) => refreshStoryboardGroupQueries(
     queryClient,
     projectId,
@@ -306,10 +320,10 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
     queryClient,
     projectId,
     episodeId,
-    (storyboardId, error) => setGenerationErrorsByStoryboardId((errors) => error === null
-      ? clearStoryboardError(errors, storyboardId)
-      : { ...errors, [storyboardId]: error }),
-  ), [episodeId, projectId, queryClient])
+    setGenerationError,
+    nextSheetAttempt,
+    currentSheetAttempt,
+  ), [currentSheetAttempt, episodeId, nextSheetAttempt, projectId, queryClient, setGenerationError])
   const sheet = useMutation(sheetOptions)
   const crop = useMutation({
     mutationFn: (input: CropTaskInput) => submitTask(buildSheetCropRequest(projectId, input)),

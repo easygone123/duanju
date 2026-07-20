@@ -472,6 +472,8 @@
         "status": "任务状态：{status}",
         "idle": "空闲",
         "running": "处理中",
+        "sheetGenerationRunning": "正在生成一张完整的 3×2 六宫格整图…",
+        "sheetGenerationStatus": "正在生成一张完整的 3×2 六宫格整图，并非分别提交六张图片。",
         "manageComfyui": "管理 ComfyUI 节点池",
         "comfyuiHint": "前往设置中心添加 ComfyUI IP，并发布、测试私有放大工作流。",
         "workflowRequired": "需要先发布并测试一个本人可用的放大工作流",

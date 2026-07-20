@@ -49,7 +49,6 @@ export default function GridGroupControls({
   translationNamespace = 'storyboard.grid',
 }: GridGroupControlsProps) {
   const t = useTranslations(translationNamespace)
-  const gridT = useTranslations('storyboard.grid')
   if (!isGridStoryboardMode(storyboard.layoutMode)) return null
 
   const mode = storyboard.layoutMode
@@ -69,9 +68,13 @@ export default function GridGroupControls({
     ? (hasUpscaledSheet ? t('sourceUpscaled') : t('sourceMissing'))
     : (hasSheet ? t('sourceOriginal') : t('sourceMissing'))
   const title = isLegacySixGrid ? t('title') : t(`title.${mode}`)
-  const sheetGenerationStatus = gridT(`sheetGenerationStatus.${mode}`)
+  const sheetGenerationStatus = isLegacySixGrid
+    ? t('sheetGenerationStatus')
+    : t(`sheetGenerationStatus.${mode}`)
   const generateLabel = isTaskRunning
-    ? gridT(`sheetGenerationRunning.${mode}`)
+    ? isLegacySixGrid
+      ? t('sheetGenerationRunning')
+      : t(`sheetGenerationRunning.${mode}`)
     : isLegacySixGrid
       ? t(hasSheet ? 'regenerateSheet' : 'generateSheet')
       : t(`${hasSheet ? 'regenerateSheet' : 'generateSheet'}.${mode}`)
