@@ -268,6 +268,156 @@ export const PATCH = apiHandler(async (
 
   // 单条更新
   if (lineId) {
+    const currentLine = await prisma.novelPromotionVoiceLine.findFirst({
+      where: {
+        id: lineId,
+        episode: {
+          novelPromotionProject: { projectId },
+        },
+      },
+      select: {
+        id: true,
+        episodeId: true,
+        lineType: true,
+        sourceKey: true,
+        speaker: true,
+        content: true,
+        matchedPanelId: true,
+      },
+    })
+    if (!currentLine) {
+      throw new ApiError('NOT_FOUND')
+    }
+
+    if (currentLine.lineType === 'narration') {
+      const normalizedSpeaker = typeof speaker === 'string' ? speaker.trim() : speaker
+      if (
+        (speaker !== undefined && normalizedSpeaker !== currentLine.speaker)
+        || (matchedPanelId !== undefined && matchedPanelId !== currentLine.matchedPanelId)
+      ) {
+        throw new ApiError('INVALID_PARAMS', {
+          code: 'NARRATION_IDENTITY_IMMUTABLE',
+        })
+      }
+
+      if (!currentLine.matchedPanelId) {
+        throw new ApiError('INVALID_PARAMS', {
+          code: 'NARRATION_PANEL_MISSING',
+        })
+      }
+      const narrationPanelId = currentLine.matchedPanelId
+      const currentPanel = await prisma.novelPromotionPanel.findFirst({
+        where: {
+          id: narrationPanelId,
+          storyboard: {
+            episode: {
+              id: currentLine.episodeId,
+              novelPromotionProject: { projectId },
+            },
+          },
+        },
+        select: { id: true, hasDialogue: true },
+      })
+      if (!currentPanel) {
+        throw new ApiError('INVALID_PARAMS', {
+          code: 'NARRATION_PANEL_MISSING',
+        })
+      }
+      if (currentPanel.hasDialogue) {
+        throw new ApiError('INVALID_PARAMS', {
+          code: 'PANEL_NARRATION_DIALOGUE_UNSUPPORTED',
+        })
+      }
+
+      const updateData: Prisma.NovelPromotionVoiceLineUncheckedUpdateInput = {}
+      if (voicePresetId !== undefined) updateData.voicePresetId = voicePresetId
+      if (emotionStrength !== undefined) updateData.emotionStrength = emotionStrength
+      if (content !== undefined) {
+        if (typeof content !== 'string' || !content.trim()) {
+          throw new ApiError('INVALID_PARAMS', {
+            code: 'PANEL_NARRATION_TEXT_REQUIRED',
+          })
+        }
+        updateData.content = content.trim()
+      }
+      if (emotionPrompt !== undefined) {
+        if (emotionPrompt !== null && typeof emotionPrompt !== 'string') {
+          throw new ApiError('INVALID_PARAMS')
+        }
+        updateData.emotionPrompt = emotionPrompt?.trim() || null
+      }
+      if (audioUrl !== undefined) {
+        updateData.audioUrl = audioUrl
+        const media = await resolveMediaRefFromLegacyValue(audioUrl)
+        updateData.audioMediaId = media?.id || null
+      }
+      const mirroredNarrationText = content !== undefined
+        ? content.trim()
+        : currentLine.content.trim()
+      if (emotionPrompt !== undefined && !mirroredNarrationText) {
+        throw new ApiError('INVALID_PARAMS', {
+          code: 'PANEL_NARRATION_TEXT_REQUIRED',
+        })
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const matchedPanel = await tx.novelPromotionPanel.findFirst({
+          where: {
+            id: narrationPanelId,
+            storyboard: {
+              episode: {
+                id: currentLine.episodeId,
+                novelPromotionProject: { projectId },
+              },
+            },
+          },
+          select: { id: true, hasDialogue: true },
+        })
+        if (!matchedPanel) {
+          throw new ApiError('INVALID_PARAMS', {
+            code: 'NARRATION_PANEL_MISSING',
+          })
+        }
+        if (matchedPanel.hasDialogue) {
+          throw new ApiError('INVALID_PARAMS', {
+            code: 'PANEL_NARRATION_DIALOGUE_UNSUPPORTED',
+          })
+        }
+
+        if (content !== undefined || emotionPrompt !== undefined) {
+          await tx.novelPromotionPanel.update({
+            where: { id: matchedPanel.id },
+            data: {
+              narrationMode: 'on',
+              narrationText: mirroredNarrationText,
+              ...(emotionPrompt !== undefined
+                ? { narrationEmotion: updateData.emotionPrompt as string | null }
+                : {}),
+            },
+          })
+        }
+
+        return tx.novelPromotionVoiceLine.update({
+          where: { id: currentLine.id },
+          data: updateData,
+          include: {
+            matchedPanel: {
+              select: {
+                id: true,
+                storyboardId: true,
+                panelIndex: true,
+              },
+            },
+          },
+        })
+      })
+
+      return NextResponse.json({
+        success: true,
+        voiceLine: await withVoiceLineMedia(updated),
+      })
+    }
+
     const updateData: Prisma.NovelPromotionVoiceLineUncheckedUpdateInput = {}
     if (voicePresetId !== undefined) updateData.voicePresetId = voicePresetId
     if (emotionPrompt !== undefined) updateData.emotionPrompt = emotionPrompt || null
@@ -290,14 +440,6 @@ export const PATCH = apiHandler(async (
       updateData.audioMediaId = media?.id || null
     }
     if (matchedPanelId !== undefined) {
-      const currentLine = await prisma.novelPromotionVoiceLine.findUnique({
-        where: { id: lineId },
-        select: { episodeId: true }
-      })
-      if (!currentLine) {
-        throw new ApiError('NOT_FOUND')
-      }
-
       const matchedPanelData = await resolveMatchedPanelData(matchedPanelId, currentLine.episodeId)
       if (matchedPanelData) {
         updateData.matchedPanelId = matchedPanelData.matchedPanelId
