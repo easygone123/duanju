@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
 import { getObjectBuffer } from '@/lib/storage'
-import { assertTaskActive, resolveImageSourceFromGeneration, toSignedUrlIfCos, uploadImageSourceToCos } from '@/lib/workers/utils'
+import { assertTaskActive, resolveImageSourceFromGeneration, uploadImageSourceToCos } from '@/lib/workers/utils'
 import { normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-image'
 import type { TaskJobData } from '@/lib/task/types'
 import type { NormalizedCropRect, SixGridCellAspectRatio, SixGridProcessingOrder } from '@/lib/novel-promotion/six-grid/contracts'
@@ -200,15 +200,15 @@ export async function handleStoryboardSheetTask(job: Job<TaskJobData>) {
   }
   if (storyboard.sheetArtifactVersion !== snapshot.expectedSheetArtifactVersion) throw new Error('SIX_GRID_SHEET_STALE')
   if (snapshot.operation === 'sheet_upscale' && (!storyboard.sheetImageMedia || !sourceMatchesSnapshot(storyboard.sheetImageMedia, snapshot))) throw new Error('SIX_GRID_SOURCE_STALE')
+  const isComfyModel = snapshot.modelSnapshot.startsWith('comfyui::')
   const sourceMedia = snapshot.operation === 'sheet_upscale' ? storyboard.sheetImageMedia : null
-  const references = sourceMedia ? await prepareVerifiedSourceReferences(sourceMedia, snapshot.modelSnapshot.startsWith('comfyui::')) : null
+  const references = sourceMedia ? await prepareVerifiedSourceReferences(sourceMedia, isComfyModel) : null
   const sheetReferences = snapshot.operation === 'generate' && snapshot.referenceImages?.length
-    ? await prepareSheetReferences(snapshot.referenceImages)
+    ? await prepareSheetReferences(snapshot.referenceImages, isComfyModel)
     : null
   const prompt = sheetReferences
     ? `${snapshot.promptSnapshot}\nREFERENCE_IMAGE_MAPPING=${JSON.stringify(sheetReferences.mapping)}`
     : snapshot.promptSnapshot
-  const isComfyModel = snapshot.modelSnapshot.startsWith('comfyui::')
   await assertTaskActive(job, 'six_grid_sheet_before_provider')
   const generated = await resolveImageSourceFromGeneration(job, {
     userId: job.data.userId, modelId: snapshot.modelSnapshot,
@@ -345,11 +345,12 @@ async function prepareVerifiedSourceReferences(media: { storageKey: string | nul
 
 async function prepareSheetReferences(
   references: NonNullable<SixGridImageTaskSnapshot['referenceImages']>,
+  comfyModel: boolean,
 ) {
-  const comfy = references.map((entry) => toSignedUrlIfCos(entry.source)).filter((value): value is string => Boolean(value))
+  const sources = references.map((entry) => entry.source)
   return {
-    comfy,
-    remote: await normalizeReferenceImagesForGeneration(comfy),
+    comfy: sources,
+    remote: comfyModel ? [] : await normalizeReferenceImagesForGeneration(sources),
     mapping: references.map((entry, index) => ({
       index: `image${index}`,
       kind: entry.kind,
