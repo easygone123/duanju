@@ -182,6 +182,7 @@ export default function StoryboardCanvas({
       || selectingCandidateIds.has(storyboard.id)
       || submittingStoryboardTextIds.has(storyboard.id)
       || sixGridTaskStoryboardId === storyboard.id
+      || Boolean(storyboard.gridTaskRunning)
       || movingClipId === clip?.id
       || hasActivePanel
     return isActive ? [index] : []

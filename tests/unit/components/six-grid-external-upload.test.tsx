@@ -436,7 +436,7 @@ describe('six-grid external upload modal', () => {
 })
 
 describe('six-grid storyboard group dialog wiring', () => {
-  it('freezes the artifact version when upload opens and retains the virtual card for either dialog', async () => {
+  it('freezes upload state, retains dialogs, and binds text versus candidate overlay semantics', async () => {
     const retentionMock = vi.fn()
     vi.doMock('@/components/virtualization/VirtualCardRange', () => ({
       useVirtualCardRetention: retentionMock,
@@ -479,7 +479,18 @@ describe('six-grid storyboard group dialog wiring', () => {
     ]) {
       vi.doMock(`@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/${path}`, () => ({ default: () => null }))
     }
-    vi.doMock('@/components/task/TaskStatusOverlay', () => ({ default: () => null }))
+    vi.doMock('@/components/task/TaskStatusOverlay', () => ({
+      default: ({ state }: {
+        state: { resource: string; intent: string; hasOutput: boolean } | null
+      }) => state ? (
+        <div
+          data-testid="group-task-overlay"
+          data-resource={state.resource}
+          data-intent={state.intent}
+          data-has-output={String(state.hasOutput)}
+        />
+      ) : null,
+    }))
 
     const StoryboardGroup = (await import(
       '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/StoryboardGroup'
@@ -535,5 +546,34 @@ describe('six-grid storyboard group dialog wiring', () => {
 
     view.rerender(withIntl(<StoryboardGroup {...props} storyboard={{ ...storyboard, id: 'storyboard-2' }} />))
     await waitFor(() => expect(view.queryByTestId('upload-dialog')).toBeNull())
+
+    const textPanels = [{ id: 'panel-text-1' }] as unknown as React.ComponentProps<typeof StoryboardGroup>['textPanels']
+    view.rerender(withIntl(<StoryboardGroup
+      {...props}
+      textPanels={textPanels}
+      isSubmittingStoryboardTextTask
+    />))
+    expect(view.getByTestId('group-task-overlay').getAttribute('data-resource')).toBe('text')
+    expect(view.getByTestId('group-task-overlay').getAttribute('data-intent')).toBe('regenerate')
+    expect(view.getByTestId('group-task-overlay').getAttribute('data-has-output')).toBe('true')
+
+    view.rerender(withIntl(<StoryboardGroup
+      {...props}
+      textPanels={textPanels}
+      isSubmittingStoryboardTask
+    />))
+    expect(view.getByTestId('group-task-overlay').getAttribute('data-resource')).toBe('text')
+    expect(view.getByTestId('group-task-overlay').getAttribute('data-intent')).toBe('regenerate')
+
+    view.rerender(withIntl(<StoryboardGroup
+      {...props}
+      textPanels={textPanels}
+      isSubmittingStoryboardTextTask
+      isSelectingCandidate
+      hasAnyImage
+    />))
+    expect(view.getByTestId('group-task-overlay').getAttribute('data-resource')).toBe('image')
+    expect(view.getByTestId('group-task-overlay').getAttribute('data-intent')).toBe('process')
+    expect(view.getByTestId('group-task-overlay').getAttribute('data-has-output')).toBe('true')
   })
 })

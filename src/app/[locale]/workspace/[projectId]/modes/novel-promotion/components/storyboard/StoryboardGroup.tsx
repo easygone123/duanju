@@ -156,16 +156,34 @@ export default function StoryboardGroup({
 
   const currentRunningCount = textPanels.filter(isPanelTaskRunning).length
   const pendingCount = textPanels.filter((panel) => !panel.imageUrl && !isPanelTaskRunning(panel)).length
+  const hasTextOutput = textPanels.length > 0
 
   const groupOverlayState = useMemo(() => {
-    if (!isSubmittingStoryboardTask && !isSelectingCandidate) return null
+    const isTextTaskRunning = isSubmittingStoryboardTask || isSubmittingStoryboardTextTask
+    if (!isTextTaskRunning && !isSelectingCandidate) return null
+
+    if (isSelectingCandidate) {
+      return resolveTaskPresentationState({
+        phase: 'processing',
+        intent: 'process',
+        resource: 'image',
+        hasOutput: hasAnyImage,
+      })
+    }
+
     return resolveTaskPresentationState({
       phase: 'processing',
-      intent: isSelectingCandidate ? 'process' : hasAnyImage ? 'regenerate' : 'generate',
-      resource: 'image',
-      hasOutput: hasAnyImage,
+      intent: 'regenerate',
+      resource: 'text',
+      hasOutput: hasTextOutput,
     })
-  }, [hasAnyImage, isSelectingCandidate, isSubmittingStoryboardTask])
+  }, [
+    hasAnyImage,
+    hasTextOutput,
+    isSelectingCandidate,
+    isSubmittingStoryboardTask,
+    isSubmittingStoryboardTextTask,
+  ])
 
   const handleRegeneratePanelImage = useCallback(
     (panelId: string, count?: number, force?: boolean, imageModel?: string, generationOptions?: ImageTaskCapabilityOverrides) => {
@@ -186,7 +204,7 @@ export default function StoryboardGroup({
         />
       )}
 
-      {(isSubmittingStoryboardTask || isSelectingCandidate) && (
+      {groupOverlayState && (
         <TaskStatusOverlay
           state={groupOverlayState}
           className="z-10 rounded-lg bg-[var(--glass-bg-surface-modal)]/90"

@@ -27,6 +27,7 @@ import {
 } from '@/lib/query/hooks/useSixGridStoryboard'
 import { resolveProfileSection } from '@/app/[locale]/profile/profile-section'
 import {
+  buildSixGridTaskTypeContract,
   buildStoryboardTaskTypeContract,
   useStoryboardTaskAwareStoryboards,
 } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/hooks/useStoryboardTaskAwareStoryboards'
@@ -221,11 +222,13 @@ describe('six-grid crop contract', () => {
 
 describe('six-grid task requests and cache scope', () => {
   it('keeps text and grid task queries and projected running fields independent', () => {
-    expect(buildStoryboardTaskTypeContract()).toEqual({
+    const splitContract = {
       text: ['regenerate_storyboard_text', 'insert_panel'],
       grid: ['storyboard_sheet_generate', 'storyboard_sheet_upscale', 'storyboard_sheet_crop'],
       panel: ['storyboard_panel_upscale'],
-    })
+    }
+    expect(buildStoryboardTaskTypeContract()).toEqual(splitContract)
+    expect(buildSixGridTaskTypeContract()).toEqual(splitContract)
 
     let runningKind: 'text' | 'grid' = 'text'
     taskPresentationMock.mockImplementation((

@@ -254,6 +254,7 @@ describe('workspace card virtualization', () => {
     const storyboards = Array.from({ length: 100 }, (_, index) => ({
       id: `storyboard-${index}`,
       clipId: `clip-${index}`,
+      gridTaskRunning: index === 92,
       panels: [],
     }))
     const noop = () => undefined
@@ -325,6 +326,7 @@ describe('workspace card virtualization', () => {
     expect(view.queryByText('storyboard-89')).toBeNull()
     expect(view.getByText('storyboard-90')).toBeTruthy()
     expect(view.getByText('storyboard-91')).toBeTruthy()
+    expect(view.getByText('storyboard-92')).toBeTruthy()
     expect(view.queryByText('storyboard-50')).toBeNull()
   })
 })
