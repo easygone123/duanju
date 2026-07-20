@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { allowsIndividualStoryboardGroupCreation } from '@/lib/novel-promotion/grid-storyboard/spec'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
 
 /**
  * POST /api/novel-promotion/[projectId]/storyboard-group
@@ -250,16 +251,10 @@ export const DELETE = apiHandler(async (
   // 使用事务删除（Prisma 的 cascade 会自动处理关联删除，但我们显式删除以确保一致性）
   await prisma.$transaction(async (tx) => {
     // 1. 清除指向待删除分镜的语音匹配，避免留下陈旧的匹配元数据
-    await tx.novelPromotionVoiceLine.updateMany({
-      where: {
-        episodeId: storyboard.episodeId,
-        matchedStoryboardId: storyboardId,
-      },
-      data: {
-        matchedPanelId: null,
-        matchedStoryboardId: null,
-        matchedPanelIndex: null,
-      },
+    await detachVoiceLinesBeforePanelRemoval({
+      tx,
+      episodeId: storyboard.episodeId,
+      storyboardIds: [storyboardId],
     })
 
     // 2. 删除所有关联的 Panels

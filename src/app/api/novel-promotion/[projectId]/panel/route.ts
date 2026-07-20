@@ -5,6 +5,7 @@ import { apiHandler, ApiError } from '@/lib/api-errors'
 import { serializeStructuredJsonField } from '@/lib/novel-promotion/panel-ai-data-sync'
 import { toPanelUndoApiError, undoSixGridPanelImage, type PanelUndoClient } from '@/lib/novel-promotion/six-grid/panel-undo'
 import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
 
 function parseNullableNumberField(value: unknown): number | null {
   if (value === null || value === '') return null
@@ -165,6 +166,8 @@ export const DELETE = apiHandler(async (
   // 使用事务确保删除和重新排序的原子性
   // 采用原始 SQL 批量更新以避免循环导致的性能问题
   await prisma.$transaction(async (tx) => {
+    await detachVoiceLinesBeforePanelRemoval({ tx, panelIds: [panelId] })
+
     // 1. 删除 Panel
     await tx.novelPromotionPanel.delete({
       where: { id: panelId }

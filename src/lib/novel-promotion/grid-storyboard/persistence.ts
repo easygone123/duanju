@@ -25,6 +25,7 @@ import {
 } from '@/lib/novel-promotion/six-grid/persistence-voice'
 import { syncPanelNarrationVoiceLine } from '@/lib/novel-promotion/narration/sync'
 import { parseNarrationMode } from '@/lib/novel-promotion/narration/state'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
 import {
   resolveStoryboardGridSpec,
   type GridStoryboardMode,
@@ -79,13 +80,10 @@ export async function persistGridStoryboardOutputs(params: PersistGridParams) {
     })
     const obsoleteIds = obsoleteStoryboards.map((storyboard) => storyboard.id)
     if (obsoleteIds.length > 0) {
-      await tx.novelPromotionVoiceLine.updateMany({
-        where: { episodeId: params.episodeId, matchedStoryboardId: { in: obsoleteIds } },
-        data: {
-          matchedPanelId: null,
-          matchedStoryboardId: null,
-          matchedPanelIndex: null,
-        },
+      await detachVoiceLinesBeforePanelRemoval({
+        tx,
+        episodeId: params.episodeId,
+        storyboardIds: obsoleteIds,
       })
       await tx.novelPromotionStoryboard.deleteMany({ where: { id: { in: obsoleteIds } } })
     }

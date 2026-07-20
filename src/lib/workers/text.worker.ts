@@ -36,6 +36,7 @@ import { handleAssetHubAIModifyTask } from './handlers/asset-hub-ai-modify'
 import { handleReferenceToCharacterTask } from './handlers/reference-to-character'
 import { handleShotAITask } from './handlers/shot-ai-tasks'
 import { handleCharacterProfileTask } from './handlers/character-profile'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
 
 function readAssetKind(value: Record<string, unknown>): string {
   return typeof value.assetKind === 'string' ? value.assetKind : 'location'
@@ -392,6 +393,11 @@ async function handleRegenerateStoryboardTextTask(job: Job<TaskJobData>) {
     const panelModel = tx.novelPromotionPanel as unknown as {
       create: (args: { data: Record<string, unknown> }) => Promise<unknown>
     }
+    await detachVoiceLinesBeforePanelRemoval({
+      tx,
+      episodeId: storyboard.episodeId,
+      storyboardIds: [storyboardId],
+    })
     await tx.novelPromotionPanel.deleteMany({ where: { storyboardId } })
     await tx.novelPromotionStoryboard.update({
       where: { id: storyboardId },

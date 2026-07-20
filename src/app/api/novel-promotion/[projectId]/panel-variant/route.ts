@@ -8,6 +8,7 @@ import { submitTask } from '@/lib/task/submitter'
 import { resolveRequiredTaskLocale } from '@/lib/task/resolve-locale'
 import { TASK_TYPE } from '@/lib/task/types'
 import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
 
 function createPanelVariantId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -22,6 +23,7 @@ async function rollbackCreatedVariantPanel(params: {
   panelIndex: number
 }) {
   await prisma.$transaction(async (tx) => {
+    await detachVoiceLinesBeforePanelRemoval({ tx, panelIds: [params.panelId] })
     await tx.novelPromotionPanel.delete({
       where: { id: params.panelId },
     })

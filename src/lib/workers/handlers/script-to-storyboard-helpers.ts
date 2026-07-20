@@ -2,6 +2,7 @@ import { safeParseJson, safeParseJsonArray } from '@/lib/json-repair'
 import { prisma } from '@/lib/prisma'
 import type { StoryboardPanel } from '@/lib/storyboard-phases'
 import { persistGridStoryboardOutputs } from '@/lib/novel-promotion/grid-storyboard/persistence'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
 import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 import type { ResolvedStoryboardRunSnapshot } from '@/lib/novel-promotion/six-grid/run-snapshot'
 import { getRunIdentitySnapshot } from '@/lib/run-runtime/service'
@@ -179,6 +180,11 @@ export async function persistStoryboardsAndPanels(params: {
         select: { id: true, clipId: true },
       })
 
+      await detachVoiceLinesBeforePanelRemoval({
+        tx,
+        episodeId,
+        storyboardIds: [storyboard.id],
+      })
       await tx.novelPromotionPanel.deleteMany({
         where: { storyboardId: storyboard.id },
       })
@@ -292,16 +298,10 @@ export async function persistStoryboardOutputs(params: {
       .map((storyboard) => storyboard.id)
       .filter((storyboardId) => !plannedStoryboardIds.includes(storyboardId))
     if (obsoleteStoryboardIds.length > 0) {
-      await tx.novelPromotionVoiceLine.updateMany({
-        where: {
-          episodeId: params.episodeId,
-          matchedStoryboardId: { in: obsoleteStoryboardIds },
-        },
-        data: {
-          matchedPanelId: null,
-          matchedStoryboardId: null,
-          matchedPanelIndex: null,
-        },
+      await detachVoiceLinesBeforePanelRemoval({
+        tx,
+        episodeId: params.episodeId,
+        storyboardIds: obsoleteStoryboardIds,
       })
       await tx.novelPromotionStoryboard.deleteMany({
         where: { id: { in: obsoleteStoryboardIds } },
@@ -328,6 +328,11 @@ export async function persistStoryboardOutputs(params: {
       storyboardIdByRef.set(storyboard.id, storyboard.id)
       storyboardIdByRef.set(clipEntry.clipId, storyboard.id)
 
+      await detachVoiceLinesBeforePanelRemoval({
+        tx,
+        episodeId: params.episodeId,
+        storyboardIds: [storyboard.id],
+      })
       await tx.novelPromotionPanel.deleteMany({
         where: { storyboardId: storyboard.id },
       })
@@ -493,12 +498,14 @@ export async function persistStoryboardOutputs(params: {
       await voiceLineModel.deleteMany({
         where: {
           episodeId: params.episodeId,
+          lineType: 'dialogue',
         },
       })
     } else {
       await voiceLineModel.deleteMany({
         where: {
           episodeId: params.episodeId,
+          lineType: 'dialogue',
           lineIndex: {
             notIn: nextLineIndexes,
           },
