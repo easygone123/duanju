@@ -269,15 +269,17 @@ describe('panel narration PATCH contract', () => {
       emotion: 'calm',
       locale: 'en',
     }))
-    expect(await response.json()).toMatchObject({
-      narrationMode: 'on',
-      narrationRecommended: true,
-      narrationSuggestedText: '建议旁白',
-      narrationSuggestedEmotion: 'calm',
-      narrationText: '建议旁白',
-      narrationEmotion: 'calm',
-      updatedAt: '2026-07-20T01:00:01.000Z',
-      voiceLineId: 'line-1',
+    expect(await response.json()).toEqual({
+      success: true,
+      narration: {
+        narrationMode: 'on',
+        narrationRecommended: true,
+        narrationSuggestedText: '建议旁白',
+        narrationSuggestedEmotion: 'calm',
+        narrationText: '建议旁白',
+        narrationEmotion: 'calm',
+        updatedAt: '2026-07-20T01:00:01.000Z',
+      },
     })
   })
 

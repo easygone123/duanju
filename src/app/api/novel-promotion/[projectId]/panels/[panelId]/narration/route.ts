@@ -141,7 +141,7 @@ export const PATCH = apiHandler(async (
     })
     if (!canonicalPanel) throw new ApiError('NOT_FOUND')
 
-    const voiceLine = await syncPanelNarrationVoiceLine({
+    await syncPanelNarrationVoiceLine({
       tx,
       episodeId: canonicalPanel.storyboard.episodeId,
       panelId: canonicalPanel.id,
@@ -156,17 +156,19 @@ export const PATCH = apiHandler(async (
       emotion: canonicalPanel.narrationEmotion,
     })
 
-    return { panel: canonicalPanel, voiceLine }
+    return canonicalPanel
   })
 
   return NextResponse.json({
-    narrationMode: result.panel.narrationMode,
-    narrationRecommended: result.panel.narrationRecommended,
-    narrationSuggestedText: result.panel.narrationSuggestedText,
-    narrationSuggestedEmotion: result.panel.narrationSuggestedEmotion,
-    narrationText: result.panel.narrationText,
-    narrationEmotion: result.panel.narrationEmotion,
-    updatedAt: result.panel.updatedAt.toISOString(),
-    ...(result.voiceLine ? { voiceLineId: result.voiceLine.id } : {}),
+    success: true,
+    narration: {
+      narrationMode: result.narrationMode,
+      narrationRecommended: result.narrationRecommended,
+      narrationSuggestedText: result.narrationSuggestedText,
+      narrationSuggestedEmotion: result.narrationSuggestedEmotion,
+      narrationText: result.narrationText,
+      narrationEmotion: result.narrationEmotion,
+      updatedAt: result.updatedAt.toISOString(),
+    },
   })
 })
