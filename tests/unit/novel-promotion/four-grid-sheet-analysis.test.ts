@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   analyzeFourGridSheet,
+  buildFourGridSheetAnalysisPrompt,
   parseFourGridSheetAnalysis,
 } from '@/lib/novel-promotion/grid-storyboard/sheet-analysis'
 
@@ -13,11 +14,51 @@ const rows = Array.from({ length: 4 }, (_, index) => ({
   duration: index + 1,
   shot_type: '中景',
   camera_move: '固定',
+  narration_recommended: false,
+  narration_text: null,
+  narration_emotion: null,
+}))
+
+const plannedPanels = rows.map((row, panelIndex) => ({
+  panelIndex,
+  description: `planned plot ${panelIndex + 1}`,
+  imagePrompt: null,
+  videoPrompt: `planned motion ${panelIndex + 1}`,
+  shotType: '中景',
+  cameraMove: '固定',
+  location: 'courtyard',
+  characters: '["hero"]',
+  props: '[]',
+  srtSegment: `line ${panelIndex + 1}`,
+  dialogueSpeaker: panelIndex === 0 ? 'hero' : null,
+  dialogueText: panelIndex === 0 ? 'dialogue 1' : null,
+  dialogueEmotion: panelIndex === 0 ? 'calm' : null,
+  duration: row.duration,
+  estimatedDuration: row.duration,
 }))
 
 describe('four-grid sheet analysis', () => {
   it('sorts exactly four grounded rows by panel number', () => {
-    expect(parseFourGridSheetAnalysis(JSON.stringify({ panels: [...rows].reverse() })))
+    expect(parseFourGridSheetAnalysis(JSON.stringify({ panels: [...rows].reverse() }), plannedPanels))
+      .toEqual(rows)
+  })
+
+  it('accepts recommended narration with text on a dialogue-free panel', () => {
+    const narratedRows = rows.map((row, index) => index === 1
+      ? {
+          ...row,
+          narration_recommended: true,
+          narration_text: 'Night fell before they reached the city.',
+          narration_emotion: 'reflective',
+        }
+      : row)
+
+    expect(parseFourGridSheetAnalysis(JSON.stringify({ panels: narratedRows }), plannedPanels))
+      .toEqual(narratedRows)
+  })
+
+  it('accepts non-recommended narration fields as null', () => {
+    expect(parseFourGridSheetAnalysis(JSON.stringify({ panels: rows }), plannedPanels))
       .toEqual(rows)
   })
 
@@ -27,8 +68,58 @@ describe('four-grid sheet analysis', () => {
     ['empty prompt', rows.map((row, index) => index === 0 ? { ...row, video_prompt: '' } : row)],
     ['invalid duration', rows.map((row, index) => index === 0 ? { ...row, duration: 0 } : row)],
   ])('rejects %s', (_case, value) => {
-    expect(() => parseFourGridSheetAnalysis(JSON.stringify({ panels: value })))
+    expect(() => parseFourGridSheetAnalysis(JSON.stringify({ panels: value }), plannedPanels))
       .toThrow('FOUR_GRID_SHEET_ANALYSIS_INVALID')
+  })
+
+  it('rejects narration recommended on a panel with authoritative dialogue', () => {
+    const value = rows.map((row, index) => index === 0
+      ? { ...row, narration_recommended: true, narration_text: 'Narration over dialogue.' }
+      : row)
+
+    expect(() => parseFourGridSheetAnalysis(JSON.stringify({ panels: value }), plannedPanels))
+      .toThrow('FOUR_GRID_SHEET_ANALYSIS_INVALID')
+  })
+
+  it.each([
+    ['null', null],
+    ['blank', '   '],
+  ])('rejects recommended narration with %s text', (_case, narrationText) => {
+    const value = rows.map((row, index) => index === 1
+      ? { ...row, narration_recommended: true, narration_text: narrationText }
+      : row)
+
+    expect(() => parseFourGridSheetAnalysis(JSON.stringify({ panels: value }), plannedPanels))
+      .toThrow('FOUR_GRID_SHEET_ANALYSIS_INVALID')
+  })
+
+  it('rejects narration text when narration is not recommended', () => {
+    const value = rows.map((row, index) => index === 1
+      ? { ...row, narration_text: 'Unexpected narration.' }
+      : row)
+
+    expect(() => parseFourGridSheetAnalysis(JSON.stringify({ panels: value }), plannedPanels))
+      .toThrow('FOUR_GRID_SHEET_ANALYSIS_INVALID')
+  })
+
+  it('rejects narration emotion when narration is not recommended', () => {
+    const value = rows.map((row, index) => index === 1
+      ? { ...row, narration_emotion: 'somber' }
+      : row)
+
+    expect(() => parseFourGridSheetAnalysis(JSON.stringify({ panels: value }), plannedPanels))
+      .toThrow('FOUR_GRID_SHEET_ANALYSIS_INVALID')
+  })
+
+  it('instructs narration eligibility, nonredundancy, and duration allocation', () => {
+    const prompt = buildFourGridSheetAnalysisPrompt({ locale: 'en', panels: plannedPanels })
+
+    expect(prompt).toContain('Narration is allowed only on panels whose authoritative dialogue is empty')
+    expect(prompt).toContain('time/location transition, inner thought, off-screen background information, or necessary causal context')
+    expect(prompt).toContain('Never use narration to restate visible action')
+    expect(prompt).toContain('Include narration speaking time in duration allocation')
+    expect(prompt.match(/"narration_recommended":false,"narration_text":null,"narration_emotion":null/g))
+      .toHaveLength(4)
   })
 
   it('sends the complete sheet and authoritative plot plan to one vision request', async () => {
@@ -39,23 +130,7 @@ describe('four-grid sheet analysis', () => {
       model: 'openai::vision-model',
       imageDataUrl: 'data:image/png;base64,c2hlZXQ=',
       locale: 'zh',
-      panels: rows.map((row, panelIndex) => ({
-        panelIndex,
-        description: `planned plot ${panelIndex + 1}`,
-        imagePrompt: null,
-        videoPrompt: `planned motion ${panelIndex + 1}`,
-        shotType: '中景',
-        cameraMove: '固定',
-        location: 'courtyard',
-        characters: '["hero"]',
-        props: '[]',
-        srtSegment: `line ${panelIndex + 1}`,
-        dialogueSpeaker: 'hero',
-        dialogueText: `dialogue ${panelIndex + 1}`,
-        dialogueEmotion: 'calm',
-        duration: row.duration,
-        estimatedDuration: row.duration,
-      })),
+      panels: plannedPanels,
     }, { runVision: runVision as never })
 
     expect(result).toEqual(rows)
