@@ -195,6 +195,9 @@ export function useStoryboardTaskAwareStoryboards({
         storyboardTaskIntent: textTaskState?.intent,
         gridTaskRunning,
         gridTaskType: gridTaskRunning ? gridTaskState?.runningTaskType ?? null : null,
+        gridTaskError: gridTaskState?.phase === 'failed'
+          ? gridTaskState.lastError?.message ?? null
+          : null,
         panels: (storyboard.panels || []).map((panel) => {
           const panelImageTaskState = panelImageStates.getTaskState(`panel-image:${panel.id}`)
           const panelImageRunning = isRunningPhase(panelImageTaskState?.phase)

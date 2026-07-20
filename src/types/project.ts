@@ -257,6 +257,7 @@ export interface NovelPromotionStoryboard {
   storyboardTaskIntent?: TaskIntent
   gridTaskRunning?: boolean
   gridTaskType?: string | null
+  gridTaskError?: string | null
   candidateImages?: string | null
   lastError?: string | null  // 最后一次生成失败的错误信息
   photographyPlan?: string | null  // 摄影方案JSON

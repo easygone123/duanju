@@ -10,6 +10,7 @@ import type { SixGridImageTaskSnapshot } from '@/lib/workers/handlers/storyboard
 import { getProjectModelConfig, resolveProjectComfyWorkflowVersion, resolveProjectImageTaskGenerationOptions } from '@/lib/config-service'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { collectSixGridReferenceInputs } from '@/lib/novel-promotion/six-grid/reference-inputs'
+import { COMFY_REFERENCE_UPLOAD_LIMIT } from '@/lib/comfyui/types'
 
 const schema = z.object({
   operation: z.enum(['generate', 'upscale']), episodeId: z.string().trim().min(1).max(200), storyboardId: z.string().trim().min(1).max(200),
@@ -17,6 +18,20 @@ const schema = z.object({
   prompt: z.string().max(50_000).optional(),
   locale: z.string().max(20).optional(), meta: z.object({ locale: z.string().max(20).optional() }).strict().optional(),
 }).strict()
+
+function resolveComfyReferenceCapacity(variableDefinitions: unknown): number {
+  if (!Array.isArray(variableDefinitions)) return 0
+  const definition = variableDefinitions.find((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return false
+    const value = candidate as Record<string, unknown>
+    return (value.name === 'referenceImages' || value.name === 'input_images')
+      && value.type === 'image_ref_list'
+  }) as Record<string, unknown> | undefined
+  if (!definition) return 0
+  return typeof definition.maxItems === 'number' && Number.isInteger(definition.maxItems)
+    ? Math.max(1, Math.min(COMFY_REFERENCE_UPLOAD_LIMIT, definition.maxItems))
+    : COMFY_REFERENCE_UPLOAD_LIMIT
+}
 
 export const POST = apiHandler(async (request: NextRequest, context: { params: Promise<{ projectId: string }> }) => {
   const { projectId } = await context.params
@@ -28,7 +43,10 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
   const storyboard = await loadOwnedGridStoryboard({ userId: auth.session.user.id, projectId, episodeId: body.episodeId, storyboardId: body.storyboardId })
   const locale = resolveRequiredTaskLocale(request, body)
   const operation = body.operation === 'generate' ? 'generate' : 'sheet_upscale'
-  let workflow: { workflow: { id: string }; version: { id: string } } | null = null
+  let workflow: {
+    workflow: { id: string }
+    version: { id: string; variableDefinitions?: unknown }
+  } | null = null
   if (operation === 'sheet_upscale') {
     if (!body.workflowId || !body.workflowVersionId) throw new ApiError('INVALID_PARAMS', { code: 'UPSCALE_WORKFLOW_REQUIRED', field: 'workflowId' })
     if (!storyboard.sheetImageMedia) throw new ApiError('INVALID_PARAMS', { code: 'SHEET_IMAGE_REQUIRED', field: 'storyboardId' })
@@ -88,9 +106,12 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
       })
     }
   }
-  const referenceImages = operation === 'generate'
+  const collectedReferenceImages = operation === 'generate'
     ? await collectSixGridReferenceInputs({ projectId, panels: storyboard.panels })
     : []
+  const referenceImages = operation === 'generate' && parsedModel?.provider === 'comfyui'
+    ? collectedReferenceImages.slice(0, resolveComfyReferenceCapacity(workflow?.version.variableDefinitions))
+    : collectedReferenceImages
   const snapshot: SixGridImageTaskSnapshot = {
     operation, projectId, episodeId: body.episodeId, storyboardId: storyboard.id, groupSequence: storyboard.groupSequence ?? 0,
     ...(source ? { sourceMediaId: source.id, sourceChecksum: source.sha256 || `media:${source.id}`, sourceVersion: source.updatedAt.toISOString() } : {}),

@@ -266,7 +266,9 @@ export default function StoryboardCanvas({
                 ? sixGridTaskType ?? storyboard.gridTaskType ?? null
                 : storyboard.gridTaskType ?? null}
               sixGridTaskPanelId={sixGridTaskPanelId}
-              sixGridGenerationError={sixGridGenerationErrors[storyboard.id] ?? null}
+              sixGridGenerationError={sixGridGenerationErrors[storyboard.id]
+                ?? storyboard.gridTaskError
+                ?? null}
               onGenerateSixGridSheet={() => onGenerateSixGridSheet(storyboard.id)}
               onUpscaleSixGridSheet={(workflow) => onUpscaleSixGridSheet(storyboard.id, workflow)}
               onCropSixGridSheet={(cropRects) => onCropSixGridSheet(storyboard.id, cropRects)}
