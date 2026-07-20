@@ -1,5 +1,6 @@
 import type { CapabilitySelections } from '@/lib/model-config-contract'
 import type { LocationAvailableSlot } from '@/lib/location-available-slots'
+import type { PanelNarrationMode } from '@/lib/novel-promotion/narration/state'
 import type {
   NormalizedCropRect,
   SixGridCellAspectRatio,
@@ -18,6 +19,7 @@ export type {
   GridStoryboardMode,
   StoryboardGridSpec,
 } from '@/lib/novel-promotion/grid-storyboard/spec'
+export type { PanelNarrationMode } from '@/lib/novel-promotion/narration/state'
 
 // ============================================
 // 基础项目类型
@@ -176,8 +178,6 @@ export interface NovelPromotionClip {
   content: string
   screenplay?: string | null  // 剧本JSON（Phase 0输出）
 }
-
-export type PanelNarrationMode = 'auto' | 'on' | 'off'
 
 export interface NovelPromotionPanel {
   id: string

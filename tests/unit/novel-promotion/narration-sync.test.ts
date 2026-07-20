@@ -4,6 +4,7 @@ import {
   narrationSourceKey,
   relocateNarrationIndexConflicts,
   syncPanelNarrationVoiceLine,
+  writeDialogueVoiceLine,
 } from '@/lib/novel-promotion/narration/sync'
 
 type VoiceLineRow = {
@@ -47,13 +48,33 @@ function voiceLine(overrides: Partial<VoiceLineRow> = {}): VoiceLineRow {
   }
 }
 
-function makeTransaction(initialRows: VoiceLineRow[] = []) {
+function transactionWithVoiceModel(model: unknown, hasDialogue = false) {
+  return {
+    novelPromotionPanel: {
+      findUnique: vi.fn(async () => ({ hasDialogue })),
+    },
+    novelPromotionVoiceLine: model,
+  } as unknown as Prisma.TransactionClient
+}
+
+function makeTransaction(initialRows: VoiceLineRow[] = [], hasDialogue = false) {
   const rows = initialRows.map((row) => ({ ...row }))
   let nextId = rows.length + 1
   const model = {
-    findUnique: vi.fn(async ({ where }: { where: { sourceKey: string } }) => (
-      rows.find((row) => row.sourceKey === where.sourceKey) || null
-    )),
+    findUnique: vi.fn(async ({ where }: {
+      where: {
+        sourceKey?: string
+        episodeId_lineIndex?: { episodeId: string; lineIndex: number }
+      }
+    }) => {
+      if (where.sourceKey) {
+        return rows.find((row) => row.sourceKey === where.sourceKey) || null
+      }
+      const key = where.episodeId_lineIndex
+      return key
+        ? rows.find((row) => row.episodeId === key.episodeId && row.lineIndex === key.lineIndex) || null
+        : null
+    }),
     aggregate: vi.fn(async ({ where }: { where: { episodeId: string } }) => ({
       _max: {
         lineIndex: rows
@@ -61,11 +82,25 @@ function makeTransaction(initialRows: VoiceLineRow[] = []) {
           .reduce<number | null>((max, row) => max === null ? row.lineIndex : Math.max(max, row.lineIndex), null),
       },
     })),
-    create: vi.fn(async ({ data }: { data: Omit<VoiceLineRow, 'id'> }) => {
+    create: vi.fn(async ({ data }: {
+      data: Partial<VoiceLineRow> & Pick<
+        VoiceLineRow,
+        'episodeId' | 'lineIndex' | 'lineType' | 'enabled' | 'speaker' | 'content'
+      >
+    }) => {
       if (rows.some((row) => row.sourceKey === data.sourceKey)) {
         throw { code: 'P2002', meta: { target: ['sourceKey'] } }
       }
-      const created = { id: `voice-${nextId++}`, ...data }
+      if (rows.some((row) => (
+        row.episodeId === data.episodeId && row.lineIndex === data.lineIndex
+      ))) {
+        throw { code: 'P2002', meta: { target: ['episodeId', 'lineIndex'] } }
+      }
+      const created = voiceLine({
+        id: `voice-${nextId++}`,
+        sourceKey: data.sourceKey ?? null,
+        ...data,
+      })
       rows.push(created)
       return { id: created.id }
     }),
@@ -73,11 +108,14 @@ function makeTransaction(initialRows: VoiceLineRow[] = []) {
       where,
       data,
     }: {
-      where: { id: string }
+      where: { id?: string; sourceKey?: string }
       data: Partial<VoiceLineRow>
     }) => {
-      const row = rows.find((candidate) => candidate.id === where.id)
-      if (!row) throw new Error('ROW_NOT_FOUND')
+      const row = rows.find((candidate) => (
+        (where.id && candidate.id === where.id)
+        || (where.sourceKey && candidate.sourceKey === where.sourceKey)
+      ))
+      if (!row) throw { code: 'P2025' }
       Object.assign(row, data)
       return { id: row.id }
     }),
@@ -98,7 +136,7 @@ function makeTransaction(initialRows: VoiceLineRow[] = []) {
   return {
     rows,
     model,
-    tx: { novelPromotionVoiceLine: model } as unknown as Prisma.TransactionClient,
+    tx: transactionWithVoiceModel(model, hasDialogue),
   }
 }
 
@@ -189,14 +227,25 @@ describe('panel narration voice-line synchronization', () => {
     })
   })
 
-  it('keeps disabled manual content coherent while preserving audio and preset fields', async () => {
+  it('disables an existing manual row without changing projection or media fields', async () => {
     const media = {
       voicePresetId: 'preset-1',
       audioUrl: '/media/original.wav',
       audioMediaId: 'media-1',
       audioDuration: 2400,
     }
-    const { tx, rows, model } = makeTransaction([voiceLine(media)])
+    const existingProjection = {
+      speaker: 'Existing narrator',
+      content: 'Existing narration',
+      emotionPrompt: 'existing emotion',
+      matchedPanelId: 'existing-panel',
+      matchedStoryboardId: 'existing-storyboard',
+      matchedPanelIndex: 3,
+    }
+    const { tx, rows, model } = makeTransaction([voiceLine({
+      ...media,
+      ...existingProjection,
+    })])
 
     await syncPanelNarrationVoiceLine({
       tx,
@@ -208,18 +257,44 @@ describe('panel narration voice-line synchronization', () => {
 
     expect(rows[0]).toMatchObject({
       enabled: false,
-      content: 'Preserved manual narration',
-      emotionPrompt: 'solemn',
+      ...existingProjection,
       ...media,
     })
     const updateData = model.update.mock.calls[0]?.[0]?.data
-    expect(updateData).not.toHaveProperty('voicePresetId')
-    expect(updateData).not.toHaveProperty('audioUrl')
-    expect(updateData).not.toHaveProperty('audioMediaId')
-    expect(updateData).not.toHaveProperty('audioDuration')
+    expect(updateData).toEqual({ enabled: false })
   })
 
-  it('reloads and updates a concurrently created source-key row', async () => {
+  it('disables an auto-unrecommended row without refreshing its prior projection', async () => {
+    const prior = voiceLine({
+      content: 'Prior automatic narration',
+      emotionPrompt: 'prior emotion',
+      audioUrl: '/media/prior.wav',
+    })
+    const { tx, rows, model } = makeTransaction([prior])
+
+    await syncPanelNarrationVoiceLine({
+      tx,
+      ...baseInput,
+      recommended: false,
+      suggestedText: 'New disabled suggestion',
+      suggestedEmotion: 'new disabled emotion',
+    })
+
+    expect(rows[0]).toEqual({ ...prior, enabled: false })
+    expect(model.update.mock.calls[0]?.[0]?.data).toEqual({ enabled: false })
+  })
+
+  it('keeps narration disabled while the canonical panel has dialogue', async () => {
+    const prior = voiceLine({ enabled: true, audioUrl: '/media/dialogue-panel.wav' })
+    const { tx, rows, model } = makeTransaction([prior], true)
+
+    await syncPanelNarrationVoiceLine({ tx, ...baseInput, mode: 'on' })
+
+    expect(rows[0]).toEqual({ ...prior, enabled: false })
+    expect(model.update.mock.calls[0]?.[0]?.data).toEqual({ enabled: false })
+  })
+
+  it('updates a concurrently created row with a current write by source key', async () => {
     const racedRow = voiceLine({ id: 'voice-raced', lineIndex: 5 })
     const sourceKey = narrationSourceKey('panel-1')
     const model = {
@@ -232,7 +307,7 @@ describe('panel narration voice-line synchronization', () => {
       }),
       update: vi.fn(async () => ({ id: racedRow.id })),
     }
-    const tx = { novelPromotionVoiceLine: model } as unknown as Prisma.TransactionClient
+    const tx = transactionWithVoiceModel(model)
 
     await expect(syncPanelNarrationVoiceLine({ tx, ...baseInput }))
       .resolves.toEqual({ id: 'voice-raced' })
@@ -241,22 +316,39 @@ describe('panel narration voice-line synchronization', () => {
       select: { id: true },
     })
     expect(model.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'voice-raced' },
+      where: { sourceKey: 'panel-narration:panel-1' },
     }))
   })
 
   it('does not swallow an unrelated unique violation', async () => {
-    const uniqueError = { code: 'P2002', meta: { target: ['episodeId', 'lineIndex'] } }
+    const uniqueError = { code: 'P2002', meta: { target: ['unrelatedUniqueField'] } }
     const model = {
       findUnique: vi.fn().mockResolvedValue(null),
       aggregate: vi.fn(async () => ({ _max: { lineIndex: 4 } })),
       create: vi.fn(async () => { throw uniqueError }),
-      update: vi.fn(),
+      update: vi.fn().mockRejectedValue({ code: 'P2025' }),
     }
-    const tx = { novelPromotionVoiceLine: model } as unknown as Prisma.TransactionClient
+    const tx = transactionWithVoiceModel(model)
 
     await expect(syncPanelNarrationVoiceLine({ tx, ...baseInput })).rejects.toBe(uniqueError)
-    expect(model.update).not.toHaveBeenCalled()
+    expect(model.update).toHaveBeenCalledTimes(1)
+  })
+
+  it('advances the next index when a repeatable-read snapshot does not advance', async () => {
+    const model = {
+      findUnique: vi.fn().mockResolvedValue(null),
+      aggregate: vi.fn().mockResolvedValue({ _max: { lineIndex: 4 } }),
+      create: vi.fn()
+        .mockRejectedValueOnce({ code: 'P2002', meta: { target: ['episodeId', 'lineIndex'] } })
+        .mockResolvedValueOnce({ id: 'voice-retried' }),
+      update: vi.fn().mockRejectedValue({ code: 'P2025' }),
+    }
+    const tx = transactionWithVoiceModel(model)
+
+    await expect(syncPanelNarrationVoiceLine({ tx, ...baseInput }))
+      .resolves.toEqual({ id: 'voice-retried' })
+    expect(model.aggregate).toHaveBeenCalledTimes(2)
+    expect(model.create.mock.calls.map((call) => call[0].data.lineIndex)).toEqual([5, 6])
   })
 })
 
@@ -312,5 +404,83 @@ describe('narration line-index relocation', () => {
       { where: { id: 'narration-b' }, data: { lineIndex: 7 } },
       { where: { id: 'narration-a' }, data: { lineIndex: 8 } },
     ])
+  })
+
+  it('allocates above a higher incoming dialogue index', async () => {
+    const { tx, rows } = makeTransaction([
+      voiceLine({ id: 'narration-3', lineIndex: 3 }),
+    ])
+
+    await relocateNarrationIndexConflicts({
+      tx,
+      episodeId: 'episode-1',
+      incomingDialogueIndexes: [1, 2, 3, 4],
+    })
+
+    expect(rows[0].lineIndex).toBe(5)
+  })
+
+  it('advances relocation when a repeatable-read aggregate remains stale', async () => {
+    const model = {
+      findMany: vi.fn(async () => [{ id: 'narration-3', lineIndex: 3 }]),
+      aggregate: vi.fn(async () => ({ _max: { lineIndex: 4 } })),
+      update: vi.fn()
+        .mockRejectedValueOnce({ code: 'P2002', meta: { target: ['episodeId', 'lineIndex'] } })
+        .mockResolvedValueOnce({ id: 'narration-3' }),
+    }
+    const tx = transactionWithVoiceModel(model)
+
+    await relocateNarrationIndexConflicts({
+      tx,
+      episodeId: 'episode-1',
+      incomingDialogueIndexes: [1, 2, 3, 4],
+    })
+
+    expect(model.aggregate).toHaveBeenCalledTimes(2)
+    expect(model.update.mock.calls.map((call) => call[0].data.lineIndex)).toEqual([5, 6])
+  })
+
+  it('relocates narration inserted between dialogue lookup and create without mutating it', async () => {
+    const media = {
+      voicePresetId: 'preset-race',
+      audioUrl: '/media/raced.wav',
+      audioMediaId: 'media-race',
+      audioDuration: 1800,
+    }
+    const harness = makeTransaction()
+    harness.model.create.mockImplementationOnce(async () => {
+      harness.rows.push(voiceLine({
+        id: 'narration-race',
+        lineIndex: 2,
+        sourceKey: narrationSourceKey('panel-race'),
+        ...media,
+      }))
+      throw { code: 'P2002', meta: { target: ['episodeId', 'lineIndex'] } }
+    })
+
+    await writeDialogueVoiceLine({
+      tx: harness.tx,
+      episodeId: 'episode-1',
+      lineIndex: 2,
+      incomingDialogueIndexes: [1, 2],
+      speaker: 'Hero',
+      content: 'Dialogue wins index two',
+      emotionStrength: 0.5,
+      matchedPanelId: 'panel-2',
+      matchedStoryboardId: 'storyboard-1',
+      matchedPanelIndex: 1,
+    })
+
+    expect(harness.rows.find((row) => row.id === 'narration-race')).toMatchObject({
+      lineIndex: 3,
+      lineType: 'narration',
+      sourceKey: narrationSourceKey('panel-race'),
+      ...media,
+    })
+    expect(harness.rows.find((row) => row.lineIndex === 2)).toMatchObject({
+      lineType: 'dialogue',
+      enabled: true,
+      content: 'Dialogue wins index two',
+    })
   })
 })

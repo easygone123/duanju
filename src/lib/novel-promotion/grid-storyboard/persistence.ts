@@ -23,6 +23,8 @@ import {
   persistGridVoiceLines,
   validateGridVoiceLineRows,
 } from '@/lib/novel-promotion/six-grid/persistence-voice'
+import { syncPanelNarrationVoiceLine } from '@/lib/novel-promotion/narration/sync'
+import { parseNarrationMode } from '@/lib/novel-promotion/narration/state'
 import {
   resolveStoryboardGridSpec,
   type GridStoryboardMode,
@@ -156,7 +158,6 @@ export async function persistGridStoryboardOutputs(params: PersistGridParams) {
       storyboardIdByRef.set(group.groupId, storyboard.id)
       storyboardIdByRef.set(group.groupKey, storyboard.id)
 
-      await tx.novelPromotionPanel.deleteMany({ where: { storyboardId: storyboard.id } })
       const persistedPanels: PersistedStoryboard['panels'] = []
       for (let panelIndex = 0; panelIndex < group.panels.length; panelIndex += 1) {
         const panel = group.panels[panelIndex]
@@ -166,40 +167,70 @@ export async function persistGridStoryboardOutputs(params: PersistGridParams) {
           actionComplexity: readNonNegativeNumber(panel.actionComplexity),
           cameraComplexity: readNonNegativeNumber(panel.cameraComplexity),
         })
-        const created = await tx.novelPromotionPanel.create({
-          data: {
+        const plannedPanelFields = {
+          gridCellIndex: panelIndex,
+          panelNumber: panelIndex + 1,
+          shotType: panel.shot_type || '中景',
+          cameraMove: panel.camera_move || '固定',
+          description: panel.description || null,
+          videoPrompt: panel.video_prompt || null,
+          location: panel.location || null,
+          characters: panel.characters ? JSON.stringify(panel.characters) : null,
+          props: panel.props ? JSON.stringify(panel.props) : null,
+          srtSegment: panel.source_text || null,
+          srtStart: null,
+          srtEnd: null,
+          photographyRules: panel.photographyPlan ? JSON.stringify(panel.photographyPlan) : null,
+          actingNotes: panel.actingNotes ? JSON.stringify(panel.actingNotes) : null,
+          duration: duration.estimatedDuration,
+          estimatedDuration: duration.estimatedDuration,
+          durationOverride: null,
+          hasDialogue: dialogue.hasDialogue,
+          dialogueSpeaker: dialogue.speaker,
+          dialogueText: dialogue.text,
+          dialogueEmotion: dialogue.emotion,
+          includeDialogueInVideoPrompt: dialogue.includeInVideoPrompt,
+          imagePrompt: null,
+          imageUrl: null,
+          imageMediaId: null,
+          imageHistory: null,
+          firstLastFramePrompt: null,
+          videoUrl: null,
+          videoGenerationMode: null,
+          videoMediaId: null,
+          sceneType: null,
+          candidateImages: null,
+          linkedToNextPanel: false,
+          lipSyncTaskId: null,
+          lipSyncVideoUrl: null,
+          lipSyncVideoMediaId: null,
+          sketchImageUrl: null,
+          sketchImageMediaId: null,
+          previousImageUrl: null,
+          previousImageMediaId: null,
+          normalizedCropRect: null,
+          croppedImageUrl: null,
+          croppedImageMediaId: null,
+          upscaledImageUrl: null,
+          upscaledImageMediaId: null,
+          imageDerivation: null,
+          imageLineage: null,
+          firstFrameSourceMeta: null,
+          lastFrameSourceMeta: null,
+        }
+        const persistedPanel = await tx.novelPromotionPanel.upsert({
+          where: {
+            storyboardId_panelIndex: {
+              storyboardId: storyboard.id,
+              panelIndex,
+            },
+          },
+          create: {
             storyboardId: storyboard.id,
             panelIndex,
-            gridCellIndex: panelIndex,
-            panelNumber: panelIndex + 1,
-            shotType: panel.shot_type || '中景',
-            cameraMove: panel.camera_move || '固定',
-            description: panel.description || null,
-            videoPrompt: panel.video_prompt || null,
-            location: panel.location || null,
-            characters: panel.characters ? JSON.stringify(panel.characters) : null,
-            props: panel.props ? JSON.stringify(panel.props) : null,
-            srtSegment: panel.source_text || null,
-            photographyRules: panel.photographyPlan ? JSON.stringify(panel.photographyPlan) : null,
-            actingNotes: panel.actingNotes ? JSON.stringify(panel.actingNotes) : null,
-            duration: duration.estimatedDuration,
-            estimatedDuration: duration.estimatedDuration,
-            durationOverride: null,
-            hasDialogue: dialogue.hasDialogue,
-            dialogueSpeaker: dialogue.speaker,
-            dialogueText: dialogue.text,
-            dialogueEmotion: dialogue.emotion,
-            includeDialogueInVideoPrompt: dialogue.includeInVideoPrompt,
-            imageUrl: null,
-            imageMediaId: null,
-            normalizedCropRect: null,
-            croppedImageUrl: null,
-            croppedImageMediaId: null,
-            upscaledImageUrl: null,
-            upscaledImageMediaId: null,
-            imageDerivation: null,
-            imageLineage: null,
+            ...plannedPanelFields,
           },
+          update: plannedPanelFields,
           select: {
             id: true,
             panelIndex: true,
@@ -207,12 +238,32 @@ export async function persistGridStoryboardOutputs(params: PersistGridParams) {
             srtSegment: true,
             characters: true,
             props: true,
+            narrationMode: true,
+            narrationRecommended: true,
+            narrationSuggestedText: true,
+            narrationSuggestedEmotion: true,
+            narrationText: true,
+            narrationEmotion: true,
           },
         })
+        await syncPanelNarrationVoiceLine({
+          tx,
+          episodeId: params.episodeId,
+          panelId: persistedPanel.id,
+          storyboardId: storyboard.id,
+          panelIndex,
+          locale,
+          mode: parseNarrationMode(persistedPanel.narrationMode),
+          recommended: persistedPanel.narrationRecommended,
+          suggestedText: persistedPanel.narrationSuggestedText,
+          suggestedEmotion: persistedPanel.narrationSuggestedEmotion,
+          text: persistedPanel.narrationText,
+          emotion: persistedPanel.narrationEmotion,
+        })
         for (const ref of [storyboard.id, group.groupId, group.groupKey]) {
-          panelIdByStoryboardRef.set(`${ref}:${panelIndex}`, created.id)
+          panelIdByStoryboardRef.set(`${ref}:${panelIndex}`, persistedPanel.id)
         }
-        persistedPanels.push(created)
+        persistedPanels.push(persistedPanel)
       }
 
       const artifactPayload = {

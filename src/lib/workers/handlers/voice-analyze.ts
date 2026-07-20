@@ -14,7 +14,11 @@ import {
 } from './voice-analyze-helpers'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
 import { resolveAnalysisModel } from './resolve-analysis-model'
-import { relocateNarrationIndexConflicts } from '@/lib/novel-promotion/narration/sync'
+import {
+  relocateNarrationIndexConflicts,
+  writeDialogueVoiceLine,
+} from '@/lib/novel-promotion/narration/sync'
+import { runWithSixGridPersistenceRetry } from '@/lib/novel-promotion/six-grid/persistence-contract'
 
 const MAX_VOICE_ANALYZE_ATTEMPTS = 2
 
@@ -237,107 +241,63 @@ export async function handleVoiceAnalyzeTask(job: Job<TaskJobData>) {
   })
   await assertTaskActive(job, 'voice_analyze_persist')
 
-  const createdVoiceLines = await prisma.$transaction(async (tx) => {
-    const incomingLineIndexes = Array.from(new Set(
-      voiceLinesData.map((item) => item.lineIndex),
-    ))
-    await relocateNarrationIndexConflicts({
-      tx,
-      episodeId,
-      incomingDialogueIndexes: incomingLineIndexes,
-    })
+  const createdVoiceLines = await runWithSixGridPersistenceRetry(async () => (
+    await prisma.$transaction(async (tx) => {
+      const incomingLineIndexes = Array.from(new Set(
+        voiceLinesData.map((item) => item.lineIndex),
+      ))
+      await relocateNarrationIndexConflicts({
+        tx,
+        episodeId,
+        incomingDialogueIndexes: incomingLineIndexes,
+      })
 
-    const voiceLineModel = tx.novelPromotionVoiceLine as unknown as {
-      upsert?: (args: unknown) => Promise<{
+      const created: Array<{
         id: string
         speaker: string
         matchedStoryboardId: string | null
-      }>
-      create: (args: unknown) => Promise<{
-        id: string
-        speaker: string
-        matchedStoryboardId: string | null
-      }>
-      deleteMany: (args: unknown) => Promise<unknown>
-    }
-    const created: Array<{
-      id: string
-      speaker: string
-      matchedStoryboardId: string | null
-    }> = []
+      }> = []
 
-    for (let i = 0; i < voiceLinesData.length; i += 1) {
-      const lineData = voiceLinesData[i]
+      for (let i = 0; i < voiceLinesData.length; i += 1) {
+        const lineData = voiceLinesData[i]
 
-      const upsertArgs = {
-        where: {
-          episodeId_lineIndex: {
-            episodeId,
-            lineIndex: lineData.lineIndex,
-          },
-        },
-        create: {
+        const voiceLine = await writeDialogueVoiceLine({
+          tx,
           episodeId,
           lineIndex: lineData.lineIndex,
-          lineType: 'dialogue',
-          enabled: true,
+          incomingDialogueIndexes: incomingLineIndexes,
           speaker: lineData.speaker,
           content: lineData.content,
           emotionStrength: lineData.emotionStrength,
           matchedPanelId: lineData.matchedPanelId,
           matchedStoryboardId: lineData.matchedStoryboardId,
           matchedPanelIndex: lineData.matchedPanelIndex,
-        },
-        update: {
-          lineType: 'dialogue',
-          enabled: true,
-          speaker: lineData.speaker,
-          content: lineData.content,
-          emotionStrength: lineData.emotionStrength,
-          matchedPanelId: lineData.matchedPanelId,
-          matchedStoryboardId: lineData.matchedStoryboardId,
-          matchedPanelIndex: lineData.matchedPanelIndex,
-        },
-        select: {
-          id: true,
-          speaker: true,
-          matchedStoryboardId: true,
-        },
+        })
+        created.push(voiceLine)
       }
-      const voiceLine = typeof voiceLineModel.upsert === 'function'
-        ? await voiceLineModel.upsert(upsertArgs)
-        : (
-          process.env.NODE_ENV === 'test'
-            ? await voiceLineModel.create({
-              data: upsertArgs.create,
-              select: upsertArgs.select,
-            })
-            : (() => { throw new Error('novelPromotionVoiceLine.upsert unavailable') })()
-        )
-      created.push(voiceLine)
-    }
 
-    if (incomingLineIndexes.length === 0) {
-      await voiceLineModel.deleteMany({
-        where: {
-          episodeId,
-          lineType: 'dialogue',
-        },
-      })
-    } else {
-      await voiceLineModel.deleteMany({
-        where: {
-          episodeId,
-          lineType: 'dialogue',
-          lineIndex: {
-            notIn: incomingLineIndexes,
+      if (incomingLineIndexes.length === 0) {
+        await tx.novelPromotionVoiceLine.deleteMany({
+          where: {
+            episodeId,
+            lineType: 'dialogue',
           },
-        },
-      })
-    }
+        })
+      } else {
+        await tx.novelPromotionVoiceLine.deleteMany({
+          where: {
+            episodeId,
+            lineType: 'dialogue',
+            lineIndex: {
+              notIn: incomingLineIndexes,
+            },
+          },
+        })
+      }
 
-    return created
-  })
+      return created
+    })
+  ))
 
   const speakerStats: Record<string, number> = {}
   for (const line of createdVoiceLines) {

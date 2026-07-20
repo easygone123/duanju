@@ -5,6 +5,7 @@ import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 const txState = vi.hoisted(() => ({
   createdRows: [] as Array<Record<string, unknown>>,
   deletedWhereClauses: [] as Array<Record<string, unknown>>,
+  voiceRows: [] as Array<Record<string, unknown>>,
 }))
 
 const prismaMock = vi.hoisted(() => ({
@@ -81,6 +82,33 @@ describe('worker voice-analyze behavior', () => {
     vi.clearAllMocks()
     txState.createdRows = []
     txState.deletedWhereClauses = []
+    txState.voiceRows = [{
+      id: 'narration-existing',
+      episodeId: 'episode-1',
+      lineIndex: 1,
+      lineType: 'narration',
+      enabled: true,
+      sourceKey: 'panel-narration:panel-1',
+      speaker: '旁白',
+      content: '保留的旁白',
+      emotionPrompt: '沉静',
+      matchedPanelId: 'panel-1',
+      matchedStoryboardId: 'storyboard-1',
+      matchedPanelIndex: 0,
+      voicePresetId: 'preset-1',
+      audioUrl: '/media/narration.wav',
+      audioMediaId: 'media-1',
+      audioDuration: 2400,
+    }, {
+      id: 'stale-dialogue',
+      episodeId: 'episode-1',
+      lineIndex: 99,
+      lineType: 'dialogue',
+      enabled: true,
+      sourceKey: null,
+      speaker: 'Stale',
+      content: 'remove me',
+    }]
 
     prismaMock.project.findUnique.mockResolvedValue({ id: 'project-1' })
     prismaMock.novelPromotionProject.findUnique.mockResolvedValue({
@@ -121,35 +149,98 @@ describe('worker voice-analyze behavior', () => {
       },
     ])
 
-    prismaMock.$transaction.mockImplementation(async (fn: (tx: {
-      novelPromotionVoiceLine: {
-        findMany: () => Promise<Array<{ id: string; lineIndex: number }>>
-        deleteMany: (args: { where: Record<string, unknown> }) => Promise<unknown>
-        create: (args: { data: Record<string, unknown>; select: { id: boolean; speaker: boolean; matchedStoryboardId: boolean } }) => Promise<{
-          id: string
-          speaker: string
-          matchedStoryboardId: string | null
-        }>
-      }
-    }) => Promise<unknown>) => {
+    prismaMock.$transaction.mockImplementation(async (fn: (tx: Record<string, unknown>) => Promise<unknown>) => {
       const tx = {
         novelPromotionVoiceLine: {
-          findMany: async () => [],
+          findMany: async ({ where }: {
+            where: { episodeId: string; lineType: string; lineIndex: { in: number[] } }
+          }) => txState.voiceRows
+            .filter((row) => (
+              row.episodeId === where.episodeId
+              && row.lineType === where.lineType
+              && where.lineIndex.in.includes(row.lineIndex as number)
+            ))
+            .sort((left, right) => (
+              (left.lineIndex as number) - (right.lineIndex as number)
+              || String(left.id).localeCompare(String(right.id))
+            ))
+            .map((row) => ({ id: row.id as string, lineIndex: row.lineIndex as number })),
+          findUnique: async ({ where }: {
+            where: {
+              sourceKey?: string
+              episodeId_lineIndex?: { episodeId: string; lineIndex: number }
+            }
+          }) => {
+            if (where.sourceKey) {
+              return txState.voiceRows.find((row) => row.sourceKey === where.sourceKey) || null
+            }
+            const key = where.episodeId_lineIndex
+            return key
+              ? txState.voiceRows.find((row) => (
+                row.episodeId === key.episodeId && row.lineIndex === key.lineIndex
+              )) || null
+              : null
+          },
+          aggregate: async ({ where }: { where: { episodeId: string } }) => ({
+            _max: {
+              lineIndex: txState.voiceRows
+                .filter((row) => row.episodeId === where.episodeId)
+                .reduce<number | null>((max, row) => (
+                  max === null ? row.lineIndex as number : Math.max(max, row.lineIndex as number)
+                ), null),
+            },
+          }),
+          update: async ({
+            where,
+            data,
+          }: {
+            where: { id: string }
+            data: Record<string, unknown>
+          }) => {
+            const row = txState.voiceRows.find((candidate) => candidate.id === where.id)
+            if (!row) throw new Error('VOICE_ROW_NOT_FOUND')
+            Object.assign(row, data)
+            return {
+              id: row.id as string,
+              speaker: row.speaker as string,
+              matchedStoryboardId: row.matchedStoryboardId as string | null,
+            }
+          },
           deleteMany: async (args: { where: Record<string, unknown> }) => {
             txState.deletedWhereClauses.push(args.where)
+            const where = args.where as {
+              episodeId: string
+              lineType?: string
+              lineIndex?: { notIn: number[] }
+            }
+            const retained = txState.voiceRows.filter((row) => {
+              const matches = row.episodeId === where.episodeId
+                && (!where.lineType || row.lineType === where.lineType)
+                && (!where.lineIndex || !where.lineIndex.notIn.includes(row.lineIndex as number))
+              return !matches
+            })
+            txState.voiceRows.splice(0, txState.voiceRows.length, ...retained)
             return undefined
           },
           create: async (args: { data: Record<string, unknown>; select: { id: boolean; speaker: boolean; matchedStoryboardId: boolean } }) => {
+            if (txState.voiceRows.some((row) => (
+              row.episodeId === args.data.episodeId && row.lineIndex === args.data.lineIndex
+            ))) {
+              throw { code: 'P2002', meta: { target: ['episodeId', 'lineIndex'] } }
+            }
             txState.createdRows.push(args.data)
             const speaker = typeof args.data.speaker === 'string' ? args.data.speaker : 'unknown'
             const matchedStoryboardId = typeof args.data.matchedStoryboardId === 'string'
               ? args.data.matchedStoryboardId
               : null
-            return {
+            const created = {
               id: `line-${txState.createdRows.length}`,
               speaker,
               matchedStoryboardId,
+              ...args.data,
             }
+            txState.voiceRows.push(created)
+            return created
           },
         },
       }
@@ -194,6 +285,16 @@ describe('worker voice-analyze behavior', () => {
         notIn: [1, 2],
       },
     })
+    expect(txState.voiceRows.find((row) => row.id === 'narration-existing')).toMatchObject({
+      lineIndex: 100,
+      lineType: 'narration',
+      sourceKey: 'panel-narration:panel-1',
+      voicePresetId: 'preset-1',
+      audioUrl: '/media/narration.wav',
+      audioMediaId: 'media-1',
+      audioDuration: 2400,
+    })
+    expect(txState.voiceRows.some((row) => row.id === 'stale-dialogue')).toBe(false)
   })
 
   it('empty voice lines -> success with zero rows and clears existing lines', async () => {
@@ -213,6 +314,13 @@ describe('worker voice-analyze behavior', () => {
       episodeId: 'episode-1',
       lineType: 'dialogue',
     })
+    expect(txState.voiceRows).toEqual([
+      expect.objectContaining({
+        id: 'narration-existing',
+        lineType: 'narration',
+        audioUrl: '/media/narration.wav',
+      }),
+    ])
   })
 
   it('line references non-existent storyboard panel -> explicit error', async () => {
