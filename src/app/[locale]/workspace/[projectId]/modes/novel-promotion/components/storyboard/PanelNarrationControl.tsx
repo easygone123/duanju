@@ -3,22 +3,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocale, useTranslations } from 'next-intl'
 import { useQueryClient } from '@tanstack/react-query'
+import { z } from 'zod'
 
 import { apiFetch } from '@/lib/api-fetch'
 import type { PanelNarrationMode } from '@/lib/novel-promotion/narration/state'
 import { queryKeys } from '@/lib/query/keys'
 import type { StoryboardPanel } from './hooks/useStoryboardState'
-
-type NarrationSnapshot = Pick<
-  StoryboardPanel,
-  | 'narrationMode'
-  | 'narrationRecommended'
-  | 'narrationSuggestedText'
-  | 'narrationSuggestedEmotion'
-  | 'narrationText'
-  | 'narrationEmotion'
-  | 'updatedAt'
->
 
 interface PanelNarrationControlProps {
   projectId: string
@@ -26,12 +16,36 @@ interface PanelNarrationControlProps {
   panel: StoryboardPanel
 }
 
-interface NarrationResponse {
-  success: true
-  narration: NarrationSnapshot
+const modes: PanelNarrationMode[] = ['auto', 'on', 'off']
+
+const narrationSnapshotSchema = z.object({
+  narrationMode: z.enum(['auto', 'on', 'off']),
+  narrationRecommended: z.boolean(),
+  narrationSuggestedText: z.string().nullable(),
+  narrationSuggestedEmotion: z.string().nullable(),
+  narrationText: z.string().nullable(),
+  narrationEmotion: z.string().nullable(),
+  updatedAt: z.string().datetime({ offset: true }),
+}).strict()
+
+const narrationResponseSchema = z.object({
+  success: z.literal(true),
+  narration: narrationSnapshotSchema,
+}).strict()
+
+type NarrationSnapshot = z.infer<typeof narrationSnapshotSchema>
+
+type NarrationPatchBody = {
+  mode: PanelNarrationMode
+  locale: 'zh' | 'en'
+  expectedPanelUpdatedAt: string
+  text?: string
+  emotion?: string | null
 }
 
-const modes: PanelNarrationMode[] = ['auto', 'on', 'off']
+type NarrationPatchResult =
+  | { ok: true; narration: NarrationSnapshot }
+  | { ok: false; message: string }
 
 function snapshotFromPanel(panel: StoryboardPanel): NarrationSnapshot {
   return {
@@ -50,14 +64,8 @@ function timestamp(value: string) {
   return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY
 }
 
-function isNarrationResponse(value: unknown): value is NarrationResponse {
-  if (!value || typeof value !== 'object') return false
-  const payload = value as { success?: unknown; narration?: unknown }
-  if (payload.success !== true || !payload.narration || typeof payload.narration !== 'object') return false
-  const narration = payload.narration as Record<string, unknown>
-  return modes.includes(narration.narrationMode as PanelNarrationMode)
-    && typeof narration.narrationRecommended === 'boolean'
-    && typeof narration.updatedAt === 'string'
+function normalizeDraftValue(value: string | null) {
+  return value?.trim() || null
 }
 
 function isStaleError(value: unknown) {
@@ -155,9 +163,45 @@ export default function PanelNarrationControl({
     setErrorMessage(null)
   }
 
+  const invalidateDependentQueries = () => {
+    void Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.episodeStage(projectId, episodeId, 'storyboard'),
+      }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.all(episodeId) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.matched(projectId, episodeId) }),
+    ]).catch(() => undefined)
+  }
+
+  const patchNarration = async (body: NarrationPatchBody): Promise<NarrationPatchResult> => {
+    try {
+      const response = await apiFetch(
+        `/api/novel-promotion/${projectId}/panels/${panel.id}/narration`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+      )
+      const payload: unknown = await response.json().catch(() => null)
+      if (!response.ok) {
+        return { ok: false, message: isStaleError(payload) ? t('stale') : t('failure') }
+      }
+      const parsed = narrationResponseSchema.safeParse(payload)
+      if (!parsed.success || parsed.data.narration.narrationMode !== body.mode) {
+        return { ok: false, message: t('failure') }
+      }
+      return { ok: true, narration: parsed.data.narration }
+    } catch {
+      return { ok: false, message: t('failure') }
+    }
+  }
+
   const save = async () => {
     if (savingRef.current) return
-    const normalizedText = manualText?.trim() || ''
+    const normalizedText = normalizeDraftValue(manualText)
+    const normalizedEmotion = normalizeDraftValue(manualEmotion)
     if (draftMode === 'on' && !normalizedText) {
       setErrorMessage(t('required'))
       return
@@ -168,43 +212,52 @@ export default function PanelNarrationControl({
     setErrorMessage(null)
     try {
       const apiLocale = locale.toLowerCase().startsWith('zh') ? 'zh' : 'en'
-      const body = draftMode === 'on'
+      const targetMode = draftMode
+      const manualDraftChanged = normalizedText !== normalizeDraftValue(canonicalRef.current.narrationText)
+        || normalizedEmotion !== normalizeDraftValue(canonicalRef.current.narrationEmotion)
+      let expectedPanelUpdatedAt = canonicalRef.current.updatedAt
+      let persistedOn: NarrationSnapshot | null = null
+
+      if (targetMode !== 'on' && manualDraftChanged) {
+        const persistResult = await patchNarration({
+          mode: 'on',
+          text: normalizedText || '',
+          emotion: normalizedEmotion,
+          locale: apiLocale,
+          expectedPanelUpdatedAt,
+        })
+        if (!persistResult.ok) {
+          setErrorMessage(persistResult.message)
+          return
+        }
+        persistedOn = persistResult.narration
+        expectedPanelUpdatedAt = persistedOn.updatedAt
+      }
+
+      const finalResult = await patchNarration(targetMode === 'on'
         ? {
-            mode: draftMode,
-            text: normalizedText,
-            emotion: manualEmotion?.trim() || null,
+            mode: targetMode,
+            text: normalizedText || '',
+            emotion: normalizedEmotion,
             locale: apiLocale,
-            expectedPanelUpdatedAt: canonicalRef.current.updatedAt,
+            expectedPanelUpdatedAt,
           }
         : {
-            mode: draftMode,
+            mode: targetMode,
             locale: apiLocale,
-            expectedPanelUpdatedAt: canonicalRef.current.updatedAt,
-          }
-
-      const response = await apiFetch(
-        `/api/novel-promotion/${projectId}/panels/${panel.id}/narration`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        },
-      )
-      const payload: unknown = await response.json().catch(() => null)
-      if (!response.ok || !isNarrationResponse(payload)) {
-        setErrorMessage(isStaleError(payload) ? t('stale') : t('failure'))
+            expectedPanelUpdatedAt,
+          })
+      if (!finalResult.ok) {
+        if (persistedOn) {
+          adoptCanonical(persistedOn)
+          invalidateDependentQueries()
+        }
+        setErrorMessage(finalResult.message)
         return
       }
 
-      adoptCanonical(payload.narration)
-      void Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.episodeStage(projectId, episodeId, 'storyboard'),
-        }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.all(episodeId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.matched(projectId, episodeId) }),
-      ])
+      adoptCanonical(finalResult.narration)
+      invalidateDependentQueries()
     } catch {
       setErrorMessage(t('failure'))
     } finally {
