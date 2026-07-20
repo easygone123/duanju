@@ -2,12 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
+import {
+    resolveNarrationVoiceEnabled,
+    selectPanelVideo,
+} from '@/lib/novel-promotion/video/select-panel-video'
 
 interface PanelData {
     panelIndex: number | null
     description: string | null
     videoUrl: string | null
     lipSyncVideoUrl: string | null
+    hasDialogue: boolean | null
+    matchedVoiceLines?: Array<{ lineType: string; enabled: boolean }>
 }
 
 interface StoryboardData {
@@ -57,7 +63,15 @@ export const POST = apiHandler(async (
             include: {
                 storyboards: {
                     include: {
-                        panels: { orderBy: { panelIndex: 'asc' } }
+                        panels: {
+                            orderBy: { panelIndex: 'asc' },
+                            include: {
+                                matchedVoiceLines: {
+                                    where: { lineType: 'narration' },
+                                    select: { lineType: true, enabled: true }
+                                }
+                            }
+                        }
                     },
                     orderBy: { createdAt: 'asc' }
                 },
@@ -78,7 +92,15 @@ export const POST = apiHandler(async (
                     include: {
                         storyboards: {
                             include: {
-                                panels: { orderBy: { panelIndex: 'asc' } }
+                                panels: {
+                                    orderBy: { panelIndex: 'asc' },
+                                    include: {
+                                        matchedVoiceLines: {
+                                            where: { lineType: 'narration' },
+                                            select: { lineType: true, enabled: true }
+                                        }
+                                    }
+                                }
                             },
                             orderBy: { createdAt: 'asc' }
                         },
@@ -128,14 +150,14 @@ export const POST = apiHandler(async (
             const panelKey = `${storyboard.id}-${panel.panelIndex || 0}`
             const preferLipSync = panelPreferences?.[panelKey] ?? true
 
-            // 根据用户偏好选择视频类型
-            let videoKey: string | null = null
-
-            if (preferLipSync) {
-                videoKey = panel.lipSyncVideoUrl || panel.videoUrl
-            } else {
-                videoKey = panel.videoUrl || panel.lipSyncVideoUrl
-            }
+            const { videoUrl: videoKey } = selectPanelVideo({
+                videoUrl: panel.videoUrl,
+                lipSyncVideoUrl: panel.lipSyncVideoUrl,
+                preferLipSync,
+                hasDialogue: panel.hasDialogue,
+                narrationVoiceEnabled: resolveNarrationVoiceEnabled(panel.matchedVoiceLines),
+                allowLipSyncFallbackWhenBasePreferred: true,
+            })
 
             if (videoKey) {
                 // 文件名使用描述，清理非法字符

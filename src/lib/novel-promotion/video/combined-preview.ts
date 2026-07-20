@@ -1,5 +1,6 @@
 import type { VideoPanel } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video/types'
 import { buildVideoSubmissionKey } from '@/lib/novel-promotion/stages/video-stage-runtime/immediate-video-submission'
+import { selectPanelVideo } from './select-panel-video'
 
 const DEFAULT_FPS = 30
 const DEFAULT_DURATION_SECONDS = 3
@@ -135,7 +136,13 @@ export function buildCombinedPreviewTimeline(
   const mutableItems = panels.map<MutableCombinedPreviewItem>((panel) => {
     const panelKey = buildVideoSubmissionKey(panel)
     const preferLipSync = resolvePreference(panel, panelKey, panelVideoPreference)
-    const videoUrl = (preferLipSync && panel.lipSyncVideoUrl ? panel.lipSyncVideoUrl : panel.videoUrl) || null
+    const { videoUrl } = selectPanelVideo({
+      videoUrl: panel.videoUrl,
+      lipSyncVideoUrl: panel.lipSyncVideoUrl,
+      preferLipSync,
+      hasDialogue: panel.hasDialogue,
+      narrationVoiceEnabled: panel.narrationVoiceEnabled,
+    })
     const imageUrl = panel.imageUrl || null
     const durationInFrames = resolveDurationInFrames(panel, resolvedFps)
 

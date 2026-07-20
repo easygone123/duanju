@@ -77,7 +77,11 @@ function response(body: unknown, status = 200) {
 }
 
 function expectAmbiguousRecovery(view: ReturnType<typeof renderControl>) {
-  expect(view.invalidate).toHaveBeenCalledTimes(4)
+  expect(view.invalidate).toHaveBeenCalledTimes(5)
+  expect(view.invalidate).toHaveBeenCalledWith({
+    queryKey: queryKeys.episodeStage('project-1', 'episode-1', 'videos'),
+    refetchType: 'none',
+  })
   expect(view.invalidate).toHaveBeenCalledWith({
     queryKey: queryKeys.episodeStage('project-1', 'episode-1', 'storyboard'),
     refetchType: 'none',
@@ -245,7 +249,7 @@ describe('four-grid panel narration control', () => {
       },
     ])
     expect(view.getByRole('button', { name: 'Off' }).getAttribute('aria-pressed')).toBe('true')
-    await waitFor(() => expect(view.invalidate).toHaveBeenCalledTimes(4))
+    await waitFor(() => expect(view.invalidate).toHaveBeenCalledTimes(5))
     fireEvent.click(view.getByRole('button', { name: 'On' }))
     expect(view.getByRole('textbox', { name: 'Narration text' })).toHaveValue('Persist before off')
     expect(view.getByRole('textbox', { name: 'Emotion' })).toHaveValue('quiet')
@@ -484,8 +488,9 @@ describe('four-grid panel narration control', () => {
     ))
     await waitFor(() => expect(view.getByRole('textbox', { name: 'Narration text' })).toHaveValue('Canonical manual narration'))
     expect(view.getByRole('textbox', { name: 'Emotion' })).toHaveValue('canonical calm')
-    expect(view.invalidate).toHaveBeenCalledTimes(4)
+    expect(view.invalidate).toHaveBeenCalledTimes(5)
     expect(view.invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.episodeStage('project-1', 'episode-1', 'storyboard') })
+    expect(view.invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.episodeStage('project-1', 'episode-1', 'videos') })
     expect(view.invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.episodeData('project-1', 'episode-1') })
     expect(view.invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.voiceLines.all('episode-1') })
     expect(view.invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.voiceLines.matched('project-1', 'episode-1') })

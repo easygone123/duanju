@@ -251,6 +251,9 @@ export function usePanelNarrationControl({
       queryClient.invalidateQueries({
         queryKey: queryKeys.episodeStage(projectId, episodeId, 'storyboard'),
       }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.episodeStage(projectId, episodeId, 'videos'),
+      }),
       queryClient.invalidateQueries({ queryKey: queryKeys.episodeData(projectId, episodeId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.all(episodeId) }),
       queryClient.invalidateQueries({ queryKey: queryKeys.voiceLines.matched(projectId, episodeId) }),
@@ -259,12 +262,14 @@ export function usePanelNarrationControl({
 
   const refreshCanonicalQueries = useCallback(async () => {
     const storyboardKey = queryKeys.episodeStage(projectId, episodeId, 'storyboard')
+    const videosKey = queryKeys.episodeStage(projectId, episodeId, 'videos')
     const episodeKey = queryKeys.episodeData(projectId, episodeId)
     const allVoiceLinesKey = queryKeys.voiceLines.all(episodeId)
     const matchedVoiceLinesKey = queryKeys.voiceLines.matched(projectId, episodeId)
     try {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: storyboardKey, refetchType: 'none' }),
+        queryClient.invalidateQueries({ queryKey: videosKey, refetchType: 'none' }),
         queryClient.invalidateQueries({ queryKey: episodeKey, refetchType: 'none' }),
         queryClient.invalidateQueries({ queryKey: allVoiceLinesKey, refetchType: 'none' }),
         queryClient.invalidateQueries({ queryKey: matchedVoiceLinesKey, refetchType: 'none' }),

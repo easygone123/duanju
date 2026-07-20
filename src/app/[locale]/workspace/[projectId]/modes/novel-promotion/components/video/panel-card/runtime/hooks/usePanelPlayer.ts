@@ -1,6 +1,7 @@
 import { logError as _ulogError } from '@/lib/logging/core'
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useWorkspaceStageActivity } from '../../../../WorkspaceStageActivityContext'
+import { selectPanelVideo } from '@/lib/novel-promotion/video/select-panel-video'
 
 interface UsePanelPlayerParams {
   videoRatio: string
@@ -8,6 +9,8 @@ interface UsePanelPlayerParams {
   videoUrl?: string
   lipSyncVideoUrl?: string
   showLipSyncVideo: boolean
+  hasDialogue?: boolean
+  narrationVoiceEnabled?: boolean
   onPreviewImage?: (imageUrl: string) => void
 }
 
@@ -17,6 +20,8 @@ export function usePanelPlayer({
   videoUrl,
   lipSyncVideoUrl,
   showLipSyncVideo,
+  hasDialogue,
+  narrationVoiceEnabled,
   onPreviewImage,
 }: UsePanelPlayerParams) {
   const isStageActive = useWorkspaceStageActivity()
@@ -27,7 +32,13 @@ export function usePanelPlayer({
   isStageActiveRef.current = isStageActive
   const cssAspectRatio = videoRatio.replace(':', '/')
   const currentVideoUrl = videoUrl
-    ? (showLipSyncVideo && lipSyncVideoUrl ? lipSyncVideoUrl : videoUrl)
+    ? selectPanelVideo({
+        videoUrl,
+        lipSyncVideoUrl,
+        preferLipSync: showLipSyncVideo,
+        hasDialogue,
+        narrationVoiceEnabled,
+      }).videoUrl || undefined
     : undefined
 
   const handlePreviewImage = useCallback((event?: MouseEvent) => {

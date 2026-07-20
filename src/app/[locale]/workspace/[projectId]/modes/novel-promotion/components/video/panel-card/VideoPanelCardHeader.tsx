@@ -5,6 +5,7 @@ import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import type { VideoPanelRuntime } from './hooks/useVideoPanelActions'
 import { AppIcon } from '@/components/ui/icons'
 import { getAspectRatioConfig } from '@/lib/constants'
+import { shouldIgnoreDisabledNarrationLipSync } from '@/lib/novel-promotion/video/select-panel-video'
 
 interface VideoPanelCardHeaderProps {
   runtime: VideoPanelRuntime
@@ -32,6 +33,10 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
   }, [taskStatus.panelErrorDisplay?.message])
 
   const hasVisibleBaseVideo = !!media.baseVideoUrl
+  const canUseLipSyncVideo = !shouldIgnoreDisabledNarrationLipSync({
+    hasDialogue: panel.hasDialogue,
+    narrationVoiceEnabled: panel.narrationVoiceEnabled,
+  })
   const showFirstLastFrameSwitch = layout.hasNext
   const frameSourceMode = layout.frameLinkChoices?.lastFrame?.mode
   const thumbnailSizes = getAspectRatioConfig(layout.videoRatio).isVertical
@@ -128,7 +133,7 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
       )}
 
       {/* 口型同步切换 */}
-      {panel.lipSyncVideoUrl && hasVisibleBaseVideo ? (
+      {canUseLipSyncVideo && panel.lipSyncVideoUrl && hasVisibleBaseVideo ? (
         <div
           className="absolute top-2 right-2 flex items-center bg-[var(--glass-overlay)] rounded-full p-0.5 cursor-pointer"
           onClick={(event) => {

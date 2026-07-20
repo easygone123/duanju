@@ -104,6 +104,10 @@ const videoPanelSelect = {
   dialogueText: true,
   dialogueEmotion: true,
   includeDialogueInVideoPrompt: true,
+  matchedVoiceLines: {
+    where: { lineType: 'narration' },
+    select: { lineType: true, enabled: true },
+  },
   estimatedDuration: true,
   durationOverride: true,
   gridCellIndex: true,
