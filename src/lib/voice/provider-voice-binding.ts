@@ -125,7 +125,7 @@ function normalizeRawSpeakerVoiceEntry(raw: unknown, speaker: string): SpeakerVo
   throw new Error(`SPEAKER_VOICE_ENTRY_MISSING_BINDING: ${speaker}`)
 }
 
-export function parseSpeakerVoiceMap(raw: string | null | undefined): SpeakerVoiceMap {
+function parseSpeakerVoiceRecord(raw: string | null | undefined): Record<string, unknown> {
   if (!raw) return {}
 
   let parsed: unknown
@@ -139,7 +139,11 @@ export function parseSpeakerVoiceMap(raw: string | null | undefined): SpeakerVoi
     throw new Error('SPEAKER_VOICES_INVALID_SHAPE')
   }
 
-  const record = parsed as Record<string, unknown>
+  return parsed as Record<string, unknown>
+}
+
+export function parseSpeakerVoiceMap(raw: string | null | undefined): SpeakerVoiceMap {
+  const record = parseSpeakerVoiceRecord(raw)
   const result: SpeakerVoiceMap = {}
   for (const [speaker, value] of Object.entries(record)) {
     if (!speaker.trim()) {
@@ -148,6 +152,31 @@ export function parseSpeakerVoiceMap(raw: string | null | undefined): SpeakerVoi
     result[speaker] = normalizeRawSpeakerVoiceEntry(value, speaker)
   }
   return result
+}
+
+/**
+ * Return every stored audio reference from a validated speakerVoices payload.
+ * Cleanup callers need both fields because historical entries can retain an
+ * audioUrl alongside the provider's active previewAudioUrl.
+ */
+export function parseSpeakerVoiceMediaUrls(raw: string | null | undefined): string[] {
+  const record = parseSpeakerVoiceRecord(raw)
+  const urls = new Set<string>()
+
+  for (const [speaker, value] of Object.entries(record)) {
+    if (!speaker.trim()) {
+      throw new Error('SPEAKER_VOICES_INVALID_SPEAKER')
+    }
+    normalizeRawSpeakerVoiceEntry(value, speaker)
+
+    const entry = value as RawSpeakerVoiceEntry
+    const audioUrl = readTrimmedString(entry.audioUrl)
+    const previewAudioUrl = readTrimmedString(entry.previewAudioUrl)
+    if (audioUrl) urls.add(audioUrl)
+    if (previewAudioUrl) urls.add(previewAudioUrl)
+  }
+
+  return [...urls]
 }
 
 function normalizeProviderKey(providerKey: string): SupportedAudioProviderKey | null {

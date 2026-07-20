@@ -8,7 +8,7 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
   },
   novelPromotionCharacter: { findFirst: vi.fn() },
-  novelPromotionEpisode: { findFirst: vi.fn() },
+  novelPromotionEpisode: { findFirst: vi.fn(), findMany: vi.fn() },
   novelPromotionVoiceLine: { findFirst: vi.fn() },
   voicePreset: { findFirst: vi.fn() },
   globalCharacter: { findFirst: vi.fn() },
@@ -42,13 +42,14 @@ describe('deferred media cleanup', () => {
     prismaMock.mediaObject.findFirst.mockResolvedValue(null)
     prismaMock.novelPromotionCharacter.findFirst.mockResolvedValue(null)
     prismaMock.novelPromotionEpisode.findFirst.mockResolvedValue(null)
+    prismaMock.novelPromotionEpisode.findMany.mockResolvedValue([])
     prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValue(null)
     prismaMock.voicePreset.findFirst.mockResolvedValue(null)
     prismaMock.globalCharacter.findFirst.mockResolvedValue(null)
     prismaMock.globalVoice.findFirst.mockResolvedValue(null)
   })
 
-  it('registers a legacy URL-only object with a grace period instead of deleting or forgetting it', async () => {
+  it('clears a stale media id when a URL-only candidate is registered again', async () => {
     const now = new Date('2026-07-20T00:00:00.000Z')
     prismaMock.mediaCleanupCandidate.upsert.mockImplementationOnce(async (args: {
       create: MediaCleanupCandidateRecord
@@ -65,6 +66,7 @@ describe('deferred media cleanup', () => {
     expect(prismaMock.mediaCleanupCandidate.upsert).toHaveBeenCalledWith({
       where: { storageKey: 'voice/legacy-owned.wav' },
       update: {
+        mediaId: null,
         mediaKind: 'audio',
         reason: 'voice_line_replaced',
         notBefore: new Date(now.getTime() + MEDIA_CLEANUP_GRACE_MS),
@@ -79,6 +81,28 @@ describe('deferred media cleanup', () => {
     })
   })
 
+  it('canonicalizes a supplied media id to the media row owned by the storage key', async () => {
+    const now = new Date('2026-07-20T00:00:00.000Z')
+    prismaMock.mediaObject.findFirst.mockResolvedValueOnce({
+      id: 'media-canonical',
+      publicId: 'public-canonical',
+      storageKey: 'voice/legacy-owned.wav',
+    })
+
+    await scheduleMediaCleanupCandidate({
+      storageKey: 'voice/legacy-owned.wav',
+      mediaId: 'media-stale',
+      mediaKind: 'audio',
+      reason: 'voice_line_replaced',
+      now,
+    })
+
+    expect(prismaMock.mediaCleanupCandidate.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ mediaId: 'media-canonical' }),
+      create: expect.objectContaining({ mediaId: 'media-canonical' }),
+    }))
+  })
+
   it('does not probe or delete a candidate before its grace period expires', async () => {
     await expect(inspectDeferredAudioCleanupCandidate(
       candidate(),
@@ -90,7 +114,11 @@ describe('deferred media cleanup', () => {
   })
 
   it('retains a due candidate when another legacy URL-only voice line shares the object', async () => {
-    prismaMock.mediaObject.findFirst.mockResolvedValueOnce({ publicId: 'public-shared' })
+    prismaMock.mediaObject.findFirst.mockResolvedValueOnce({
+      id: 'media-canonical',
+      publicId: 'public-shared',
+      storageKey: 'voice/shared-old.wav',
+    })
     prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValueOnce({ id: 'shared-line' })
 
     await expect(inspectDeferredAudioCleanupCandidate(
@@ -106,6 +134,130 @@ describe('deferred media cleanup', () => {
         ]),
       },
     }))
+  })
+
+  it('uses the storage-key media row and ignores a stale candidate media id', async () => {
+    prismaMock.mediaObject.findFirst
+      .mockResolvedValueOnce({
+        id: 'media-canonical',
+        publicId: 'public-canonical',
+        storageKey: 'voice/shared-old.wav',
+      })
+      .mockResolvedValueOnce({
+        id: 'media-stale',
+        publicId: 'public-stale',
+        storageKey: 'voice/different.wav',
+      })
+    prismaMock.novelPromotionVoiceLine.findFirst.mockImplementationOnce(async (args: {
+      where: { OR: Array<Record<string, unknown>> }
+    }) => args.where.OR.some((clause) => clause.audioMediaId === 'media-canonical')
+      ? { id: 'canonical-reference' }
+      : null)
+
+    await expect(inspectDeferredAudioCleanupCandidate(
+      candidate({
+        mediaId: 'media-stale',
+        notBefore: new Date('2026-07-19T00:00:00.000Z'),
+      }),
+      new Date('2026-07-20T00:00:00.000Z'),
+    )).resolves.toEqual({ state: 'referenced', referenced: true })
+
+    const voiceLineProbe = prismaMock.novelPromotionVoiceLine.findFirst.mock.calls[0]?.[0]
+    expect(voiceLineProbe?.where.OR).toContainEqual({ audioMediaId: 'media-canonical' })
+    expect(voiceLineProbe?.where.OR).not.toContainEqual({ audioMediaId: 'media-stale' })
+  })
+
+  it.each([
+    ['storage key', 'voice/shared-old.wav'],
+    ['encoded key', 'voice%2Fshared-old.wav'],
+    ['complete object URL', 'https://storage.example/bucket/voice/shared-old.wav?signature=abc'],
+    ['canonical signed route', '/api/storage/sign?key=voice%2Fshared-old.wav&expires=7200'],
+    ['canonical media route', '/m/public-shared'],
+  ])('retains a due candidate referenced by speakerVoices %s', async (_label, audioUrl) => {
+    prismaMock.mediaObject.findFirst.mockResolvedValueOnce({
+      id: 'media-canonical',
+      publicId: 'public-shared',
+      storageKey: 'voice/shared-old.wav',
+    })
+    prismaMock.novelPromotionEpisode.findMany.mockResolvedValueOnce([{
+      speakerVoices: JSON.stringify({
+        Narrator: {
+          provider: audioUrl.includes('/m/') ? 'bailian' : 'fal',
+          voiceType: 'uploaded',
+          ...(audioUrl.includes('/m/')
+            ? { voiceId: 'voice-1', previewAudioUrl: audioUrl }
+            : { audioUrl }),
+        },
+      }),
+    }])
+
+    await expect(inspectDeferredAudioCleanupCandidate(
+      candidate({ notBefore: new Date('2026-07-19T00:00:00.000Z') }),
+      new Date('2026-07-20T00:00:00.000Z'),
+    )).resolves.toEqual({ state: 'referenced', referenced: true })
+  })
+
+  it('checks a retained audioUrl even when the same speaker has a different previewAudioUrl', async () => {
+    prismaMock.mediaObject.findFirst.mockResolvedValueOnce({
+      id: 'media-canonical',
+      publicId: 'public-shared',
+      storageKey: 'voice/shared-old.wav',
+    })
+    prismaMock.novelPromotionEpisode.findMany.mockResolvedValueOnce([{
+      speakerVoices: JSON.stringify({
+        Narrator: {
+          provider: 'bailian',
+          voiceType: 'qwen-designed',
+          voiceId: 'voice-1',
+          audioUrl: 'voice/shared-old.wav',
+          previewAudioUrl: 'voice/new-preview.wav',
+        },
+      }),
+    }])
+
+    await expect(inspectDeferredAudioCleanupCandidate(
+      candidate({ notBefore: new Date('2026-07-19T00:00:00.000Z') }),
+      new Date('2026-07-20T00:00:00.000Z'),
+    )).resolves.toEqual({ state: 'referenced', referenced: true })
+  })
+
+  it('treats malformed speakerVoices JSON as referenced instead of risking deletion', async () => {
+    prismaMock.mediaObject.findFirst.mockResolvedValueOnce({
+      id: 'media-canonical',
+      publicId: 'public-shared',
+      storageKey: 'voice/shared-old.wav',
+    })
+    prismaMock.novelPromotionEpisode.findMany.mockResolvedValueOnce([{
+      speakerVoices: '{"Narrator":',
+    }])
+
+    await expect(inspectDeferredAudioCleanupCandidate(
+      candidate({ notBefore: new Date('2026-07-19T00:00:00.000Z') }),
+      new Date('2026-07-20T00:00:00.000Z'),
+    )).resolves.toEqual({ state: 'referenced', referenced: true })
+  })
+
+  it('does not retain an unrelated speakerVoices key that only contains the candidate as a suffix', async () => {
+    prismaMock.mediaObject.findFirst.mockResolvedValueOnce({
+      id: 'media-canonical',
+      publicId: 'public-shared',
+      storageKey: 'voice/shared-old.wav',
+    })
+    prismaMock.novelPromotionEpisode.findMany.mockResolvedValueOnce([{
+      speakerVoices: JSON.stringify({
+        Narrator: {
+          provider: 'bailian',
+          voiceType: 'qwen-designed',
+          voiceId: 'voice-1',
+          previewAudioUrl: 'archive/voice/shared-old.wav',
+        },
+      }),
+    }])
+
+    await expect(inspectDeferredAudioCleanupCandidate(
+      candidate({ notBefore: new Date('2026-07-19T00:00:00.000Z') }),
+      new Date('2026-07-20T00:00:00.000Z'),
+    )).resolves.toEqual({ state: 'eligible_for_future_gc', referenced: false })
   })
 
   it('marks an unreferenced due candidate for a future GC pass without deleting it inline', async () => {
