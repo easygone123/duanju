@@ -9,6 +9,7 @@ import { buildDefaultTaskBillingInfo } from '@/lib/billing'
 import { hasPanelLipSyncOutput } from '@/lib/task/has-output'
 import { withTaskUiPayload } from '@/lib/task/ui-payload'
 import { composeModelKey, parseModelKeyStrict } from '@/lib/model-config-contract'
+import { buildOwnedLipSyncVoiceLineWhere } from '@/lib/novel-promotion/lip-sync/voice-line-match'
 
 const DEFAULT_LIPSYNC_MODEL_KEY = composeModelKey('fal', 'fal-ai/kling-video/lipsync/audio-to-video')
 
@@ -58,7 +59,12 @@ export const POST = apiHandler(async (
       panelIndex: Number(panelIndex),
       storyboard: { episode: { novelPromotionProject: { projectId } } },
     },
-    select: { id: true, storyboard: { select: { episodeId: true } } },
+    select: {
+      id: true,
+      storyboardId: true,
+      panelIndex: true,
+      storyboard: { select: { episodeId: true } },
+    },
   })
 
   if (!panel) {
@@ -66,13 +72,12 @@ export const POST = apiHandler(async (
   }
 
   const voiceLine = await prisma.novelPromotionVoiceLine.findFirst({
-    where: {
-      id: voiceLineId,
+    where: buildOwnedLipSyncVoiceLineWhere({
+      voiceLineId,
+      panel,
+      projectId,
       episodeId: panel.storyboard.episodeId,
-      enabled: true,
-      matchedPanelId: panel.id,
-      episode: { novelPromotionProject: { projectId } },
-    },
+    }),
     select: { id: true },
   })
   if (!voiceLine) throw new ApiError('NOT_FOUND')

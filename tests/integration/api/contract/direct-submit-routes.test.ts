@@ -109,6 +109,7 @@ const prismaMock = vi.hoisted(() => ({
         ? { id: 'trusted-last-panel' }
         : {
             id: 'panel-1', updatedAt: new Date('2026-07-13T00:00:00.000Z'),
+            storyboardId: 'storyboard-1', panelIndex: 0,
             hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
             includeDialogueInVideoPrompt: true, videoPrompt: 'panel prompt',
             firstFrameSourceMeta: null,

@@ -28,6 +28,9 @@ import {
 } from '@/lib/media/service'
 import { deleteObject } from '@/lib/storage'
 import { scheduleMediaCleanupCandidate } from '@/lib/media/deferred-cleanup'
+import {
+  buildOwnedLipSyncVoiceLineWhere,
+} from '@/lib/novel-promotion/lip-sync/voice-line-match'
 
 type AnyObj = Record<string, unknown>
 type VideoOptionValue = string | number | boolean
@@ -383,18 +386,12 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
   if (!voiceLineId) throw new Error('Lip-sync task missing voiceLineId')
 
   const voiceLine = await prisma.novelPromotionVoiceLine.findFirst({
-    where: {
-      id: voiceLineId,
-      enabled: true,
-      matchedPanelId: panel.id,
-      episode: {
-        storyboards: { some: { id: panel.storyboardId } },
-        novelPromotionProject: {
-          projectId: job.data.projectId,
-          project: { userId: job.data.userId },
-        },
-      },
-    },
+    where: buildOwnedLipSyncVoiceLineWhere({
+      voiceLineId,
+      panel,
+      projectId: job.data.projectId,
+      userId: job.data.userId,
+    }),
   })
   if (!voiceLine || !voiceLine.enabled || !voiceLine.audioUrl) {
     throw new Error('Voice line or audioUrl not found')
@@ -418,27 +415,21 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
     modelKey: lipSyncModel,
   })
 
-  const isNarration = voiceLine.lineType === 'narration'
-  if (isNarration) {
-    const currentVoiceLine = await prisma.novelPromotionVoiceLine.findUnique({
-      where: { id: voiceLine.id },
-      select: {
-        id: true,
-        enabled: true,
-        lineType: true,
-        audioUrl: true,
-        matchedPanelId: true,
-      },
-    })
-    if (
-      !currentVoiceLine
-      || !currentVoiceLine.enabled
-      || currentVoiceLine.lineType !== 'narration'
-      || currentVoiceLine.audioUrl !== voiceLine.audioUrl
-      || currentVoiceLine.matchedPanelId !== panel.id
-    ) {
-      throw new Error('LIP_SYNC_INPUT_STALE')
-    }
+  const currentVoiceLine = await prisma.novelPromotionVoiceLine.findFirst({
+    where: {
+      ...buildOwnedLipSyncVoiceLineWhere({
+        voiceLineId: voiceLine.id,
+        panel,
+        projectId: job.data.projectId,
+        userId: job.data.userId,
+      }),
+      lineType: voiceLine.lineType,
+      audioUrl: voiceLine.audioUrl,
+    },
+    select: { id: true },
+  })
+  if (!currentVoiceLine) {
+    throw new Error('LIP_SYNC_INPUT_STALE')
   }
 
   await reportTaskProgress(job, 93, { stage: 'persist_lip_sync' })
@@ -459,22 +450,31 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
       lipSyncVideoMediaId: lipSyncVideoMedia.id,
       lipSyncTaskId: null,
     }
-    const persisted = await prisma.novelPromotionPanel.updateMany({
-      where: {
-        id: panel.id,
-        videoUrl: panel.videoUrl,
-        lipSyncVideoUrl: panel.lipSyncVideoUrl,
-        lipSyncVideoMediaId: panel.lipSyncVideoMediaId,
-        matchedVoiceLines: {
-          some: {
-            id: voiceLine.id,
-            lineType: voiceLine.lineType,
-            enabled: true,
-            audioUrl: voiceLine.audioUrl,
-          },
+    const persisted = await prisma.$transaction(async (tx) => {
+      const publishVoiceLine = await tx.novelPromotionVoiceLine.findFirst({
+        where: {
+          ...buildOwnedLipSyncVoiceLineWhere({
+            voiceLineId: voiceLine.id,
+            panel,
+            projectId: job.data.projectId,
+            userId: job.data.userId,
+          }),
+          lineType: voiceLine.lineType,
+          audioUrl: voiceLine.audioUrl,
         },
-      },
-      data,
+        select: { id: true },
+      })
+      if (!publishVoiceLine) return { count: 0 }
+
+      return await tx.novelPromotionPanel.updateMany({
+        where: {
+          id: panel.id,
+          videoUrl: panel.videoUrl,
+          lipSyncVideoUrl: panel.lipSyncVideoUrl,
+          lipSyncVideoMediaId: panel.lipSyncVideoMediaId,
+        },
+        data,
+      })
     })
     if (persisted.count === 0) {
       throw new Error('LIP_SYNC_INPUT_STALE')

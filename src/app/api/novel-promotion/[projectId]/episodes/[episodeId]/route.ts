@@ -73,6 +73,12 @@ export const PATCH = apiHandler(async (
   const authResult = await requireProjectAuthLight(projectId)
   if (isErrorResponse(authResult)) return authResult
 
+  const ownedEpisode = await prisma.novelPromotionEpisode.findFirst({
+    where: { id: episodeId, novelPromotionProject: { projectId } },
+    select: { id: true },
+  })
+  if (!ownedEpisode) throw new ApiError('NOT_FOUND')
+
   const body = await request.json()
   const { name, description, novelText, audioUrl, srtContent } = body
 
@@ -86,12 +92,6 @@ export const PATCH = apiHandler(async (
     updateData.audioMediaId = media?.id || null
   }
   if (srtContent !== undefined) updateData.srtContent = srtContent
-
-  const ownedEpisode = await prisma.novelPromotionEpisode.findFirst({
-    where: { id: episodeId, novelPromotionProject: { projectId } },
-    select: { id: true },
-  })
-  if (!ownedEpisode) throw new ApiError('NOT_FOUND')
 
   const episode = await prisma.novelPromotionEpisode.update({
     where: { id: ownedEpisode.id },

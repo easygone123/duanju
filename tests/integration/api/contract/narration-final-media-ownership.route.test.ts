@@ -4,6 +4,11 @@ import { buildMockRequest } from '../../../helpers/request'
 
 const authMock = vi.hoisted(() => vi.fn())
 const submitTaskMock = vi.hoisted(() => vi.fn(async () => ({ taskId: 'task-1', async: true })))
+const mediaMock = vi.hoisted(() => ({
+  resolveMediaRef: vi.fn(async () => null),
+  resolveMediaRefFromLegacyValue: vi.fn(async () => null),
+  resolveStorageKeyFromMediaValue: vi.fn(async () => null),
+}))
 const prismaMock = vi.hoisted(() => ({
   userPreference: { findUnique: vi.fn(async () => ({ lipSyncModel: 'fal::lip-sync' })) },
   novelPromotionEpisode: {
@@ -29,6 +34,7 @@ vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/task/submitter', () => ({ submitTask: submitTaskMock }))
 vi.mock('@/lib/task/has-output', () => ({ hasPanelLipSyncOutput: vi.fn(async () => false) }))
 vi.mock('@/lib/media/attach', () => ({ attachMediaFieldsToProject: vi.fn(async (value: unknown) => value) }))
+vi.mock('@/lib/media/service', () => mediaMock)
 
 import { GET as getVoiceLines, PATCH as patchVoiceLines } from '@/app/api/novel-promotion/[projectId]/voice-lines/route'
 import { GET as downloadVoices } from '@/app/api/novel-promotion/[projectId]/download-voices/route'
@@ -102,6 +108,8 @@ describe('narration and final-media route ownership boundaries', () => {
 
     prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce({
       id: 'panel-1',
+      storyboardId: 'storyboard-1',
+      panelIndex: 0,
       storyboard: { episodeId: 'episode-1' },
     })
     await expectNotFound(await submitLipSync(buildMockRequest({
@@ -111,15 +119,76 @@ describe('narration and final-media route ownership boundaries', () => {
     }), context))
 
     expect(prismaMock.novelPromotionVoiceLine.findFirst).toHaveBeenCalledWith({
-      where: {
+      where: expect.objectContaining({
         id: 'foreign-line',
         episodeId: 'episode-1',
         enabled: true,
-        matchedPanelId: 'panel-1',
-        episode: { novelPromotionProject: { projectId: 'project-1' } },
-      },
+        OR: expect.arrayContaining([
+          { matchedPanelId: 'panel-1' },
+          expect.objectContaining({
+            lineType: 'dialogue',
+            matchedStoryboardId: 'storyboard-1',
+            matchedPanelIndex: 0,
+          }),
+        ]),
+        episode: expect.objectContaining({
+          novelPromotionProject: { projectId: 'project-1' },
+        }),
+      }),
       select: { id: true },
     })
+    expect(submitTaskMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts an owned enabled legacy dialogue matched by storyboard and panel index', async () => {
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce({
+      id: 'panel-1',
+      storyboardId: 'storyboard-1',
+      panelIndex: 0,
+      storyboard: { episodeId: 'episode-1' },
+    })
+    prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValueOnce({ id: 'legacy-line' })
+
+    const response = await submitLipSync(buildMockRequest({
+      path: '/api/novel-promotion/project-1/lip-sync',
+      method: 'POST',
+      body: { storyboardId: 'storyboard-1', panelIndex: 0, voiceLineId: 'legacy-line' },
+    }), context)
+
+    expect(response.status).toBe(200)
+    expect(submitTaskMock).toHaveBeenCalled()
+    expect(prismaMock.novelPromotionVoiceLine.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        enabled: true,
+        OR: expect.arrayContaining([{
+          lineType: 'dialogue',
+          matchedPanelId: null,
+          matchedStoryboardId: 'storyboard-1',
+          matchedPanelIndex: 0,
+        }]),
+      }),
+    }))
+  })
+
+  it.each([
+    ['a legacy line with the wrong storyboard/index', 'wrong-legacy-line'],
+    ['a disabled legacy line', 'disabled-legacy-line'],
+    ['a cross-project legacy line', 'foreign-legacy-line'],
+  ])('rejects %s before submitting lip sync', async (_label, voiceLineId) => {
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce({
+      id: 'panel-1',
+      storyboardId: 'storyboard-1',
+      panelIndex: 0,
+      storyboard: { episodeId: 'episode-1' },
+    })
+    prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValueOnce(null)
+
+    await expectNotFound(await submitLipSync(buildMockRequest({
+      path: '/api/novel-promotion/project-1/lip-sync',
+      method: 'POST',
+      body: { storyboardId: 'storyboard-1', panelIndex: 0, voiceLineId },
+    }), context))
+
     expect(submitTaskMock).not.toHaveBeenCalled()
   })
 
@@ -175,6 +244,18 @@ describe('narration and final-media route ownership boundaries', () => {
 
     expect(prismaMock.novelPromotionEpisode.update).not.toHaveBeenCalled()
     expect(prismaMock.novelPromotionEpisode.delete).not.toHaveBeenCalled()
+    expect(mediaMock.resolveMediaRefFromLegacyValue).not.toHaveBeenCalled()
+  })
+
+  it('does not resolve foreign episode media before ownership succeeds', async () => {
+    await expectNotFound(await patchEpisode(buildMockRequest({
+      path: '/api/novel-promotion/project-1/episodes/foreign-episode',
+      method: 'PATCH',
+      body: { audioUrl: '/m/foreign-audio' },
+    }), episodeContext))
+
+    expect(mediaMock.resolveMediaRefFromLegacyValue).not.toHaveBeenCalled()
+    expect(prismaMock.novelPromotionEpisode.update).not.toHaveBeenCalled()
   })
 
   it('returns an auth response before touching scoped data', async () => {

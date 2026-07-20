@@ -53,6 +53,7 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
     findUnique: vi.fn(),
   },
+  $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => await callback(prismaMock)),
 }))
 
 vi.mock('bullmq', () => ({
@@ -128,6 +129,7 @@ describe('chain contract - video queue behavior', () => {
       id: 'panel-1',
       videoUrl: 'cos/base-video.mp4',
       storyboardId: 'storyboard-1',
+      panelIndex: 0,
       lipSyncVideoUrl: null,
       lipSyncVideoMediaId: null,
     }

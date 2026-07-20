@@ -7,6 +7,8 @@ type WorkerProcessor = (job: Job<TaskJobData>) => Promise<unknown>
 
 type PanelRow = {
   id: string
+  storyboardId: string
+  panelIndex: number
   videoUrl: string | null
   imageUrl: string | null
   videoPrompt: string | null
@@ -76,6 +78,7 @@ const prismaMock = vi.hoisted(() => ({
   mediaObject: {
     deleteMany: vi.fn(async () => ({ count: 1 })),
   },
+  $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => await callback(prismaMock)),
 }))
 
 vi.mock('bullmq', () => ({
@@ -131,6 +134,8 @@ vi.mock('@/lib/workers/user-concurrency-gate', () => concurrencyGateMock)
 function buildPanel(overrides?: Partial<PanelRow>): PanelRow {
   return {
     id: 'panel-1',
+    storyboardId: 'storyboard-1',
+    panelIndex: 0,
     videoUrl: 'cos/base-video.mp4',
     imageUrl: 'cos/panel-image.png',
     videoPrompt: 'panel prompt',
@@ -543,7 +548,7 @@ describe('worker video processor behavior', () => {
     const processor = workerState.processor
     expect(processor).toBeTruthy()
 
-    prismaMock.novelPromotionPanel.findUnique.mockResolvedValueOnce(null)
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValueOnce(null)
     const job = buildJob({
       type: TASK_TYPE.LIP_SYNC,
       payload: { voiceLineId: 'line-1' },
@@ -602,6 +607,83 @@ describe('worker video processor behavior', () => {
         lipSyncTaskId: null,
       },
     })
+  })
+
+  it('LIP_SYNC: accepts an owned enabled legacy dialogue matched by storyboard and index', async () => {
+    const legacyLine = {
+      id: 'legacy-line',
+      audioUrl: 'cos/legacy.mp3',
+      audioDuration: 1200,
+      enabled: true,
+      lineType: 'dialogue',
+      matchedPanelId: null,
+      matchedStoryboardId: 'storyboard-1',
+      matchedPanelIndex: 0,
+    }
+    prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValue(legacyLine)
+
+    await workerState.processor!(buildJob({
+      type: TASK_TYPE.LIP_SYNC,
+      payload: { voiceLineId: 'legacy-line' },
+    }))
+
+    expect(prismaMock.novelPromotionVoiceLine.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        enabled: true,
+        OR: expect.arrayContaining([{
+          lineType: 'dialogue',
+          matchedPanelId: null,
+          matchedStoryboardId: 'storyboard-1',
+          matchedPanelIndex: 0,
+        }]),
+        episode: expect.objectContaining({
+          novelPromotionProject: {
+            projectId: 'project-1',
+            project: { userId: 'user-1' },
+          },
+        }),
+      }),
+    }))
+    expect(prismaMock.$transaction).toHaveBeenCalled()
+    expect(prismaMock.novelPromotionVoiceLine.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([expect.objectContaining({
+          matchedStoryboardId: 'storyboard-1',
+          matchedPanelIndex: 0,
+        })]),
+      }),
+      select: { id: true },
+    }))
+  })
+
+  it.each([
+    ['wrong storyboard/index', {
+      enabled: true,
+      matchedPanelId: null,
+      matchedStoryboardId: 'storyboard-other',
+      matchedPanelIndex: 9,
+    }],
+    ['disabled legacy line', {
+      enabled: false,
+      matchedPanelId: null,
+      matchedStoryboardId: 'storyboard-1',
+      matchedPanelIndex: 0,
+    }],
+    ['cross-project line', {
+      enabled: true,
+      matchedPanelId: null,
+      matchedStoryboardId: 'storyboard-1',
+      matchedPanelIndex: 0,
+    }],
+  ])('LIP_SYNC: rejects %s before calling the provider', async (_label, _line) => {
+    prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValueOnce(null)
+
+    await expect(workerState.processor!(buildJob({
+      type: TASK_TYPE.LIP_SYNC,
+      payload: { voiceLineId: 'rejected-line' },
+    }))).rejects.toThrow('Voice line or audioUrl not found')
+
+    expect(utilsMock.resolveLipSyncVideoSource).not.toHaveBeenCalled()
   })
 
   it('LIP_SYNC: defers the replaced video only after a successful publish CAS', async () => {
@@ -664,7 +746,8 @@ describe('worker video processor behavior', () => {
   })
 
   it('LIP_SYNC: drops narration output when narration is disabled after provider completion', async () => {
-    prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValueOnce({
+    prismaMock.novelPromotionVoiceLine.findFirst
+      .mockResolvedValueOnce({
         id: 'line-1',
         audioUrl: 'cos/line-1.mp3',
         audioDuration: 1200,
@@ -672,13 +755,7 @@ describe('worker video processor behavior', () => {
         lineType: 'narration',
         matchedPanelId: 'panel-1',
       })
-    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValueOnce({
-        id: 'line-1',
-        audioUrl: 'cos/line-1.mp3',
-        enabled: false,
-        lineType: 'narration',
-        matchedPanelId: 'panel-1',
-      })
+      .mockResolvedValueOnce(null)
 
     await expect(workerState.processor!(buildJob({
       type: TASK_TYPE.LIP_SYNC,
@@ -691,7 +768,8 @@ describe('worker video processor behavior', () => {
   })
 
   it('LIP_SYNC: drops narration output when its audio snapshot changes after provider completion', async () => {
-    prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValueOnce({
+    prismaMock.novelPromotionVoiceLine.findFirst
+      .mockResolvedValueOnce({
         id: 'line-1',
         audioUrl: 'cos/line-1.mp3',
         audioDuration: 1200,
@@ -699,13 +777,7 @@ describe('worker video processor behavior', () => {
         lineType: 'narration',
         matchedPanelId: 'panel-1',
       })
-    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValueOnce({
-        id: 'line-1',
-        audioUrl: 'cos/new-line-1.mp3',
-        enabled: true,
-        lineType: 'narration',
-        matchedPanelId: 'panel-1',
-      })
+      .mockResolvedValueOnce(null)
 
     await expect(workerState.processor!(buildJob({
       type: TASK_TYPE.LIP_SYNC,
