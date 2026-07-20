@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildLipSyncPanelPublishVoiceLineWhere,
   buildLipSyncVoiceLinePanelMatch,
   buildOwnedLipSyncVoiceLineWhere,
 } from '@/lib/novel-promotion/lip-sync/voice-line-match'
@@ -40,5 +41,42 @@ describe('lip-sync voice-line matching', () => {
         },
       },
     }))
+  })
+
+  it('builds one panel relation filter for the final voice-line snapshot CAS', () => {
+    expect(buildLipSyncPanelPublishVoiceLineWhere({
+      voiceLineId: 'line-1',
+      panel,
+      projectId: 'project-1',
+      userId: 'user-1',
+      lineType: 'narration',
+      audioUrl: 'cos/line-1.mp3',
+    })).toEqual({
+      storyboard: {
+        episode: {
+          novelPromotionProject: {
+            projectId: 'project-1',
+            project: { userId: 'user-1' },
+          },
+          voiceLines: {
+            some: {
+              id: 'line-1',
+              enabled: true,
+              lineType: 'narration',
+              audioUrl: 'cos/line-1.mp3',
+              OR: [
+                { matchedPanelId: 'panel-1' },
+                {
+                  lineType: 'dialogue',
+                  matchedPanelId: null,
+                  matchedStoryboardId: 'storyboard-1',
+                  matchedPanelIndex: 2,
+                },
+              ],
+            },
+          },
+        },
+      },
+    })
   })
 })

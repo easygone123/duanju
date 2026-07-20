@@ -29,6 +29,7 @@ import {
 import { deleteObject } from '@/lib/storage'
 import { scheduleMediaCleanupCandidate } from '@/lib/media/deferred-cleanup'
 import {
+  buildLipSyncPanelPublishVoiceLineWhere,
   buildOwnedLipSyncVoiceLineWhere,
 } from '@/lib/novel-promotion/lip-sync/voice-line-match'
 
@@ -396,9 +397,10 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
   if (!voiceLine || !voiceLine.enabled || !voiceLine.audioUrl) {
     throw new Error('Voice line or audioUrl not found')
   }
+  const voiceLineAudioUrl = voiceLine.audioUrl
 
   const signedVideoUrl = toSignedUrlIfCos(panel.videoUrl, 7200)
-  const signedAudioUrl = toSignedUrlIfCos(voiceLine.audioUrl, 7200)
+  const signedAudioUrl = toSignedUrlIfCos(voiceLineAudioUrl, 7200)
 
   if (!signedVideoUrl || !signedAudioUrl) {
     throw new Error('Lip-sync input media url invalid')
@@ -424,7 +426,7 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
         userId: job.data.userId,
       }),
       lineType: voiceLine.lineType,
-      audioUrl: voiceLine.audioUrl,
+      audioUrl: voiceLineAudioUrl,
     },
     select: { id: true },
   })
@@ -450,31 +452,22 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
       lipSyncVideoMediaId: lipSyncVideoMedia.id,
       lipSyncTaskId: null,
     }
-    const persisted = await prisma.$transaction(async (tx) => {
-      const publishVoiceLine = await tx.novelPromotionVoiceLine.findFirst({
-        where: {
-          ...buildOwnedLipSyncVoiceLineWhere({
-            voiceLineId: voiceLine.id,
-            panel,
-            projectId: job.data.projectId,
-            userId: job.data.userId,
-          }),
+    const persisted = await prisma.novelPromotionPanel.updateMany({
+      where: {
+        id: panel.id,
+        videoUrl: panel.videoUrl,
+        lipSyncVideoUrl: panel.lipSyncVideoUrl,
+        lipSyncVideoMediaId: panel.lipSyncVideoMediaId,
+        ...buildLipSyncPanelPublishVoiceLineWhere({
+          voiceLineId: voiceLine.id,
+          panel,
+          projectId: job.data.projectId,
+          userId: job.data.userId,
           lineType: voiceLine.lineType,
-          audioUrl: voiceLine.audioUrl,
-        },
-        select: { id: true },
-      })
-      if (!publishVoiceLine) return { count: 0 }
-
-      return await tx.novelPromotionPanel.updateMany({
-        where: {
-          id: panel.id,
-          videoUrl: panel.videoUrl,
-          lipSyncVideoUrl: panel.lipSyncVideoUrl,
-          lipSyncVideoMediaId: panel.lipSyncVideoMediaId,
-        },
-        data,
-      })
+          audioUrl: voiceLineAudioUrl,
+        }),
+      },
+      data,
     })
     if (persisted.count === 0) {
       throw new Error('LIP_SYNC_INPUT_STALE')

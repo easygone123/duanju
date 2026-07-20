@@ -39,3 +39,32 @@ export function buildOwnedLipSyncVoiceLineWhere(input: {
     },
   }
 }
+
+export function buildLipSyncPanelPublishVoiceLineWhere(input: {
+  voiceLineId: string
+  panel: LipSyncPanelIdentity
+  projectId: string
+  userId: string
+  lineType: string
+  audioUrl: string
+}) {
+  return {
+    storyboard: {
+      episode: {
+        novelPromotionProject: {
+          projectId: input.projectId,
+          project: { userId: input.userId },
+        },
+        voiceLines: {
+          some: {
+            id: input.voiceLineId,
+            enabled: true,
+            lineType: input.lineType,
+            audioUrl: input.audioUrl,
+            ...buildLipSyncVoiceLinePanelMatch(input.panel),
+          },
+        },
+      },
+    },
+  }
+}

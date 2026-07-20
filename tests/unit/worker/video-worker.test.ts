@@ -73,12 +73,10 @@ const prismaMock = vi.hoisted(() => ({
   },
   novelPromotionVoiceLine: {
     findFirst: vi.fn(),
-    findUnique: vi.fn(),
   },
   mediaObject: {
     deleteMany: vi.fn(async () => ({ count: 1 })),
   },
-  $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => await callback(prismaMock)),
 }))
 
 vi.mock('bullmq', () => ({
@@ -146,6 +144,58 @@ function buildPanel(overrides?: Partial<PanelRow>): PanelRow {
     lipSyncVideoMediaId: null,
     ...(overrides || {}),
   }
+}
+
+type FinalVoiceLineState = {
+  id: string
+  enabled: boolean
+  lineType: string
+  audioUrl: string
+  matchedPanelId: string | null
+  matchedStoryboardId?: string | null
+  matchedPanelIndex?: number | null
+}
+
+type FinalVoiceLineFilter = {
+  id?: string
+  enabled?: boolean
+  lineType?: string
+  audioUrl?: string
+  OR?: Array<{
+    lineType?: string
+    matchedPanelId?: string | null
+    matchedStoryboardId?: string
+    matchedPanelIndex?: number
+  }>
+}
+
+function simulateFinalPublishAgainstVoiceLine(current: FinalVoiceLineState) {
+  prismaMock.novelPromotionPanel.updateMany.mockImplementationOnce(async (args: unknown) => {
+    const where = (args as {
+      where?: {
+        storyboard?: {
+          episode?: {
+            voiceLines?: { some?: FinalVoiceLineFilter }
+          }
+        }
+      }
+    }).where
+    const filter = where?.storyboard?.episode?.voiceLines?.some
+    const bindingMatches = filter?.OR?.some((binding) => (
+      binding.lineType === 'dialogue'
+        ? binding.lineType === current.lineType
+          && binding.matchedPanelId === current.matchedPanelId
+          && binding.matchedStoryboardId === current.matchedStoryboardId
+          && binding.matchedPanelIndex === current.matchedPanelIndex
+        : binding.matchedPanelId === current.matchedPanelId
+    )) === true
+    const snapshotMatches = filter?.id === current.id
+      && filter.enabled === current.enabled
+      && filter.lineType === current.lineType
+      && filter.audioUrl === current.audioUrl
+
+    return { count: snapshotMatches && bindingMatches ? 1 : 0 }
+  })
 }
 
 function buildJob(params: {
@@ -600,6 +650,22 @@ describe('worker video processor behavior', () => {
         videoUrl: 'cos/base-video.mp4',
         lipSyncVideoUrl: null,
         lipSyncVideoMediaId: null,
+        storyboard: expect.objectContaining({
+          episode: expect.objectContaining({
+            novelPromotionProject: {
+              projectId: 'project-1',
+              project: { userId: 'user-1' },
+            },
+            voiceLines: {
+              some: expect.objectContaining({
+                id: 'line-1',
+                enabled: true,
+                lineType: 'dialogue',
+                audioUrl: 'cos/line-1.mp3',
+              }),
+            },
+          }),
+        }),
       }),
       data: {
         lipSyncVideoUrl: 'cos/lip-sync/video.mp4',
@@ -644,15 +710,27 @@ describe('worker video processor behavior', () => {
         }),
       }),
     }))
-    expect(prismaMock.$transaction).toHaveBeenCalled()
-    expect(prismaMock.novelPromotionVoiceLine.findFirst).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(prismaMock.novelPromotionPanel.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        OR: expect.arrayContaining([expect.objectContaining({
-          matchedStoryboardId: 'storyboard-1',
-          matchedPanelIndex: 0,
-        })]),
+        storyboard: expect.objectContaining({
+          episode: expect.objectContaining({
+            voiceLines: {
+              some: expect.objectContaining({
+                id: 'legacy-line',
+                enabled: true,
+                lineType: 'dialogue',
+                audioUrl: 'cos/legacy.mp3',
+                OR: expect.arrayContaining([{
+                  lineType: 'dialogue',
+                  matchedPanelId: null,
+                  matchedStoryboardId: 'storyboard-1',
+                  matchedPanelIndex: 0,
+                }]),
+              }),
+            },
+          }),
+        }),
       }),
-      select: { id: true },
     }))
   })
 
@@ -788,7 +866,29 @@ describe('worker video processor behavior', () => {
     expect(prismaMock.novelPromotionPanel.updateMany).not.toHaveBeenCalled()
   })
 
-  it('LIP_SYNC: cleans the unique upload when narration publish CAS loses a race', async () => {
+  it.each([
+    ['disabled', {
+      id: 'line-1',
+      enabled: false,
+      lineType: 'narration',
+      audioUrl: 'cos/line-1.mp3',
+      matchedPanelId: 'panel-1',
+    }],
+    ['audio changed', {
+      id: 'line-1',
+      enabled: true,
+      lineType: 'narration',
+      audioUrl: 'cos/replaced.mp3',
+      matchedPanelId: 'panel-1',
+    }],
+    ['rebound', {
+      id: 'line-1',
+      enabled: true,
+      lineType: 'narration',
+      audioUrl: 'cos/line-1.mp3',
+      matchedPanelId: 'panel-other',
+    }],
+  ] satisfies Array<[string, FinalVoiceLineState]>)('LIP_SYNC: final publish refuses a voice line that is %s at the atomic write', async (_label, finalVoiceLine) => {
     prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValue({
       id: 'line-1',
       audioUrl: 'cos/line-1.mp3',
@@ -797,15 +897,7 @@ describe('worker video processor behavior', () => {
       lineType: 'narration',
       matchedPanelId: 'panel-1',
     })
-    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue({
-      id: 'line-1',
-      audioUrl: 'cos/line-1.mp3',
-      audioDuration: 1200,
-      enabled: true,
-      lineType: 'narration',
-      matchedPanelId: 'panel-1',
-    })
-    prismaMock.novelPromotionPanel.updateMany.mockResolvedValueOnce({ count: 0 })
+    simulateFinalPublishAgainstVoiceLine(finalVoiceLine)
 
     await expect(workerState.processor!(buildJob({
       type: TASK_TYPE.LIP_SYNC,
@@ -817,6 +909,31 @@ describe('worker video processor behavior', () => {
     })
     expect(deleteObjectMock).toHaveBeenCalledWith('cos/lip-sync/video.mp4')
     expect(scheduleMediaCleanupCandidateMock).not.toHaveBeenCalled()
+    expect(prismaMock.novelPromotionPanel.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: 'panel-1',
+        videoUrl: 'cos/base-video.mp4',
+        lipSyncVideoUrl: null,
+        lipSyncVideoMediaId: null,
+        storyboard: expect.objectContaining({
+          episode: expect.objectContaining({
+            novelPromotionProject: {
+              projectId: 'project-1',
+              project: { userId: 'user-1' },
+            },
+            voiceLines: {
+              some: expect.objectContaining({
+                id: 'line-1',
+                enabled: true,
+                lineType: 'narration',
+                audioUrl: 'cos/line-1.mp3',
+                OR: expect.arrayContaining([{ matchedPanelId: 'panel-1' }]),
+              }),
+            },
+          }),
+        }),
+      }),
+    }))
   })
 
   it('未知任务类型: 显式报错', async () => {

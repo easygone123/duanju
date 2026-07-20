@@ -51,9 +51,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   novelPromotionVoiceLine: {
     findFirst: vi.fn(),
-    findUnique: vi.fn(),
   },
-  $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => await callback(prismaMock)),
 }))
 
 vi.mock('bullmq', () => ({
@@ -143,7 +141,6 @@ describe('chain contract - video queue behavior', () => {
       matchedPanelId: 'panel-1',
     }
     prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValue(voiceLine)
-    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue(voiceLine)
   })
 
   it('VIDEO_PANEL is enqueued into video queue', async () => {
