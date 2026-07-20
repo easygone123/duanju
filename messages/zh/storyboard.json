@@ -423,6 +423,8 @@
           "four_grid": "正在生成一张完整的 2×2 四宫格整图，并非分别提交四张图片。",
           "six_grid": "正在生成一张完整的 3×2 六宫格整图，并非分别提交六张图片。"
         },
+        "taskRunning": "宫格整图操作进行中…",
+        "taskRunningStatus": "宫格整图操作正在进行，完成后即可生成整图。",
         "manageComfyui": "管理 ComfyUI 节点池",
         "comfyuiHint": "前往设置中心管理私有 ComfyUI 工作流。",
         "workflowRequired": "需要先发布并测试一个本人可用的放大工作流",
@@ -474,6 +476,8 @@
         "running": "处理中",
         "sheetGenerationRunning": "正在生成一张完整的 3×2 六宫格整图…",
         "sheetGenerationStatus": "正在生成一张完整的 3×2 六宫格整图，并非分别提交六张图片。",
+        "taskRunning": "宫格整图操作进行中…",
+        "taskRunningStatus": "宫格整图操作正在进行，完成后即可生成整图。",
         "manageComfyui": "管理 ComfyUI 节点池",
         "comfyuiHint": "前往设置中心添加 ComfyUI IP，并发布、测试私有放大工作流。",
         "workflowRequired": "需要先发布并测试一个本人可用的放大工作流",

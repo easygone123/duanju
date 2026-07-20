@@ -16,6 +16,7 @@ import {
 } from '@/lib/query/hooks/useSixGridStoryboard'
 import { buildScriptToStoryboardRunBody } from '@/lib/query/hooks/useScriptToStoryboardRunStream'
 import { resolveStoryboardRunErrorMessage } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/hooks/useWorkspaceExecution'
+import { TASK_TYPE } from '@/lib/task/types'
 
 vi.mock('@/components/ui/icons', () => ({
   AppIcon: ({ name }: { name: string }) => createElement('span', { 'data-icon': name }),
@@ -56,6 +57,8 @@ const messages = {
       four_grid: 'One complete 2×2 four-grid sheet is being generated, not four independent images.',
       six_grid: 'One complete 3×2 six-grid sheet is being generated, not six independent images.',
     },
+    taskRunning: 'Grid sheet operation in progress…',
+    taskRunningStatus: 'A grid sheet operation is in progress. Generation will be available when it finishes.',
     manageComfyui: 'Manage ComfyUI', comfyuiHint: 'Manage ComfyUI', workflowRequired: 'Workflow required',
     sheetRequired: 'Sheet required', upscaledSheetRequired: 'Upscaled sheet required',
     generationFailed: 'Generation failed: {message}',
@@ -158,6 +161,7 @@ describe('generic grid group controls', () => {
   ] as const)('announces one complete %s sheet while submission is running', (mode, label, status) => {
     const view = render(withIntl(<GridGroupControls
       storyboard={storyboard(mode)} {...controlProps} isTaskRunning
+      activeTaskType={TASK_TYPE.STORYBOARD_SHEET_GENERATE}
     />))
     const generate = view.getByRole('button', { name: label })
 
@@ -167,6 +171,28 @@ describe('generic grid group controls', () => {
     expect(view.getByRole('status').textContent).toBe(status)
     expect(view.getByRole('button', { name: 'View prompt' }).hasAttribute('disabled')).toBe(false)
     expect(view.getByRole('button', { name: 'Upload grid sheet' })).toBeTruthy()
+  })
+
+  it.each([
+    TASK_TYPE.STORYBOARD_SHEET_UPSCALE,
+    TASK_TYPE.STORYBOARD_SHEET_CROP,
+    'storyboard_sheet_upload',
+    null,
+  ])('uses generic accessible busy copy for non-generation task type %s', (activeTaskType) => {
+    const view = render(withIntl(<GridGroupControls
+      storyboard={storyboard('four_grid')} {...controlProps} isTaskRunning
+      activeTaskType={activeTaskType}
+    />))
+    const action = view.getByRole('button', { name: 'Grid sheet operation in progress…' })
+
+    expect(action.getAttribute('aria-busy')).toBe('true')
+    expect(action.getAttribute('title')).toBe(
+      'A grid sheet operation is in progress. Generation will be available when it finishes.',
+    )
+    expect(view.getByRole('status').textContent).toBe(
+      'A grid sheet operation is in progress. Generation will be available when it finishes.',
+    )
+    expect(view.queryByText(/complete 2×2.*not four independent/i)).toBeNull()
   })
 
   it('keeps a failed submission actionable once the task is no longer running', () => {

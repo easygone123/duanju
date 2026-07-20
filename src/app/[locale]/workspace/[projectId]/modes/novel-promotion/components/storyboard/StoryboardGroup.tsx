@@ -84,6 +84,7 @@ export default function StoryboardGroup({
   submittingVariantPanelId,
   sixGridUpscaleWorkflow,
   isSixGridTaskRunning,
+  sixGridTaskType,
   sixGridTaskPanelId,
   sixGridGenerationError,
   onGenerateSixGridSheet,
@@ -240,6 +241,7 @@ export default function StoryboardGroup({
       <GridGroupControls
         storyboard={storyboard}
         isTaskRunning={isGridGroupTaskRunning}
+        activeTaskType={sixGridTaskType ?? storyboard.gridTaskType ?? null}
         upscaleWorkflow={sixGridUpscaleWorkflow}
         generationError={sixGridGenerationError}
         onGenerateSheet={onGenerateSixGridSheet}

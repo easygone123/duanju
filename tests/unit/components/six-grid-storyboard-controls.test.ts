@@ -64,6 +64,8 @@ const messages = {
     artifactVersion: 'Artifact version {version}', status: 'Task status: {status}', idle: 'Idle', running: 'Running',
     sheetGenerationRunning: 'Generating one complete 3×2 sheet…',
     sheetGenerationStatus: 'One complete 3×2 six-grid sheet is being generated, not six independent images.',
+    taskRunning: 'Grid sheet operation in progress…',
+    taskRunningStatus: 'A grid sheet operation is in progress. Generation will be available when it finishes.',
     manageComfyui: 'Manage ComfyUI pool', comfyuiHint: 'Configure and test your private ComfyUI upscale workflow in Settings Center.',
     workflowRequired: 'A published and tested upscale workflow is required', sheetRequired: 'Generate the original sheet first',
     upscaledSheetRequired: 'Upscale the sheet before cropping',
@@ -117,6 +119,7 @@ describe('six-grid storyboard controls', () => {
     const renderControls = (isTaskRunning: boolean, onError?: (error: unknown) => void) => renderWithIntl(createElement(SixGridGroupControls, {
       storyboard: sixGrid({ sheetImageUrl: null, sheetPromptSnapshot: null }),
       isTaskRunning,
+      activeTaskType: isTaskRunning ? 'storyboard_sheet_generate' : null,
       upscaleWorkflow: null,
       onGenerateSheet: () => undefined,
       onPreviewSheet: () => undefined,

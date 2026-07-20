@@ -200,12 +200,16 @@ export function createSheetTaskMutationOptions(
         setGenerationError(input.storyboardId, error instanceof Error ? error.message : String(error))
       }
     },
-    onSuccess: (_data: unknown, input: SheetTaskInput, context: { attempt: number } | undefined) => {
+    onSuccess: async (_data: unknown, input: SheetTaskInput, context: { attempt: number } | undefined) => {
       if (input.operation === 'generate'
         && context?.attempt === currentAttempt(input.storyboardId)) {
         setGenerationError(input.storyboardId, null)
       }
-      return refreshStoryboardGroupQueries(queryClient, projectId, episodeId, input.storyboardId)
+      try {
+        await refreshStoryboardGroupQueries(queryClient, projectId, episodeId, input.storyboardId)
+      } catch {
+        // Submission is already accepted; task state polling can recover a missed refresh.
+      }
     },
   }
 }

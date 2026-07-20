@@ -122,6 +122,7 @@ export default function StoryboardStage({
     handleGenerateAllPanels,
     sixGridUpscaleWorkflow,
     sixGridTaskStoryboardId,
+    sixGridTaskType,
     sixGridTaskPanelId,
     sixGridGenerationErrors,
     generateSixGridSheet,
@@ -238,6 +239,7 @@ export default function StoryboardStage({
           setLocalStoryboards={setLocalStoryboards}
           sixGridUpscaleWorkflow={sixGridUpscaleWorkflow}
           sixGridTaskStoryboardId={sixGridTaskStoryboardId}
+          sixGridTaskType={sixGridTaskType}
           sixGridTaskPanelId={sixGridTaskPanelId}
           sixGridGenerationErrors={sixGridGenerationErrors}
           onGenerateSixGridSheet={generateSixGridSheet}

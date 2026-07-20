@@ -77,6 +77,7 @@ interface StoryboardCanvasProps {
   setLocalStoryboards: React.Dispatch<React.SetStateAction<NovelPromotionStoryboard[]>>
   sixGridUpscaleWorkflow: SixGridUpscaleWorkflow | null
   sixGridTaskStoryboardId: string | null
+  sixGridTaskType?: string | null
   sixGridTaskPanelId: string | null
   sixGridGenerationErrors: Record<string, string>
   onGenerateSixGridSheet: (storyboardId: string) => void
@@ -140,6 +141,7 @@ export default function StoryboardCanvas({
   setLocalStoryboards,
   sixGridUpscaleWorkflow,
   sixGridTaskStoryboardId,
+  sixGridTaskType,
   sixGridTaskPanelId,
   sixGridGenerationErrors,
   onGenerateSixGridSheet,
@@ -260,6 +262,9 @@ export default function StoryboardCanvas({
               submittingVariantPanelId={submittingVariantPanelId}
               sixGridUpscaleWorkflow={sixGridUpscaleWorkflow}
               isSixGridTaskRunning={sixGridTaskStoryboardId === storyboard.id}
+              sixGridTaskType={sixGridTaskStoryboardId === storyboard.id
+                ? sixGridTaskType ?? storyboard.gridTaskType ?? null
+                : storyboard.gridTaskType ?? null}
               sixGridTaskPanelId={sixGridTaskPanelId}
               sixGridGenerationError={sixGridGenerationErrors[storyboard.id] ?? null}
               onGenerateSixGridSheet={() => onGenerateSixGridSheet(storyboard.id)}

@@ -127,6 +127,36 @@ describe('grid sheet submit mutation', () => {
     })
   })
 
+  it('keeps a successful submit successful when the follow-up refresh rejects', async () => {
+    const queryClient = new QueryClient()
+    vi.spyOn(queryClient, 'invalidateQueries').mockRejectedValueOnce(new Error('refresh unavailable'))
+    const { errors, options } = createHarness(queryClient)
+    const variables = input()
+    const context = options.onMutate(variables)
+    errors['storyboard-1'] = 'previous failure'
+    upsertTaskTargetOverlay(queryClient, {
+      projectId: 'project-1',
+      targetType: 'NovelPromotionStoryboard',
+      targetId: 'storyboard-1',
+      runningTaskId: 'server-task-1',
+      runningTaskType: TASK_TYPE.STORYBOARD_SHEET_GENERATE,
+      phase: 'processing',
+      intent: 'generate',
+    })
+
+    await expect(options.onSuccess({ taskId: 'server-task-1' }, variables, context))
+      .resolves.toBeUndefined()
+
+    expect(errors['storyboard-1']).toBeUndefined()
+    expect(queryClient.getQueryData(queryKeys.tasks.targetStateOverlay('project-1'))).toMatchObject({
+      'NovelPromotionStoryboard:storyboard-1': {
+        runningTaskId: 'server-task-1',
+        runningTaskType: TASK_TYPE.STORYBOARD_SHEET_GENERATE,
+        phase: 'processing',
+      },
+    })
+  })
+
   it('does not let a stale earlier rejection overwrite or clear a newer generation attempt', () => {
     const queryClient = new QueryClient()
     const { errors, options } = createHarness(queryClient)

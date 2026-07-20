@@ -186,14 +186,15 @@ export function useStoryboardTaskAwareStoryboards({
         : isRunningPhase(episodeTextTaskState?.phase)
           ? episodeTextTaskState
           : null
+      const gridTaskState = storyboardGridStates.getTaskState(`storyboard-grid:${storyboard.id}`)
+      const gridTaskRunning = isRunningPhase(gridTaskState?.phase)
 
       return {
         ...storyboard,
         storyboardTaskRunning: textTaskState !== null,
         storyboardTaskIntent: textTaskState?.intent,
-        gridTaskRunning: isRunningPhase(
-          storyboardGridStates.getTaskState(`storyboard-grid:${storyboard.id}`)?.phase,
-        ),
+        gridTaskRunning,
+        gridTaskType: gridTaskRunning ? gridTaskState?.runningTaskType ?? null : null,
         panels: (storyboard.panels || []).map((panel) => {
           const panelImageTaskState = panelImageStates.getTaskState(`panel-image:${panel.id}`)
           const panelImageRunning = isRunningPhase(panelImageTaskState?.phase)

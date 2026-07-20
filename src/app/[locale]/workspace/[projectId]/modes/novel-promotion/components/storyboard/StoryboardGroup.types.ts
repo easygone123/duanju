@@ -69,6 +69,7 @@ export interface StoryboardGroupProps {
   submittingVariantPanelId: string | null
   sixGridUpscaleWorkflow: GridUpscaleWorkflow | null
   isSixGridTaskRunning: boolean
+  sixGridTaskType?: string | null
   sixGridTaskPanelId: string | null
   sixGridGenerationError: string | null
   onGenerateSixGridSheet: () => void

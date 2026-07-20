@@ -25,6 +25,7 @@ import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { useGridStoryboard } from '@/lib/query/hooks/useSixGridStoryboard'
 import type { GridUpscaleWorkflow } from '../GridGroupControls'
 import type { CropEntry } from '../GridCropModal'
+import { TASK_TYPE } from '@/lib/task/types'
 
 interface UseStoryboardStageControllerProps {
   projectId: string
@@ -251,6 +252,17 @@ export function useStoryboardStageController({
         ? gridTasks.crop.variables?.storyboardId || null
         : gridTasks.upload.isPending
           ? gridTasks.upload.variables?.storyboardId || null
+          : null,
+    sixGridTaskType: gridTasks.sheet.isPending
+      ? gridTasks.sheet.variables?.operation === 'generate'
+        ? TASK_TYPE.STORYBOARD_SHEET_GENERATE
+        : gridTasks.sheet.variables?.operation === 'upscale'
+          ? TASK_TYPE.STORYBOARD_SHEET_UPSCALE
+          : null
+      : gridTasks.crop.isPending
+        ? TASK_TYPE.STORYBOARD_SHEET_CROP
+        : gridTasks.upload.isPending
+          ? 'storyboard_sheet_upload'
           : null,
     sixGridTaskPanelId: gridTasks.panelUpscale.isPending
       ? gridTasks.panelUpscale.variables?.panelId || null

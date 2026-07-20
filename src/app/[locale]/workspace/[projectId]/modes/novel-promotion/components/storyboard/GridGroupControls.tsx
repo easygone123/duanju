@@ -8,6 +8,7 @@ import type { NovelPromotionStoryboard } from '@/types/project'
 import { Link } from '@/i18n/navigation'
 import { isGridStoryboardMode, resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 import { toDisplayImageUrl } from '@/lib/media/image-url'
+import { TASK_TYPE } from '@/lib/task/types'
 
 export type GridUpscaleWorkflow = {
   workflowId: string
@@ -18,6 +19,7 @@ export type GridUpscaleWorkflow = {
 export interface GridGroupControlsProps {
   storyboard: NovelPromotionStoryboard
   isTaskRunning: boolean
+  activeTaskType?: string | null
   upscaleWorkflow: GridUpscaleWorkflow | null
   generationError?: string | null
   onGenerateSheet: () => void
@@ -38,6 +40,7 @@ function includesUnsupportedRatio(error: string) {
 export default function GridGroupControls({
   storyboard,
   isTaskRunning,
+  activeTaskType,
   upscaleWorkflow,
   generationError,
   onGenerateSheet,
@@ -68,13 +71,19 @@ export default function GridGroupControls({
     ? (hasUpscaledSheet ? t('sourceUpscaled') : t('sourceMissing'))
     : (hasSheet ? t('sourceOriginal') : t('sourceMissing'))
   const title = isLegacySixGrid ? t('title') : t(`title.${mode}`)
+  const isSheetGenerationRunning = isTaskRunning
+    && activeTaskType === TASK_TYPE.STORYBOARD_SHEET_GENERATE
   const sheetGenerationStatus = isLegacySixGrid
     ? t('sheetGenerationStatus')
     : t(`sheetGenerationStatus.${mode}`)
+  const taskRunningStatus = t('taskRunningStatus')
+  const runningStatus = isSheetGenerationRunning ? sheetGenerationStatus : taskRunningStatus
   const generateLabel = isTaskRunning
-    ? isLegacySixGrid
-      ? t('sheetGenerationRunning')
-      : t(`sheetGenerationRunning.${mode}`)
+    ? isSheetGenerationRunning
+      ? isLegacySixGrid
+        ? t('sheetGenerationRunning')
+        : t(`sheetGenerationRunning.${mode}`)
+      : t('taskRunning')
     : isLegacySixGrid
       ? t(hasSheet ? 'regenerateSheet' : 'generateSheet')
       : t(`${hasSheet ? 'regenerateSheet' : 'generateSheet'}.${mode}`)
@@ -141,7 +150,7 @@ export default function GridGroupControls({
           className="glass-btn-base glass-btn-primary rounded-lg px-3 py-1.5 text-xs"
           disabled={isTaskRunning}
           aria-busy={isTaskRunning}
-          title={isTaskRunning ? sheetGenerationStatus : undefined}
+          title={isTaskRunning ? runningStatus : undefined}
           onClick={onGenerateSheet}
         >
           <AppIcon name="imagePreview" className="h-3.5 w-3.5" />
@@ -156,7 +165,7 @@ export default function GridGroupControls({
       </div>
       {isTaskRunning && (
         <p role="status" className="mt-3 break-words text-xs text-[var(--glass-text-secondary)]">
-          {sheetGenerationStatus}
+          {runningStatus}
         </p>
       )}
       {errorMessage && (
