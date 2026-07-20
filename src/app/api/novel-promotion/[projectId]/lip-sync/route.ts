@@ -53,13 +53,29 @@ export const POST = apiHandler(async (
   }
 
   const panel = await prisma.novelPromotionPanel.findFirst({
-    where: { storyboardId, panelIndex: Number(panelIndex) },
-    select: { id: true },
+    where: {
+      storyboardId,
+      panelIndex: Number(panelIndex),
+      storyboard: { episode: { novelPromotionProject: { projectId } } },
+    },
+    select: { id: true, storyboard: { select: { episodeId: true } } },
   })
 
   if (!panel) {
     throw new ApiError('NOT_FOUND')
   }
+
+  const voiceLine = await prisma.novelPromotionVoiceLine.findFirst({
+    where: {
+      id: voiceLineId,
+      episodeId: panel.storyboard.episodeId,
+      enabled: true,
+      matchedPanelId: panel.id,
+      episode: { novelPromotionProject: { projectId } },
+    },
+    select: { id: true },
+  })
+  if (!voiceLine) throw new ApiError('NOT_FOUND')
 
   const payload = {
     ...body,
@@ -71,13 +87,14 @@ export const POST = apiHandler(async (
     locale,
     requestId: getRequestId(request),
     projectId,
+    episodeId: panel.storyboard.episodeId,
     type: TASK_TYPE.LIP_SYNC,
     targetType: 'NovelPromotionPanel',
     targetId: panel.id,
     payload: withTaskUiPayload(payload, {
       hasOutputAtStart: await hasPanelLipSyncOutput(panel.id),
     }),
-    dedupeKey: `lip_sync:${panel.id}:${voiceLineId}`,
+    dedupeKey: `lip_sync:${panel.id}:${voiceLine.id}`,
     billingInfo: buildDefaultTaskBillingInfo(TASK_TYPE.LIP_SYNC, payload),
   })
 

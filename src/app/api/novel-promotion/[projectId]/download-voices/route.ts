@@ -6,6 +6,7 @@ import { getObjectBuffer, toFetchableUrl } from '@/lib/storage'
 import { resolveStorageKeyFromMediaValue } from '@/lib/media/service'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
+import { requireOwnedNovelPromotionEpisode } from '@/lib/novel-promotion/ownership'
 
 export const GET = apiHandler(async (
   request: NextRequest,
@@ -23,20 +24,13 @@ export const GET = apiHandler(async (
   // 获取配音台词
   const whereClause: Record<string, unknown> = {
     enabled: true,
-    audioUrl: { not: null }
+    audioUrl: { not: null },
+    episode: { novelPromotionProject: { projectId } },
   }
 
   if (episodeId) {
+    await requireOwnedNovelPromotionEpisode({ projectId, episodeId })
     whereClause.episodeId = episodeId
-  } else {
-    // 如果没有指定 episodeId，获取该项目所有剧集的配音
-    const npData = await prisma.novelPromotionProject.findFirst({
-      where: { projectId },
-      include: { episodes: { select: { id: true } } }
-    })
-    if (npData?.episodes) {
-      whereClause.episodeId = { in: npData.episodes.map(e => e.id) }
-    }
   }
 
   const voiceLines = await prisma.novelPromotionVoiceLine.findMany({

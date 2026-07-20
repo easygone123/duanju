@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server'
 import { getSignedUrl, toFetchableUrl } from '@/lib/storage'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
+import { prisma } from '@/lib/prisma'
 
 /**
  * 代理下载单个视频文件
@@ -23,6 +24,18 @@ export const GET = apiHandler(async (
     // 🔐 统一权限验证
     const authResult = await requireProjectAuthLight(projectId)
     if (isErrorResponse(authResult)) return authResult
+
+    const ownedPanel = await prisma.novelPromotionPanel.findFirst({
+        where: {
+            storyboard: { episode: { novelPromotionProject: { projectId } } },
+            OR: [
+                { videoUrl: videoKey },
+                { lipSyncVideoUrl: videoKey },
+            ],
+        },
+        select: { id: true },
+    })
+    if (!ownedPanel) throw new ApiError('NOT_FOUND')
 
     // 生成签名 URL 并下载
     let fetchUrl: string

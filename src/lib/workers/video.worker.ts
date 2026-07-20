@@ -326,7 +326,7 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
 
   let panel: PanelRecord | null = null
   if (job.data.targetType === 'NovelPromotionPanel') {
-    panel = await prisma.novelPromotionPanel.findUnique({ where: { id: job.data.targetId } })
+    panel = await fetchFramePanelById(job.data.targetId, job.data.projectId, job.data.userId)
   }
 
   if (
@@ -349,7 +349,20 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
   const voiceLineId = typeof payload.voiceLineId === 'string' ? payload.voiceLineId : null
   if (!voiceLineId) throw new Error('Lip-sync task missing voiceLineId')
 
-  const voiceLine = await prisma.novelPromotionVoiceLine.findUnique({ where: { id: voiceLineId } })
+  const voiceLine = await prisma.novelPromotionVoiceLine.findFirst({
+    where: {
+      id: voiceLineId,
+      enabled: true,
+      matchedPanelId: panel.id,
+      episode: {
+        storyboards: { some: { id: panel.storyboardId } },
+        novelPromotionProject: {
+          projectId: job.data.projectId,
+          project: { userId: job.data.userId },
+        },
+      },
+    },
+  })
   if (!voiceLine || !voiceLine.enabled || !voiceLine.audioUrl) {
     throw new Error('Voice line or audioUrl not found')
   }

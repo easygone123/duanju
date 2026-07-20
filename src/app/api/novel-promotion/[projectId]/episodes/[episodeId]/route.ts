@@ -21,8 +21,8 @@ export const GET = apiHandler(async (
   if (isErrorResponse(authResult)) return authResult
 
   // 获取剧集及其关联数据
-  const episode = await prisma.novelPromotionEpisode.findUnique({
-    where: { id: episodeId },
+  const episode = await prisma.novelPromotionEpisode.findFirst({
+    where: { id: episodeId, novelPromotionProject: { projectId } },
     include: {
       clips: {
         orderBy: { createdAt: 'asc' }
@@ -87,8 +87,14 @@ export const PATCH = apiHandler(async (
   }
   if (srtContent !== undefined) updateData.srtContent = srtContent
 
+  const ownedEpisode = await prisma.novelPromotionEpisode.findFirst({
+    where: { id: episodeId, novelPromotionProject: { projectId } },
+    select: { id: true },
+  })
+  if (!ownedEpisode) throw new ApiError('NOT_FOUND')
+
   const episode = await prisma.novelPromotionEpisode.update({
-    where: { id: episodeId },
+    where: { id: ownedEpisode.id },
     data: updateData
   })
 
@@ -108,9 +114,15 @@ export const DELETE = apiHandler(async (
   const authResult = await requireProjectAuthLight(projectId)
   if (isErrorResponse(authResult)) return authResult
 
+  const ownedEpisode = await prisma.novelPromotionEpisode.findFirst({
+    where: { id: episodeId, novelPromotionProject: { projectId } },
+    select: { id: true },
+  })
+  if (!ownedEpisode) throw new ApiError('NOT_FOUND')
+
   // 删除剧集（关联数据会级联删除）
   await prisma.novelPromotionEpisode.delete({
-    where: { id: episodeId }
+    where: { id: ownedEpisode.id }
   })
 
   // 如果删除的是最后编辑的剧集，更新 lastEpisodeId

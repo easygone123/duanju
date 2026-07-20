@@ -7,6 +7,7 @@ import { apiHandler, ApiError } from '@/lib/api-errors'
 import { resolveMediaRef, resolveMediaRefFromLegacyValue } from '@/lib/media/service'
 import { readJsonObject } from '@/lib/viral-replication/request-json'
 import { narrationSourceKey } from '@/lib/novel-promotion/narration/sync'
+import { requireOwnedNovelPromotionEpisode } from '@/lib/novel-promotion/ownership'
 
 const nullableIdentifier = z.string().trim().min(1).max(200).nullable()
 const voiceLineMutableFields = {
@@ -164,10 +165,15 @@ export const GET = apiHandler(async (
   if (!episodeId) {
     throw new ApiError('INVALID_PARAMS')
   }
+  await requireOwnedNovelPromotionEpisode({ projectId, episodeId })
 
   // 获取台词列表（包含匹配的 Panel 信息）
   const voiceLines = await prisma.novelPromotionVoiceLine.findMany({
-    where: { episodeId, enabled: true },
+    where: {
+      episodeId,
+      enabled: true,
+      episode: { novelPromotionProject: { projectId } },
+    },
     orderBy: { lineIndex: 'asc' },
     include: {
       matchedPanel: {
@@ -546,11 +552,13 @@ export const PATCH = apiHandler(async (
 
   // 批量更新同一发言人（仅支持更新音色）
   if (speaker && episodeId) {
+    await requireOwnedNovelPromotionEpisode({ projectId, episodeId })
     const result = await prisma.novelPromotionVoiceLine.updateMany({
       where: {
         episodeId,
         speaker,
         enabled: true,
+        episode: { novelPromotionProject: { projectId } },
       },
       data: { voicePresetId }
     })

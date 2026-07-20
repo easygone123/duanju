@@ -49,6 +49,7 @@ const prismaMock = vi.hoisted(() => ({
     update: vi.fn(async () => undefined),
   },
   novelPromotionVoiceLine: {
+    findFirst: vi.fn(),
     findUnique: vi.fn(),
   },
 }))
@@ -110,14 +111,22 @@ describe('chain contract - video queue behavior', () => {
     vi.clearAllMocks()
     queueState.addCallsByQueue.clear()
     workerState.processor = null
-    prismaMock.novelPromotionPanel.findUnique.mockResolvedValue({
+    const panel = {
       id: 'panel-1',
       videoUrl: 'cos/base-video.mp4',
-    })
-    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue({
+      storyboardId: 'storyboard-1',
+    }
+    prismaMock.novelPromotionPanel.findUnique.mockResolvedValue(panel)
+    prismaMock.novelPromotionPanel.findFirst.mockResolvedValue(panel)
+    const voiceLine = {
       id: 'line-1',
       audioUrl: 'cos/line-1.mp3',
-    })
+      enabled: true,
+      lineType: 'dialogue',
+      matchedPanelId: 'panel-1',
+    }
+    prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValue(voiceLine)
+    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue(voiceLine)
   })
 
   it('VIDEO_PANEL is enqueued into video queue', async () => {

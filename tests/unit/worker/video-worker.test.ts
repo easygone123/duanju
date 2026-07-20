@@ -65,6 +65,7 @@ const prismaMock = vi.hoisted(() => ({
     updateMany: vi.fn(async () => ({ count: 1 })),
   },
   novelPromotionVoiceLine: {
+    findFirst: vi.fn(),
     findUnique: vi.fn(),
   },
   mediaObject: {
@@ -188,7 +189,7 @@ describe('worker video processor behavior', () => {
 
     prismaMock.novelPromotionPanel.findUnique.mockResolvedValue(buildPanel())
     prismaMock.novelPromotionPanel.findFirst.mockResolvedValue(buildPanel())
-    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue({
+    prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValue({
       id: 'line-1',
       audioUrl: 'cos/line-1.mp3',
       audioDuration: 1200,
@@ -586,8 +587,7 @@ describe('worker video processor behavior', () => {
   })
 
   it('LIP_SYNC: drops narration output when narration is disabled after provider completion', async () => {
-    prismaMock.novelPromotionVoiceLine.findUnique
-      .mockResolvedValueOnce({
+    prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValueOnce({
         id: 'line-1',
         audioUrl: 'cos/line-1.mp3',
         audioDuration: 1200,
@@ -595,7 +595,7 @@ describe('worker video processor behavior', () => {
         lineType: 'narration',
         matchedPanelId: 'panel-1',
       })
-      .mockResolvedValueOnce({
+    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValueOnce({
         id: 'line-1',
         audioUrl: 'cos/line-1.mp3',
         enabled: false,
@@ -614,8 +614,7 @@ describe('worker video processor behavior', () => {
   })
 
   it('LIP_SYNC: drops narration output when its audio snapshot changes after provider completion', async () => {
-    prismaMock.novelPromotionVoiceLine.findUnique
-      .mockResolvedValueOnce({
+    prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValueOnce({
         id: 'line-1',
         audioUrl: 'cos/line-1.mp3',
         audioDuration: 1200,
@@ -623,7 +622,7 @@ describe('worker video processor behavior', () => {
         lineType: 'narration',
         matchedPanelId: 'panel-1',
       })
-      .mockResolvedValueOnce({
+    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValueOnce({
         id: 'line-1',
         audioUrl: 'cos/new-line-1.mp3',
         enabled: true,
@@ -641,6 +640,14 @@ describe('worker video processor behavior', () => {
   })
 
   it('LIP_SYNC: cleans the unique upload when narration publish CAS loses a race', async () => {
+    prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValue({
+      id: 'line-1',
+      audioUrl: 'cos/line-1.mp3',
+      audioDuration: 1200,
+      enabled: true,
+      lineType: 'narration',
+      matchedPanelId: 'panel-1',
+    })
     prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue({
       id: 'line-1',
       audioUrl: 'cos/line-1.mp3',
