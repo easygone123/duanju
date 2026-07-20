@@ -7,6 +7,7 @@ import { resolveTaskErrorMessage } from '@/lib/task/error-message'
 import { queryKeys } from '@/lib/query/keys'
 import { clearTaskTargetOverlay, upsertTaskTargetOverlay } from '@/lib/query/task-target-overlay'
 import { invalidateEpisodeStageQueries } from '@/lib/query/episode-stage-cache'
+import { TASK_TYPE } from '@/lib/task/types'
 import type { NormalizedCropRect } from '@/types/project'
 
 type CropEntry = { cellIndex: number; normalizedCropRect: NormalizedCropRect }
@@ -36,6 +37,8 @@ const PANEL_IMAGE_LINEAGE_KEYS = [
 ] as const
 
 type PanelRecord = Record<string, unknown>
+// Upload is synchronous, but its optimistic overlay still needs a non-text identity.
+const STORYBOARD_SHEET_UPLOAD_OVERLAY_TYPE = 'storyboard_sheet_upload'
 
 function clearStoryboardError(errors: Record<string, string>, storyboardId: string) {
   if (!(storyboardId in errors)) return errors
@@ -144,6 +147,7 @@ export function createSheetUploadMutationOptions(
       projectId,
       targetType: 'NovelPromotionStoryboard',
       targetId: input.storyboardId,
+      runningTaskType: STORYBOARD_SHEET_UPLOAD_OVERLAY_TYPE,
       intent: 'process',
     }),
     onSuccess: async (_data: unknown, input: SheetUploadInput) => {
@@ -264,6 +268,9 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
       }
       upsertTaskTargetOverlay(queryClient, {
         projectId, targetType: 'NovelPromotionStoryboard', targetId: input.storyboardId,
+        runningTaskType: input.operation === 'generate'
+          ? TASK_TYPE.STORYBOARD_SHEET_GENERATE
+          : TASK_TYPE.STORYBOARD_SHEET_UPSCALE,
         intent: input.operation === 'generate' ? 'generate' : 'process',
       })
       return { generationAttempt }
@@ -289,7 +296,8 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
   const crop = useMutation({
     mutationFn: (input: CropTaskInput) => submitTask(buildSheetCropRequest(projectId, input)),
     onMutate: (input) => upsertTaskTargetOverlay(queryClient, {
-      projectId, targetType: 'NovelPromotionStoryboard', targetId: input.storyboardId, intent: 'process',
+      projectId, targetType: 'NovelPromotionStoryboard', targetId: input.storyboardId,
+      runningTaskType: TASK_TYPE.STORYBOARD_SHEET_CROP, intent: 'process',
     }),
     onError: (_error, input) => clearOverlay('NovelPromotionStoryboard', input.storyboardId),
     onSuccess: (_data, input) => refreshGroup(input.storyboardId),
@@ -297,7 +305,8 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
   const panelUpscale = useMutation({
     mutationFn: (input: PanelUpscaleInput) => submitTask(buildPanelUpscaleRequest(projectId, input)),
     onMutate: (input) => upsertTaskTargetOverlay(queryClient, {
-      projectId, targetType: 'NovelPromotionPanel', targetId: input.panelId, intent: 'process',
+      projectId, targetType: 'NovelPromotionPanel', targetId: input.panelId,
+      runningTaskType: TASK_TYPE.STORYBOARD_PANEL_UPSCALE, intent: 'process',
     }),
     onError: (_error, input) => clearOverlay('NovelPromotionPanel', input.panelId),
     onSuccess: (_data, input) => Promise.all([

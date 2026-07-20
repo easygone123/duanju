@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { renderHook } from '@testing-library/react'
@@ -228,19 +230,25 @@ describe('six-grid task requests and cache scope', () => {
       panel: ['storyboard_panel_upscale'],
     }
     expect(buildStoryboardTaskTypeContract()).toEqual(splitContract)
-    expect(buildSixGridTaskTypeContract()).toEqual(splitContract)
+    expect(buildSixGridTaskTypeContract()).toEqual({
+      storyboard: splitContract.grid,
+      panel: splitContract.panel,
+    })
 
-    let runningKind: 'text' | 'grid' = 'text'
+    let runningKind: 'both-text' | 'episode-text' | 'grid' = 'both-text'
     taskPresentationMock.mockImplementation((
       _projectId: string,
       targets: Array<{ key: string }>,
     ) => ({
       getTaskState: (key: string) => {
-        if (runningKind === 'text' && targets.some((target) => target.key.startsWith('storyboard-text:')) && key === 'storyboard-text:storyboard-1') {
-          return { phase: 'processing' }
+        if (runningKind === 'both-text' && targets.some((target) => target.key.startsWith('storyboard-text:')) && key === 'storyboard-text:storyboard-1') {
+          return { phase: 'processing', intent: 'regenerate' }
+        }
+        if ((runningKind === 'both-text' || runningKind === 'episode-text') && targets.some((target) => target.key.startsWith('episode-text:')) && key === 'episode-text:episode-1') {
+          return { phase: 'processing', intent: 'build' }
         }
         if (runningKind === 'grid' && targets.some((target) => target.key.startsWith('storyboard-grid:')) && key === 'storyboard-grid:storyboard-1') {
-          return { phase: 'processing' }
+          return { phase: 'processing', intent: 'generate' }
         }
         return null
       },
@@ -258,6 +266,7 @@ describe('six-grid task requests and cache scope', () => {
 
     expect(hook.result.current.taskAwareStoryboards[0]).toMatchObject({
       storyboardTaskRunning: true,
+      storyboardTaskIntent: 'regenerate',
       gridTaskRunning: false,
     })
 
@@ -292,10 +301,19 @@ describe('six-grid task requests and cache scope', () => {
       }),
     ])
 
+    runningKind = 'episode-text'
+    hook.rerender()
+    expect(hook.result.current.taskAwareStoryboards[0]).toMatchObject({
+      storyboardTaskRunning: true,
+      storyboardTaskIntent: 'build',
+      gridTaskRunning: false,
+    })
+
     runningKind = 'grid'
     hook.rerender()
     expect(hook.result.current.taskAwareStoryboards[0]).toMatchObject({
       storyboardTaskRunning: false,
+      storyboardTaskIntent: undefined,
       gridTaskRunning: true,
     })
   })

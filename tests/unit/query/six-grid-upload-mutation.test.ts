@@ -1,13 +1,19 @@
+// @vitest-environment jsdom
+
+import { createElement, type ReactNode } from 'react'
+import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MutationObserver, QueryClient, QueryObserver } from '@tanstack/react-query'
+import { MutationObserver, QueryClient, QueryClientProvider, QueryObserver } from '@tanstack/react-query'
 
 import {
   buildSheetUploadRequest,
   createSheetUploadMutationOptions,
   sixGridStoryboardQueryKeys,
   type SheetUploadInput,
+  useSixGridStoryboard,
 } from '@/lib/query/hooks/useSixGridStoryboard'
 import { queryKeys } from '@/lib/query/keys'
+import { useTaskTargetStateMap } from '@/lib/query/hooks/useTaskTargetStateMap'
 
 const apiFetchMock = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/api-fetch', () => ({ apiFetch: apiFetchMock }))
@@ -27,7 +33,16 @@ function mutate(queryClient: QueryClient, input: SheetUploadInput) {
   return new MutationObserver(queryClient, createUploadOptions(queryClient)).mutate(input)
 }
 
+function createQueryWrapper(queryClient: QueryClient) {
+  return ({ children }: { children: ReactNode }) => createElement(
+    QueryClientProvider,
+    { client: queryClient },
+    children,
+  )
+}
+
 afterEach(() => {
+  cleanup()
   apiFetchMock.mockReset()
 })
 
@@ -79,7 +94,7 @@ describe('six-grid external sheet upload request', () => {
 })
 
 describe('six-grid external sheet upload lifecycle', () => {
-  it('adds a process overlay for the exact storyboard target on mutate', async () => {
+  it('adds a typed upload overlay without activating the storyboard text whitelist', async () => {
     const queryClient = new QueryClient()
     const input = uploadInput()
     const options = createUploadOptions(queryClient)
@@ -90,9 +105,70 @@ describe('six-grid external sheet upload lifecycle', () => {
       'NovelPromotionStoryboard:storyboard-1': {
         targetType: 'NovelPromotionStoryboard',
         targetId: 'storyboard-1',
+        runningTaskType: 'storyboard_sheet_upload',
         intent: 'process',
       },
     })
+
+    const textState = renderHook(() => useTaskTargetStateMap('project-1', [{
+      targetType: 'NovelPromotionStoryboard',
+      targetId: 'storyboard-1',
+      types: ['regenerate_storyboard_text', 'insert_panel'],
+    }], { enabled: false }), { wrapper: createQueryWrapper(queryClient) })
+    expect(textState.result.current.getState('NovelPromotionStoryboard', 'storyboard-1')?.phase).toBe('idle')
+  })
+
+  it('tags every optimistic grid task so sheet generation cannot activate text state', async () => {
+    apiFetchMock.mockImplementation(async () => new Response(JSON.stringify({ taskId: 'task-1' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const queryClient = new QueryClient()
+    const wrapper = createQueryWrapper(queryClient)
+    const grid = renderHook(() => useSixGridStoryboard('project-1', 'episode-1'), { wrapper })
+    const overlays = () => queryClient.getQueryData<Record<string, { runningTaskType: string }>>(
+      queryKeys.tasks.targetStateOverlay('project-1'),
+    )
+
+    await act(async () => {
+      await grid.result.current.sheet.mutateAsync({
+        operation: 'generate', episodeId: 'episode-1', storyboardId: 'storyboard-1',
+      })
+    })
+    expect(overlays()?.['NovelPromotionStoryboard:storyboard-1']?.runningTaskType)
+      .toBe('storyboard_sheet_generate')
+
+    const textState = renderHook(() => useTaskTargetStateMap('project-1', [{
+      targetType: 'NovelPromotionStoryboard',
+      targetId: 'storyboard-1',
+      types: ['regenerate_storyboard_text', 'insert_panel'],
+    }], { enabled: false }), { wrapper })
+    expect(textState.result.current.getState('NovelPromotionStoryboard', 'storyboard-1')?.phase).toBe('idle')
+
+    await act(async () => {
+      await grid.result.current.sheet.mutateAsync({
+        operation: 'upscale', episodeId: 'episode-1', storyboardId: 'storyboard-1',
+      })
+    })
+    expect(overlays()?.['NovelPromotionStoryboard:storyboard-1']?.runningTaskType)
+      .toBe('storyboard_sheet_upscale')
+
+    await act(async () => {
+      await grid.result.current.crop.mutateAsync({
+        episodeId: 'episode-1', storyboardId: 'storyboard-1', cropRects: [],
+      })
+    })
+    expect(overlays()?.['NovelPromotionStoryboard:storyboard-1']?.runningTaskType)
+      .toBe('storyboard_sheet_crop')
+
+    await act(async () => {
+      await grid.result.current.panelUpscale.mutateAsync({
+        episodeId: 'episode-1', storyboardId: 'storyboard-1', panelId: 'panel-1',
+        workflowId: 'workflow-1', workflowVersionId: 'version-1',
+      })
+    })
+    expect(overlays()?.['NovelPromotionPanel:panel-1']?.runningTaskType)
+      .toBe('storyboard_panel_upscale')
   })
 
   it('invalidates the group and active episode stage, then clears the overlay after success', async () => {

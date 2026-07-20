@@ -559,6 +559,16 @@ describe('six-grid storyboard group dialog wiring', () => {
 
     view.rerender(withIntl(<StoryboardGroup
       {...props}
+      storyboard={{ ...storyboard, storyboardTaskIntent: 'build' }}
+      textPanels={textPanels}
+      isSubmittingStoryboardTask
+    />))
+    expect(view.getByTestId('group-task-overlay').getAttribute('data-resource')).toBe('text')
+    expect(view.getByTestId('group-task-overlay').getAttribute('data-intent')).toBe('build')
+
+    view.rerender(withIntl(<StoryboardGroup
+      {...props}
+      storyboard={{ ...storyboard, storyboardTaskIntent: 'regenerate' }}
       textPanels={textPanels}
       isSubmittingStoryboardTask
     />))
@@ -567,6 +577,7 @@ describe('six-grid storyboard group dialog wiring', () => {
 
     view.rerender(withIntl(<StoryboardGroup
       {...props}
+      storyboard={{ ...storyboard, storyboardTaskIntent: 'regenerate' }}
       textPanels={textPanels}
       isSubmittingStoryboardTextTask
       isSelectingCandidate

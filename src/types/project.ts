@@ -1,6 +1,7 @@
 import type { CapabilitySelections } from '@/lib/model-config-contract'
 import type { LocationAvailableSlot } from '@/lib/location-available-slots'
 import type { PanelNarrationMode } from '@/lib/novel-promotion/narration/state'
+import type { TaskIntent } from '@/lib/task/intent'
 import type {
   NormalizedCropRect,
   SixGridCellAspectRatio,
@@ -253,6 +254,7 @@ export interface NovelPromotionStoryboard {
   storyboardImageUrl: string | null
   media?: MediaRef | null
   storyboardTaskRunning?: boolean
+  storyboardTaskIntent?: TaskIntent
   gridTaskRunning?: boolean
   candidateImages?: string | null
   lastError?: string | null  // 最后一次生成失败的错误信息

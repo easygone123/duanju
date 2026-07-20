@@ -173,7 +173,7 @@ export default function StoryboardGroup({
 
     return resolveTaskPresentationState({
       phase: 'processing',
-      intent: 'regenerate',
+      intent: storyboard.storyboardTaskIntent ?? (isSubmittingStoryboardTextTask ? 'regenerate' : 'process'),
       resource: 'text',
       hasOutput: hasTextOutput,
     })
@@ -183,6 +183,7 @@ export default function StoryboardGroup({
     isSelectingCandidate,
     isSubmittingStoryboardTask,
     isSubmittingStoryboardTextTask,
+    storyboard.storyboardTaskIntent,
   ])
 
   const handleRegeneratePanelImage = useCallback(
