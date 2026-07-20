@@ -35,6 +35,10 @@ const workerMock = vi.hoisted(() => ({
   assertTaskActive: vi.fn(async () => undefined),
 }))
 
+const promptMock = vi.hoisted(() => ({
+  buildPrompt: vi.fn((_input: { variables: { character_profiles: string } }) => 'character-visual-prompt'),
+}))
+
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/llm-client', () => llmMock)
 vi.mock('@/types/character-profile', () => ({
@@ -67,7 +71,7 @@ vi.mock('@/lib/workers/handlers/character-profile-helpers', async () => {
 })
 vi.mock('@/lib/prompt-i18n', () => ({
   PROMPT_IDS: { NP_AGENT_CHARACTER_VISUAL: 'np_agent_character_visual' },
-  buildPrompt: vi.fn(() => 'character-visual-prompt'),
+  buildPrompt: promptMock.buildPrompt,
 }))
 
 import { handleCharacterProfileTask } from '@/lib/workers/handlers/character-profile'
@@ -102,7 +106,7 @@ describe('worker character-profile behavior', () => {
             appearances: [
               {
                 change_reason: '默认形象',
-                descriptions: ['黑发，冷静，风衣'],
+                descriptions: ['二十五岁男性，剑眉星目，黑色短发，身穿深蓝风衣与黑色长靴。'],
               },
             ],
           },
@@ -112,7 +116,11 @@ describe('worker character-profile behavior', () => {
 
     prismaMock.novelPromotionCharacter.findFirst.mockImplementation(async (args: { where: { id: string } }) => ({
       id: args.where.id,
-      name: args.where.id === 'character-2' ? 'Villain' : 'Hero',
+      name: args.where.id === 'character-2' ? 'Villain' : '我',
+      aliases: JSON.stringify(args.where.id === 'character-2' ? [] : ['林墨']),
+      introduction: args.where.id === 'character-2'
+        ? '故事反派'
+        : '故事主角，小说以第一人称「我」叙述。',
       profileData: JSON.stringify({ archetype: 'lead' }),
       profileConfirmed: false,
       novelPromotionProjectId: 'np-project-1',
@@ -151,7 +159,7 @@ describe('worker character-profile behavior', () => {
         characterId: 'character-1',
         appearanceIndex: 0,
         changeReason: '默认形象',
-        description: '黑发，冷静，风衣',
+        description: '二十五岁男性，剑眉星目，黑色短发，身穿深蓝风衣与黑色长靴。',
       }),
     })
 
@@ -170,6 +178,27 @@ describe('worker character-profile behavior', () => {
         profileConfirmed: true,
       }),
     }))
+
+    const promptInput = promptMock.buildPrompt.mock.calls[0]![0]
+    const profile = JSON.parse(promptInput.variables.character_profiles)[0]
+    expect(profile).toMatchObject({
+      name: '我',
+      aliases: ['林墨'],
+      introduction: '故事主角，小说以第一人称「我」叙述。',
+      archetype: 'lead',
+    })
+  })
+
+  it('rejects a one-character visual description instead of persisting it', async () => {
+    llmMock.getCompletionContent.mockReturnValue(JSON.stringify({
+      characters: [{ appearances: [{ change_reason: '初始形象', descriptions: ['我'] }] }],
+    }))
+
+    const job = buildJob(TASK_TYPE.CHARACTER_PROFILE_CONFIRM, { characterId: 'character-1' })
+
+    await expect(handleCharacterProfileTask(job)).rejects.toThrow('AI返回格式错误: 形象描述无效')
+    expect(prismaMock.$transaction).not.toHaveBeenCalled()
+    expect(prismaMock.characterAppearance.create).not.toHaveBeenCalled()
   })
 
   it('batch confirm -> loops through all unconfirmed characters and returns count', async () => {

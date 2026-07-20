@@ -272,6 +272,9 @@ export async function handleAnalyzeNovelTask(job: Job<TaskJobData>) {
       visual_keywords: toStringArray(item.visual_keywords),
       gender: item.gender,
       age_range: item.age_range,
+      expected_appearances: Array.isArray(item.expected_appearances)
+        ? item.expected_appearances
+        : [],
     }
 
     const created = await prisma.novelPromotionCharacter.create({
@@ -279,6 +282,7 @@ export async function handleAnalyzeNovelTask(job: Job<TaskJobData>) {
         novelPromotionProjectId: novelData.id,
         name,
         aliases: JSON.stringify(toStringArray(item.aliases)),
+        introduction: readText(item.introduction) || null,
         profileData: JSON.stringify(profileData),
         profileConfirmed: false,
       },

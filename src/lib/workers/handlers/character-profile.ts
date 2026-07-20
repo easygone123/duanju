@@ -9,9 +9,8 @@ import { assertTaskActive } from '@/lib/workers/utils'
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 import {
   type AnyObj,
-  parseVisualResponse,
+  parseCharacterVisualAppearances,
   readRequiredString,
-  readText,
   resolveProjectModel,
 } from './character-profile-helpers'
 import { createWorkerLLMStreamCallbacks, createWorkerLLMStreamContext } from './llm-stream'
@@ -58,6 +57,22 @@ async function handleConfirmProfile(
   }
 
   const parsedProfile = JSON.parse(finalProfileData) as AnyObj
+  const aliases = (() => {
+    if (!character.aliases) return []
+    try {
+      const parsed = JSON.parse(character.aliases)
+      return Array.isArray(parsed)
+        ? parsed
+          .map((item) => typeof item === 'string' ? item.trim() : '')
+          .filter(Boolean)
+        : []
+    } catch {
+      return []
+    }
+  })()
+  const expectedAppearances = Array.isArray(parsedProfile.expected_appearances)
+    ? parsedProfile.expected_appearances
+    : [{ id: 1, change_reason: '初始形象' }]
   const promptTemplate = buildPrompt({
     promptId: PROMPT_IDS.NP_AGENT_CHARACTER_VISUAL,
     locale: job.data.locale,
@@ -65,8 +80,11 @@ async function handleConfirmProfile(
       character_profiles: JSON.stringify(
         [
           {
-            name: character.name,
             ...parsedProfile,
+            name: character.name,
+            aliases,
+            introduction: character.introduction || '',
+            expected_appearances: expectedAppearances,
           },
         ],
         null,
@@ -108,17 +126,7 @@ async function handleConfirmProfile(
   await assertTaskActive(job, 'character_profile_confirm_parse')
 
   const responseText = completion.text
-  const visualData = parseVisualResponse(responseText)
-  const visualCharacters = Array.isArray(visualData.characters)
-    ? (visualData.characters as Array<AnyObj>)
-    : []
-  const firstCharacter = visualCharacters[0]
-  const appearances = Array.isArray(firstCharacter?.appearances)
-    ? (firstCharacter!.appearances as Array<AnyObj>)
-    : []
-  if (appearances.length === 0) {
-    throw new Error('AI返回格式错误: 缺少 appearances')
-  }
+  const appearances = parseCharacterVisualAppearances(responseText)
 
   if (!suppressProgress) {
     await reportTaskProgress(job, 78, {
@@ -142,14 +150,12 @@ async function handleConfirmProfile(
   for (let appIndex = 0; appIndex < appearances.length; appIndex++) {
     const app = appearances[appIndex]
     await assertTaskActive(job, 'character_profile_confirm_create_appearance')
-    const descriptions = Array.isArray(app.descriptions) ? app.descriptions : []
-    const normalizedDescriptions = descriptions.map((item) => readText(item)).filter(Boolean)
     appearanceRows.push({
       characterId: character.id,
       appearanceIndex: appIndex,
-      changeReason: readText(app.change_reason) || '初始形象',
-      description: normalizedDescriptions[0] || '',
-      descriptions: JSON.stringify(normalizedDescriptions),
+      changeReason: app.changeReason,
+      description: app.descriptions[0],
+      descriptions: JSON.stringify(app.descriptions),
       imageUrls: encodeImageUrls([]),
       previousImageUrls: encodeImageUrls([]),
     })

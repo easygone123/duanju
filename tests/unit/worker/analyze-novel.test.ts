@@ -111,9 +111,11 @@ describe('worker analyze-novel behavior', () => {
           {
             name: '新角色',
             aliases: ['别名A'],
+            introduction: '故事主角，以第一人称「我」叙述。',
             role_level: 'main',
             personality_tags: ['冷静'],
             visual_keywords: ['黑发'],
+            expected_appearances: [{ id: 1, change_reason: '初始形象' }],
           },
         ],
       }))
@@ -170,6 +172,8 @@ describe('worker analyze-novel behavior', () => {
           novelPromotionProjectId: 'np-project-1',
           name: '新角色',
           aliases: JSON.stringify(['别名A']),
+          introduction: '故事主角，以第一人称「我」叙述。',
+          profileData: expect.stringContaining('expected_appearances'),
         }),
       }),
     )
