@@ -505,7 +505,6 @@ describe('four-grid panel narration control', () => {
     if (recovers) {
       await waitFor(() => expect(view.refetch).toHaveBeenCalledTimes(2))
       expectAmbiguousRecovery(view)
-    }
     } else {
       expect(view.invalidate).not.toHaveBeenCalled()
       expect(view.refetch).not.toHaveBeenCalled()
