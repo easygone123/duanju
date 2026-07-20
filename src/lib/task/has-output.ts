@@ -137,9 +137,10 @@ export async function hasVoiceLineAudioOutput(lineId: string | null | undefined)
     select: {
       audioUrl: true,
       audioMediaId: true,
+      enabled: true,
     },
   })
-  if (!line) return false
+  if (!line || !line.enabled) return false
   return isNonEmptyString(line.audioUrl) || !!line.audioMediaId
 }
 

@@ -133,6 +133,9 @@ export interface VideoPanel {
 export interface MatchedVoiceLine {
   id: string
   lineIndex: number
+  lineType: 'dialogue' | 'narration'
+  enabled: boolean
+  sourceKey: string | null
   speaker: string
   content: string
   audioUrl?: string

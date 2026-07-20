@@ -227,7 +227,7 @@ async function loadConfigArtifactCounts(episodeId: string): Promise<ConfigArtifa
     prisma.novelPromotionPanel.count({
       where: { storyboard: { episodeId }, videoUrl: { not: null }, NOT: { videoUrl: '' } },
     }),
-    prisma.novelPromotionVoiceLine.count({ where: { episodeId } }),
+    prisma.novelPromotionVoiceLine.count({ where: { episodeId, enabled: true } }),
   ])
   return { scriptCount, storyboardCount, panelCount, videoCount, voiceCount }
 }

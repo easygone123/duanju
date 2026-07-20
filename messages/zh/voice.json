@@ -99,7 +99,8 @@
         "locatePanelCta": "定位到镜头 {index}",
         "editLine": "编辑台词",
         "deleteLine": "删除台词",
-        "deleteAudio": "删除配音"
+        "deleteAudio": "删除配音",
+        "narrationBadge": "旁白"
     },
     "lineEditor": {
         "addTitle": "添加语音",
@@ -113,6 +114,7 @@
         "bindPanelLabel": "绑定镜头",
         "unboundPanel": "未绑定镜头",
         "panelLabel": "镜头 {index}",
+        "narrationIdentityHint": "旁白的发言人和绑定镜头由故事板管理；可在此编辑内容。",
         "saveAdd": "添加语音",
         "saveEdit": "保存修改"
     },

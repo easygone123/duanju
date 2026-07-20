@@ -12,6 +12,9 @@ interface MatchedVoiceLinesQueryLike {
     voiceLines?: Array<{
       id: string
       lineIndex: number
+      lineType: 'dialogue' | 'narration'
+      enabled: boolean
+      sourceKey: string | null
       speaker: string
       content: string
       audioUrl: string | null
@@ -36,7 +39,8 @@ export function useVideoVoiceLines({
   const [allVoiceLines, setAllVoiceLines] = useState<VoiceLine[]>([])
 
   useEffect(() => {
-    const voiceLines = matchedVoiceLinesQuery.data?.voiceLines || []
+    const voiceLines = (matchedVoiceLinesQuery.data?.voiceLines || [])
+      .filter((line) => line.enabled !== false)
     const panelMap = new Map<string, MatchedVoiceLine[]>()
 
     for (const voiceLine of voiceLines) {
@@ -46,6 +50,9 @@ export function useVideoVoiceLines({
         existing.push({
           id: voiceLine.id,
           lineIndex: voiceLine.lineIndex,
+          lineType: voiceLine.lineType,
+          enabled: voiceLine.enabled,
+          sourceKey: voiceLine.sourceKey,
           speaker: voiceLine.speaker,
           content: voiceLine.content,
           audioUrl: voiceLine.audioUrl || undefined,

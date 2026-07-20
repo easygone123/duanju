@@ -128,6 +128,9 @@ export function useVoiceStageRuntime({
     speakerOptions,
   })
   const { playingLineId, handleTogglePlayAudio } = useVoicePlayback()
+  const editingLineType = editingLineId
+    ? voiceLines.find((line) => line.id === editingLineId)?.lineType ?? null
+    : null
   const [pendingVoiceGenerationByLineId, setPendingVoiceGenerationByLineId] = useState<PendingVoiceGenerationMap>({})
   const submittingVoiceLineIds = useMemo(
     () => new Set(Object.keys(pendingVoiceGenerationByLineId)),
@@ -277,6 +280,7 @@ export function useVoiceStageRuntime({
         isLineEditorOpen={isLineEditorOpen}
         isSavingLineEditor={isSavingLineEditor}
         editingLineId={editingLineId}
+        editingLineType={editingLineType}
         editingContent={editingContent}
         editingSpeaker={editingSpeaker}
         editingMatchedPanelId={editingMatchedPanelId}

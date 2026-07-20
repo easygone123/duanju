@@ -71,12 +71,16 @@ export function useVoiceLineCrudActions({
           return
         }
 
-        const data = await updateVoiceLineMutation.mutateAsync({
-          lineId: editingLineId,
-          content,
-          speaker,
-          matchedPanelId: editingMatchedPanelId || null,
-        })
+        const data = await updateVoiceLineMutation.mutateAsync(
+          originalLine.lineType === 'narration'
+            ? { lineId: editingLineId, content }
+            : {
+                lineId: editingLineId,
+                content,
+                speaker,
+                matchedPanelId: editingMatchedPanelId || null,
+              },
+        )
         const updatedLine = data.voiceLine as VoiceLine
         setVoiceLines((prev) => prev.map((line) => (line.id === editingLineId ? updatedLine : line)))
       } else {
@@ -119,7 +123,7 @@ export function useVoiceLineCrudActions({
 
   const handleDeleteLine = useCallback(async (lineId: string) => {
     const line = voiceLines.find((item) => item.id === lineId)
-    if (!line) return
+    if (!line || line.lineType === 'narration') return
 
     const content = line.content.slice(0, 50) + (line.content.length > 50 ? '...' : '')
     const confirmed = window.confirm(t('confirm.deleteLine', { content }))

@@ -41,11 +41,13 @@ export default function VoiceLineList({
   onSaveEmotionSettings,
   onAnalyze,
 }: VoiceLineListProps) {
-  if (voiceLines.length === 0) {
+  const enabledVoiceLines = voiceLines.filter((line) => line.enabled !== false)
+
+  if (enabledVoiceLines.length === 0) {
     return <EmptyVoiceState onAnalyze={onAnalyze} analyzing={analyzing} />
   }
 
-  const pinnedLineIndices = voiceLines.flatMap((line, index) => (
+  const pinnedLineIndices = enabledVoiceLines.flatMap((line, index) => (
     runningLineIds.has(line.id)
     || line.lineTaskRunning
     || playingLineId === line.id
@@ -56,7 +58,7 @@ export default function VoiceLineList({
 
   return (
     <VirtualCardRange
-      items={voiceLines}
+      items={enabledVoiceLines}
       getKey={(line) => line.id}
       estimatedCardHeight={440}
       estimatedRowHeight={456}

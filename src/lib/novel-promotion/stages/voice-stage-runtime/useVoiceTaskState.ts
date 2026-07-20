@@ -17,7 +17,7 @@ export function useVoiceTaskState({
   submittingVoiceLineIds,
 }: UseVoiceTaskStateParams) {
   const voiceLineTargets = useMemo(() => {
-    return voiceLines.map((line) => ({
+    return voiceLines.filter((line) => line.enabled !== false).map((line) => ({
       key: `line:${line.id}`,
       targetType: 'NovelPromotionVoiceLine',
       targetId: line.id,
@@ -34,6 +34,7 @@ export function useVoiceTaskState({
   const voiceStatusStateByLineId = useMemo(() => {
     const map = new Map<string, TaskPresentationState>()
     for (const line of voiceLines) {
+      if (line.enabled === false) continue
       const state = voiceTaskStates.getTaskState(`line:${line.id}`)
       if (!state) continue
       const presentation = resolveTaskPresentationState({
@@ -50,6 +51,7 @@ export function useVoiceTaskState({
   const activeVoiceTaskLineIds = useMemo(() => {
     const ids = new Set<string>()
     for (const line of voiceLines) {
+      if (line.enabled === false) continue
       const state = voiceTaskStates.getTaskState(`line:${line.id}`)
       if (!state) continue
       if (state.phase === 'queued' || state.phase === 'processing') {
@@ -60,12 +62,17 @@ export function useVoiceTaskState({
   }, [voiceLines, voiceTaskStates])
 
   const runningLineIds = useMemo(() => {
-    const ids = new Set<string>(submittingVoiceLineIds)
+    const enabledLineIds = new Set(
+      voiceLines.filter((line) => line.enabled !== false).map((line) => line.id),
+    )
+    const ids = new Set<string>(
+      [...submittingVoiceLineIds].filter((lineId) => enabledLineIds.has(lineId)),
+    )
     for (const lineId of activeVoiceTaskLineIds) {
       ids.add(lineId)
     }
     return ids
-  }, [activeVoiceTaskLineIds, submittingVoiceLineIds])
+  }, [activeVoiceTaskLineIds, submittingVoiceLineIds, voiceLines])
 
   return {
     voiceStatusStateByLineId,

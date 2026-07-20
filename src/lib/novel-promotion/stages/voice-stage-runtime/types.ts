@@ -8,6 +8,9 @@ import type {
 export interface VoiceLine {
   id: string
   lineIndex: number
+  lineType: 'dialogue' | 'narration'
+  enabled: boolean
+  sourceKey: string | null
   speaker: string
   content: string
   emotionPrompt: string | null

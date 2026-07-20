@@ -8,6 +8,9 @@ import { apiFetch } from '@/lib/api-fetch'
 // ============ 类型定义 ============
 export interface VoiceLine {
     id: string
+    lineType: 'dialogue' | 'narration'
+    enabled: boolean
+    sourceKey: string | null
     panelId: string
     text: string
     characterId: string | null
@@ -24,6 +27,9 @@ export interface VoiceLinesData {
 export interface MatchedVoiceLine {
     id: string
     lineIndex: number
+    lineType: 'dialogue' | 'narration'
+    enabled: boolean
+    sourceKey: string | null
     speaker: string
     content: string
     audioUrl: string | null

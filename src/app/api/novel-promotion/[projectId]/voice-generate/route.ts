@@ -22,6 +22,7 @@ type VoiceLineRow = {
   id: string
   speaker: string
   content: string
+  enabled: boolean
 }
 
 type CharacterRow = CharacterVoiceFields & {
@@ -180,12 +181,14 @@ export const POST = apiHandler(async (
     const allLines = await prisma.novelPromotionVoiceLine.findMany({
       where: {
         episodeId,
+        enabled: true,
         audioUrl: null},
       orderBy: { lineIndex: 'asc' },
       select: {
         id: true,
         speaker: true,
-        content: true}})
+        content: true,
+        enabled: true}})
     voiceLines = allLines.filter((line) =>
       hasSpeakerVoiceForProvider(line.speaker, characters, speakerVoices, selectedProviderKey),
     )
@@ -197,9 +200,15 @@ export const POST = apiHandler(async (
       select: {
         id: true,
         speaker: true,
-        content: true}})
+        content: true,
+        enabled: true}})
     if (!line) {
       throw new ApiError('NOT_FOUND')
+    }
+    if (!line.enabled) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'VOICE_LINE_DISABLED',
+      })
     }
     const validation = validateSpeakerVoiceForProvider(
       line.speaker,
@@ -220,6 +229,7 @@ export const POST = apiHandler(async (
       const firstLineWithoutBinding = await prisma.novelPromotionVoiceLine.findFirst({
         where: {
           episodeId,
+          enabled: true,
           audioUrl: null,
         },
         orderBy: { lineIndex: 'asc' },

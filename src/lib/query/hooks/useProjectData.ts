@@ -66,6 +66,9 @@ export interface Episode {
 
 interface VoiceLine {
     id: string
+    lineType?: 'dialogue' | 'narration'
+    enabled?: boolean
+    sourceKey?: string | null
     text: string
     speakerId: string
     audioUrl?: string | null

@@ -176,10 +176,14 @@ export async function generateVoiceLine(params: {
       content: true,
       emotionPrompt: true,
       emotionStrength: true,
+      enabled: true,
     },
   })
   if (!line) {
     throw new Error('Voice line not found')
+  }
+  if (!line.enabled) {
+    throw new Error('VOICE_LINE_DISABLED')
   }
 
   const episodeId = params.episodeId || line.episodeId
@@ -270,13 +274,16 @@ export async function generateVoiceLine(params: {
 
   await checkCancelled?.()
 
-  await prisma.novelPromotionVoiceLine.update({
-    where: { id: line.id },
+  const persisted = await prisma.novelPromotionVoiceLine.updateMany({
+    where: { id: line.id, enabled: true },
     data: {
       audioUrl: cosKey,
       audioDuration: generated.audioDuration || null,
     },
   })
+  if (persisted.count === 0) {
+    throw new Error('VOICE_LINE_DISABLED')
+  }
 
   const signedUrl = getSignedUrl(cosKey, 7200)
   return {

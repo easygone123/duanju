@@ -10,6 +10,9 @@ import { useVirtualCardRetention } from '@/components/virtualization/VirtualCard
 interface VoiceLine {
     id: string
     lineIndex: number
+    lineType: 'dialogue' | 'narration'
+    enabled: boolean
+    sourceKey: string | null
     speaker: string
     content: string
     emotionPrompt: string | null
@@ -133,9 +136,19 @@ export default function VoiceLineCard({
                 )}
             </div>
 
-            {/* 序号标签 */}
-            <div className="absolute top-2 left-2 bg-[var(--glass-overlay)] backdrop-blur-sm text-white px-2 py-0.5 rounded-lg text-xs font-medium">
-                #{line.lineIndex}
+            {/* 序号与类型标签 */}
+            <div className="absolute top-2 left-2 flex items-center gap-1.5">
+                <div className="bg-[var(--glass-overlay)] backdrop-blur-sm text-white px-2 py-0.5 rounded-lg text-xs font-medium">
+                    #{line.lineIndex}
+                </div>
+                {line.lineType === 'narration' && (
+                    <div
+                        data-testid="voice-line-narration-badge"
+                        className="bg-[var(--glass-tone-info-bg)] text-[var(--glass-tone-info-fg)] px-2 py-0.5 rounded-lg text-xs font-medium border border-[var(--glass-stroke-focus)]"
+                    >
+                        {t("lineCard.narrationBadge")}
+                    </div>
+                )}
             </div>
 
             {/* 状态标签+删除配音按钮 */}
@@ -180,13 +193,15 @@ export default function VoiceLineCard({
                         >
                             <AppIcon name="editSquare" className="w-3.5 h-3.5" />
                         </button>
-                        <button
-                            onClick={() => onDelete(line.id)}
-                            className="p-1 text-[var(--glass-text-tertiary)] hover:text-[var(--glass-tone-danger-fg)] hover:bg-[var(--glass-tone-danger-bg)] rounded transition-colors"
-                            title={t("lineCard.deleteLine")}
-                        >
-                            <AppIcon name="trash" className="w-3.5 h-3.5" />
-                        </button>
+                        {line.lineType !== 'narration' && (
+                            <button
+                                onClick={() => onDelete(line.id)}
+                                className="p-1 text-[var(--glass-text-tertiary)] hover:text-[var(--glass-tone-danger-fg)] hover:bg-[var(--glass-tone-danger-bg)] rounded transition-colors"
+                                title={t("lineCard.deleteLine")}
+                            >
+                                <AppIcon name="trash" className="w-3.5 h-3.5" />
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>

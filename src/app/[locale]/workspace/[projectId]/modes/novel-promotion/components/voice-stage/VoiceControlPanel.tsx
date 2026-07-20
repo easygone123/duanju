@@ -31,6 +31,7 @@ interface VoiceControlPanelProps {
   isLineEditorOpen: boolean
   isSavingLineEditor: boolean
   editingLineId: string | null
+  editingLineType: 'dialogue' | 'narration' | null
   editingContent: string
   editingSpeaker: string
   editingMatchedPanelId: string
@@ -69,6 +70,7 @@ export default function VoiceControlPanel({
   isLineEditorOpen,
   isSavingLineEditor,
   editingLineId,
+  editingLineType,
   editingContent,
   editingSpeaker,
   editingMatchedPanelId,
@@ -172,6 +174,7 @@ export default function VoiceControlPanel({
                 <select
                   value={editingSpeaker}
                   onChange={(event) => onEditingSpeakerChange(event.target.value)}
+                  disabled={editingLineType === 'narration'}
                   className="w-full rounded-xl border border-[var(--glass-stroke-strong)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--glass-tone-info-fg)]"
                 >
                   <option value="" disabled>{t('lineEditor.selectSpeaker')}</option>
@@ -191,6 +194,7 @@ export default function VoiceControlPanel({
                 <select
                   value={editingMatchedPanelId}
                   onChange={(event) => onEditingMatchedPanelIdChange(event.target.value)}
+                  disabled={editingLineType === 'narration'}
                   className="w-full rounded-xl border border-[var(--glass-stroke-strong)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--glass-tone-info-fg)]"
                 >
                   <option value="">{t('lineEditor.unboundPanel')}</option>
@@ -200,6 +204,11 @@ export default function VoiceControlPanel({
                     </option>
                   ))}
                 </select>
+                {editingLineType === 'narration' && (
+                  <p className="mt-1 text-xs text-[var(--glass-text-tertiary)]">
+                    {t('lineEditor.narrationIdentityHint')}
+                  </p>
+                )}
               </div>
             </div>
 

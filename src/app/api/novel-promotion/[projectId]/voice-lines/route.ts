@@ -146,6 +146,7 @@ export const GET = apiHandler(async (
 
     const speakerRows = await prisma.novelPromotionVoiceLine.findMany({
       where: {
+        enabled: true,
         episode: {
           novelPromotionProjectId: novelProject.id
         }
@@ -166,7 +167,7 @@ export const GET = apiHandler(async (
 
   // 获取台词列表（包含匹配的 Panel 信息）
   const voiceLines = await prisma.novelPromotionVoiceLine.findMany({
-    where: { episodeId },
+    where: { episodeId, enabled: true },
     orderBy: { lineIndex: 'asc' },
     include: {
       matchedPanel: {
@@ -548,7 +549,8 @@ export const PATCH = apiHandler(async (
     const result = await prisma.novelPromotionVoiceLine.updateMany({
       where: {
         episodeId,
-        speaker
+        speaker,
+        enabled: true,
       },
       data: { voicePresetId }
     })
@@ -585,12 +587,22 @@ export const DELETE = apiHandler(async (
   }
 
   // 获取要删除的台词
-  const lineToDelete = await prisma.novelPromotionVoiceLine.findUnique({
-    where: { id: lineId }
+  const lineToDelete = await prisma.novelPromotionVoiceLine.findFirst({
+    where: {
+      id: lineId,
+      episode: {
+        novelPromotionProject: { projectId },
+      },
+    },
   })
 
   if (!lineToDelete) {
     throw new ApiError('NOT_FOUND')
+  }
+  if (lineToDelete.lineType === 'narration') {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'NARRATION_DELETE_UNSUPPORTED',
+    })
   }
 
   // 删除台词

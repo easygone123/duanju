@@ -38,6 +38,7 @@ export const GET = apiHandler(async (
         orderBy: { shotId: 'asc' }
       },
       voiceLines: {
+        where: { enabled: true },
         orderBy: { lineIndex: 'asc' }
       }
     }

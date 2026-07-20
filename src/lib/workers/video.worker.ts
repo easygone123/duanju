@@ -322,7 +322,7 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
   if (!voiceLineId) throw new Error('Lip-sync task missing voiceLineId')
 
   const voiceLine = await prisma.novelPromotionVoiceLine.findUnique({ where: { id: voiceLineId } })
-  if (!voiceLine || !voiceLine.audioUrl) {
+  if (!voiceLine || !voiceLine.enabled || !voiceLine.audioUrl) {
     throw new Error('Voice line or audioUrl not found')
   }
 

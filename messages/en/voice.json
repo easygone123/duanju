@@ -99,7 +99,8 @@
         "locatePanelCta": "Jump to Shot {index}",
         "editLine": "Edit line",
         "deleteLine": "Delete line",
-        "deleteAudio": "Delete audio"
+        "deleteAudio": "Delete audio",
+        "narrationBadge": "Narration"
     },
     "lineEditor": {
         "addTitle": "Add Voice Line",
@@ -113,6 +114,7 @@
         "bindPanelLabel": "Bind Shot",
         "unboundPanel": "Unbound",
         "panelLabel": "Shot {index}",
+        "narrationIdentityHint": "Narration speaker and shot binding are managed in the storyboard. You can edit its content here.",
         "saveAdd": "Add Voice",
         "saveEdit": "Save Changes"
     },

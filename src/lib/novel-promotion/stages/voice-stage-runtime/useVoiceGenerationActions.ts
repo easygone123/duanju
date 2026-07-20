@@ -109,6 +109,9 @@ export function useVoiceGenerationActions({
   }, [analyzeVoiceMutation, episodeId, loadData, notifyVoiceLinesChanged, t])
 
   const handleGenerateLine = useCallback(async (lineId: string) => {
+    const line = voiceLines.find((item) => item.id === lineId)
+    if (!line || line.enabled === false) return
+
     const pendingGeneration = buildPendingGenerationMap([lineId])
     setPendingVoiceGenerationByLineId((prev) => ({
       ...prev,
@@ -165,11 +168,13 @@ export function useVoiceGenerationActions({
     queryClient,
     setPendingVoiceGenerationByLineId,
     t,
+    voiceLines,
     withTaskState,
   ])
 
   const handleGenerateAll = useCallback(async () => {
     const linesToGenerate = voiceLines.filter((line) => {
+      if (line.enabled === false) return false
       if (line.audioUrl) return false
       const character = speakerCharacterMap[line.speaker]
       const speakerVoice = speakerVoices[line.speaker]
