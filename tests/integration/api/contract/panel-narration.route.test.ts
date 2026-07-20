@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   panel: null as Record<string, unknown> | null,
   line: null as Record<string, unknown> | null,
   transactionCalls: 0,
+  beforeNextVoiceUpdate: null as (() => void) | null,
 }))
 
 const panelFindFirst = vi.hoisted(() => vi.fn(async () => state.panel))
@@ -35,6 +36,8 @@ const panelUpdateMany = vi.hoisted(() => vi.fn(async ({ where, data }: {
 }))
 const voiceFindFirst = vi.hoisted(() => vi.fn(async () => state.line))
 const voiceUpdate = vi.hoisted(() => vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+  state.beforeNextVoiceUpdate?.()
+  state.beforeNextVoiceUpdate = null
   state.line = {
     ...state.line,
     ...data,
@@ -49,16 +52,21 @@ const voiceUpdate = vi.hoisted(() => vi.fn(async ({ data }: { data: Record<strin
   }
   return state.line
 }))
+const panelUpdate = vi.hoisted(() => vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+  state.panel = state.panel ? { ...state.panel, ...data } : null
+  return state.panel
+}))
+const voiceFindUnique = vi.hoisted(() => vi.fn(async () => state.line))
 
 const tx = vi.hoisted(() => ({
   novelPromotionPanel: {
     findFirst: panelFindUnique,
     findUnique: panelFindUnique,
     updateMany: panelUpdateMany,
-    update: vi.fn(),
+    update: panelUpdate,
   },
   novelPromotionVoiceLine: {
-    findUnique: vi.fn(),
+    findUnique: voiceFindUnique,
     findMany: vi.fn(),
     aggregate: vi.fn(),
     create: vi.fn(),
@@ -180,6 +188,7 @@ describe('panel narration PATCH contract', () => {
     state.panel = makePanel()
     state.line = makeLine()
     state.transactionCalls = 0
+    state.beforeNextVoiceUpdate = null
     authMock.mockResolvedValue({
       session: { user: { id: 'user-1' } },
       project: { id: 'project-1', userId: 'user-1' },
@@ -370,13 +379,14 @@ describe('narration voice-line PATCH contract', () => {
     state.panel = makePanel()
     state.line = makeLine()
     state.transactionCalls = 0
+    state.beforeNextVoiceUpdate = null
     authMock.mockResolvedValue({
       session: { user: { id: 'user-1' } },
       project: { id: 'project-1', userId: 'user-1' },
     })
   })
 
-  it('mirrors narration content and emotion to its panel in one transaction', async () => {
+  it('mirrors narration content and emotion to its panel in one transaction while preserving media', async () => {
     const response = await voicePatch({
       lineId: 'line-1',
       content: '  新旁白  ',
@@ -394,7 +404,6 @@ describe('narration voice-line PATCH contract', () => {
         episodeId: true,
         lineType: true,
         sourceKey: true,
-        content: true,
         matchedPanelId: true,
       }),
     }))
@@ -409,10 +418,14 @@ describe('narration voice-line PATCH contract', () => {
     expect(voiceUpdate).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'line-1' },
       data: expect.objectContaining({
+        enabled: true,
         content: '新旁白',
         emotionPrompt: 'excited',
       }),
     }))
+    expect(voiceUpdate.mock.invocationCallOrder[0]).toBeLessThan(
+      panelUpdate.mock.invocationCallOrder[0],
+    )
     expect(state.line).toMatchObject({
       id: 'line-1',
       sourceKey: 'panel-narration:panel-1',
@@ -420,6 +433,99 @@ describe('narration voice-line PATCH contract', () => {
       audioUrl: '/audio/existing.mp3',
       audioMediaId: 'media-1',
     })
+  })
+
+  it('re-enables a disabled narration edit and preserves returned emotion on content-only edits', async () => {
+    state.line = makeLine({ enabled: false, emotionPrompt: 'existing-emotion' })
+
+    const response = await voicePatch({ lineId: 'line-1', content: '新内容' })
+
+    expect(response.status).toBe(200)
+    expect(state.line).toMatchObject({
+      enabled: true,
+      content: '新内容',
+      emotionPrompt: 'existing-emotion',
+    })
+    expect(state.panel).toMatchObject({
+      narrationMode: 'on',
+      narrationText: '新内容',
+      narrationEmotion: 'existing-emotion',
+    })
+  })
+
+  it('preserves returned content on emotion-only edits', async () => {
+    state.line = makeLine({ enabled: false, content: 'existing-content' })
+
+    const response = await voicePatch({ lineId: 'line-1', emotionPrompt: 'new-emotion' })
+
+    expect(response.status).toBe(200)
+    expect(state.line).toMatchObject({
+      enabled: true,
+      content: 'existing-content',
+      emotionPrompt: 'new-emotion',
+    })
+    expect(state.panel).toMatchObject({
+      narrationMode: 'on',
+      narrationText: 'existing-content',
+      narrationEmotion: 'new-emotion',
+    })
+  })
+
+  it('mirrors post-update row values instead of a stale pre-read snapshot', async () => {
+    state.line = makeLine({ emotionPrompt: 'pre-read-emotion' })
+    state.beforeNextVoiceUpdate = () => {
+      state.line = { ...(state.line || {}), emotionPrompt: 'concurrent-emotion' }
+    }
+
+    const response = await voicePatch({ lineId: 'line-1', content: 'new-content' })
+
+    expect(response.status).toBe(200)
+    expect(state.panel).toMatchObject({
+      narrationText: 'new-content',
+      narrationEmotion: 'concurrent-emotion',
+    })
+  })
+
+  it.each([
+    [{ lineId: 7, content: 'invalid id' }],
+    [{ lineId: 'line-1', speaker: 7 }],
+    [{ speaker: 'Alice', episodeId: 7, voicePresetId: 'preset-1' }],
+    [{ lineId: 'line-1', voicePresetId: 7 }],
+    [{ lineId: 'line-1', emotionPrompt: 7 }],
+    [{ lineId: 'line-1', emotionStrength: Number.POSITIVE_INFINITY }],
+    [{ lineId: 'line-1', emotionStrength: 1.1 }],
+    [{ lineId: 'line-1', content: 7 }],
+    [{ lineId: 'line-1', audioUrl: 7 }],
+    [{ lineId: 'line-1', matchedPanelId: 7 }],
+    [{ lineId: 'line-1', surprise: true }],
+    [{ lineId: 'line-1' }],
+  ])('rejects malformed, unknown-only, and no-op voice payloads %#', async (body) => {
+    const response = await voicePatch(body)
+
+    await expectApiError(response, 400, 'INVALID_PARAMS', 'VOICE_LINE_PATCH_PAYLOAD_INVALID')
+    expect(voiceFindFirst).not.toHaveBeenCalled()
+    expect(prismaMock.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('rejects a narration line whose source key does not match its panel identity', async () => {
+    state.line = makeLine({ sourceKey: 'panel-narration:panel-elsewhere' })
+
+    const response = await voicePatch({ lineId: 'line-1', content: '不能写入' })
+
+    await expectApiError(response, 400, 'INVALID_PARAMS', 'NARRATION_SOURCE_KEY_INVALID')
+    expect(prismaMock.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('rolls back both the voice row and panel when the narration transaction fails', async () => {
+    state.line = makeLine({ enabled: false, content: 'before-content' })
+    state.panel = makePanel({ narrationMode: 'auto', narrationText: null })
+    panelUpdate.mockRejectedValueOnce(new Error('panel write failed'))
+
+    const response = await voicePatch({ lineId: 'line-1', content: 'after-content' })
+
+    expect(response.status).toBe(500)
+    expect(state.line).toMatchObject({ enabled: false, content: 'before-content' })
+    expect(state.panel).toMatchObject({ narrationMode: 'auto', narrationText: null })
   })
 
   it('rejects blank narration content and identity reassignment', async () => {
@@ -495,5 +601,22 @@ describe('narration voice-line PATCH contract', () => {
       data: expect.objectContaining({ content: 'hello', speaker: 'Bob' }),
     }))
     expect(tx.novelPromotionPanel.update).not.toHaveBeenCalled()
+  })
+
+  it('keeps the valid batch speaker preset update shape unchanged', async () => {
+    prismaMock.novelPromotionVoiceLine.updateMany.mockResolvedValueOnce({ count: 2 })
+
+    const response = await voicePatch({
+      speaker: 'Alice',
+      episodeId: 'episode-1',
+      voicePresetId: 'preset-2',
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ success: true, updatedCount: 2 })
+    expect(prismaMock.novelPromotionVoiceLine.updateMany).toHaveBeenCalledWith({
+      where: { episodeId: 'episode-1', speaker: 'Alice' },
+      data: { voicePresetId: 'preset-2' },
+    })
   })
 })

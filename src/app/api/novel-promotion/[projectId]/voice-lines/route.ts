@@ -1,9 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
+import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { resolveMediaRef, resolveMediaRefFromLegacyValue } from '@/lib/media/service'
+import { readJsonObject } from '@/lib/viral-replication/request-json'
+import { narrationSourceKey } from '@/lib/novel-promotion/narration/sync'
+
+const nullableIdentifier = z.string().trim().min(1).max(200).nullable()
+const voiceLineMutableFields = {
+  speaker: z.string().max(200).optional(),
+  voicePresetId: nullableIdentifier.optional(),
+  emotionPrompt: z.string().nullable().optional(),
+  emotionStrength: z.number().finite().min(0).max(1).optional(),
+  content: z.string().optional(),
+  audioUrl: z.string().nullable().optional(),
+  matchedPanelId: nullableIdentifier.optional(),
+} as const
+const singleVoiceLinePatchSchema = z.object({
+  lineId: z.string().trim().min(1).max(200),
+  ...voiceLineMutableFields,
+}).strict().refine(
+  (body) => Object.keys(voiceLineMutableFields).some((field) => (
+    Object.prototype.hasOwnProperty.call(body, field)
+  )),
+  { message: 'At least one mutable field is required' },
+)
+const batchVoiceLinePatchSchema = z.object({
+  speaker: z.string().trim().min(1).max(200),
+  episodeId: z.string().trim().min(1).max(200),
+  voicePresetId: nullableIdentifier,
+}).strict()
+const voiceLinePatchSchema = z.union([
+  singleVoiceLinePatchSchema,
+  batchVoiceLinePatchSchema,
+])
+
+type VoiceLinePatchBody = {
+  lineId?: string
+  speaker?: string
+  episodeId?: string
+  voicePresetId?: string | null
+  emotionPrompt?: string | null
+  emotionStrength?: number
+  content?: string
+  audioUrl?: string | null
+  matchedPanelId?: string | null
+}
 
 async function resolveMatchedPanelData(
   matchedPanelId: string | null | undefined,
@@ -253,7 +297,15 @@ export const PATCH = apiHandler(async (
   const authResult = await requireProjectAuthLight(projectId)
   if (isErrorResponse(authResult)) return authResult
 
-  const body = await request.json()
+  const rawBody = await readJsonObject(request)
+  const parsed = voiceLinePatchSchema.safeParse(rawBody)
+  if (!parsed.success) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'VOICE_LINE_PATCH_PAYLOAD_INVALID',
+      field: parsed.error.issues[0]?.path.join('.') || 'body',
+    })
+  }
+  const body: VoiceLinePatchBody = parsed.data
   const {
     lineId,
     speaker,
@@ -281,7 +333,6 @@ export const PATCH = apiHandler(async (
         lineType: true,
         sourceKey: true,
         speaker: true,
-        content: true,
         matchedPanelId: true,
       },
     })
@@ -306,6 +357,11 @@ export const PATCH = apiHandler(async (
         })
       }
       const narrationPanelId = currentLine.matchedPanelId
+      if (currentLine.sourceKey !== narrationSourceKey(narrationPanelId)) {
+        throw new ApiError('INVALID_PARAMS', {
+          code: 'NARRATION_SOURCE_KEY_INVALID',
+        })
+      }
       const currentPanel = await prisma.novelPromotionPanel.findFirst({
         where: {
           id: narrationPanelId,
@@ -333,7 +389,7 @@ export const PATCH = apiHandler(async (
       if (voicePresetId !== undefined) updateData.voicePresetId = voicePresetId
       if (emotionStrength !== undefined) updateData.emotionStrength = emotionStrength
       if (content !== undefined) {
-        if (typeof content !== 'string' || !content.trim()) {
+        if (!content.trim()) {
           throw new ApiError('INVALID_PARAMS', {
             code: 'PANEL_NARRATION_TEXT_REQUIRED',
           })
@@ -341,9 +397,6 @@ export const PATCH = apiHandler(async (
         updateData.content = content.trim()
       }
       if (emotionPrompt !== undefined) {
-        if (emotionPrompt !== null && typeof emotionPrompt !== 'string') {
-          throw new ApiError('INVALID_PARAMS')
-        }
         updateData.emotionPrompt = emotionPrompt?.trim() || null
       }
       if (audioUrl !== undefined) {
@@ -351,16 +404,21 @@ export const PATCH = apiHandler(async (
         const media = await resolveMediaRefFromLegacyValue(audioUrl)
         updateData.audioMediaId = media?.id || null
       }
-      const mirroredNarrationText = content !== undefined
-        ? content.trim()
-        : currentLine.content.trim()
-      if (emotionPrompt !== undefined && !mirroredNarrationText) {
-        throw new ApiError('INVALID_PARAMS', {
-          code: 'PANEL_NARRATION_TEXT_REQUIRED',
-        })
-      }
+      const updatesCanonicalNarration = content !== undefined || emotionPrompt !== undefined
+      if (updatesCanonicalNarration) updateData.enabled = true
 
       const updated = await prisma.$transaction(async (tx) => {
+        const canonicalVoiceLine = updatesCanonicalNarration
+          ? await tx.novelPromotionVoiceLine.update({
+              where: { id: currentLine.id },
+              data: updateData,
+              select: {
+                content: true,
+                emotionPrompt: true,
+              },
+            })
+          : null
+
         const matchedPanel = await tx.novelPromotionPanel.findFirst({
           where: {
             id: narrationPanelId,
@@ -384,17 +442,35 @@ export const PATCH = apiHandler(async (
           })
         }
 
-        if (content !== undefined || emotionPrompt !== undefined) {
+        if (canonicalVoiceLine) {
+          if (!canonicalVoiceLine.content.trim()) {
+            throw new ApiError('INVALID_PARAMS', {
+              code: 'PANEL_NARRATION_TEXT_REQUIRED',
+            })
+          }
           await tx.novelPromotionPanel.update({
             where: { id: matchedPanel.id },
             data: {
               narrationMode: 'on',
-              narrationText: mirroredNarrationText,
-              ...(emotionPrompt !== undefined
-                ? { narrationEmotion: updateData.emotionPrompt as string | null }
-                : {}),
+              narrationText: canonicalVoiceLine.content,
+              narrationEmotion: canonicalVoiceLine.emotionPrompt,
             },
           })
+
+          const canonicalResult = await tx.novelPromotionVoiceLine.findUnique({
+            where: { id: currentLine.id },
+            include: {
+              matchedPanel: {
+                select: {
+                  id: true,
+                  storyboardId: true,
+                  panelIndex: true,
+                },
+              },
+            },
+          })
+          if (!canonicalResult) throw new ApiError('NOT_FOUND')
+          return canonicalResult
         }
 
         return tx.novelPromotionVoiceLine.update({
