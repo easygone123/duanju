@@ -11,7 +11,7 @@ import {
   pollAsyncTask,
   type ExternalExecutionClock,
 } from '@/lib/async-poll'
-import { getSignedUrl, toFetchableUrl } from '@/lib/storage'
+import { getObjectBuffer, getSignedUrl, toFetchableUrl } from '@/lib/storage'
 import { initializeFonts, createLabelSVG } from '@/lib/fonts'
 import { processMediaResult } from '@/lib/media-process'
 import {
@@ -908,12 +908,17 @@ export async function stripLabelBar(imageSource: string): Promise<string> {
 export async function withLabelBar(imageSource: string, labelText: string): Promise<Buffer> {
   await initializeFonts()
 
-  const response = await fetch(toFetchableUrl(imageSource))
-  if (!response.ok) {
-    throw new Error(`Failed to download image: ${response.status}`)
-  }
-
-  const raw = Buffer.from(await response.arrayBuffer())
+  const raw = imageSource.startsWith('comfyui/')
+    && !imageSource.includes('..')
+    && !imageSource.includes('\\')
+    ? await getObjectBuffer(imageSource)
+    : await (async () => {
+        const response = await fetch(toFetchableUrl(imageSource))
+        if (!response.ok) {
+          throw new Error(`Failed to download image: ${response.status}`)
+        }
+        return Buffer.from(await response.arrayBuffer())
+      })()
   const meta = await sharp(raw).metadata()
   const width = meta.width || 2160
   const height = meta.height || 2160

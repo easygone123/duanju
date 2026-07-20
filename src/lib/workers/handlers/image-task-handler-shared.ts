@@ -126,7 +126,15 @@ async function generateImageToStorage(params: {
     prompt: params.prompt,
     options: params.options,
     comfyReferenceImages: params.comfyReferenceImages,
+    preferComfyStorageKey: true,
   })
+
+  const isStoredComfyOutput = source.startsWith('comfyui/')
+    && !source.includes('..')
+    && !source.includes('\\')
+  if (isStoredComfyOutput && !params.label) {
+    return source
+  }
 
   const uploadSource = params.label
     ? await withLabelBar(source, params.label)
