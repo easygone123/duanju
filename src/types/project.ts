@@ -253,6 +253,7 @@ export interface NovelPromotionStoryboard {
   storyboardImageUrl: string | null
   media?: MediaRef | null
   storyboardTaskRunning?: boolean
+  gridTaskRunning?: boolean
   candidateImages?: string | null
   lastError?: string | null  // 最后一次生成失败的错误信息
   photographyPlan?: string | null  // 摄影方案JSON

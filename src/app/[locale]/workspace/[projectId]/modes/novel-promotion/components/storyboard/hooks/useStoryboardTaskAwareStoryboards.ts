@@ -19,44 +19,71 @@ interface UseStoryboardTaskAwareStoryboardsProps {
   isRunningPhase: (phase: string | null | undefined) => boolean
 }
 
-export function buildSixGridTaskTypeContract() {
+export function buildStoryboardTaskTypeContract() {
   return {
-    storyboard: ['storyboard_sheet_generate', 'storyboard_sheet_upscale', 'storyboard_sheet_crop'],
+    text: ['regenerate_storyboard_text', 'insert_panel'],
+    grid: ['storyboard_sheet_generate', 'storyboard_sheet_upscale', 'storyboard_sheet_crop'],
     panel: ['storyboard_panel_upscale'],
   }
 }
 
+export function buildSixGridTaskTypeContract() {
+  return buildStoryboardTaskTypeContract()
+}
+
 function buildStoryboardTextTargets(storyboards: NovelPromotionStoryboard[]): TaskTarget[] {
   const targets: TaskTarget[] = []
-  const sixGridTypes = buildSixGridTaskTypeContract().storyboard
+  const episodeTargets = new Map<string, TaskTarget>()
+  const textTypes = buildStoryboardTaskTypeContract().text
 
   for (const storyboard of storyboards) {
+    const hasOutput = !!(storyboard.panels || []).length
     targets.push({
-      key: `storyboard:${storyboard.id}`,
+      key: `storyboard-text:${storyboard.id}`,
       targetType: 'NovelPromotionStoryboard',
       targetId: storyboard.id,
-      types: ['regenerate_storyboard_text', 'insert_panel', ...sixGridTypes],
+      types: textTypes,
       resource: 'text',
-      hasOutput: !!(storyboard.panels || []).length,
+      hasOutput,
     })
     if (storyboard.episodeId) {
-      targets.push({
-        key: `episode:${storyboard.episodeId}`,
+      const existingEpisodeTarget = episodeTargets.get(storyboard.episodeId)
+      if (existingEpisodeTarget) {
+        existingEpisodeTarget.hasOutput ||= hasOutput
+        continue
+      }
+      const episodeTarget: TaskTarget = {
+        key: `episode-text:${storyboard.episodeId}`,
         targetType: 'NovelPromotionEpisode',
         targetId: storyboard.episodeId,
-        types: ['regenerate_storyboard_text', 'insert_panel'],
+        types: textTypes,
         resource: 'text',
-        hasOutput: !!(storyboard.panels || []).length,
-      })
+        hasOutput,
+      }
+      episodeTargets.set(storyboard.episodeId, episodeTarget)
+      targets.push(episodeTarget)
     }
   }
 
   return targets
 }
 
+function buildStoryboardGridTargets(storyboards: NovelPromotionStoryboard[]): TaskTarget[] {
+  const gridTypes = buildStoryboardTaskTypeContract().grid
+
+  return storyboards.map((storyboard) => ({
+    key: `storyboard-grid:${storyboard.id}`,
+    targetType: 'NovelPromotionStoryboard',
+    targetId: storyboard.id,
+    types: gridTypes,
+    resource: 'image',
+    hasOutput: !!storyboard.sheetImageUrl,
+  }))
+}
+
 function buildPanelTargets(storyboards: NovelPromotionStoryboard[], type: 'image' | 'video' | 'lip-sync'): TaskTarget[] {
   const targets: TaskTarget[] = []
-  const sixGridPanelTypes = buildSixGridTaskTypeContract().panel
+  const sixGridPanelTypes = buildStoryboardTaskTypeContract().panel
 
   for (const storyboard of storyboards) {
     for (const panel of storyboard.panels || []) {
@@ -103,6 +130,10 @@ export function useStoryboardTaskAwareStoryboards({
     () => buildStoryboardTextTargets(initialStoryboards),
     [initialStoryboards],
   )
+  const storyboardGridTargets = useMemo(
+    () => buildStoryboardGridTargets(initialStoryboards),
+    [initialStoryboards],
+  )
   const panelImageTargets = useMemo(
     () => buildPanelTargets(initialStoryboards, 'image'),
     [initialStoryboards],
@@ -120,6 +151,11 @@ export function useStoryboardTaskAwareStoryboards({
     projectId,
     storyboardTextTargets,
     !!projectId && storyboardTextTargets.length > 0,
+  )
+  const storyboardGridStates = useStoryboardTaskPresentation(
+    projectId,
+    storyboardGridTargets,
+    !!projectId && storyboardGridTargets.length > 0,
   )
   const panelImageStates = useStoryboardTaskPresentation(
     projectId,
@@ -141,8 +177,11 @@ export function useStoryboardTaskAwareStoryboards({
     return initialStoryboards.map((storyboard) => ({
       ...storyboard,
       storyboardTaskRunning:
-        isRunningPhase(storyboardTextStates.getTaskState(`storyboard:${storyboard.id}`)?.phase) ||
-        isRunningPhase(storyboardTextStates.getTaskState(`episode:${storyboard.episodeId}`)?.phase),
+        isRunningPhase(storyboardTextStates.getTaskState(`storyboard-text:${storyboard.id}`)?.phase) ||
+        isRunningPhase(storyboardTextStates.getTaskState(`episode-text:${storyboard.episodeId}`)?.phase),
+      gridTaskRunning: isRunningPhase(
+        storyboardGridStates.getTaskState(`storyboard-grid:${storyboard.id}`)?.phase,
+      ),
       panels: (storyboard.panels || []).map((panel) => {
         const panelImageTaskState = panelImageStates.getTaskState(`panel-image:${panel.id}`)
         const panelImageRunning = isRunningPhase(panelImageTaskState?.phase)
@@ -164,6 +203,7 @@ export function useStoryboardTaskAwareStoryboards({
     panelImageStates,
     panelLipSyncStates,
     panelVideoStates,
+    storyboardGridStates,
     storyboardTextStates,
   ])
 

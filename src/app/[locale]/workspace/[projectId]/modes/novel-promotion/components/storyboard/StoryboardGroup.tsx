@@ -97,7 +97,7 @@ export default function StoryboardGroup({
   const [cropCellIndex, setCropCellIndex] = useState<number | null>(null)
   const [promptModalOpen, setPromptModalOpen] = useState(false)
   const [uploadSession, setUploadSession] = useState<GridUploadSession | null>(null)
-  const isGridGroupTaskRunning = isGridGroupBusy(isSixGridTaskRunning, isSubmittingStoryboardTask)
+  const isGridGroupTaskRunning = isGridGroupBusy(isSixGridTaskRunning, Boolean(storyboard.gridTaskRunning))
   const sixGridCellRatio = storyboard.sixGridCellAspectRatio === '9:16' ? '9:16' : '16:9'
 
   useEffect(() => {

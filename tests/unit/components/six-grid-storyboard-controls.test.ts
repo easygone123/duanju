@@ -1,5 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
 import { NextIntlClientProvider } from 'next-intl'
@@ -25,7 +26,10 @@ import {
   sixGridStoryboardQueryKeys,
 } from '@/lib/query/hooks/useSixGridStoryboard'
 import { resolveProfileSection } from '@/app/[locale]/profile/profile-section'
-import { buildSixGridTaskTypeContract } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/hooks/useStoryboardTaskAwareStoryboards'
+import {
+  buildStoryboardTaskTypeContract,
+  useStoryboardTaskAwareStoryboards,
+} from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/storyboard/hooks/useStoryboardTaskAwareStoryboards'
 import type { NovelPromotionStoryboard } from '@/types/project'
 import { queryKeys } from '@/lib/query/keys'
 
@@ -42,6 +46,10 @@ vi.mock('@/i18n/navigation', () => ({
 }))
 const apiFetchMock = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/api-fetch', () => ({ apiFetch: apiFetchMock }))
+const taskPresentationMock = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/query/hooks/useTaskPresentation', () => ({
+  useStoryboardTaskPresentation: taskPresentationMock,
+}))
 
 const messages = {
   storyboard: { sixGrid: {
@@ -212,10 +220,80 @@ describe('six-grid crop contract', () => {
 })
 
 describe('six-grid task requests and cache scope', () => {
-  it('keeps optimistic overlays compatible with SSE storyboard and panel task types', () => {
-    expect(buildSixGridTaskTypeContract()).toEqual({
-      storyboard: ['storyboard_sheet_generate', 'storyboard_sheet_upscale', 'storyboard_sheet_crop'],
+  it('keeps text and grid task queries and projected running fields independent', () => {
+    expect(buildStoryboardTaskTypeContract()).toEqual({
+      text: ['regenerate_storyboard_text', 'insert_panel'],
+      grid: ['storyboard_sheet_generate', 'storyboard_sheet_upscale', 'storyboard_sheet_crop'],
       panel: ['storyboard_panel_upscale'],
+    })
+
+    let runningKind: 'text' | 'grid' = 'text'
+    taskPresentationMock.mockImplementation((
+      _projectId: string,
+      targets: Array<{ key: string }>,
+    ) => ({
+      getTaskState: (key: string) => {
+        if (runningKind === 'text' && targets.some((target) => target.key.startsWith('storyboard-text:')) && key === 'storyboard-text:storyboard-1') {
+          return { phase: 'processing' }
+        }
+        if (runningKind === 'grid' && targets.some((target) => target.key.startsWith('storyboard-grid:')) && key === 'storyboard-grid:storyboard-1') {
+          return { phase: 'processing' }
+        }
+        return null
+      },
+      getState: () => null,
+    }))
+
+    const hook = renderHook(() => useStoryboardTaskAwareStoryboards({
+      projectId: 'project-1',
+      initialStoryboards: [
+        sixGrid({ panels: [] }),
+        sixGrid({ id: 'storyboard-2', panels: [] }),
+      ],
+      isRunningPhase: (phase) => phase === 'processing',
+    }))
+
+    expect(hook.result.current.taskAwareStoryboards[0]).toMatchObject({
+      storyboardTaskRunning: true,
+      gridTaskRunning: false,
+    })
+
+    const targetLists = taskPresentationMock.mock.calls.map(([, targets]) => targets)
+    expect(targetLists).toContainEqual([
+      expect.objectContaining({
+        key: 'storyboard-text:storyboard-1',
+        targetType: 'NovelPromotionStoryboard',
+        types: ['regenerate_storyboard_text', 'insert_panel'],
+      }),
+      expect.objectContaining({
+        key: 'episode-text:episode-1',
+        targetType: 'NovelPromotionEpisode',
+        types: ['regenerate_storyboard_text', 'insert_panel'],
+      }),
+      expect.objectContaining({
+        key: 'storyboard-text:storyboard-2',
+        targetType: 'NovelPromotionStoryboard',
+        types: ['regenerate_storyboard_text', 'insert_panel'],
+      }),
+    ])
+    expect(targetLists).toContainEqual([
+      expect.objectContaining({
+        key: 'storyboard-grid:storyboard-1',
+        targetType: 'NovelPromotionStoryboard',
+        types: ['storyboard_sheet_generate', 'storyboard_sheet_upscale', 'storyboard_sheet_crop'],
+      }),
+      expect.objectContaining({
+        key: 'storyboard-grid:storyboard-2',
+        targetType: 'NovelPromotionStoryboard',
+        types: ['storyboard_sheet_generate', 'storyboard_sheet_upscale', 'storyboard_sheet_crop'],
+      }),
+    ])
+
+    runningKind = 'grid'
+    hook.rerender()
+    expect(hook.result.current.taskAwareStoryboards[0]).toMatchObject({
+      storyboardTaskRunning: false,
+      gridTaskRunning: true,
     })
   })
 
