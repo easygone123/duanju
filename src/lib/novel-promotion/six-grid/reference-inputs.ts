@@ -29,16 +29,29 @@ export async function collectSixGridReferenceInputs(
   dependencies: ReferenceInputDependencies = defaultDependencies,
 ): Promise<SixGridReferenceInput[]> {
   const projectData = await dependencies.resolveProjectData(input.projectId)
-  const collected: SixGridReferenceInput[] = []
+  const collectedByKind: Record<SixGridReferenceInput['kind'], SixGridReferenceInput[]> = {
+    character: [],
+    location: [],
+    prop: [],
+    sketch: [],
+  }
   const seen = new Set<string>()
   for (const panel of input.panels) {
     const entries = await dependencies.collectPanel(projectData, panel)
     for (const entry of entries) {
       if (seen.has(entry.source)) continue
       seen.add(entry.source)
-      collected.push({ source: entry.source, kind: entry.kind, name: entry.name })
-      if (collected.length >= COMFY_REFERENCE_UPLOAD_LIMIT) return collected
+      collectedByKind[entry.kind].push({
+        source: entry.source,
+        kind: entry.kind,
+        name: entry.name,
+      })
     }
   }
-  return collected
+  return [
+    ...collectedByKind.character,
+    ...collectedByKind.location,
+    ...collectedByKind.prop,
+    ...collectedByKind.sketch,
+  ].slice(0, COMFY_REFERENCE_UPLOAD_LIMIT)
 }

@@ -250,8 +250,8 @@
         "unknown": "无法安全分析这个工作流，请检查文件后重试。"
       },
       "types": {
-        "image_generation": { "title": "图片生成", "hint": "根据文字描述创建图片。" },
-        "image_edit": { "title": "图片编辑", "hint": "根据图片和描述进行修改。" },
+        "image_generation": { "title": "图片生成", "hint": "根据文字描述和可选参考图片创建图片。" },
+        "image_edit": { "title": "图片编辑", "hint": "根据图片和描述进行修改；仅在工作流确实需要时映射源图片。" },
         "image_upscale": { "title": "图片放大", "hint": "提升图片尺寸和清晰度。" },
         "video_generation": { "title": "视频生成", "hint": "根据文字描述创建视频。" },
         "video_to_video": { "title": "视频转视频", "hint": "根据现有视频生成新版本。" }

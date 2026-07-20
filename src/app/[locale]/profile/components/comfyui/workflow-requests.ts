@@ -166,7 +166,16 @@ function hasDuplicate(values: string[]) {
 }
 
 function validatesSharedContract(analysis: WorkflowAutoMappingResult) {
-  const variableDefinitions = analysis.proposals.map((proposal, index) => ({
+  let retainedUpscaleMediaInput = false
+  const contractProposals = analysis.purpose === 'upscale'
+    ? analysis.proposals.filter((proposal) => {
+        if (!['image_ref', 'image_ref_list', 'video_ref'].includes(proposal.valueType)) return true
+        if (retainedUpscaleMediaInput) return false
+        retainedUpscaleMediaInput = true
+        return true
+      })
+    : analysis.proposals
+  const variableDefinitions = contractProposals.map((proposal, index) => ({
     name: `mapping${index}`,
     type: proposal.valueType,
     required: true,
@@ -174,7 +183,7 @@ function validatesSharedContract(analysis: WorkflowAutoMappingResult) {
       ? { maxItems: Math.max(analysis.referenceCapacity, (proposal.referenceIndex ?? 0) + 1, 1) }
       : {}),
   }))
-  const bindings = analysis.proposals.map((proposal, index) => ({
+  const bindings = contractProposals.map((proposal, index) => ({
     nodeId: proposal.nodeId,
     inputPath: proposal.inputPath,
     variable: `mapping${index}`,
@@ -182,7 +191,10 @@ function validatesSharedContract(analysis: WorkflowAutoMappingResult) {
     ...(proposal.transform ? { transform: proposal.transform } : {}),
     ...(proposal.transform === 'filename_at' ? { valueIndex: proposal.referenceIndex } : {}),
   }))
-  const outputs = analysis.outputs.map((output, index) => ({ ...output, primary: index === 0 }))
+  const contractOutputs = analysis.purpose === 'upscale'
+    ? analysis.outputs.slice(0, 1)
+    : analysis.outputs
+  const outputs = contractOutputs.map((output, index) => ({ ...output, primary: index === 0 }))
   const toleratedIssues = new Set([
     'COMFY_OUTPUT_REQUIRED',
     'COMFY_OUTPUT_PRIMARY_INVALID',

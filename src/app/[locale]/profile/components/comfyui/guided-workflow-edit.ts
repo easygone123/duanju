@@ -79,7 +79,13 @@ export function createGuidedMappingDraftFromAuthorDraft(
   )))
   const proposals = draft.bindings.flatMap((binding, index) => {
     const proposal = proposalFromBinding(binding, index, definitions, graph)
-    return proposal ? [proposal] : []
+    if (!proposal) return []
+    if (draft.mediaType === 'image'
+      && draft.purpose === 'generation'
+      && proposal.canonicalName === 'sourceImage') {
+      return [{ ...proposal, required: false }]
+    }
+    return [proposal]
   })
   const referenceDefinition = definitions.get('referenceImages')
   const analysis: WorkflowAutoMappingResult = {

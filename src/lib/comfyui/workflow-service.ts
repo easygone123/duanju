@@ -149,9 +149,10 @@ export async function createWorkflowVersion(
       )
       if (latest && latest.purpose !== purpose) throw new ApiError('INVALID_PARAMS')
       const prepared = prepareVersion({ ...input, purpose })
-      return tx.comfyWorkflowVersion.create({
+      const version = await tx.comfyWorkflowVersion.create({
         data: { workflowId, version: (latest?.version ?? 0) + 1, ...prepared.data },
       })
+      return toVersionDetail(version as unknown as Record<string, unknown>)
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   } catch (error) {
     if (isPrismaCode(error, 'P2002') || isPrismaCode(error, 'P2034')) {

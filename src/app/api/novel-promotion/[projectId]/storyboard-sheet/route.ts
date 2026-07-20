@@ -11,6 +11,7 @@ import { getProjectModelConfig, resolveProjectComfyWorkflowVersion, resolveProje
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { collectSixGridReferenceInputs } from '@/lib/novel-promotion/six-grid/reference-inputs'
 import { COMFY_REFERENCE_UPLOAD_LIMIT } from '@/lib/comfyui/types'
+import { getArtStylePrompt } from '@/lib/constants'
 
 const schema = z.object({
   operation: z.enum(['generate', 'upscale']), episodeId: z.string().trim().min(1).max(200), storyboardId: z.string().trim().min(1).max(200),
@@ -62,7 +63,13 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
   const model = operation === 'generate'
     ? body.imageModel || storyboard.sheetModelSnapshot || projectModelConfig?.storyboardModel
     : `comfyui::${workflow!.workflow.id}`
-  const prompt = body.prompt ?? storyboard.sheetPromptSnapshot
+  const basePrompt = body.prompt ?? storyboard.sheetPromptSnapshot
+  const artStylePrompt = operation === 'generate'
+    ? getArtStylePrompt(projectModelConfig?.artStyle, locale)
+    : ''
+  const prompt = basePrompt && artStylePrompt
+    ? `${basePrompt}\nART_STYLE=${artStylePrompt}`
+    : basePrompt
   if (!model || !prompt) throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_SHEET_SNAPSHOT_MISSING' })
   const parsedModel = parseModelKeyStrict(model)
   if (operation === 'generate'

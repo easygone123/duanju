@@ -3,7 +3,7 @@ import { COMFY_REFERENCE_UPLOAD_LIMIT } from '@/lib/comfyui/types'
 import { collectSixGridReferenceInputs } from '@/lib/novel-promotion/six-grid/reference-inputs'
 
 describe('six-grid reference input snapshot', () => {
-  it('collects references in panel order, deduplicates assets, and enforces the upload limit', async () => {
+  it('orders characters before locations, deduplicates assets, and enforces the upload limit', async () => {
     const projectData = { characters: [], locations: [] }
     const panels = Array.from({ length: 6 }, (_, index) => ({
       characters: `panel-${index}`,
@@ -25,6 +25,7 @@ describe('six-grid reference input snapshot', () => {
     expect(result[0]).toEqual({
       source: 'images/shared.png', kind: 'character', name: 'Hero',
     })
+    expect(result.slice(1).every((item) => item.kind === 'location')).toBe(true)
     expect(result.filter((item) => item.source.endsWith('shared.png'))).toHaveLength(1)
     expect(result).toHaveLength(Math.min(7, COMFY_REFERENCE_UPLOAD_LIMIT))
   })

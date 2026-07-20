@@ -39,7 +39,7 @@ export const WORKFLOW_IMPORT_KIND_META: Record<WorkflowImportKind, {
     mediaType: 'image', purpose: 'generation', requiredInputs: ['prompt'],
   },
   image_edit: {
-    mediaType: 'image', purpose: 'generation', requiredInputs: ['prompt', 'sourceImage'],
+    mediaType: 'image', purpose: 'generation', requiredInputs: ['prompt'],
   },
   image_upscale: {
     mediaType: 'image', purpose: 'upscale', requiredInputs: ['sourceImage'],

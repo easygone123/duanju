@@ -250,8 +250,8 @@
         "unknown": "This workflow could not be analyzed safely. Check the file and try again."
       },
       "types": {
-        "image_generation": { "title": "Image generation", "hint": "Create images from a written description." },
-        "image_edit": { "title": "Image editing", "hint": "Modify an image using a written description." },
+        "image_generation": { "title": "Image generation", "hint": "Create images from text and optional reference images." },
+        "image_edit": { "title": "Image editing", "hint": "Modify an image using a written description; map a source image only when the workflow needs one." },
         "image_upscale": { "title": "Image upscaling", "hint": "Increase an image's size and clarity." },
         "video_generation": { "title": "Video generation", "hint": "Create videos from a written description." },
         "video_to_video": { "title": "Video to video", "hint": "Create a new version from an existing video." }

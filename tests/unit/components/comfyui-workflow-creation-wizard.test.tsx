@@ -785,6 +785,28 @@ describe('workflow request helpers', () => {
     })
   })
 
+  it('accepts upscale analysis with multiple output candidates before the user selects one', async () => {
+    const graph = {
+      '1': { class_type: 'LoadImage', inputs: { image: 'input.png' } },
+      '8': { class_type: 'PreviewImage', inputs: { images: ['1', 0] } },
+      '9': { class_type: 'SaveImage', inputs: { images: ['1', 0] } },
+    }
+    const expectedAnalysis = analyzeComfyApiWorkflow({ graph, kind: 'image_upscale' })
+    const sourceText = JSON.stringify(graph)
+    vi.spyOn(apiFetchModule, 'apiFetch').mockResolvedValue(new Response(JSON.stringify({
+      analysis: expectedAnalysis,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const file = new File([sourceText], 'upscale.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(sourceText) })
+
+    await expect(analyzeWorkflowJson('image_upscale', file)).resolves.toMatchObject({
+      analysis: { outputs: expect.arrayContaining([
+        expect.objectContaining({ nodeId: '8' }),
+        expect.objectContaining({ nodeId: '9' }),
+      ]) },
+    })
+  })
+
   it('normalizes a wrapped upload while retaining strengthened response validation', async () => {
     const graph = analysis().graph
     const expectedAnalysis = analyzeComfyApiWorkflow({ graph, kind: 'image_generation' })
