@@ -10,8 +10,9 @@ RUN npm ci
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Keep the Next.js compiler and its type-check worker within small Docker Desktop VMs.
-ENV NODE_OPTIONS=--max-old-space-size=1024
+# TypeScript already exceeds a 1 GiB heap in the multi-platform GitHub image build.
+# Keep enough headroom for type-checking while still bounding Node's memory use.
+ENV NODE_OPTIONS=--max-old-space-size=3072
 ENV NEXT_BUILD_LOW_MEMORY=1
 
 COPY --from=deps /app/node_modules ./node_modules
