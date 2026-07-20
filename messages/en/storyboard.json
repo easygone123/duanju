@@ -415,6 +415,14 @@
         "status": "Task status: {status}",
         "idle": "Idle",
         "running": "Running",
+        "sheetGenerationRunning": {
+          "four_grid": "Generating one complete 2×2 sheet…",
+          "six_grid": "Generating one complete 3×2 sheet…"
+        },
+        "sheetGenerationStatus": {
+          "four_grid": "One complete 2×2 four-grid sheet is being generated, not four independent images.",
+          "six_grid": "One complete 3×2 six-grid sheet is being generated, not six independent images."
+        },
         "manageComfyui": "Manage ComfyUI pool",
         "comfyuiHint": "Open Settings Center to manage your private ComfyUI workflows.",
         "workflowRequired": "Publish and test an upscale workflow available to your account first",

@@ -415,6 +415,14 @@
         "status": "任务状态：{status}",
         "idle": "空闲",
         "running": "处理中",
+        "sheetGenerationRunning": {
+          "four_grid": "正在生成一张完整的 2×2 四宫格整图…",
+          "six_grid": "正在生成一张完整的 3×2 六宫格整图…"
+        },
+        "sheetGenerationStatus": {
+          "four_grid": "正在生成一张完整的 2×2 四宫格整图，并非分别提交四张图片。",
+          "six_grid": "正在生成一张完整的 3×2 六宫格整图，并非分别提交六张图片。"
+        },
         "manageComfyui": "管理 ComfyUI 节点池",
         "comfyuiHint": "前往设置中心管理私有 ComfyUI 工作流。",
         "workflowRequired": "需要先发布并测试一个本人可用的放大工作流",

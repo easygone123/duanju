@@ -48,6 +48,14 @@ const messages = {
     orders: { sheet_upscale_then_crop: 'Upscale sheet then crop', crop_then_panel_upscale: 'Crop then upscale panels' },
     sourceLabel: 'Current source', sourceOriginal: 'Original sheet', sourceUpscaled: 'Upscaled sheet', sourceMissing: 'No sheet',
     artifactVersion: 'Artifact version {version}', status: 'Task status: {status}', idle: 'Idle', running: 'Running',
+    sheetGenerationRunning: {
+      four_grid: 'Generating one complete 2×2 sheet…',
+      six_grid: 'Generating one complete 3×2 sheet…',
+    },
+    sheetGenerationStatus: {
+      four_grid: 'One complete 2×2 four-grid sheet is being generated, not four independent images.',
+      six_grid: 'One complete 3×2 six-grid sheet is being generated, not six independent images.',
+    },
     manageComfyui: 'Manage ComfyUI', comfyuiHint: 'Manage ComfyUI', workflowRequired: 'Workflow required',
     sheetRequired: 'Sheet required', upscaledSheetRequired: 'Upscaled sheet required',
     generationFailed: 'Generation failed: {message}',
@@ -142,6 +150,38 @@ describe('generic grid group controls', () => {
       generationError="SIX_GRID_ASPECT_RATIO_UNSUPPORTED"
     />))
     expect(view.getByRole('alert').textContent).toContain('Switch to four-grid or change model')
+  })
+
+  it.each([
+    ['four_grid', 'Generating one complete 2×2 sheet…', 'One complete 2×2 four-grid sheet is being generated, not four independent images.'],
+    ['six_grid', 'Generating one complete 3×2 sheet…', 'One complete 3×2 six-grid sheet is being generated, not six independent images.'],
+  ] as const)('announces one complete %s sheet while submission is running', (mode, label, status) => {
+    const view = render(withIntl(<GridGroupControls
+      storyboard={storyboard(mode)} {...controlProps} isTaskRunning
+    />))
+    const generate = view.getByRole('button', { name: label })
+
+    expect(generate.hasAttribute('disabled')).toBe(true)
+    expect(generate.getAttribute('aria-busy')).toBe('true')
+    expect(generate.getAttribute('title')).toBe(status)
+    expect(view.getByRole('status').textContent).toBe(status)
+    expect(view.getByRole('button', { name: 'View prompt' }).hasAttribute('disabled')).toBe(false)
+    expect(view.getByRole('button', { name: 'Upload grid sheet' })).toBeTruthy()
+  })
+
+  it('keeps a failed submission actionable once the task is no longer running', () => {
+    const onGenerateSheet = vi.fn()
+    const view = render(withIntl(<GridGroupControls
+      storyboard={storyboard('four_grid')} {...controlProps}
+      generationError="provider rejected sheet"
+      onGenerateSheet={onGenerateSheet}
+    />))
+
+    expect(view.getByRole('alert').textContent).toContain('provider rejected sheet')
+    const retry = view.getByRole('button', { name: 'Regenerate 2x2 four-grid' })
+    expect(retry.hasAttribute('disabled')).toBe(false)
+    fireEvent.click(retry)
+    expect(onGenerateSheet).toHaveBeenCalledTimes(1)
   })
 })
 

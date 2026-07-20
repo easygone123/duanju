@@ -49,6 +49,7 @@ export default function GridGroupControls({
   translationNamespace = 'storyboard.grid',
 }: GridGroupControlsProps) {
   const t = useTranslations(translationNamespace)
+  const gridT = useTranslations('storyboard.grid')
   if (!isGridStoryboardMode(storyboard.layoutMode)) return null
 
   const mode = storyboard.layoutMode
@@ -68,9 +69,12 @@ export default function GridGroupControls({
     ? (hasUpscaledSheet ? t('sourceUpscaled') : t('sourceMissing'))
     : (hasSheet ? t('sourceOriginal') : t('sourceMissing'))
   const title = isLegacySixGrid ? t('title') : t(`title.${mode}`)
-  const generateLabel = isLegacySixGrid
-    ? t(hasSheet ? 'regenerateSheet' : 'generateSheet')
-    : t(`${hasSheet ? 'regenerateSheet' : 'generateSheet'}.${mode}`)
+  const sheetGenerationStatus = gridT(`sheetGenerationStatus.${mode}`)
+  const generateLabel = isTaskRunning
+    ? gridT(`sheetGenerationRunning.${mode}`)
+    : isLegacySixGrid
+      ? t(hasSheet ? 'regenerateSheet' : 'generateSheet')
+      : t(`${hasSheet ? 'regenerateSheet' : 'generateSheet'}.${mode}`)
   const errorMessage = generationError && mode === 'six_grid' && includesUnsupportedRatio(generationError)
     ? t('sixGridRatioUnsupported')
     : generationError
@@ -129,7 +133,14 @@ export default function GridGroupControls({
           <AppIcon name="upload" className="h-3.5 w-3.5" />
           {t('uploadSheet')}
         </button>
-        <button type="button" className="glass-btn-base glass-btn-primary rounded-lg px-3 py-1.5 text-xs" disabled={isTaskRunning} onClick={onGenerateSheet}>
+        <button
+          type="button"
+          className="glass-btn-base glass-btn-primary rounded-lg px-3 py-1.5 text-xs"
+          disabled={isTaskRunning}
+          aria-busy={isTaskRunning}
+          title={isTaskRunning ? sheetGenerationStatus : undefined}
+          onClick={onGenerateSheet}
+        >
           <AppIcon name="imagePreview" className="h-3.5 w-3.5" />
           {generateLabel}
         </button>
@@ -140,6 +151,11 @@ export default function GridGroupControls({
           {t('crop')}
         </button>
       </div>
+      {isTaskRunning && (
+        <p role="status" className="mt-3 break-words text-xs text-[var(--glass-text-secondary)]">
+          {sheetGenerationStatus}
+        </p>
+      )}
       {errorMessage && (
         <p role="alert" className="mt-3 break-words text-xs text-[var(--glass-tone-danger-fg)]">
           {generationError === errorMessage ? t('generationFailed', { message: errorMessage }) : errorMessage}

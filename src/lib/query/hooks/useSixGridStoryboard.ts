@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api-fetch'
 import { resolveTaskErrorMessage } from '@/lib/task/error-message'
@@ -165,6 +165,52 @@ export function createSheetUploadMutationOptions(
   }
 }
 
+export function createSheetTaskMutationOptions(
+  queryClient: QueryClient,
+  projectId: string,
+  episodeId: string,
+  setGenerationError: (storyboardId: string, error: string | null) => void,
+) {
+  const attemptByStoryboardId: Record<string, number> = {}
+
+  return {
+    mutationFn: (input: SheetTaskInput) => submitTask(buildSheetTaskRequest(projectId, input)),
+    onMutate: (input: SheetTaskInput) => {
+      const attempt = (attemptByStoryboardId[input.storyboardId] ?? 0) + 1
+      attemptByStoryboardId[input.storyboardId] = attempt
+      if (input.operation === 'generate') setGenerationError(input.storyboardId, null)
+      upsertTaskTargetOverlay(queryClient, {
+        projectId,
+        targetType: 'NovelPromotionStoryboard',
+        targetId: input.storyboardId,
+        runningTaskType: input.operation === 'generate'
+          ? TASK_TYPE.STORYBOARD_SHEET_GENERATE
+          : TASK_TYPE.STORYBOARD_SHEET_UPSCALE,
+        intent: input.operation === 'generate' ? 'generate' : 'process',
+      })
+      return { attempt }
+    },
+    onError: (error: Error, input: SheetTaskInput, context: { attempt: number } | undefined) => {
+      if (context?.attempt !== attemptByStoryboardId[input.storyboardId]) return
+      clearTaskTargetOverlay(queryClient, {
+        projectId,
+        targetType: 'NovelPromotionStoryboard',
+        targetId: input.storyboardId,
+      })
+      if (input.operation === 'generate') {
+        setGenerationError(input.storyboardId, error instanceof Error ? error.message : String(error))
+      }
+    },
+    onSuccess: (_data: unknown, input: SheetTaskInput, context: { attempt: number } | undefined) => {
+      if (input.operation === 'generate'
+        && context?.attempt === attemptByStoryboardId[input.storyboardId]) {
+        setGenerationError(input.storyboardId, null)
+      }
+      return refreshStoryboardGroupQueries(queryClient, projectId, episodeId, input.storyboardId)
+    },
+  }
+}
+
 export function createPanelUndoMutationOptions(
   queryClient: QueryClient,
   projectId: string,
@@ -247,7 +293,6 @@ function rollbackPanelImageIfStillOptimistic(
 export function useSixGridStoryboard(projectId: string, episodeId: string) {
   const queryClient = useQueryClient()
   const [generationErrorsByStoryboardId, setGenerationErrorsByStoryboardId] = useState<Record<string, string>>({})
-  const generationAttemptByStoryboardId = useRef<Record<string, number>>({})
   const refreshGroup = (storyboardId: string) => refreshStoryboardGroupQueries(
     queryClient,
     projectId,
@@ -257,42 +302,15 @@ export function useSixGridStoryboard(projectId: string, episodeId: string) {
   const clearOverlay = (targetType: string, targetId: string) =>
     clearTaskTargetOverlay(queryClient, { projectId, targetType, targetId })
 
-  const sheet = useMutation({
-    mutationFn: (input: SheetTaskInput) => submitTask(buildSheetTaskRequest(projectId, input)),
-    onMutate: (input) => {
-      let generationAttempt: number | undefined
-      if (input.operation === 'generate') {
-        generationAttempt = (generationAttemptByStoryboardId.current[input.storyboardId] ?? 0) + 1
-        generationAttemptByStoryboardId.current[input.storyboardId] = generationAttempt
-        setGenerationErrorsByStoryboardId((errors) => clearStoryboardError(errors, input.storyboardId))
-      }
-      upsertTaskTargetOverlay(queryClient, {
-        projectId, targetType: 'NovelPromotionStoryboard', targetId: input.storyboardId,
-        runningTaskType: input.operation === 'generate'
-          ? TASK_TYPE.STORYBOARD_SHEET_GENERATE
-          : TASK_TYPE.STORYBOARD_SHEET_UPSCALE,
-        intent: input.operation === 'generate' ? 'generate' : 'process',
-      })
-      return { generationAttempt }
-    },
-    onError: (error, input, context) => {
-      clearOverlay('NovelPromotionStoryboard', input.storyboardId)
-      if (input.operation === 'generate'
-        && context?.generationAttempt === generationAttemptByStoryboardId.current[input.storyboardId]) {
-        setGenerationErrorsByStoryboardId((errors) => ({
-          ...errors,
-          [input.storyboardId]: error instanceof Error ? error.message : String(error),
-        }))
-      }
-    },
-    onSuccess: (_data, input, context) => {
-      if (input.operation === 'generate'
-        && context?.generationAttempt === generationAttemptByStoryboardId.current[input.storyboardId]) {
-        setGenerationErrorsByStoryboardId((errors) => clearStoryboardError(errors, input.storyboardId))
-      }
-      return refreshGroup(input.storyboardId)
-    },
-  })
+  const sheetOptions = useMemo(() => createSheetTaskMutationOptions(
+    queryClient,
+    projectId,
+    episodeId,
+    (storyboardId, error) => setGenerationErrorsByStoryboardId((errors) => error === null
+      ? clearStoryboardError(errors, storyboardId)
+      : { ...errors, [storyboardId]: error }),
+  ), [episodeId, projectId, queryClient])
+  const sheet = useMutation(sheetOptions)
   const crop = useMutation({
     mutationFn: (input: CropTaskInput) => submitTask(buildSheetCropRequest(projectId, input)),
     onMutate: (input) => upsertTaskTargetOverlay(queryClient, {
