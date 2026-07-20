@@ -532,6 +532,23 @@
         "panel": {
             "actions": "六宫格分镜操作",
             "dialogue": "含台词",
+            "narration": {
+                "title": "旁白",
+                "aiRecommended": "AI 建议使用",
+                "aiNotRecommended": "AI 不建议使用",
+                "auto": "自动",
+                "on": "开启",
+                "off": "关闭",
+                "text": "旁白文本",
+                "emotion": "情绪",
+                "save": "保存",
+                "saving": "保存中…",
+                "required": "开启旁白时必须填写旁白文本。",
+                "stale": "该分镜已在其他位置更新，请刷新后重试。",
+                "failure": "旁白保存失败，请重试。",
+                "aiHint": "当前使用 AI 建议",
+                "manualHint": "当前为手动旁白草稿"
+            },
             "recrop": "重新裁剪",
             "upscale": "单格放大",
             "upscaleUnavailable": "需要裁剪图、先裁剪后放大模式，以及已发布并测试的私有放大工作流",

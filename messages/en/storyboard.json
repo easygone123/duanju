@@ -532,6 +532,23 @@
         "panel": {
             "actions": "Six-grid panel actions",
             "dialogue": "Contains dialogue",
+            "narration": {
+                "title": "Narration",
+                "aiRecommended": "AI recommended",
+                "aiNotRecommended": "AI not recommended",
+                "auto": "Auto",
+                "on": "On",
+                "off": "Off",
+                "text": "Narration text",
+                "emotion": "Emotion",
+                "save": "Save",
+                "saving": "Saving…",
+                "required": "Narration text is required.",
+                "stale": "This panel changed elsewhere. Refresh and try again.",
+                "failure": "Could not save narration. Please try again.",
+                "aiHint": "Using the AI suggestion",
+                "manualHint": "Manual narration draft"
+            },
             "recrop": "Recrop",
             "upscale": "Upscale panel",
             "upscaleUnavailable": "Requires a crop, crop-then-upscale mode, and a published tested private upscale workflow",

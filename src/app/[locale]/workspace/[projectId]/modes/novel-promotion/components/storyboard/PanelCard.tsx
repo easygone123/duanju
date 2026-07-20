@@ -10,6 +10,7 @@ import { GlassSurface } from '@/components/ui/primitives'
 import { AppIcon } from '@/components/ui/icons'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import { SixGridPanelActions, type SixGridPanelActionProps } from './ImageSectionActionButtons'
+import PanelNarrationControl from './PanelNarrationControl'
 
 export function DialoguePanelBadge({ hasDialogue }: { hasDialogue: boolean }) {
   const t = useTranslations('storyboard.sixGrid.panel')
@@ -32,6 +33,8 @@ interface PanelCandidateData {
 }
 
 interface PanelCardProps {
+  projectId: string
+  episodeId: string
   panel: StoryboardPanel
   panelData: PanelEditData
   imageUrl: string | null
@@ -71,6 +74,8 @@ interface PanelCardProps {
 }
 
 export default function PanelCard({
+  projectId,
+  episodeId,
   panel,
   panelData,
   imageUrl,
@@ -170,6 +175,13 @@ export default function PanelCard({
       {/* 分镜信息编辑区 */}
       <div className="p-3">
         <DialoguePanelBadge hasDialogue={Boolean(panel.hasDialogue)} />
+        {!panel.hasDialogue && (
+          <PanelNarrationControl
+            projectId={projectId}
+            episodeId={episodeId}
+            panel={panel}
+          />
+        )}
         <PanelEditForm
           panelData={panelData}
           isSaving={isSaving}

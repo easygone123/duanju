@@ -14,6 +14,8 @@ import { VirtualCardRange } from '@/components/virtualization/VirtualCardRange'
 import { isGridStoryboardMode, resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 interface StoryboardPanelListProps {
+  projectId: string
+  episodeId: string
   storyboard: NovelPromotionStoryboard
   textPanels: StoryboardPanel[]
   storyboardStartIndex: number
@@ -55,6 +57,8 @@ interface StoryboardPanelListProps {
 }
 
 export default function StoryboardPanelList({
+  projectId,
+  episodeId,
   storyboard,
   textPanels,
   storyboardStartIndex,
@@ -158,6 +162,8 @@ export default function StoryboardPanelList({
 
         return (
           <PanelCard
+              projectId={projectId}
+              episodeId={episodeId}
               panel={panel}
               panelData={panelData}
               imageUrl={imageUrl}
