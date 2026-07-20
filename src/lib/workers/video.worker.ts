@@ -1,4 +1,5 @@
 import { Worker, type Job } from 'bullmq'
+import { logError as _ulogError } from '@/lib/logging/core'
 import { prisma } from '@/lib/prisma'
 import { queueRedis } from '@/lib/redis'
 import { QUEUE_NAME } from '@/lib/task/queue-names'
@@ -21,6 +22,7 @@ import { getProviderConfig } from '@/lib/api-config'
 import { resolveVideoGenerationModel } from '@/lib/video/model-selection'
 import { resolvePinnedVideoPrompt } from '@/lib/novel-promotion/video/panel-video-submission'
 import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
+import { deleteObject } from '@/lib/storage'
 
 type AnyObj = Record<string, unknown>
 type VideoOptionValue = string | number | boolean
@@ -31,6 +33,32 @@ type PanelRecord = NonNullable<Awaited<ReturnType<typeof prisma.novelPromotionPa
 function toDurationMs(value: number | null | undefined): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined
   return value > 1000 ? Math.round(value) : Math.round(value * 1000)
+}
+
+async function cleanupUnpublishedLipSyncResult(input: {
+  storageKey: string
+  mediaId?: string | null
+}) {
+  if (input.mediaId) {
+    try {
+      await prisma.mediaObject.deleteMany({ where: { id: input.mediaId } })
+    } catch (error) {
+      _ulogError('[VideoWorker] failed to clean unpublished lip-sync media row', {
+        mediaId: input.mediaId,
+        storageKey: input.storageKey,
+        error,
+      })
+    }
+  }
+
+  try {
+    await deleteObject(input.storageKey)
+  } catch (error) {
+    _ulogError('[VideoWorker] failed to clean unpublished lip-sync object', {
+      storageKey: input.storageKey,
+      error,
+    })
+  }
 }
 
 function extractGenerationOptions(payload: AnyObj): VideoOptionMap {
@@ -344,20 +372,82 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
     modelKey: lipSyncModel,
   })
 
+  const isNarration = voiceLine.lineType === 'narration'
+  if (isNarration) {
+    const currentVoiceLine = await prisma.novelPromotionVoiceLine.findUnique({
+      where: { id: voiceLine.id },
+      select: {
+        id: true,
+        enabled: true,
+        lineType: true,
+        audioUrl: true,
+        matchedPanelId: true,
+      },
+    })
+    if (
+      !currentVoiceLine
+      || !currentVoiceLine.enabled
+      || currentVoiceLine.lineType !== 'narration'
+      || currentVoiceLine.audioUrl !== voiceLine.audioUrl
+      || currentVoiceLine.matchedPanelId !== panel.id
+    ) {
+      throw new Error('LIP_SYNC_INPUT_STALE')
+    }
+  }
+
   await reportTaskProgress(job, 93, { stage: 'persist_lip_sync' })
 
-  const cosKey = await uploadVideoSourceToCos(source, 'lip-sync', panel.id)
-  const lipSyncVideoMedia = await ensureMediaObjectFromStorageKey(cosKey)
+  const cosKey = await uploadVideoSourceToCos(
+    source,
+    'lip-sync',
+    `${panel.id}-${job.data.taskId}`,
+  )
+  let lipSyncVideoMedia: Awaited<ReturnType<typeof ensureMediaObjectFromStorageKey>> | null = null
+  let published = false
+  try {
+    lipSyncVideoMedia = await ensureMediaObjectFromStorageKey(cosKey)
 
-  await assertTaskActive(job, 'persist_lip_sync_video')
-  await prisma.novelPromotionPanel.update({
-    where: { id: panel.id },
-    data: {
+    await assertTaskActive(job, 'persist_lip_sync_video')
+    const data = {
       lipSyncVideoUrl: cosKey,
       lipSyncVideoMediaId: lipSyncVideoMedia.id,
       lipSyncTaskId: null,
-    },
-  })
+    }
+    if (isNarration) {
+      const persisted = await prisma.novelPromotionPanel.updateMany({
+        where: {
+          id: panel.id,
+          videoUrl: panel.videoUrl,
+          matchedVoiceLines: {
+            some: {
+              id: voiceLine.id,
+              lineType: 'narration',
+              enabled: true,
+              audioUrl: voiceLine.audioUrl,
+            },
+          },
+        },
+        data,
+      })
+      if (persisted.count === 0) {
+        throw new Error('LIP_SYNC_INPUT_STALE')
+      }
+    } else {
+      await prisma.novelPromotionPanel.update({
+        where: { id: panel.id },
+        data,
+      })
+    }
+    published = true
+  } catch (error) {
+    if (!published) {
+      await cleanupUnpublishedLipSyncResult({
+        storageKey: cosKey,
+        mediaId: lipSyncVideoMedia?.id,
+      })
+    }
+    throw error
+  }
 
   return {
     panelId: panel.id,

@@ -17,9 +17,51 @@ describe('final video selection with disabled narration', () => {
       preferLipSync: true,
       hasDialogue: false,
       narrationVoiceEnabled,
-      allowLipSyncFallbackWhenBasePreferred: true,
     })).toEqual({ videoUrl: 'base.mp4', isLipSync: false })
   })
+
+  it.each([
+    {
+      name: 'uses lip-sync when preferred and available',
+      input: { videoUrl: 'base.mp4', lipSyncVideoUrl: 'lip.mp4', preferLipSync: true },
+      expected: { videoUrl: 'lip.mp4', isLipSync: true },
+    },
+    {
+      name: 'falls back to base when lip-sync is preferred but absent',
+      input: { videoUrl: 'base.mp4', lipSyncVideoUrl: null, preferLipSync: true },
+      expected: { videoUrl: 'base.mp4', isLipSync: false },
+    },
+    {
+      name: 'uses base when preferred and available',
+      input: { videoUrl: 'base.mp4', lipSyncVideoUrl: 'lip.mp4', preferLipSync: false },
+      expected: { videoUrl: 'base.mp4', isLipSync: false },
+    },
+    {
+      name: 'falls back to lip-sync when base is preferred but absent',
+      input: { videoUrl: null, lipSyncVideoUrl: 'lip.mp4', preferLipSync: false },
+      expected: { videoUrl: 'lip.mp4', isLipSync: true },
+    },
+    {
+      name: 'returns no video when neither variant exists',
+      input: { videoUrl: null, lipSyncVideoUrl: null, preferLipSync: false },
+      expected: { videoUrl: null, isLipSync: false },
+    },
+  ])('$name', ({ input, expected }) => {
+    expect(selectPanelVideo(input)).toEqual(expected)
+  })
+
+  it.each([true, false])(
+    'never exposes disabled narration lip-sync when preferLipSync=%s',
+    (preferLipSync) => {
+      expect(selectPanelVideo({
+        videoUrl: null,
+        lipSyncVideoUrl: 'stale-narration-lip.mp4',
+        preferLipSync,
+        hasDialogue: false,
+        narrationVoiceEnabled: false,
+      })).toEqual({ videoUrl: null, isLipSync: false })
+    },
+  )
 
   it('does not suppress lip-sync for a normal dialogue panel', () => {
     expect(selectPanelVideo({
@@ -53,11 +95,14 @@ describe('final video selection with disabled narration', () => {
     for (const source of [preview, urls, download]) {
       expect(source).toContain('selectPanelVideo({')
       expect(source).toContain('narrationVoiceEnabled:')
+      expect(source).not.toContain('allowLipSyncFallbackWhenBasePreferred')
       expect(source).not.toContain('panel.lipSyncVideoUrl || panel.videoUrl')
     }
     expect(urls).toMatch(/matchedVoiceLines:[\s\S]*lineType: 'narration'/)
     expect(download).toMatch(/matchedVoiceLines:[\s\S]*lineType: 'narration'/)
     expect(stageRoute).toMatch(/matchedVoiceLines:[\s\S]*lineType: 'narration'/)
     expect(cardPlayer).toContain('selectPanelVideo({')
+    expect(cardPlayer).not.toContain('allowLipSyncFallbackWhenBasePreferred')
+    expect(cardPlayer).not.toMatch(/const currentVideoUrl = videoUrl\s*\?/)
   })
 })

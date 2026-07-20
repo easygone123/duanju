@@ -51,15 +51,24 @@ const normalizeToBase64ForGenerationMock = vi.hoisted(() => vi.fn(async (input: 
   input.includes('last') ? 'data:image/png;base64,TEFTVA==' : 'data:image/png;base64,RklSU1Q='
 )))
 const fetchMock = vi.hoisted(() => vi.fn())
+const deleteObjectMock = vi.hoisted(() => vi.fn(async () => undefined))
+const ensureMediaObjectMock = vi.hoisted(() => vi.fn(async (storageKey: string) => ({
+  id: `media:${storageKey}`,
+  url: storageKey,
+})))
 
 const prismaMock = vi.hoisted(() => ({
   novelPromotionPanel: {
     findUnique: vi.fn(),
     findFirst: vi.fn(),
     update: vi.fn(async () => undefined),
+    updateMany: vi.fn(async () => ({ count: 1 })),
   },
   novelPromotionVoiceLine: {
     findUnique: vi.fn(),
+  },
+  mediaObject: {
+    deleteMany: vi.fn(async () => ({ count: 1 })),
   },
 }))
 
@@ -92,6 +101,10 @@ vi.mock('@/lib/workers/shared', () => ({
 }))
 vi.mock('@/lib/workers/utils', () => utilsMock)
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
+vi.mock('@/lib/storage', () => ({ deleteObject: deleteObjectMock }))
+vi.mock('@/lib/media/service', () => ({
+  ensureMediaObjectFromStorageKey: ensureMediaObjectMock,
+}))
 vi.mock('@/lib/media/outbound-image', () => ({
   normalizeToBase64ForGeneration: normalizeToBase64ForGenerationMock,
 }))
@@ -179,6 +192,9 @@ describe('worker video processor behavior', () => {
       id: 'line-1',
       audioUrl: 'cos/line-1.mp3',
       audioDuration: 1200,
+      enabled: true,
+      lineType: 'dialogue',
+      matchedPanelId: 'panel-1',
     })
 
     const mod = await import('@/lib/workers/video.worker')
@@ -291,6 +307,7 @@ describe('worker video processor behavior', () => {
     expect(result).toEqual({
       panelId: 'panel-1',
       videoUrl: 'cos/lip-sync/video.mp4',
+      videoMediaId: 'media:cos/lip-sync/video.mp4',
       actualVideoTokens: 108000,
     })
   })
@@ -356,6 +373,7 @@ describe('worker video processor behavior', () => {
       where: { id: 'panel-1' },
       data: {
         videoUrl: 'comfyui/user-1/project-1/result.mp4',
+        videoMediaId: 'media:comfyui/user-1/project-1/result.mp4',
         videoGenerationMode: 'normal',
       },
     })
@@ -539,6 +557,7 @@ describe('worker video processor behavior', () => {
       panelId: 'panel-1',
       voiceLineId: 'line-1',
       lipSyncVideoUrl: 'cos/lip-sync/video.mp4',
+      lipSyncVideoMediaId: 'media:cos/lip-sync/video.mp4',
     })
 
     expect(utilsMock.resolveLipSyncVideoSource).toHaveBeenCalledWith(
@@ -551,13 +570,96 @@ describe('worker video processor behavior', () => {
       }),
     )
 
+    expect(utilsMock.uploadVideoSourceToCos).toHaveBeenCalledWith(
+      'https://provider.example/lipsync.mp4',
+      'lip-sync',
+      'panel-1-task-1',
+    )
     expect(prismaMock.novelPromotionPanel.update).toHaveBeenCalledWith({
       where: { id: 'panel-1' },
       data: {
         lipSyncVideoUrl: 'cos/lip-sync/video.mp4',
+        lipSyncVideoMediaId: 'media:cos/lip-sync/video.mp4',
         lipSyncTaskId: null,
       },
     })
+  })
+
+  it('LIP_SYNC: drops narration output when narration is disabled after provider completion', async () => {
+    prismaMock.novelPromotionVoiceLine.findUnique
+      .mockResolvedValueOnce({
+        id: 'line-1',
+        audioUrl: 'cos/line-1.mp3',
+        audioDuration: 1200,
+        enabled: true,
+        lineType: 'narration',
+        matchedPanelId: 'panel-1',
+      })
+      .mockResolvedValueOnce({
+        id: 'line-1',
+        audioUrl: 'cos/line-1.mp3',
+        enabled: false,
+        lineType: 'narration',
+        matchedPanelId: 'panel-1',
+      })
+
+    await expect(workerState.processor!(buildJob({
+      type: TASK_TYPE.LIP_SYNC,
+      payload: { voiceLineId: 'line-1' },
+    }))).rejects.toThrow('LIP_SYNC_INPUT_STALE')
+
+    expect(utilsMock.resolveLipSyncVideoSource).toHaveBeenCalledTimes(1)
+    expect(utilsMock.uploadVideoSourceToCos).not.toHaveBeenCalled()
+    expect(prismaMock.novelPromotionPanel.updateMany).not.toHaveBeenCalled()
+  })
+
+  it('LIP_SYNC: drops narration output when its audio snapshot changes after provider completion', async () => {
+    prismaMock.novelPromotionVoiceLine.findUnique
+      .mockResolvedValueOnce({
+        id: 'line-1',
+        audioUrl: 'cos/line-1.mp3',
+        audioDuration: 1200,
+        enabled: true,
+        lineType: 'narration',
+        matchedPanelId: 'panel-1',
+      })
+      .mockResolvedValueOnce({
+        id: 'line-1',
+        audioUrl: 'cos/new-line-1.mp3',
+        enabled: true,
+        lineType: 'narration',
+        matchedPanelId: 'panel-1',
+      })
+
+    await expect(workerState.processor!(buildJob({
+      type: TASK_TYPE.LIP_SYNC,
+      payload: { voiceLineId: 'line-1' },
+    }))).rejects.toThrow('LIP_SYNC_INPUT_STALE')
+
+    expect(utilsMock.uploadVideoSourceToCos).not.toHaveBeenCalled()
+    expect(prismaMock.novelPromotionPanel.updateMany).not.toHaveBeenCalled()
+  })
+
+  it('LIP_SYNC: cleans the unique upload when narration publish CAS loses a race', async () => {
+    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue({
+      id: 'line-1',
+      audioUrl: 'cos/line-1.mp3',
+      audioDuration: 1200,
+      enabled: true,
+      lineType: 'narration',
+      matchedPanelId: 'panel-1',
+    })
+    prismaMock.novelPromotionPanel.updateMany.mockResolvedValueOnce({ count: 0 })
+
+    await expect(workerState.processor!(buildJob({
+      type: TASK_TYPE.LIP_SYNC,
+      payload: { voiceLineId: 'line-1' },
+    }))).rejects.toThrow('LIP_SYNC_INPUT_STALE')
+
+    expect(prismaMock.mediaObject.deleteMany).toHaveBeenCalledWith({
+      where: { id: 'media:cos/lip-sync/video.mp4' },
+    })
+    expect(deleteObjectMock).toHaveBeenCalledWith('cos/lip-sync/video.mp4')
   })
 
   it('未知任务类型: 显式报错', async () => {

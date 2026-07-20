@@ -31,15 +31,13 @@ export function usePanelPlayer({
   const isStageActiveRef = useRef(isStageActive)
   isStageActiveRef.current = isStageActive
   const cssAspectRatio = videoRatio.replace(':', '/')
-  const currentVideoUrl = videoUrl
-    ? selectPanelVideo({
-        videoUrl,
-        lipSyncVideoUrl,
-        preferLipSync: showLipSyncVideo,
-        hasDialogue,
-        narrationVoiceEnabled,
-      }).videoUrl || undefined
-    : undefined
+  const currentVideoUrl = selectPanelVideo({
+    videoUrl,
+    lipSyncVideoUrl,
+    preferLipSync: showLipSyncVideo,
+    hasDialogue,
+    narrationVoiceEnabled,
+  }).videoUrl || undefined
 
   const handlePreviewImage = useCallback((event?: MouseEvent) => {
     if (event) event.stopPropagation()

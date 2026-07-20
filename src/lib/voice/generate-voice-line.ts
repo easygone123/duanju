@@ -1,9 +1,10 @@
-import { logInfo as _ulogInfo } from '@/lib/logging/core'
+import { randomUUID } from 'node:crypto'
+import { logError as _ulogError, logInfo as _ulogInfo } from '@/lib/logging/core'
 import { fal } from '@fal-ai/client'
 import { prisma } from '@/lib/prisma'
 import { getAudioApiKey, getProviderConfig, getProviderKey, resolveModelSelectionOrSingle } from '@/lib/api-config'
 import { normalizeToBase64ForGeneration } from '@/lib/media/outbound-image'
-import { extractStorageKey, getSignedUrl, toFetchableUrl, uploadObject } from '@/lib/storage'
+import { deleteObject, extractStorageKey, getSignedUrl, toFetchableUrl, uploadObject } from '@/lib/storage'
 import { resolveStorageKeyFromMediaValue } from '@/lib/media/service'
 import { synthesizeWithBailianTTS } from '@/lib/providers/bailian'
 import {
@@ -15,6 +16,45 @@ import {
 
 type CheckCancelled = () => Promise<void>
 type CharacterVoiceProfile = CharacterVoiceFields & { name: string }
+
+type VoiceLineGenerationSnapshot = {
+  id: string
+  episodeId: string
+  speaker: string
+  content: string
+  emotionPrompt: string | null
+  emotionStrength: number | null
+  audioUrl: string | null
+  audioMediaId: string | null
+  updatedAt: Date
+}
+
+function isSameVoiceLineSnapshot(
+  current: VoiceLineGenerationSnapshot & { enabled: boolean } | null,
+  snapshot: VoiceLineGenerationSnapshot,
+) {
+  return current?.id === snapshot.id
+    && current.episodeId === snapshot.episodeId
+    && current.enabled
+    && current.speaker === snapshot.speaker
+    && current.content === snapshot.content
+    && current.emotionPrompt === snapshot.emotionPrompt
+    && current.emotionStrength === snapshot.emotionStrength
+    && current.audioUrl === snapshot.audioUrl
+    && current.audioMediaId === snapshot.audioMediaId
+    && current.updatedAt.getTime() === snapshot.updatedAt.getTime()
+}
+
+async function cleanupUnpublishedVoiceObject(storageKey: string) {
+  try {
+    await deleteObject(storageKey)
+  } catch (error) {
+    _ulogError('[Voice] failed to clean unpublished generated audio', {
+      storageKey,
+      error,
+    })
+  }
+}
 
 function normalizeBailianVoiceGenerationError(errorMessage: string | null | undefined) {
   const message = typeof errorMessage === 'string' ? errorMessage.trim() : ''
@@ -177,6 +217,9 @@ export async function generateVoiceLine(params: {
       emotionPrompt: true,
       emotionStrength: true,
       enabled: true,
+      audioUrl: true,
+      audioMediaId: true,
+      updatedAt: true,
     },
   })
   if (!line) {
@@ -189,6 +232,21 @@ export async function generateVoiceLine(params: {
   const episodeId = params.episodeId || line.episodeId
   if (!episodeId) {
     throw new Error('episodeId is required')
+  }
+  if (episodeId !== line.episodeId) {
+    throw new Error('VOICE_LINE_EPISODE_MISMATCH')
+  }
+
+  const generationSnapshot: VoiceLineGenerationSnapshot = {
+    id: line.id,
+    episodeId: line.episodeId,
+    speaker: line.speaker,
+    content: line.content,
+    emotionPrompt: line.emotionPrompt,
+    emotionStrength: line.emotionStrength,
+    audioUrl: line.audioUrl,
+    audioMediaId: line.audioMediaId,
+    updatedAt: line.updatedAt,
   }
 
   const [projectData, episode] = await Promise.all([
@@ -269,20 +327,63 @@ export async function generateVoiceLine(params: {
     throw new Error(`AUDIO_PROVIDER_UNSUPPORTED: ${audioSelection.provider}`)
   }
 
-  const audioKey = `voice/${params.projectId}/${episodeId}/${line.id}.wav`
-  const cosKey = await uploadObject(generated.audioData, audioKey)
-
   await checkCancelled?.()
 
-  const persisted = await prisma.novelPromotionVoiceLine.updateMany({
-    where: { id: line.id, enabled: true },
-    data: {
-      audioUrl: cosKey,
-      audioDuration: generated.audioDuration || null,
+  const currentLine = await prisma.novelPromotionVoiceLine.findUnique({
+    where: { id: line.id },
+    select: {
+      id: true,
+      episodeId: true,
+      enabled: true,
+      speaker: true,
+      content: true,
+      emotionPrompt: true,
+      emotionStrength: true,
+      audioUrl: true,
+      audioMediaId: true,
+      updatedAt: true,
     },
   })
-  if (persisted.count === 0) {
+  if (!currentLine?.enabled) {
     throw new Error('VOICE_LINE_DISABLED')
+  }
+  if (!isSameVoiceLineSnapshot(currentLine, generationSnapshot)) {
+    throw new Error('VOICE_LINE_STALE')
+  }
+
+  const audioKey = `voice/${params.projectId}/${episodeId}/${line.id}/${randomUUID()}.wav`
+  const cosKey = await uploadObject(generated.audioData, audioKey)
+  let published = false
+  try {
+    await checkCancelled?.()
+
+    const persisted = await prisma.novelPromotionVoiceLine.updateMany({
+      where: {
+        id: generationSnapshot.id,
+        episodeId: generationSnapshot.episodeId,
+        enabled: true,
+        speaker: generationSnapshot.speaker,
+        content: generationSnapshot.content,
+        emotionPrompt: generationSnapshot.emotionPrompt,
+        emotionStrength: generationSnapshot.emotionStrength,
+        audioUrl: generationSnapshot.audioUrl,
+        audioMediaId: generationSnapshot.audioMediaId,
+        updatedAt: generationSnapshot.updatedAt,
+      },
+      data: {
+        audioUrl: cosKey,
+        audioDuration: generated.audioDuration || null,
+      },
+    })
+    if (persisted.count === 0) {
+      throw new Error('VOICE_LINE_STALE')
+    }
+    published = true
+  } catch (error) {
+    if (!published) {
+      await cleanupUnpublishedVoiceObject(cosKey)
+    }
+    throw error
   }
 
   const signedUrl = getSignedUrl(cosKey, 7200)

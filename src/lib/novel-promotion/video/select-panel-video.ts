@@ -4,7 +4,6 @@ export interface PanelVideoSelectionInput {
   preferLipSync: boolean
   hasDialogue?: boolean | null
   narrationVoiceEnabled?: boolean
-  allowLipSyncFallbackWhenBasePreferred?: boolean
 }
 
 export interface PanelVideoSelection {
@@ -47,7 +46,7 @@ export function selectPanelVideo(input: PanelVideoSelectionInput): PanelVideoSel
   }
 
   if (baseVideoUrl) return { videoUrl: baseVideoUrl, isLipSync: false }
-  if (input.allowLipSyncFallbackWhenBasePreferred && lipSyncVideoUrl) {
+  if (lipSyncVideoUrl) {
     return { videoUrl: lipSyncVideoUrl, isLipSync: true }
   }
   return { videoUrl: null, isLipSync: false }

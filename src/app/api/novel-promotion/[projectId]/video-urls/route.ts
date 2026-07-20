@@ -156,7 +156,6 @@ export const POST = apiHandler(async (
                 preferLipSync,
                 hasDialogue: panel.hasDialogue,
                 narrationVoiceEnabled: resolveNarrationVoiceEnabled(panel.matchedVoiceLines),
-                allowLipSyncFallbackWhenBasePreferred: true,
             })
 
             if (videoKey) {
