@@ -9,8 +9,19 @@ export const narrationSourceKey = (panelId: string) => `panel-narration:${panelI
 
 const MAX_VOICE_LINE_WRITE_ATTEMPTS = 4
 
+export interface NarrationTransactionClient {
+  novelPromotionPanel: Pick<
+    Prisma.TransactionClient['novelPromotionPanel'],
+    'findUnique'
+  >
+  novelPromotionVoiceLine: Pick<
+    Prisma.TransactionClient['novelPromotionVoiceLine'],
+    'findUnique' | 'findMany' | 'aggregate' | 'create' | 'update'
+  >
+}
+
 type SyncPanelNarrationInput = {
-  tx: Prisma.TransactionClient
+  tx: NarrationTransactionClient
   episodeId: string
   panelId: string
   storyboardId: string
@@ -113,7 +124,7 @@ export async function syncPanelNarrationVoiceLine(
 }
 
 export async function writeDialogueVoiceLine(input: {
-  tx: Prisma.TransactionClient
+  tx: NarrationTransactionClient
   episodeId: string
   lineIndex: number
   incomingDialogueIndexes: number[]
@@ -190,7 +201,7 @@ export async function writeDialogueVoiceLine(input: {
 }
 
 export async function relocateNarrationIndexConflicts(input: {
-  tx: Prisma.TransactionClient
+  tx: NarrationTransactionClient
   episodeId: string
   incomingDialogueIndexes: number[]
 }): Promise<void> {

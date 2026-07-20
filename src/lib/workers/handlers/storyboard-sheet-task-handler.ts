@@ -156,6 +156,7 @@ export function buildSixGridTaskDedupeKey(snapshot: SixGridImageTaskSnapshot) {
     ...(snapshot.cropRectSource ? { cropRectSource: snapshot.cropRectSource } : {}),
     cropRects: snapshot.cropRects ? [...snapshot.cropRects].sort((a, b) => a.cellIndex - b.cellIndex) : undefined,
     promptSnapshot: snapshot.promptSnapshot, modelSnapshot: snapshot.modelSnapshot,
+    locale: snapshot.locale,
     ...(snapshot.analysisModelSnapshot
       ? { analysisModelSnapshot: snapshot.analysisModelSnapshot }
       : {}),

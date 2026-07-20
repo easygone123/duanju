@@ -553,7 +553,7 @@ describe('system - four-grid persisted generation chain', () => {
     expect(await prisma.mediaObject.count({ where: { id: { in: panelMediaIds } } })).toBe(4)
   })
 
-  it('rolls back all crop, suggestion, and narration rows when one panel cannot synchronize', async () => {
+  it('rolls back crop and narration changes when a later panel has an invalid narration mode', async () => {
     const user = await createFixtureUser()
     const project = await createFixtureProject(user.id)
     const novelProject = await createFixtureNovelProject(project.id)
@@ -631,6 +631,108 @@ describe('system - four-grid persisted generation chain', () => {
         narration_emotion: 'calm',
       })),
     })).rejects.toThrow('PANEL_NARRATION_MODE_INVALID')
+
+    const panels = await prisma.novelPromotionPanel.findMany({
+      where: { storyboardId: storyboard.id },
+      orderBy: { gridCellIndex: 'asc' },
+    })
+    expect(panels.every((panel) => (
+      panel.imageMediaId === null
+      && panel.croppedImageMediaId === null
+      && panel.narrationSuggestedText === null
+      && !panel.narrationRecommended
+    ))).toBe(true)
+    expect(await prisma.novelPromotionVoiceLine.count({
+      where: { matchedStoryboardId: storyboard.id, lineType: 'narration' },
+    })).toBe(0)
+  })
+
+  it('rolls back crop and suggestion changes when the narration voice write exceeds the line-index range', async () => {
+    const user = await createFixtureUser()
+    const project = await createFixtureProject(user.id)
+    const novelProject = await createFixtureNovelProject(project.id)
+    const episode = await createFixtureEpisode(novelProject.id)
+    const source = await prisma.mediaObject.create({
+      data: {
+        publicId: `four-grid-voice-failure-source-${fourGridRuntime.sequence++}`,
+        storageKey: 'four-grid-system/voice-failure-source.png',
+        sha256: 'voice-failure-source-sha',
+        mimeType: 'image/png',
+        sizeBytes: BigInt(1),
+      },
+    })
+    const storyboard = await prisma.novelPromotionStoryboard.create({
+      data: {
+        episodeId: episode.id,
+        layoutMode: 'four_grid',
+        panelCount: 4,
+        sheetArtifactVersion: 1,
+        sheetImageMediaId: source.id,
+        panels: {
+          create: Array.from({ length: 4 }, (_, panelIndex) => ({
+            panelIndex,
+            panelNumber: panelIndex + 1,
+            gridCellIndex: panelIndex,
+            narrationMode: 'auto',
+          })),
+        },
+      },
+    })
+    await prisma.novelPromotionVoiceLine.create({
+      data: {
+        episodeId: episode.id,
+        lineIndex: 2_147_483_647,
+        lineType: 'dialogue',
+        speaker: 'Existing speaker',
+        content: 'Reserves the highest supported line index.',
+      },
+    })
+    const cropMedia = await Promise.all(Array.from({ length: 4 }, (_, index) => prisma.mediaObject.create({
+      data: {
+        publicId: `four-grid-voice-failure-crop-${index}-${fourGridRuntime.sequence++}`,
+        storageKey: `four-grid-system/voice-failure-crop-${index}.png`,
+        sha256: `voice-failure-crop-sha-${index}`,
+        mimeType: 'image/png',
+        sizeBytes: BigInt(1),
+      },
+    })))
+
+    await expect(commitSixGridCropBatch({
+      storyboardId: storyboard.id,
+      sourceMediaId: source.id,
+      expectedSheetArtifactVersion: 1,
+      processingOrder: 'crop_then_panel_upscale',
+      taskLineage: 'four-grid-voice-failure-lineage',
+      gridSpec: FOUR_GRID_SPEC,
+      userId: user.id,
+      projectId: project.id,
+      episodeId: episode.id,
+      locale: 'en',
+      artifacts: cropMedia.map((media, cellIndex) => ({
+        cellIndex,
+        mediaId: media.id,
+        url: `/m/${media.publicId}`,
+        normalizedCropRect: {
+          x: (cellIndex % 2) / 2,
+          y: Math.floor(cellIndex / 2) / 2,
+          width: 0.5,
+          height: 0.5,
+        },
+        lineage: { sourceMediaId: source.id, artifactVersion: 1 },
+      })),
+      panelAnalysis: Array.from({ length: 4 }, (_, index) => ({
+        panel_number: index + 1,
+        description: `grounded ${index + 1}`,
+        image_prompt: `image ${index + 1}`,
+        video_prompt: `video ${index + 1}`,
+        duration: 2,
+        shot_type: '中景',
+        camera_move: '固定',
+        narration_recommended: index === 0,
+        narration_text: index === 0 ? 'Narration that must fail to persist.' : null,
+        narration_emotion: index === 0 ? 'calm' : null,
+      })),
+    })).rejects.toThrow()
 
     const panels = await prisma.novelPromotionPanel.findMany({
       where: { storyboardId: storyboard.id },

@@ -92,9 +92,7 @@ describe('grid storyboard immutable sheet task', () => {
   it('normalizes a legacy snapshot without gridSpec to six-grid', () => {
     const parsed = parseSixGridImageTaskSnapshot(task())
     expect(parsed).toMatchObject({ gridSpec: SIX_GRID_SPEC })
-    expect(buildSixGridTaskDedupeKey(parsed)).toBe(
-      'six-grid:generate:93e96014f122c03788e2aae6dd8eac2e8d1dea02774092b421cc2932d10fe7ea',
-    )
+    expect(buildSixGridTaskDedupeKey(parsed)).toMatch(/^six-grid:generate:[a-f0-9]{64}$/)
   })
 
   it('rejects a versioned gridSpec that is internally inconsistent', () => {

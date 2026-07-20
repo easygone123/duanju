@@ -95,6 +95,13 @@ describe('six-grid image task immutable contract', () => {
     expect(buildSixGridTaskDedupeKey(changed)).not.toBe(key)
   })
 
+  it('uses locale in immutable dedupe identity for the same source snapshot', () => {
+    const zh = snapshot({ locale: 'zh' })
+    const en = snapshot({ locale: 'en' })
+
+    expect(buildSixGridTaskDedupeKey(zh)).not.toBe(buildSixGridTaskDedupeKey(en))
+  })
+
   it('canonicalizes crop geometry order and rejects duplicate cell indexes', () => {
     const base = snapshot()
     const reversed = snapshot({ cropRects: [...base.cropRects!].reverse() })
@@ -1082,6 +1089,50 @@ describe('six-grid crop atomic persistence', () => {
     })
   })
 
+  it('uses the canonical manual narration returned after an interleaving edit and projects a Chinese speaker', async () => {
+    const fixture = createAtomicNarrationCropFixture({
+      beforePanelUpdate: (panel) => {
+        if (panel.id !== 'panel-0') return
+        panel.narrationMode = 'on'
+        panel.narrationText = '手动保留的旁白'
+        panel.narrationEmotion = '坚定'
+      },
+    })
+    const input = fourGridNarrationCommitInput([
+      analysisNarration(true),
+      ...Array.from({ length: 3 }, () => analysisNarration(false)),
+    ])
+
+    await commitSixGridCropBatch(
+      { ...input, locale: 'zh' },
+      { transaction: fixture.transaction as never },
+    )
+
+    expect(fixture.update).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      select: expect.objectContaining({
+        hasDialogue: true,
+        narrationMode: true,
+        narrationText: true,
+        narrationEmotion: true,
+      }),
+    }))
+    expect(fixture.state.panels[0]).toMatchObject({
+      narrationMode: 'on',
+      narrationText: '手动保留的旁白',
+      narrationEmotion: '坚定',
+      narrationSuggestedText: 'Suggested narration',
+    })
+    expect(fixture.state.voiceLines).toEqual([
+      expect.objectContaining({
+        sourceKey: narrationSourceKey('panel-0'),
+        enabled: true,
+        speaker: '旁白',
+        content: '手动保留的旁白',
+        emotionPrompt: '坚定',
+      }),
+    ])
+  })
+
   it('keeps narration disabled when the canonical panel has dialogue', async () => {
     const fixture = createAtomicNarrationCropFixture({
       panels: [
@@ -1096,6 +1147,27 @@ describe('six-grid crop atomic persistence', () => {
 
     expect(fixture.state.voiceLines.find((line) => line.sourceKey === narrationSourceKey('panel-0')))
       .toMatchObject({ enabled: false, content: 'Manual narration' })
+  })
+
+  it('rejects an AI narration recommendation when the canonical returned panel has dialogue and rolls back the panel update', async () => {
+    const fixture = createAtomicNarrationCropFixture({
+      beforePanelUpdate: (panel) => {
+        if (panel.id === 'panel-0') panel.hasDialogue = true
+      },
+    })
+
+    await expect(commitFourGridNarrationFixture(fixture, [
+      analysisNarration(true),
+      ...Array.from({ length: 3 }, () => analysisNarration(false)),
+    ])).rejects.toThrow('FOUR_GRID_SHEET_ANALYSIS_INVALID')
+
+    expect(fixture.state.panels[0]).toMatchObject({
+      hasDialogue: false,
+      imageMediaId: null,
+      narrationRecommended: false,
+      narrationSuggestedText: null,
+    })
+    expect(fixture.state.voiceLines).toEqual([])
   })
 
   it.each([
@@ -1352,6 +1424,7 @@ function createAtomicNarrationCropFixture(options: {
   voiceLines?: NarrationVoiceFixtureRow[]
   failPanelId?: string
   failVoicePanelId?: string
+  beforePanelUpdate?: (panel: CropPanelFixtureRow) => void
 } = {}) {
   const state = {
     panels: structuredClone(options.panels ?? Array.from({ length: 4 }, (_, index) => cropPanel({
@@ -1366,6 +1439,7 @@ function createAtomicNarrationCropFixture(options: {
     if (where.id === options.failPanelId) throw new Error('PANEL_WRITE_FAILED')
     const panel = state.panels.find((row) => row.id === where.id)
     if (!panel) throw new Error('PANEL_NOT_FOUND')
+    options.beforePanelUpdate?.(panel)
     Object.assign(panel, data)
     return structuredClone(panel)
   })

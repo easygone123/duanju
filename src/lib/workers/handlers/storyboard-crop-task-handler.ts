@@ -12,28 +12,34 @@ import {
   type FourGridPlannedPanel,
   type FourGridSheetAnalysisRow,
 } from '@/lib/novel-promotion/grid-storyboard/sheet-analysis'
-import { syncPanelNarrationVoiceLine } from '@/lib/novel-promotion/narration/sync'
+import {
+  syncPanelNarrationVoiceLine,
+  type NarrationTransactionClient,
+} from '@/lib/novel-promotion/narration/sync'
 import { parseNarrationMode } from '@/lib/novel-promotion/narration/state'
 
 type CropArtifact = Pick<SixGridCropArtifact, 'cellIndex' | 'mediaId' | 'url' | 'normalizedCropRect'> & { lineage: unknown }
-type CurrentCropPanel = {
-  id: string
-  storyboardId: string
-  storyboard: { episodeId: string }
-  panelIndex: number
-  gridCellIndex: number | null
-  imageMediaId: string | null
-  imageUrl: string | null
-  hasDialogue: boolean
-  narrationMode: string
-  narrationRecommended: boolean
-  narrationSuggestedText: string | null
-  narrationSuggestedEmotion: string | null
-  narrationText: string | null
-  narrationEmotion: string | null
-}
+const currentCropPanelSelect = {
+  id: true,
+  storyboardId: true,
+  storyboard: { select: { episodeId: true } },
+  panelIndex: true,
+  gridCellIndex: true,
+  imageMediaId: true,
+  imageUrl: true,
+  hasDialogue: true,
+  narrationMode: true,
+  narrationRecommended: true,
+  narrationSuggestedText: true,
+  narrationSuggestedEmotion: true,
+  narrationText: true,
+  narrationEmotion: true,
+} satisfies Prisma.NovelPromotionPanelSelect
+type CurrentCropPanel = Prisma.NovelPromotionPanelGetPayload<{
+  select: typeof currentCropPanelSelect
+}>
 
-type CropTransactionClient = {
+type CropTransactionClient = NarrationTransactionClient & {
   lockStoryboard: (input: {
     storyboardId: string
     sourceMediaId: string
@@ -44,17 +50,10 @@ type CropTransactionClient = {
     projectId?: string
     episodeId?: string
   }) => Promise<boolean>
-  novelPromotionPanel: {
-    findMany: (args: unknown) => Promise<CurrentCropPanel[]>
-    findUnique: (args: unknown) => Promise<unknown>
-    update: (args: unknown) => Promise<unknown>
-  }
-  novelPromotionVoiceLine: {
-    findUnique: (args: unknown) => Promise<unknown>
-    aggregate: (args: unknown) => Promise<unknown>
-    create: (args: unknown) => Promise<unknown>
-    update: (args: unknown) => Promise<unknown>
-  }
+  novelPromotionPanel: NarrationTransactionClient['novelPromotionPanel'] & Pick<
+    Prisma.TransactionClient['novelPromotionPanel'],
+    'findMany' | 'update'
+  >
 }
 type Transaction = (callback: (tx: CropTransactionClient) => Promise<void>) => Promise<unknown>
 
@@ -98,24 +97,9 @@ export async function commitSixGridCropBatch(input: {
       episodeId: input.episodeId,
     })
     if (!locked) throw new Error('SIX_GRID_SOURCE_STALE')
-    const currentPanels = await tx.novelPromotionPanel.findMany({
+    const currentPanels: CurrentCropPanel[] = await tx.novelPromotionPanel.findMany({
       where: { storyboardId: input.storyboardId },
-      select: {
-        id: true,
-        storyboardId: true,
-        storyboard: { select: { episodeId: true } },
-        panelIndex: true,
-        gridCellIndex: true,
-        imageMediaId: true,
-        imageUrl: true,
-        hasDialogue: true,
-        narrationMode: true,
-        narrationRecommended: true,
-        narrationSuggestedText: true,
-        narrationSuggestedEmotion: true,
-        narrationText: true,
-        narrationEmotion: true,
-      },
+      select: currentCropPanelSelect,
     })
     if (currentPanels.length !== gridSpec.panelCount) throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
     const currentByCell = new Map(currentPanels.map((panel) => [panel.gridCellIndex, panel]))
@@ -123,8 +107,7 @@ export async function commitSixGridCropBatch(input: {
       const previous = currentByCell.get(artifact.cellIndex)
       if (!previous) throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
       const analysis = input.panelAnalysis?.[artifact.cellIndex]
-      const narrationMode = analysis ? parseNarrationMode(previous.narrationMode) : undefined
-      await tx.novelPromotionPanel.update({
+      const persistedPanel: CurrentCropPanel = await tx.novelPromotionPanel.update({
         where: { id: previous.id },
         data: {
           previousImageMediaId: previous.imageMediaId,
@@ -152,21 +135,25 @@ export async function commitSixGridCropBatch(input: {
             narrationSuggestedEmotion: analysis.narration_emotion,
           } : {}),
         },
+        select: currentCropPanelSelect,
       })
-      if (analysis && narrationMode) {
+      if (analysis) {
+        if (persistedPanel.hasDialogue && persistedPanel.narrationRecommended) {
+          throw new Error('FOUR_GRID_SHEET_ANALYSIS_INVALID')
+        }
         await syncPanelNarrationVoiceLine({
-          tx: tx as unknown as Prisma.TransactionClient,
-          episodeId: previous.storyboard.episodeId,
-          panelId: previous.id,
-          storyboardId: previous.storyboardId,
-          panelIndex: previous.panelIndex,
+          tx,
+          episodeId: persistedPanel.storyboard.episodeId,
+          panelId: persistedPanel.id,
+          storyboardId: persistedPanel.storyboardId,
+          panelIndex: persistedPanel.panelIndex,
           locale: input.locale!,
-          mode: narrationMode,
-          recommended: analysis.narration_recommended,
-          suggestedText: analysis.narration_text,
-          suggestedEmotion: analysis.narration_emotion,
-          text: previous.narrationText,
-          emotion: previous.narrationEmotion,
+          mode: parseNarrationMode(persistedPanel.narrationMode),
+          recommended: persistedPanel.narrationRecommended,
+          suggestedText: persistedPanel.narrationSuggestedText,
+          suggestedEmotion: persistedPanel.narrationSuggestedEmotion,
+          text: persistedPanel.narrationText,
+          emotion: persistedPanel.narrationEmotion,
         })
       }
     }
@@ -222,31 +209,8 @@ const defaultCropTransaction: Transaction = async (callback) => prisma.$transact
           `)
       return rows.length === 1
     },
-    novelPromotionPanel: {
-      findMany: (args) => tx.novelPromotionPanel.findMany(
-        args as Prisma.NovelPromotionPanelFindManyArgs,
-      ) as unknown as Promise<CurrentCropPanel[]>,
-      findUnique: (args) => tx.novelPromotionPanel.findUnique(
-        args as Prisma.NovelPromotionPanelFindUniqueArgs,
-      ),
-      update: (args) => tx.novelPromotionPanel.update(
-        args as Prisma.NovelPromotionPanelUpdateArgs,
-      ),
-    },
-    novelPromotionVoiceLine: {
-      findUnique: (args) => tx.novelPromotionVoiceLine.findUnique(
-        args as Prisma.NovelPromotionVoiceLineFindUniqueArgs,
-      ),
-      aggregate: (args) => tx.novelPromotionVoiceLine.aggregate(
-        args as Prisma.NovelPromotionVoiceLineAggregateArgs,
-      ),
-      create: (args) => tx.novelPromotionVoiceLine.create(
-        args as Prisma.NovelPromotionVoiceLineCreateArgs,
-      ),
-      update: (args) => tx.novelPromotionVoiceLine.update(
-        args as Prisma.NovelPromotionVoiceLineUpdateArgs,
-      ),
-    },
+    novelPromotionPanel: tx.novelPromotionPanel,
+    novelPromotionVoiceLine: tx.novelPromotionVoiceLine,
   })
 })
 
