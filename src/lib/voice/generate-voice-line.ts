@@ -5,7 +5,12 @@ import { prisma } from '@/lib/prisma'
 import { getAudioApiKey, getProviderConfig, getProviderKey, resolveModelSelectionOrSingle } from '@/lib/api-config'
 import { normalizeToBase64ForGeneration } from '@/lib/media/outbound-image'
 import { deleteObject, extractStorageKey, getSignedUrl, toFetchableUrl, uploadObject } from '@/lib/storage'
-import { resolveStorageKeyFromMediaValue } from '@/lib/media/service'
+import {
+  deleteMediaObjectIfUnreferenced,
+  ensureMediaObjectFromStorageKey,
+  resolveStorageKeyFromMediaValue,
+} from '@/lib/media/service'
+import type { MediaRef } from '@/lib/media/types'
 import { synthesizeWithBailianTTS } from '@/lib/providers/bailian'
 import {
   parseSpeakerVoiceMap,
@@ -45,14 +50,34 @@ function isSameVoiceLineSnapshot(
     && current.updatedAt.getTime() === snapshot.updatedAt.getTime()
 }
 
-async function cleanupUnpublishedVoiceObject(storageKey: string) {
+async function cleanupUnpublishedVoiceMedia(input: {
+  storageKey: string
+  media: MediaRef | null
+}) {
   try {
-    await deleteObject(storageKey)
+    if (input.media) {
+      await deleteMediaObjectIfUnreferenced({
+        mediaId: input.media.id,
+        expectedStorageKey: input.storageKey,
+      })
+    } else {
+      await deleteObject(input.storageKey)
+    }
   } catch (error) {
     _ulogError('[Voice] failed to clean unpublished generated audio', {
-      storageKey,
+      storageKey: input.storageKey,
+      mediaId: input.media?.id,
       error,
     })
+  }
+}
+
+async function cleanupReplacedVoiceMedia(mediaId: string | null) {
+  if (!mediaId) return
+  try {
+    await deleteMediaObjectIfUnreferenced({ mediaId })
+  } catch (error) {
+    _ulogError('[Voice] failed to clean replaced audio media', { mediaId, error })
   }
 }
 
@@ -353,8 +378,13 @@ export async function generateVoiceLine(params: {
 
   const audioKey = `voice/${params.projectId}/${episodeId}/${line.id}/${randomUUID()}.wav`
   const cosKey = await uploadObject(generated.audioData, audioKey)
+  let audioMedia: MediaRef | null = null
   let published = false
   try {
+    audioMedia = await ensureMediaObjectFromStorageKey(cosKey, {
+      mimeType: 'audio/wav',
+      durationMs: generated.audioDuration || null,
+    })
     await checkCancelled?.()
 
     const persisted = await prisma.novelPromotionVoiceLine.updateMany({
@@ -372,6 +402,7 @@ export async function generateVoiceLine(params: {
       },
       data: {
         audioUrl: cosKey,
+        audioMediaId: audioMedia.id,
         audioDuration: generated.audioDuration || null,
       },
     })
@@ -381,9 +412,16 @@ export async function generateVoiceLine(params: {
     published = true
   } catch (error) {
     if (!published) {
-      await cleanupUnpublishedVoiceObject(cosKey)
+      await cleanupUnpublishedVoiceMedia({ storageKey: cosKey, media: audioMedia })
     }
     throw error
+  }
+
+  if (!audioMedia) {
+    throw new Error('VOICE_MEDIA_REGISTRATION_FAILED')
+  }
+  if (generationSnapshot.audioMediaId !== audioMedia.id) {
+    await cleanupReplacedVoiceMedia(generationSnapshot.audioMediaId)
   }
 
   const signedUrl = getSignedUrl(cosKey, 7200)

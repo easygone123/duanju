@@ -24,6 +24,18 @@ const toFetchableUrlMock = vi.hoisted(() => vi.fn((url: string) => url))
 const uploadObjectMock = vi.hoisted(() => vi.fn(async () => 'voice/storage/line-1.wav'))
 const deleteObjectMock = vi.hoisted(() => vi.fn(async () => undefined))
 const resolveStorageKeyFromMediaValueMock = vi.hoisted(() => vi.fn())
+const ensureMediaObjectFromStorageKeyMock = vi.hoisted(() => vi.fn(async (storageKey: string) => ({
+  id: 'media-new',
+  publicId: 'public-new',
+  url: '/m/public-new',
+  storageKey,
+  mimeType: 'audio/wav',
+  sizeBytes: null,
+  width: null,
+  height: null,
+  durationMs: 1,
+})))
+const deleteMediaObjectIfUnreferencedMock = vi.hoisted(() => vi.fn(async () => true))
 const synthesizeWithBailianTTSMock = vi.hoisted(() => vi.fn())
 const falSubscribeMock = vi.hoisted(() => vi.fn())
 const getProviderConfigMock = vi.hoisted(() => vi.fn())
@@ -52,6 +64,8 @@ vi.mock('@/lib/storage', () => ({
 }))
 
 vi.mock('@/lib/media/service', () => ({
+  deleteMediaObjectIfUnreferenced: deleteMediaObjectIfUnreferencedMock,
+  ensureMediaObjectFromStorageKey: ensureMediaObjectFromStorageKeyMock,
   resolveStorageKeyFromMediaValue: resolveStorageKeyFromMediaValueMock,
 }))
 
@@ -151,6 +165,7 @@ describe('generate voice line with bailian provider', () => {
       },
       data: {
         audioUrl: 'voice/storage/line-1.wav',
+        audioMediaId: 'media-new',
         audioDuration: 1,
       },
     })
@@ -160,7 +175,11 @@ describe('generate voice line with bailian provider', () => {
       storageKey: 'voice/storage/line-1.wav',
       audioDuration: 1,
     })
-    expect(deleteObjectMock).not.toHaveBeenCalled()
+    expect(ensureMediaObjectFromStorageKeyMock).toHaveBeenCalledWith(
+      'voice/storage/line-1.wav',
+      { mimeType: 'audio/wav', durationMs: 1 },
+    )
+    expect(deleteMediaObjectIfUnreferencedMock).not.toHaveBeenCalled()
   })
 
   it('does not upload when narration is disabled while the provider is running', async () => {
@@ -198,6 +217,18 @@ describe('generate voice line with bailian provider', () => {
   })
 
   it('deletes a newly uploaded object when snapshot CAS loses a race', async () => {
+    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue({
+      id: 'line-1',
+      episodeId: 'episode-1',
+      speaker: 'Narrator',
+      content: '你好，世界',
+      emotionPrompt: null,
+      emotionStrength: null,
+      enabled: true,
+      audioUrl: 'voice/storage/previous.wav',
+      audioMediaId: 'media-old',
+      updatedAt: new Date('2026-07-20T00:00:00.000Z'),
+    })
     prismaMock.novelPromotionVoiceLine.updateMany.mockResolvedValueOnce({ count: 0 })
 
     await expect(generateVoiceLine({
@@ -208,8 +239,50 @@ describe('generate voice line with bailian provider', () => {
       audioModel: 'bailian::qwen3-tts-vd-2026-01-26',
     })).rejects.toThrow('VOICE_LINE_STALE')
 
-    expect(deleteObjectMock).toHaveBeenCalledWith('voice/storage/line-1.wav')
+    expect(deleteMediaObjectIfUnreferencedMock).toHaveBeenCalledWith({
+      mediaId: 'media-new',
+      expectedStorageKey: 'voice/storage/line-1.wav',
+    })
+    expect(deleteMediaObjectIfUnreferencedMock).not.toHaveBeenCalledWith({
+      mediaId: 'media-old',
+    })
     expect(prismaMock.novelPromotionVoiceLine.updateMany).toHaveBeenCalledTimes(1)
+  })
+
+  it('replaces a non-null old audioMediaId and asks canonical cleanup to retain shared old media', async () => {
+    prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue({
+      id: 'line-1',
+      episodeId: 'episode-1',
+      speaker: 'Narrator',
+      content: '你好，世界',
+      emotionPrompt: null,
+      emotionStrength: null,
+      enabled: true,
+      audioUrl: 'voice/storage/previous.wav',
+      audioMediaId: 'media-shared-old',
+      updatedAt: new Date('2026-07-20T00:00:00.000Z'),
+    })
+    deleteMediaObjectIfUnreferencedMock.mockResolvedValueOnce(false)
+
+    await generateVoiceLine({
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      lineId: 'line-1',
+      userId: 'user-1',
+      audioModel: 'bailian::qwen3-tts-vd-2026-01-26',
+    })
+
+    expect(prismaMock.novelPromotionVoiceLine.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ audioMediaId: 'media-shared-old' }),
+      data: expect.objectContaining({
+        audioUrl: 'voice/storage/line-1.wav',
+        audioMediaId: 'media-new',
+      }),
+    }))
+    expect(deleteMediaObjectIfUnreferencedMock).toHaveBeenCalledWith({
+      mediaId: 'media-shared-old',
+    })
+    expect(deleteObjectMock).not.toHaveBeenCalled()
   })
 
   it('fails explicitly when bailian speaker binding only has uploaded audio', async () => {

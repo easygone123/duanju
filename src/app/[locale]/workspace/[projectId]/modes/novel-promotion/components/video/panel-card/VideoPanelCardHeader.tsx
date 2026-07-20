@@ -5,7 +5,10 @@ import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 import type { VideoPanelRuntime } from './hooks/useVideoPanelActions'
 import { AppIcon } from '@/components/ui/icons'
 import { getAspectRatioConfig } from '@/lib/constants'
-import { shouldIgnoreDisabledNarrationLipSync } from '@/lib/novel-promotion/video/select-panel-video'
+import {
+  selectPanelVideo,
+  shouldIgnoreDisabledNarrationLipSync,
+} from '@/lib/novel-promotion/video/select-panel-video'
 
 interface VideoPanelCardHeaderProps {
   runtime: VideoPanelRuntime
@@ -37,6 +40,14 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
     hasDialogue: panel.hasDialogue,
     narrationVoiceEnabled: panel.narrationVoiceEnabled,
   })
+  const selectedVideoUrl = selectPanelVideo({
+    videoUrl: media.baseVideoUrl,
+    lipSyncVideoUrl: panel.lipSyncVideoUrl,
+    preferLipSync: media.showLipSyncVideo,
+    hasDialogue: panel.hasDialogue,
+    narrationVoiceEnabled: panel.narrationVoiceEnabled,
+  }).videoUrl
+  const hasPlayableVideo = !!selectedVideoUrl
   const showFirstLastFrameSwitch = layout.hasNext
   const frameSourceMode = layout.frameLinkChoices?.lastFrame?.mode
   const thumbnailSizes = getAspectRatioConfig(layout.videoRatio).isVertical
@@ -45,17 +56,17 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
 
   return (
     <div className="bg-[var(--glass-bg-muted)] flex items-center justify-center relative" style={{ aspectRatio: player.cssAspectRatio }}>
-      {hasVisibleBaseVideo && player.isPlaying ? (
+      {hasPlayableVideo && player.isPlaying ? (
         <video
           ref={player.videoRef}
-          key={`video-${panel.storyboardId}-${panel.panelIndex}-${media.currentVideoUrl}`}
-          src={media.currentVideoUrl}
+          key={`video-${panel.storyboardId}-${panel.panelIndex}-${selectedVideoUrl}`}
+          src={selectedVideoUrl || undefined}
           controls
           playsInline
           className="w-full h-full object-contain bg-black"
           onEnded={() => player.setIsPlaying(false)}
         />
-      ) : hasVisibleBaseVideo ? (
+      ) : hasPlayableVideo ? (
         <div
           className="relative w-full h-full group cursor-pointer"
           onClick={() => void player.handlePlayClick()}
