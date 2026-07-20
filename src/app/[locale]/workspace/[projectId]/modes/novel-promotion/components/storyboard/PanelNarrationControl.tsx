@@ -93,6 +93,7 @@ export default function PanelNarrationControl({
   const [draftMode, setDraftMode] = useState<PanelNarrationMode>(initialSnapshot.narrationMode)
   const [manualText, setManualText] = useState<string | null>(initialSnapshot.narrationText)
   const [manualEmotion, setManualEmotion] = useState<string | null>(initialSnapshot.narrationEmotion)
+  const [manualDraftDirty, setManualDraftDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -106,6 +107,7 @@ export default function PanelNarrationControl({
     setDraftMode(incoming.narrationMode)
     setManualText(incoming.narrationText)
     setManualEmotion(incoming.narrationEmotion)
+    setManualDraftDirty(false)
     setErrorMessage(null)
   }, [
     panel.narrationEmotion,
@@ -141,6 +143,7 @@ export default function PanelNarrationControl({
       setDraftMode('on')
     }
     setManualText(value)
+    setManualDraftDirty(true)
     setErrorMessage(null)
   }
 
@@ -151,6 +154,7 @@ export default function PanelNarrationControl({
       setDraftMode('on')
     }
     setManualEmotion(value)
+    setManualDraftDirty(true)
     setErrorMessage(null)
   }
 
@@ -160,6 +164,7 @@ export default function PanelNarrationControl({
     setDraftMode(next.narrationMode)
     setManualText(next.narrationText)
     setManualEmotion(next.narrationEmotion)
+    setManualDraftDirty(false)
     setErrorMessage(null)
   }
 
@@ -213,12 +218,10 @@ export default function PanelNarrationControl({
     try {
       const apiLocale = locale.toLowerCase().startsWith('zh') ? 'zh' : 'en'
       const targetMode = draftMode
-      const manualDraftChanged = normalizedText !== normalizeDraftValue(canonicalRef.current.narrationText)
-        || normalizedEmotion !== normalizeDraftValue(canonicalRef.current.narrationEmotion)
       let expectedPanelUpdatedAt = canonicalRef.current.updatedAt
       let persistedOn: NarrationSnapshot | null = null
 
-      if (targetMode !== 'on' && manualDraftChanged) {
+      if (targetMode !== 'on' && manualDraftDirty) {
         const persistResult = await patchNarration({
           mode: 'on',
           text: normalizedText || '',

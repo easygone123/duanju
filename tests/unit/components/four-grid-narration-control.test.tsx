@@ -118,6 +118,50 @@ describe('four-grid panel narration control', () => {
     expect(view.getByRole('textbox', { name: 'Emotion' })).toHaveValue('reflective')
   })
 
+  it('saves untouched auto to off with exactly one patch and lets the server initialize the suggestion', async () => {
+    apiFetchMock.mockResolvedValueOnce(response({ success: true, narration: canonical({
+      narrationMode: 'off',
+      narrationText: 'Years later, Ming returned.',
+      narrationEmotion: 'reflective',
+    }) }))
+    const view = renderControl()
+    fireEvent.click(view.getByRole('button', { name: 'Off' }))
+    fireEvent.click(view.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
+    expect(apiFetchMock.mock.calls[0]).toEqual([
+      '/api/novel-promotion/project-1/panels/panel-1/narration',
+      {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'off', locale: 'en', expectedPanelUpdatedAt: '2026-07-20T03:00:00.000Z',
+        }),
+      },
+    ])
+  })
+
+  it('saves untouched auto to on with exactly one patch containing the effective suggestion', async () => {
+    apiFetchMock.mockResolvedValueOnce(response({ success: true, narration: canonical({
+      narrationText: 'Years later, Ming returned.',
+      narrationEmotion: 'reflective',
+    }) }))
+    const view = renderControl()
+    fireEvent.click(view.getByRole('button', { name: 'On' }))
+    fireEvent.click(view.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1))
+    expect(apiFetchMock.mock.calls[0]).toEqual([
+      '/api/novel-promotion/project-1/panels/panel-1/narration',
+      {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'on', text: 'Years later, Ming returned.', emotion: 'reflective', locale: 'en',
+          expectedPanelUpdatedAt: '2026-07-20T03:00:00.000Z',
+        }),
+      },
+    ])
+  })
+
   it('switches to on when either displayed AI field is edited', () => {
     const view = renderControl()
     fireEvent.change(view.getByRole('textbox', { name: 'Emotion' }), { target: { value: 'hopeful' } })
@@ -184,7 +228,19 @@ describe('four-grid panel narration control', () => {
   })
 
   it('preserves the off draft and stops when the draft-persistence step fails', async () => {
-    apiFetchMock.mockResolvedValueOnce(response({ success: false, error: { code: 'INTERNAL_ERROR' } }, 500))
+    apiFetchMock
+      .mockResolvedValueOnce(response({ success: false, error: { code: 'INTERNAL_ERROR' } }, 500))
+      .mockResolvedValueOnce(response({ success: true, narration: canonical({
+        narrationText: 'Unsaved off draft',
+        narrationEmotion: 'reflective',
+        updatedAt: '2026-07-20T03:05:00.000Z',
+      }) }))
+      .mockResolvedValueOnce(response({ success: true, narration: canonical({
+        narrationMode: 'off',
+        narrationText: 'Unsaved off draft',
+        narrationEmotion: 'reflective',
+        updatedAt: '2026-07-20T03:06:00.000Z',
+      }) }))
     const view = renderControl()
     fireEvent.click(view.getByRole('button', { name: 'On' }))
     fireEvent.change(view.getByRole('textbox', { name: 'Narration text' }), { target: { value: 'Unsaved off draft' } })
@@ -197,6 +253,11 @@ describe('four-grid panel narration control', () => {
     expect(view.getByRole('button', { name: 'Off' }).getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(view.getByRole('button', { name: 'On' }))
     expect(view.getByRole('textbox', { name: 'Narration text' })).toHaveValue('Unsaved off draft')
+    fireEvent.click(view.getByRole('button', { name: 'Off' }))
+    fireEvent.click(view.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(3))
+    expect(JSON.parse((apiFetchMock.mock.calls[1]?.[1] as RequestInit).body as string).mode).toBe('on')
+    expect(JSON.parse((apiFetchMock.mock.calls[2]?.[1] as RequestInit).body as string).mode).toBe('off')
   })
 
   it('uses one request when switching off with a draft already stored canonically', async () => {
@@ -221,6 +282,32 @@ describe('four-grid panel narration control', () => {
     })
   })
 
+  it('resets the user-edited flag after a successful canonical adoption', async () => {
+    apiFetchMock
+      .mockResolvedValueOnce(response({ success: true, narration: canonical({
+        narrationText: 'Saved manual draft',
+        narrationEmotion: 'reflective',
+        updatedAt: '2026-07-20T03:05:00.000Z',
+      }) }))
+      .mockResolvedValueOnce(response({ success: true, narration: canonical({
+        narrationMode: 'off',
+        narrationText: 'Saved manual draft',
+        narrationEmotion: 'reflective',
+        updatedAt: '2026-07-20T03:06:00.000Z',
+      }) }))
+    const view = renderControl()
+    fireEvent.change(view.getByRole('textbox', { name: 'Narration text' }), { target: { value: 'Saved manual draft' } })
+    fireEvent.click(view.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(view.getByRole('button', { name: 'Save' })).not.toBeDisabled())
+
+    fireEvent.click(view.getByRole('button', { name: 'Off' }))
+    fireEvent.click(view.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse((apiFetchMock.mock.calls[1]?.[1] as RequestInit).body as string)).toEqual({
+      mode: 'off', locale: 'en', expectedPanelUpdatedAt: '2026-07-20T03:05:00.000Z',
+    })
+  })
+
   it('adopts the persisted on state and preserves the draft when the final off step fails', async () => {
     apiFetchMock
       .mockResolvedValueOnce(response({ success: true, narration: canonical({
@@ -232,6 +319,12 @@ describe('four-grid panel narration control', () => {
         success: false,
         error: { code: 'CONFLICT', details: { code: 'PANEL_NARRATION_STALE' } },
       }, 409))
+      .mockResolvedValueOnce(response({ success: true, narration: canonical({
+        narrationMode: 'off',
+        narrationText: 'Persisted but still on',
+        narrationEmotion: 'reflective',
+        updatedAt: '2026-07-20T03:06:00.000Z',
+      }) }))
     const view = renderControl()
     fireEvent.click(view.getByRole('button', { name: 'On' }))
     fireEvent.change(view.getByRole('textbox', { name: 'Narration text' }), { target: { value: 'Persisted but still on' } })
@@ -243,6 +336,12 @@ describe('four-grid panel narration control', () => {
     expect(view.invalidate).toHaveBeenCalledTimes(4)
     expect(view.getByRole('button', { name: 'On' }).getAttribute('aria-pressed')).toBe('true')
     expect(view.getByRole('textbox', { name: 'Narration text' })).toHaveValue('Persisted but still on')
+    fireEvent.click(view.getByRole('button', { name: 'Off' }))
+    fireEvent.click(view.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(3))
+    expect(JSON.parse((apiFetchMock.mock.calls[2]?.[1] as RequestInit).body as string)).toEqual({
+      mode: 'off', locale: 'en', expectedPanelUpdatedAt: '2026-07-20T03:05:00.000Z',
+    })
   })
 
   it('persists a changed manual draft before auto and restores it after save and query refresh', async () => {
