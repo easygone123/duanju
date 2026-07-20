@@ -12,13 +12,25 @@ import {
   type FourGridPlannedPanel,
   type FourGridSheetAnalysisRow,
 } from '@/lib/novel-promotion/grid-storyboard/sheet-analysis'
+import { syncPanelNarrationVoiceLine } from '@/lib/novel-promotion/narration/sync'
+import { parseNarrationMode } from '@/lib/novel-promotion/narration/state'
 
 type CropArtifact = Pick<SixGridCropArtifact, 'cellIndex' | 'mediaId' | 'url' | 'normalizedCropRect'> & { lineage: unknown }
 type CurrentCropPanel = {
   id: string
+  storyboardId: string
+  storyboard: { episodeId: string }
+  panelIndex: number
   gridCellIndex: number | null
   imageMediaId: string | null
   imageUrl: string | null
+  hasDialogue: boolean
+  narrationMode: string
+  narrationRecommended: boolean
+  narrationSuggestedText: string | null
+  narrationSuggestedEmotion: string | null
+  narrationText: string | null
+  narrationEmotion: string | null
 }
 
 type CropTransactionClient = {
@@ -34,6 +46,13 @@ type CropTransactionClient = {
   }) => Promise<boolean>
   novelPromotionPanel: {
     findMany: (args: unknown) => Promise<CurrentCropPanel[]>
+    findUnique: (args: unknown) => Promise<unknown>
+    update: (args: unknown) => Promise<unknown>
+  }
+  novelPromotionVoiceLine: {
+    findUnique: (args: unknown) => Promise<unknown>
+    aggregate: (args: unknown) => Promise<unknown>
+    create: (args: unknown) => Promise<unknown>
     update: (args: unknown) => Promise<unknown>
   }
 }
@@ -49,6 +68,7 @@ export async function commitSixGridCropBatch(input: {
   userId?: string
   projectId?: string
   episodeId?: string
+  locale?: 'zh' | 'en'
   artifacts: CropArtifact[]
   panelAnalysis?: FourGridSheetAnalysisRow[]
 }, dependencies: { transaction?: Transaction } = {}) {
@@ -64,6 +84,7 @@ export async function commitSixGridCropBatch(input: {
       || input.panelAnalysis.some((row, index) => row.panel_number !== index + 1))) {
     throw new Error('FOUR_GRID_SHEET_ANALYSIS_INVALID')
   }
+  if (input.panelAnalysis && !input.locale) throw new Error('FOUR_GRID_NARRATION_LOCALE_REQUIRED')
   const runTransaction = dependencies.transaction ?? defaultCropTransaction
   await runTransaction(async (tx) => {
     const locked = await tx.lockStoryboard({
@@ -79,7 +100,22 @@ export async function commitSixGridCropBatch(input: {
     if (!locked) throw new Error('SIX_GRID_SOURCE_STALE')
     const currentPanels = await tx.novelPromotionPanel.findMany({
       where: { storyboardId: input.storyboardId },
-      select: { id: true, gridCellIndex: true, imageMediaId: true, imageUrl: true },
+      select: {
+        id: true,
+        storyboardId: true,
+        storyboard: { select: { episodeId: true } },
+        panelIndex: true,
+        gridCellIndex: true,
+        imageMediaId: true,
+        imageUrl: true,
+        hasDialogue: true,
+        narrationMode: true,
+        narrationRecommended: true,
+        narrationSuggestedText: true,
+        narrationSuggestedEmotion: true,
+        narrationText: true,
+        narrationEmotion: true,
+      },
     })
     if (currentPanels.length !== gridSpec.panelCount) throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
     const currentByCell = new Map(currentPanels.map((panel) => [panel.gridCellIndex, panel]))
@@ -87,6 +123,7 @@ export async function commitSixGridCropBatch(input: {
       const previous = currentByCell.get(artifact.cellIndex)
       if (!previous) throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
       const analysis = input.panelAnalysis?.[artifact.cellIndex]
+      const narrationMode = analysis ? parseNarrationMode(previous.narrationMode) : undefined
       await tx.novelPromotionPanel.update({
         where: { id: previous.id },
         data: {
@@ -110,9 +147,28 @@ export async function commitSixGridCropBatch(input: {
             duration: analysis.duration,
             estimatedDuration: analysis.duration,
             durationOverride: null,
+            narrationRecommended: analysis.narration_recommended,
+            narrationSuggestedText: analysis.narration_text,
+            narrationSuggestedEmotion: analysis.narration_emotion,
           } : {}),
         },
       })
+      if (analysis && narrationMode) {
+        await syncPanelNarrationVoiceLine({
+          tx: tx as unknown as Prisma.TransactionClient,
+          episodeId: previous.storyboard.episodeId,
+          panelId: previous.id,
+          storyboardId: previous.storyboardId,
+          panelIndex: previous.panelIndex,
+          locale: input.locale!,
+          mode: narrationMode,
+          recommended: analysis.narration_recommended,
+          suggestedText: analysis.narration_text,
+          suggestedEmotion: analysis.narration_emotion,
+          text: previous.narrationText,
+          emotion: previous.narrationEmotion,
+        })
+      }
     }
   })
 }
@@ -170,8 +226,25 @@ const defaultCropTransaction: Transaction = async (callback) => prisma.$transact
       findMany: (args) => tx.novelPromotionPanel.findMany(
         args as Prisma.NovelPromotionPanelFindManyArgs,
       ) as unknown as Promise<CurrentCropPanel[]>,
+      findUnique: (args) => tx.novelPromotionPanel.findUnique(
+        args as Prisma.NovelPromotionPanelFindUniqueArgs,
+      ),
       update: (args) => tx.novelPromotionPanel.update(
         args as Prisma.NovelPromotionPanelUpdateArgs,
+      ),
+    },
+    novelPromotionVoiceLine: {
+      findUnique: (args) => tx.novelPromotionVoiceLine.findUnique(
+        args as Prisma.NovelPromotionVoiceLineFindUniqueArgs,
+      ),
+      aggregate: (args) => tx.novelPromotionVoiceLine.aggregate(
+        args as Prisma.NovelPromotionVoiceLineAggregateArgs,
+      ),
+      create: (args) => tx.novelPromotionVoiceLine.create(
+        args as Prisma.NovelPromotionVoiceLineCreateArgs,
+      ),
+      update: (args) => tx.novelPromotionVoiceLine.update(
+        args as Prisma.NovelPromotionVoiceLineUpdateArgs,
       ),
     },
   })
@@ -264,6 +337,7 @@ export async function handleStoryboardCropTask(job: Job<TaskJobData>) {
     userId: job.data.userId,
     projectId: snapshot.projectId,
     episodeId: snapshot.episodeId,
+    locale: snapshot.locale,
     artifacts,
     panelAnalysis,
   })
