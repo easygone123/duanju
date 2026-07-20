@@ -10,6 +10,8 @@ import { hasPanelImageOutput } from '@/lib/task/has-output'
 import { withTaskUiPayload } from '@/lib/task/ui-payload'
 import { buildImageBillingPayload, getProjectModelConfig } from '@/lib/config-service'
 import { resolveModelSelection } from '@/lib/api-config'
+import { prisma } from '@/lib/prisma'
+import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 const DEFAULT_CANDIDATE_COUNT = 1
 const generationOptionsSchema = z.object({
@@ -46,6 +48,31 @@ export const POST = apiHandler(async (
   const count = body.count
   const candidateCount = Math.max(1, Math.min(4, Number(count ?? DEFAULT_CANDIDATE_COUNT)))
 
+  const panel = await prisma.novelPromotionPanel.findFirst({
+    where: {
+      id: panelId,
+      storyboard: {
+        episode: {
+          novelPromotionProject: {
+            projectId,
+            project: { userId: session.user.id },
+          },
+        },
+      },
+    },
+    select: {
+      id: true,
+      storyboard: { select: { layoutMode: true } },
+    },
+  })
+  if (!panel) throw new ApiError('NOT_FOUND')
+  if (isGridStoryboardMode(panel.storyboard.layoutMode)) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'GRID_PANEL_INDIVIDUAL_GENERATION_UNSUPPORTED',
+      field: 'panelId',
+    })
+  }
+
   const requestedImageModel = body.imageModel
   const projectModelConfig = await getProjectModelConfig(projectId, session.user.id, {
     imageModel: requestedImageModel,
@@ -81,7 +108,7 @@ export const POST = apiHandler(async (
     })
   }
 
-  const hasOutputAtStart = await hasPanelImageOutput(panelId)
+  const hasOutputAtStart = await hasPanelImageOutput(panel.id)
 
   const result = await submitTask({
     userId: session.user.id,
@@ -90,11 +117,11 @@ export const POST = apiHandler(async (
     projectId,
     type: TASK_TYPE.IMAGE_PANEL,
     targetType: 'NovelPromotionPanel',
-    targetId: panelId,
+    targetId: panel.id,
     payload: withTaskUiPayload(billingPayload, {
       intent: 'regenerate',
       hasOutputAtStart}),
-    dedupeKey: `image_panel:${panelId}:${candidateCount}`,
+    dedupeKey: `image_panel:${panel.id}:${candidateCount}`,
     billingInfo: buildDefaultTaskBillingInfo(TASK_TYPE.IMAGE_PANEL, billingPayload)})
 
   return NextResponse.json(result)
