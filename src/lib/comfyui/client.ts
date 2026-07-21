@@ -55,7 +55,11 @@ export interface ComfyClientOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
-const DEFAULT_MAX_JSON_BYTES = 4 * 1024 * 1024
+// ComfyUI's /object_info response grows with every installed custom-node pack.
+// Real-world installations can exceed 4 MiB even though the server is healthy;
+// rejecting that response made workflow compatibility checks report the node as
+// offline and left generation requests waiting for capacity forever.
+const DEFAULT_MAX_JSON_BYTES = 16 * 1024 * 1024
 const DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024 * 1024
 const DEFAULT_MAX_ERROR_BYTES = 8 * 1024
 const DEFAULT_MAX_WORKFLOW_BYTES = 4 * 1024 * 1024

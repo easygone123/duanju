@@ -1,6 +1,6 @@
 import { logInfo as _ulogInfo } from '@/lib/logging/core'
 import { NextRequest } from 'next/server'
-import { getSignedUrl, toFetchableUrl } from '@/lib/storage'
+import { getInternalObjectUrl } from '@/lib/storage'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { prisma } from '@/lib/prisma'
@@ -37,12 +37,15 @@ export const GET = apiHandler(async (
     })
     if (!ownedPanel) throw new ApiError('NOT_FOUND')
 
-    // 生成签名 URL 并下载
+    // Use the provider's internal endpoint for storage keys. Going through the
+    // public signing route can redirect a server-side request to a browser-only
+    // hostname (for example localhost:19000), which makes Docker deployments
+    // fail to proxy otherwise valid videos.
     let fetchUrl: string
     if (videoKey.startsWith('http://') || videoKey.startsWith('https://')) {
         fetchUrl = videoKey
     } else {
-        fetchUrl = toFetchableUrl(getSignedUrl(videoKey, 3600))
+        fetchUrl = await getInternalObjectUrl(videoKey, 3600)
     }
 
     _ulogInfo(`[视频代理] 下载: ${fetchUrl.substring(0, 100)}...`)
