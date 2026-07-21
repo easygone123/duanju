@@ -26,6 +26,7 @@ import { useGridStoryboard } from '@/lib/query/hooks/useSixGridStoryboard'
 import type { GridUpscaleWorkflow } from '../GridGroupControls'
 import type { CropEntry } from '../GridCropModal'
 import { TASK_TYPE } from '@/lib/task/types'
+import type { FourGridSheetSize } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 interface UseStoryboardStageControllerProps {
   projectId: string
@@ -204,8 +205,8 @@ export function useStoryboardStageController({
     isTransitioning,
   })
 
-  const generateSixGridSheet = useCallback((storyboardId: string) => {
-    gridTasks.sheet.mutate({ operation: 'generate', episodeId, storyboardId })
+  const generateSixGridSheet = useCallback((storyboardId: string, sheetSize?: FourGridSheetSize) => {
+    gridTasks.sheet.mutate({ operation: 'generate', episodeId, storyboardId, sheetSize })
   }, [episodeId, gridTasks.sheet])
   const upscaleSixGridSheet = useCallback((storyboardId: string, workflow: GridUpscaleWorkflow) => {
     gridTasks.sheet.mutate({

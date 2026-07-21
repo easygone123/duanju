@@ -12,11 +12,16 @@ import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { collectSixGridReferenceInputs } from '@/lib/novel-promotion/six-grid/reference-inputs'
 import { COMFY_REFERENCE_UPLOAD_LIMIT } from '@/lib/comfyui/types'
 import { getArtStylePrompt } from '@/lib/constants'
+import {
+  FOUR_GRID_SHEET_SIZES,
+  isFourGridSheetSizeForRatio,
+} from '@/lib/novel-promotion/grid-storyboard/spec'
 
 const schema = z.object({
   operation: z.enum(['generate', 'upscale']), episodeId: z.string().trim().min(1).max(200), storyboardId: z.string().trim().min(1).max(200),
   imageModel: z.string().trim().min(1).max(500).optional(), workflowId: z.string().trim().min(1).max(200).optional(), workflowVersionId: z.string().trim().min(1).max(200).optional(),
   prompt: z.string().max(50_000).optional(),
+  sheetSize: z.enum(FOUR_GRID_SHEET_SIZES).optional(),
   locale: z.string().max(20).optional(), meta: z.object({ locale: z.string().max(20).optional() }).strict().optional(),
 }).strict()
 
@@ -32,6 +37,17 @@ function resolveComfyReferenceCapacity(variableDefinitions: unknown): number {
   return typeof definition.maxItems === 'number' && Number.isInteger(definition.maxItems)
     ? Math.max(1, Math.min(COMFY_REFERENCE_UPLOAD_LIMIT, definition.maxItems))
     : COMFY_REFERENCE_UPLOAD_LIMIT
+}
+
+function supportsComfySheetSize(variableDefinitions: unknown): boolean {
+  if (!Array.isArray(variableDefinitions)) return false
+  const numericNames = new Set(variableDefinitions.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return []
+    const value = candidate as Record<string, unknown>
+    if (value.type !== 'number' || typeof value.name !== 'string') return []
+    return [value.name.replace(/[-_]/g, '').toLowerCase()]
+  }))
+  return numericNames.has('width') && numericNames.has('height')
 }
 
 export const POST = apiHandler(async (request: NextRequest, context: { params: Promise<{ projectId: string }> }) => {
@@ -61,7 +77,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
       )
     : null
   const model = operation === 'generate'
-    ? body.imageModel || storyboard.sheetModelSnapshot || projectModelConfig?.storyboardModel
+    ? body.imageModel || projectModelConfig?.storyboardModel || storyboard.sheetModelSnapshot
     : `comfyui::${workflow!.workflow.id}`
   const basePrompt = body.prompt ?? storyboard.sheetPromptSnapshot
   const artStylePrompt = operation === 'generate'
@@ -72,13 +88,6 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     : basePrompt
   if (!model || !prompt) throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_SHEET_SNAPSHOT_MISSING' })
   const parsedModel = parseModelKeyStrict(model)
-  if (operation === 'generate'
-    && !body.imageModel
-    && storyboard.sheetModelSnapshot
-    && parsedModel?.provider === 'comfyui'
-    && parsedModel.modelKey !== parseModelKeyStrict(projectModelConfig?.storyboardModel)?.modelKey) {
-    throw new ApiError('INVALID_PARAMS', { code: 'GENERATION_WORKFLOW_NOT_FOUND', field: 'imageModel' })
-  }
   const configuredWorkflowVersionId = operation === 'generate' && projectModelConfig
     ? resolveProjectComfyWorkflowVersion(projectModelConfig, model, 'image') ?? undefined
     : undefined
@@ -91,6 +100,21 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
   }
   const source = operation === 'sheet_upscale' ? storyboard.sheetImageMedia! : null
   const sheetAspectRatio = storyboard.gridSpec.sheetAspectRatio
+  if (body.sheetSize && (storyboard.gridSpec.mode !== 'four_grid'
+    || !isFourGridSheetSizeForRatio(body.sheetSize, storyboard.gridSpec.cellAspectRatio))) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'FOUR_GRID_SHEET_SIZE_INVALID',
+      field: 'sheetSize',
+    })
+  }
+  if (body.sheetSize && parsedModel?.provider === 'comfyui'
+    && !supportsComfySheetSize(workflow?.version.variableDefinitions)) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'FOUR_GRID_SHEET_SIZE_UNSUPPORTED',
+      field: 'sheetSize',
+      message: 'The selected ComfyUI workflow must map both width and height to use an explicit sheet size.',
+    })
+  }
   let resolvedGenerationOptions: Record<string, string | number | boolean> = { aspectRatio: sheetAspectRatio }
   if (operation === 'generate') {
     try {
@@ -112,6 +136,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
         },
       })
     }
+    if (body.sheetSize) resolvedGenerationOptions.size = body.sheetSize
   }
   const collectedReferenceImages = operation === 'generate'
     ? await collectSixGridReferenceInputs({ projectId, panels: storyboard.panels })

@@ -237,19 +237,35 @@ describe('six-grid route/task registration contract', () => {
     capabilityMock.mockResolvedValueOnce({ aspectRatio: '16:9' })
 
     const response = await callRoute(route.POST, 'POST', {
-      operation: 'generate', episodeId: 'episode-1', storyboardId: 'storyboard-1', imageModel: 'openai::image-1', locale: 'zh',
+      operation: 'generate', episodeId: 'episode-1', storyboardId: 'storyboard-1', imageModel: 'openai::image-1', sheetSize: '1536x864', locale: 'zh',
     }, { params: { projectId: 'project-1' } })
 
     expect(response.status).toBe(200)
     expect(capabilityMock).toHaveBeenCalledWith(expect.objectContaining({ taskSelections: { aspectRatio: '16:9' } }))
     expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
       payload: expect.objectContaining({
+        generationOptions: expect.objectContaining({ size: '1536x864' }),
         gridSpec: {
           version: 1, mode: 'four_grid', columns: 2, rows: 2, panelCount: 4,
           cellAspectRatio: '16:9', sheetAspectRatio: '16:9',
         },
       }),
     }))
+  })
+
+  it('rejects a four-grid sheet size whose orientation does not match the storyboard', async () => {
+    const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-sheet/route')
+    prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce(storyboardFixture('four_grid'))
+    const response = await callRoute(route.POST, 'POST', {
+      operation: 'generate', episodeId: 'episode-1', storyboardId: 'storyboard-1',
+      imageModel: 'openai::image-1', sheetSize: '864x1536', locale: 'zh',
+    }, { params: { projectId: 'project-1' } })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({
+      error: { details: { code: 'FOUR_GRID_SHEET_SIZE_INVALID', field: 'sheetSize' } },
+    })
+    expect(submitTaskMock).not.toHaveBeenCalled()
   })
 
   it('accepts a four-grid panel index from 0 through 3 and rejects out-of-range groups', async () => {

@@ -9,11 +9,13 @@ import { clearTaskTargetOverlay, upsertTaskTargetOverlay } from '@/lib/query/tas
 import { invalidateEpisodeStageQueries } from '@/lib/query/episode-stage-cache'
 import { TASK_TYPE } from '@/lib/task/types'
 import type { NormalizedCropRect } from '@/types/project'
+import type { FourGridSheetSize } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 type CropEntry = { cellIndex: number; normalizedCropRect: NormalizedCropRect }
 type SheetTaskInput = {
   operation: 'generate' | 'upscale'; episodeId: string; storyboardId: string
   imageModel?: string; workflowId?: string; workflowVersionId?: string; prompt?: string
+  sheetSize?: FourGridSheetSize
 }
 export type SheetUploadInput = {
   file: File

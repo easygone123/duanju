@@ -6,7 +6,12 @@ import { useTranslations } from 'next-intl'
 import { AppIcon } from '@/components/ui/icons'
 import type { NovelPromotionStoryboard } from '@/types/project'
 import { Link } from '@/i18n/navigation'
-import { isGridStoryboardMode, resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
+import {
+  isGridStoryboardMode,
+  resolveFourGridSheetSize,
+  resolveStoryboardGridSpec,
+} from '@/lib/novel-promotion/grid-storyboard/spec'
+import type { FourGridSheetSize } from '@/lib/novel-promotion/grid-storyboard/spec'
 import { toDisplayImageUrl } from '@/lib/media/image-url'
 import { TASK_TYPE } from '@/lib/task/types'
 
@@ -22,7 +27,7 @@ export interface GridGroupControlsProps {
   activeTaskType?: string | null
   upscaleWorkflow: GridUpscaleWorkflow | null
   generationError?: string | null
-  onGenerateSheet: () => void
+  onGenerateSheet: (sheetSize?: FourGridSheetSize) => void
   onPreviewSheet: (url: string) => void
   onUpscaleSheet: (workflow: GridUpscaleWorkflow) => void
   onOpenCrop: () => void
@@ -52,6 +57,7 @@ export default function GridGroupControls({
   translationNamespace = 'storyboard.grid',
 }: GridGroupControlsProps) {
   const t = useTranslations(translationNamespace)
+  const [sheetLongEdge, setSheetLongEdge] = React.useState<1280 | 1536 | 2560>(1536)
   if (!isGridStoryboardMode(storyboard.layoutMode)) return null
 
   const mode = storyboard.layoutMode
@@ -90,6 +96,9 @@ export default function GridGroupControls({
   const errorMessage = generationError && mode === 'six_grid' && includesUnsupportedRatio(generationError)
     ? t('sixGridRatioUnsupported')
     : generationError
+  const selectedSheetSize = mode === 'four_grid'
+    ? resolveFourGridSheetSize(cellRatio, sheetLongEdge)
+    : undefined
 
   return (
     <section className="mb-4 min-w-0 rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-3" aria-label={title}>
@@ -136,6 +145,26 @@ export default function GridGroupControls({
         </button>
       ) : null}
 
+      {mode === 'four_grid' && (
+        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2 text-xs">
+          <label htmlFor={`four-grid-sheet-size-${storyboard.id}`} className="font-medium text-[var(--glass-text-secondary)]">
+            {t('sheetSizeLabel')}
+          </label>
+          <select
+            id={`four-grid-sheet-size-${storyboard.id}`}
+            className="glass-input-base min-w-44 rounded-lg px-2 py-1.5 text-xs"
+            value={sheetLongEdge}
+            disabled={isTaskRunning}
+            onChange={(event) => setSheetLongEdge(Number(event.target.value) as 1280 | 1536 | 2560)}
+          >
+            <option value={1280}>{resolveFourGridSheetSize(cellRatio, 1280).replace('x', '×')} · {t('sheetSize.standard')}</option>
+            <option value={1536}>{resolveFourGridSheetSize(cellRatio, 1536).replace('x', '×')} · {t('sheetSize.recommended')}</option>
+            <option value={2560}>{resolveFourGridSheetSize(cellRatio, 2560).replace('x', '×')} · {t('sheetSize.high')}</option>
+          </select>
+          <span className="text-[var(--glass-text-tertiary)]">{t('sheetSizeHint')}</span>
+        </div>
+      )}
+
       <div className="mt-3 flex min-w-0 flex-wrap gap-2">
         <button type="button" className="glass-btn-base glass-btn-secondary rounded-lg px-3 py-1.5 text-xs" onClick={onViewPrompt}>
           <AppIcon name="eye" className="h-3.5 w-3.5" />
@@ -151,7 +180,7 @@ export default function GridGroupControls({
           disabled={isTaskRunning}
           aria-busy={isTaskRunning}
           title={isTaskRunning ? runningStatus : undefined}
-          onClick={onGenerateSheet}
+          onClick={() => onGenerateSheet(selectedSheetSize)}
         >
           <AppIcon name="imagePreview" className="h-3.5 w-3.5" />
           {generateLabel}

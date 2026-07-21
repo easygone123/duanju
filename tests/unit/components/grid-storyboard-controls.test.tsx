@@ -45,6 +45,9 @@ const messages = {
     generateSheet: { four_grid: 'Generate 2x2 four-grid', six_grid: 'Generate 3x2 six-grid' },
     regenerateSheet: { four_grid: 'Regenerate 2x2 four-grid', six_grid: 'Regenerate 3x2 six-grid' },
     viewPrompt: 'View prompt', uploadSheet: 'Upload grid sheet',
+    sheetSizeLabel: 'Four-grid sheet size',
+    sheetSizeHint: 'Larger sheets produce sharper crops but take longer to generate.',
+    sheetSize: { standard: 'Standard', recommended: 'Recommended', high: 'High quality' },
     sheetPreviewAlt: 'Grid sheet preview', upscaleSheet: 'Upscale sheet', crop: 'Crop panels',
     orders: { sheet_upscale_then_crop: 'Upscale sheet then crop', crop_then_panel_upscale: 'Crop then upscale panels' },
     sourceLabel: 'Current source', sourceOriginal: 'Original sheet', sourceUpscaled: 'Upscaled sheet', sourceMissing: 'No sheet',
@@ -145,6 +148,24 @@ describe('generic grid group controls', () => {
     expect(six.getByRole('button', { name: 'Regenerate 3x2 six-grid' })).toBeTruthy()
     expect(six.getByRole('img', { name: 'Grid sheet preview' }).getAttribute('src')).toContain('/media/owned-sheet.webp')
     expect(six.queryByRole('button', { name: /preview original/i })).toBeNull()
+  })
+
+  it('submits the selected four-grid sheet size and hides the setting for six-grid', () => {
+    const onGenerateSheet = vi.fn()
+    const four = render(withIntl(<GridGroupControls
+      storyboard={storyboard('four_grid', { sheetImageUrl: null })}
+      {...controlProps}
+      onGenerateSheet={onGenerateSheet}
+    />))
+    const size = four.getByRole('combobox', { name: 'Four-grid sheet size' }) as HTMLSelectElement
+    expect(size.value).toBe('1536')
+    fireEvent.change(size, { target: { value: '2560' } })
+    fireEvent.click(four.getByRole('button', { name: 'Generate 2x2 four-grid' }))
+    expect(onGenerateSheet).toHaveBeenCalledWith('2560x1440')
+    four.unmount()
+
+    const six = render(withIntl(<GridGroupControls storyboard={storyboard('six_grid')} {...controlProps} />))
+    expect(six.queryByRole('combobox', { name: 'Four-grid sheet size' })).toBeNull()
   })
 
   it('recommends four-grid for a six-grid model-ratio failure', () => {

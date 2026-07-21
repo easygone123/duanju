@@ -330,7 +330,7 @@ describe('six-grid task requests and cache scope', () => {
   })
 
   it('builds the three Task 8 endpoint payloads without project-wide invalidation keys', () => {
-    expect(buildSheetTaskRequest('project-1', { operation: 'generate', episodeId: 'episode-1', storyboardId: 'storyboard-1' })).toMatchObject({
+    expect(buildSheetTaskRequest('project-1', { operation: 'generate', episodeId: 'episode-1', storyboardId: 'storyboard-1', sheetSize: '1536x864' })).toMatchObject({
       endpoint: '/api/novel-promotion/project-1/storyboard-sheet', body: { operation: 'generate' },
     })
     expect(buildSheetCropRequest('project-1', { episodeId: 'episode-1', storyboardId: 'storyboard-1', cropRects: resetCropRects() }).endpoint)

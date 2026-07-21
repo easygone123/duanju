@@ -398,6 +398,13 @@
         },
         "viewPrompt": "View prompt",
         "uploadSheet": "Upload grid sheet",
+        "sheetSizeLabel": "Four-grid sheet size",
+        "sheetSizeHint": "Larger sheets produce sharper crops but take longer to generate.",
+        "sheetSize": {
+            "standard": "Standard",
+            "recommended": "Recommended",
+            "high": "High quality"
+        },
         "generationFailed": "Generation failed: {message}",
         "sixGridRatioUnsupported": "The selected model does not support the six-grid sheet ratio. Switch to four-grid or change the image model.",
         "sheetPreviewAlt": "Storyboard sheet preview",

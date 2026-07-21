@@ -398,6 +398,13 @@
         },
         "viewPrompt": "查看提示词",
         "uploadSheet": "上传宫格整图",
+        "sheetSizeLabel": "四宫格整图尺寸",
+        "sheetSizeHint": "尺寸越大，裁剪后的单格越清晰，但生成更慢。",
+        "sheetSize": {
+            "standard": "标准",
+            "recommended": "推荐",
+            "high": "高清"
+        },
         "generationFailed": "生成失败：{message}",
         "sixGridRatioUnsupported": "当前模型不支持六宫格整图比例，请切换四宫格或更换生图模型。",
         "sheetPreviewAlt": "故事板整图预览",

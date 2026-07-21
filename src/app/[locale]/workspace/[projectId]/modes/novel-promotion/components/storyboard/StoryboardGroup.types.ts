@@ -6,6 +6,7 @@ import type { PanelSaveState } from './hooks/usePanelCrudActions'
 import type { ImageTaskCapabilityOverrides } from '@/lib/model-config-contract'
 import type { GridUpscaleWorkflow } from './GridGroupControls'
 import type { CropEntry } from './GridCropModal'
+import type { FourGridSheetSize } from '@/lib/novel-promotion/grid-storyboard/spec'
 
 export interface StoryboardGroupProps {
   storyboard: NovelPromotionStoryboard
@@ -72,7 +73,7 @@ export interface StoryboardGroupProps {
   sixGridTaskType?: string | null
   sixGridTaskPanelId: string | null
   sixGridGenerationError: string | null
-  onGenerateSixGridSheet: () => void
+  onGenerateSixGridSheet: (sheetSize?: FourGridSheetSize) => void
   onUpscaleSixGridSheet: (workflow: GridUpscaleWorkflow) => void
   onCropSixGridSheet: (cropRects: CropEntry[]) => Promise<unknown>
   onUploadSixGridSheet: (file: File, expectedSheetArtifactVersion: number) => Promise<unknown>

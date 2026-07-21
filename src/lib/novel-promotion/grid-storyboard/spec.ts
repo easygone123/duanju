@@ -2,6 +2,45 @@ export type GridStoryboardMode = 'four_grid' | 'six_grid'
 
 export type GridCellAspectRatio = '16:9' | '9:16'
 
+export const FOUR_GRID_SHEET_SIZES = [
+  '1280x720',
+  '1536x864',
+  '2560x1440',
+  '720x1280',
+  '864x1536',
+  '1440x2560',
+] as const
+
+export type FourGridSheetSize = (typeof FOUR_GRID_SHEET_SIZES)[number]
+
+export const DEFAULT_FOUR_GRID_SHEET_LONG_EDGE = 1536
+
+export function resolveFourGridSheetSize(
+  cellAspectRatio: GridCellAspectRatio,
+  longEdge: 1280 | 1536 | 2560 = DEFAULT_FOUR_GRID_SHEET_LONG_EDGE,
+): FourGridSheetSize {
+  const landscape = {
+    1280: '1280x720',
+    1536: '1536x864',
+    2560: '2560x1440',
+  } as const
+  const portrait = {
+    1280: '720x1280',
+    1536: '864x1536',
+    2560: '1440x2560',
+  } as const
+  return cellAspectRatio === '9:16' ? portrait[longEdge] : landscape[longEdge]
+}
+
+export function isFourGridSheetSizeForRatio(
+  value: unknown,
+  cellAspectRatio: GridCellAspectRatio,
+): value is FourGridSheetSize {
+  return value === resolveFourGridSheetSize(cellAspectRatio, 1280)
+    || value === resolveFourGridSheetSize(cellAspectRatio, 1536)
+    || value === resolveFourGridSheetSize(cellAspectRatio, 2560)
+}
+
 export type StoryboardGridSpec = {
   mode: GridStoryboardMode
   columns: 2 | 3
