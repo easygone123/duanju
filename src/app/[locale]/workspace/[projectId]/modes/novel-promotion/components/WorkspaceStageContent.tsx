@@ -22,6 +22,7 @@ export const workspaceStageLoaders = {
   storyboard: () => import('./StoryboardStage'),
   videos: () => import('./VideoStageRoute'),
   voice: () => import('./VoiceStageRoute'),
+  editor: () => import('./EditorStageRoute'),
 }
 
 export function WorkspaceStageLoadingFallback({
@@ -64,6 +65,7 @@ export function createWorkspaceStageComponents(
     storyboard: dynamic(loaders.storyboard as Loader, { loading: WorkspaceStageLoadingFallback }),
     videos: dynamic(loaders.videos as Loader, { loading: WorkspaceStageLoadingFallback }),
     voice: dynamic(loaders.voice as Loader, { loading: WorkspaceStageLoadingFallback }),
+    editor: dynamic(loaders.editor as Loader, { loading: WorkspaceStageLoadingFallback }),
   }
 }
 

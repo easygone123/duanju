@@ -29,6 +29,7 @@ describe('workspace stage dynamic loading recovery', () => {
       storyboard: idleLoader,
       videos: idleLoader,
       voice: idleLoader,
+      editor: idleLoader,
     }
 
     const view = render(React.createElement(WorkspaceStageCache, {

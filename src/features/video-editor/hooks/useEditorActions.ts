@@ -12,13 +12,25 @@ interface UseEditorActionsProps {
 /**
  * 面板数据类型（灵活接受各种格式）
  */
-interface PanelData {
+export interface PanelData {
     id?: string
     panelIndex?: number
     storyboardId: string
     videoUrl?: string
     description?: string
     duration?: number
+    hasEmbeddedDialogueAudio?: boolean
+}
+
+export interface EditorVoiceLineData {
+    id: string
+    speaker: string
+    content: string
+    audioUrl?: string | null
+    lineType?: 'dialogue' | 'narration'
+    matchedPanelId?: string | null
+    matchedStoryboardId?: string | null
+    matchedPanelIndex?: number | null
 }
 
 /**
@@ -27,33 +39,47 @@ interface PanelData {
 export function createProjectFromPanels(
     episodeId: string,
     panels: PanelData[],
-    voiceLines?: Array<{ id: string; speaker: string; content: string; audioUrl?: string | null }>
+    voiceLines?: EditorVoiceLineData[]
 ): VideoEditorProject {
     // 过滤出有视频的面板
     const videoPanels = panels.filter(p => p.videoUrl)
 
     // 创建视频片段
     const timeline: VideoClip[] = videoPanels.map((panel, index) => {
-        // 查找匹配的配音（简单匹配：按索引）
-        const matchedVoice = voiceLines?.[index]
+        const nextPanel = videoPanels[index + 1]
+        const matchedVoices = voiceLines?.filter((voiceLine) => {
+            if (panel.id && voiceLine.matchedPanelId) {
+                return voiceLine.matchedPanelId === panel.id
+            }
+            return voiceLine.matchedStoryboardId === panel.storyboardId
+                && voiceLine.matchedPanelIndex === panel.panelIndex
+        }) || []
+        const subtitleText = matchedVoices
+            .map((voiceLine) => voiceLine.content.trim())
+            .filter(Boolean)
+            .join('\n')
+        const attachedVoice = matchedVoices.find((voiceLine) => (
+            !!voiceLine.audioUrl
+            && (voiceLine.lineType === 'narration' || !panel.hasEmbeddedDialogueAudio)
+        ))
 
         return {
             id: `clip_${panel.id || panel.storyboardId}_${panel.panelIndex ?? index}`,
             src: panel.videoUrl!,
             durationInFrames: Math.round((panel.duration || 3) * 30), // 默认 3 秒，30fps
             attachment: {
-                audio: matchedVoice?.audioUrl ? {
-                    src: matchedVoice.audioUrl,
+                audio: attachedVoice?.audioUrl ? {
+                    src: attachedVoice.audioUrl,
                     volume: 1,
-                    voiceLineId: matchedVoice.id
+                    voiceLineId: attachedVoice.id
                 } : undefined,
-                subtitle: matchedVoice ? {
-                    text: matchedVoice.content,
+                subtitle: subtitleText ? {
+                    text: subtitleText,
                     style: 'default' as const
                 } : undefined
             },
-            transition: index < videoPanels.length - 1 ? {
-                type: 'dissolve' as const,
+            transition: nextPanel ? {
+                type: nextPanel.storyboardId === panel.storyboardId ? 'dissolve' as const : 'fade' as const,
                 durationInFrames: 15 // 0.5s @ 30fps
             } : undefined,
             metadata: {
@@ -86,7 +112,7 @@ export function useEditorActions({ projectId, episodeId }: UseEditorActionsProps
         const response = await apiFetch(`/api/novel-promotion/${projectId}/editor`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectData: project })
+            body: JSON.stringify({ episodeId, projectData: project })
         })
 
         if (!response.ok) {
@@ -94,7 +120,7 @@ export function useEditorActions({ projectId, episodeId }: UseEditorActionsProps
         }
 
         return response.json()
-    }, [projectId])
+    }, [episodeId, projectId])
 
     /**
      * 加载项目

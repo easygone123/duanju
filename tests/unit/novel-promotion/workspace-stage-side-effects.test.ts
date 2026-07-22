@@ -51,6 +51,7 @@ function stageComponents(config: React.ComponentType): WorkspaceStageComponentMa
     storyboard: EmptyStage,
     videos: EmptyStage,
     voice: EmptyStage,
+    editor: EmptyStage,
   }
 }
 

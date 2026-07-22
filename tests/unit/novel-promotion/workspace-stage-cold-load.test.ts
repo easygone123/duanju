@@ -14,6 +14,7 @@ const coldLoads = vi.hoisted(() => ({
   storyboard: 0,
   videos: 0,
   voice: 0,
+  editor: 0,
 }))
 
 function coldStageModule(stage: keyof typeof coldLoads) {
@@ -30,6 +31,7 @@ vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/S
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/StoryboardStage', () => coldStageModule('storyboard'))
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/VideoStageRoute', () => coldStageModule('videos'))
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/VoiceStageRoute', () => coldStageModule('voice'))
+vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/EditorStageRoute', () => coldStageModule('editor'))
 
 afterEach(() => {
   cleanup()
@@ -51,6 +53,7 @@ describe('WorkspaceStageContent cold dynamic boundary', () => {
       storyboard: 0,
       videos: 0,
       voice: 0,
+      editor: 0,
     })
   })
 })

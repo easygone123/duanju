@@ -166,17 +166,28 @@
       "saveSuccess": "Saved successfully",
       "saveFailed": "Save failed",
       "exportStarted": "Export has started. Please wait...",
+      "exportSuccess": "Editing project exported",
       "exportFailed": "Export failed"
     },
     "toolbar": {
       "back": "← Back",
       "saveDirty": "Save *",
       "saved": "Saved",
-      "export": "Export Video"
+      "export": "Export Video",
+      "exportProject": "Export Edit Project",
+      "brand": "AI Timeline · OpenCut style",
+      "autoArrange": "Auto-arrange All Shots",
+      "autoArrangeConfirm": "Rebuilding the timeline will replace unsaved edits. Continue?",
+      "importedCount": "Timeline {current}/{total} shots"
     },
     "left": {
       "title": "Media Library",
-      "description": "Clips imported from the video stage will appear here"
+      "description": "All generated videos are loaded in story order. Click an excluded shot to add it back to the timeline.",
+      "clipName": "Shot {index}",
+      "noDescription": "No shot description",
+      "added": "Added to timeline",
+      "clickToAdd": "Click to add",
+      "noGeneratedVideos": "No editable videos yet. Generate storyboard videos on the Video stage first."
     },
     "right": {
       "title": "Properties",

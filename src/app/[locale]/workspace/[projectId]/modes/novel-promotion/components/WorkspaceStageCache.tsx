@@ -9,6 +9,7 @@ export const CANONICAL_WORKSPACE_STAGES = [
   'storyboard',
   'videos',
   'voice',
+  'editor',
 ] as const
 
 export const MAX_WORKSPACE_STAGE_SHELLS = 3
@@ -39,7 +40,6 @@ interface WorkspaceStageCacheProps {
 
 const WORKSPACE_STAGE_ALIASES: Record<string, CanonicalWorkspaceStage> = {
   assets: 'script',
-  editor: 'videos',
   'text-storyboard': 'storyboard',
 }
 

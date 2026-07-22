@@ -166,17 +166,28 @@
       "saveSuccess": "保存成功",
       "saveFailed": "保存失败",
       "exportStarted": "导出任务已开始，请稍候...",
+      "exportSuccess": "剪辑工程已导出",
       "exportFailed": "导出失败"
     },
     "toolbar": {
       "back": "← 返回",
       "saveDirty": "保存 *",
       "saved": "已保存",
-      "export": "导出视频"
+      "export": "导出视频",
+      "exportProject": "导出剪辑工程",
+      "brand": "AI 时间线 · OpenCut 风格",
+      "autoArrange": "自动编排全部分镜",
+      "autoArrangeConfirm": "重新编排会覆盖当前未保存的时间线，是否继续？",
+      "importedCount": "时间线 {current}/{total} 个分镜"
     },
     "left": {
       "title": "素材库",
-      "description": "从视频阶段导入的片段将显示在这里"
+      "description": "已按剧情顺序读取本集全部已生成视频；点击未加入的片段可放回时间线。",
+      "clipName": "分镜 {index}",
+      "noDescription": "暂无镜头描述",
+      "added": "已加入时间线",
+      "clickToAdd": "点击加入时间线",
+      "noGeneratedVideos": "还没有可剪辑的视频，请先在成片页生成分镜视频。"
     },
     "right": {
       "title": "属性",

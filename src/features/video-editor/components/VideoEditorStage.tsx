@@ -16,6 +16,7 @@ interface VideoEditorStageProps {
     projectId: string
     episodeId: string
     initialProject?: VideoEditorProject
+    sourceProject?: VideoEditorProject
     onBack?: () => void
 }
 
@@ -38,6 +39,7 @@ export function VideoEditorStage({
     projectId,
     episodeId,
     initialProject,
+    sourceProject,
     onBack
 }: VideoEditorStageProps) {
     const t = useTranslations('video')
@@ -45,6 +47,7 @@ export function VideoEditorStage({
         project,
         timelineState,
         isDirty,
+        addClip,
         removeClip,
         updateClip,
         reorderClips,
@@ -53,10 +56,11 @@ export function VideoEditorStage({
         seek,
         selectClip,
         setZoom,
-        markSaved
+        markSaved,
+        loadProject
     } = useEditorState({ episodeId, initialProject })
 
-    const { saveProject, startRender } = useEditorActions({ projectId, episodeId })
+    const { saveProject } = useEditorActions({ projectId, episodeId })
 
     const totalDuration = calculateTimelineDuration(project.timeline)
     const totalTime = framesToTime(totalDuration, project.config.fps)
@@ -75,12 +79,37 @@ export function VideoEditorStage({
 
     const handleExport = async () => {
         try {
-            await startRender(project.id)
-            alert(t('editor.alert.exportStarted'))
+            await saveProject(project)
+            markSaved()
+            const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' })
+            const url = URL.createObjectURL(blob)
+            const anchor = document.createElement('a')
+            anchor.href = url
+            anchor.download = `waoowaoo-edit-${episodeId}.json`
+            document.body.appendChild(anchor)
+            anchor.click()
+            anchor.remove()
+            URL.revokeObjectURL(url)
+            alert(t('editor.alert.exportSuccess'))
         } catch (error) {
             _ulogError('Export failed:', error)
             alert(t('editor.alert.exportFailed'))
         }
+    }
+
+    const handleAutoArrange = () => {
+        if (!sourceProject) return
+        if (isDirty && !confirm(t('editor.toolbar.autoArrangeConfirm'))) return
+        loadProject({ ...sourceProject, id: project.id })
+    }
+
+    const includedPanelIds = new Set(project.timeline.map((clip) => clip.metadata.panelId))
+
+    const handleAddSourceClip = (sourceClip: VideoEditorProject['timeline'][number]) => {
+        if (includedPanelIds.has(sourceClip.metadata.panelId)) return
+        const { id: _sourceId, ...clip } = sourceClip
+        void _sourceId
+        addClip(clip)
     }
 
     const selectedClip = project.timeline.find(c => c.id === timelineState.selectedClipId)
@@ -89,7 +118,8 @@ export function VideoEditorStage({
         <div className="video-editor-stage" style={{
             display: 'flex',
             flexDirection: 'column',
-            height: '100vh',
+            height: 'calc(100vh - 7rem)',
+            minHeight: '680px',
             background: 'var(--glass-bg-canvas)',
             color: 'var(--glass-text-primary)'
         }}>
@@ -109,11 +139,31 @@ export function VideoEditorStage({
                     {t('editor.toolbar.back')}
                 </button>
 
+                <div>
+                    <div className="text-sm font-semibold text-[var(--glass-text-primary)]">
+                        {t('editor.toolbar.brand')}
+                    </div>
+                    <div className="text-[11px] text-[var(--glass-text-tertiary)]">
+                        {t('editor.toolbar.importedCount', {
+                            current: project.timeline.length,
+                            total: sourceProject?.timeline.length || 0,
+                        })}
+                    </div>
+                </div>
+
                 <div style={{ flex: 1 }} />
 
                 <span style={{ color: 'var(--glass-text-secondary)', fontSize: '14px' }}>
                     {currentTime} / {totalTime}
                 </span>
+
+                <button
+                    onClick={handleAutoArrange}
+                    disabled={!sourceProject || sourceProject.timeline.length === 0}
+                    className="glass-btn-base glass-btn-secondary px-4 py-2 disabled:opacity-50"
+                >
+                    {t('editor.toolbar.autoArrange')}
+                </button>
 
                 <button
                     onClick={handleSave}
@@ -126,7 +176,7 @@ export function VideoEditorStage({
                     onClick={handleExport}
                     className="glass-btn-base glass-btn-tone-success px-4 py-2"
                 >
-                    {t('editor.toolbar.export')}
+                    {t('editor.toolbar.exportProject')}
                 </button>
             </div>
 
@@ -138,7 +188,7 @@ export function VideoEditorStage({
             }}>
                 {/* Left Panel - Media Library */}
                 <div style={{
-                    width: '200px',
+                    width: '260px',
                     borderRight: '1px solid var(--glass-stroke-base)',
                     padding: '12px',
                     background: 'var(--glass-bg-surface-strong)'
@@ -149,6 +199,38 @@ export function VideoEditorStage({
                     <p style={{ fontSize: '12px', color: 'var(--glass-text-tertiary)' }}>
                         {t('editor.left.description')}
                     </p>
+                    <div className="mt-3 flex max-h-[calc(100vh-20rem)] flex-col gap-2 overflow-y-auto pr-1">
+                        {(sourceProject?.timeline || []).map((clip, index) => {
+                            const included = includedPanelIds.has(clip.metadata.panelId)
+                            return (
+                                <button
+                                    key={clip.metadata.panelId}
+                                    type="button"
+                                    disabled={included}
+                                    onClick={() => handleAddSourceClip(clip)}
+                                    className={`rounded-lg border px-3 py-2 text-left transition-colors ${included
+                                        ? 'border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] opacity-60'
+                                        : 'border-[var(--glass-focus-ring)] bg-[var(--glass-bg-surface)] hover:bg-[var(--glass-bg-muted)]'
+                                        }`}
+                                >
+                                    <div className="text-xs font-medium text-[var(--glass-text-primary)]">
+                                        {t('editor.left.clipName', { index: index + 1 })}
+                                    </div>
+                                    <div className="mt-1 line-clamp-2 text-[11px] text-[var(--glass-text-tertiary)]">
+                                        {clip.metadata.description || t('editor.left.noDescription')}
+                                    </div>
+                                    <div className="mt-1 text-[10px] text-[var(--glass-text-secondary)]">
+                                        {included ? t('editor.left.added') : t('editor.left.clickToAdd')}
+                                    </div>
+                                </button>
+                            )
+                        })}
+                        {(!sourceProject || sourceProject.timeline.length === 0) && (
+                            <div className="rounded-lg border border-dashed border-[var(--glass-stroke-base)] p-3 text-xs text-[var(--glass-text-tertiary)]">
+                                {t('editor.left.noGeneratedVideos')}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Center - Preview + Properties */}

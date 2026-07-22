@@ -24,6 +24,7 @@ const stageModules = vi.hoisted(() => ({
     storyboard: 0,
     videos: 0,
     voice: 0,
+    editor: 0,
   },
 }))
 
@@ -45,6 +46,7 @@ vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/S
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/StoryboardStage', () => stageModule('storyboard'))
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/VideoStageRoute', () => stageModule('videos'))
 vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/VoiceStageRoute', () => stageModule('voice'))
+vi.mock('@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/EditorStageRoute', () => stageModule('editor'))
 
 afterEach(() => {
   cleanup()
@@ -134,11 +136,12 @@ describe('WorkspaceStageCache', () => {
     storyboard: stage('storyboard'),
     videos: stage('videos'),
     voice: stage('voice'),
+    editor: stage('editor'),
   }
 
   it('normalizes legacy URL aliases to canonical stages', () => {
     expect(normalizeWorkspaceStage('assets')).toBe('script')
-    expect(normalizeWorkspaceStage('editor')).toBe('videos')
+    expect(normalizeWorkspaceStage('editor')).toBe('editor')
     expect(normalizeWorkspaceStage('text-storyboard')).toBe('storyboard')
     expect(normalizeWorkspaceStage('voice')).toBe('voice')
   })
@@ -205,6 +208,7 @@ describe('WorkspaceStageCache', () => {
       storyboard: vi.fn(),
       videos: vi.fn(),
       voice: vi.fn(),
+      editor: vi.fn(),
     }
     const idleCallbacks = new Map<number, () => void>()
     const requestIdleCallback = vi.fn((callback: () => void) => {
@@ -237,6 +241,7 @@ describe('WorkspaceStageCache', () => {
       storyboard: vi.fn(),
       videos: vi.fn(),
       voice: vi.fn(),
+      editor: vi.fn(),
     }
     const setTimeout = vi.fn((callback: () => void, delay: number) => {
       void callback
@@ -264,6 +269,7 @@ describe('WorkspaceStageCache', () => {
       storyboard: vi.fn(),
       videos: vi.fn(),
       voice: vi.fn(),
+      editor: vi.fn(),
     }
     let idleCallback: (() => void) | undefined
     const cleanupPrefetch = scheduleNextWorkspaceStagePrefetch('config', loaders, {
@@ -289,6 +295,7 @@ describe('WorkspaceStageCache', () => {
       storyboard: vi.fn(),
       videos: vi.fn(),
       voice: vi.fn(),
+      editor: vi.fn(),
     }
     let idleCallback: (() => void) | undefined
     scheduleNextWorkspaceStagePrefetch('config', loaders, {
@@ -308,18 +315,19 @@ describe('WorkspaceStageCache', () => {
     expect(loaders.script).toHaveBeenCalledOnce()
   })
 
-  it('does not schedule prefetch after the final voice stage', () => {
+  it('does not schedule prefetch after the final editor stage', () => {
     const loaders = {
       config: vi.fn(),
       script: vi.fn(),
       storyboard: vi.fn(),
       videos: vi.fn(),
       voice: vi.fn(),
+      editor: vi.fn(),
     }
     const requestIdleCallback = vi.fn()
     const setTimeout = vi.fn()
 
-    scheduleNextWorkspaceStagePrefetch('voice', loaders, {
+    scheduleNextWorkspaceStagePrefetch('editor', loaders, {
       requestIdleCallback,
       cancelIdleCallback: vi.fn(),
       setTimeout,
