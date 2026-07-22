@@ -427,9 +427,12 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     where: { id: { in: sourcePanelIds }, storyboard: { episodeId: storyboard.episodeId } },
   })
   const sourcePanelsById = new Map(sourcePanels.map((panel) => [panel.id, panel]))
-  const sourceMediaIds = [...new Set(timelineSegments.flatMap((segment) => (
-    segment.sourceMediaId ? [segment.sourceMediaId] : []
-  )))]
+  const sourceMediaIds = [...new Set([
+    ...timelineSegments.flatMap((segment) => segment.sourceMediaId ? [segment.sourceMediaId] : []),
+    ...(savedTimeline?.motionSegments ?? []).map((segment) => segment.sourceMediaId),
+    ...(savedTimeline?.audioSegments ?? []).map((segment) => segment.sourceMediaId),
+    ...(savedTimeline?.retakeVideoMediaId ? [savedTimeline.retakeVideoMediaId] : []),
+  ])]
   const sourceMedia = await Promise.all(sourceMediaIds.map((mediaId) => getMediaObjectById(mediaId)))
   const sourceMediaById = new Map(sourceMedia.flatMap((media) => media ? [[media.id, media]] : []))
   const sourceImages = timelineSegments.map((segment) => {
@@ -449,6 +452,32 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     }
     throw new Error('STORYBOARD_DIRECTOR_SOURCE_REQUIRED')
   })
+  const resolveDirectorMediaRefs = (
+    ids: string[],
+    mediaType: 'video' | 'audio',
+  ) => ids.map((mediaId) => {
+    const media = sourceMediaById.get(mediaId)
+    if (!media?.storageKey || !media.mimeType?.startsWith(`${mediaType}/`)
+      || !isOwnedDirectorUploadStorageKey(media.storageKey, job.data.userId, job.data.projectId)) {
+      throw new Error('STORYBOARD_DIRECTOR_SOURCE_INVALID')
+    }
+    return {
+      storageKey: media.storageKey,
+      mimeType: media.mimeType,
+      filename: media.storageKey.split('/').pop(),
+    }
+  })
+  const directorVideos = resolveDirectorMediaRefs(
+    (savedTimeline?.motionSegments ?? []).map((segment) => segment.sourceMediaId),
+    'video',
+  )
+  const directorAudios = resolveDirectorMediaRefs(
+    (savedTimeline?.audioSegments ?? []).map((segment) => segment.sourceMediaId),
+    'audio',
+  )
+  const directorRetakeVideos = savedTimeline?.retakeVideoMediaId
+    ? resolveDirectorMediaRefs([savedTimeline.retakeVideoMediaId], 'video')
+    : []
   const fps = savedTimeline?.fps
     ?? (typeof payload.fps === 'number' && Number.isFinite(payload.fps) && payload.fps > 0
       ? payload.fps
@@ -474,10 +503,14 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     ? savedTimeline.rangeEndSeconds - savedTimeline.rangeStartSeconds
     : totalDuration
   const prompt = JSON.stringify({
+    ...(savedTimeline ?? {}),
     version: LTX_DIRECTOR_TIMELINE_VERSION,
     fps,
     globalPrompt: savedTimeline?.globalPrompt ?? fallbackGlobalPrompt,
     videoModel: modelId,
+    aspectRatio: savedTimeline?.aspectRatio
+      ?? storyboard.episode.novelPromotionProject.videoRatio
+      ?? '16:9',
     segments,
   })
   await reportTaskProgress(job, 15, {
@@ -493,6 +526,11 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     imageUrl: sourceImages[0]!,
     comfyReferenceImages: sourceImages,
     comfyReferenceImagesOnly: true,
+    comfyVariables: {
+      directorVideos,
+      directorAudios,
+      directorRetakeVideos,
+    },
     options: {
       prompt,
       duration: generationDuration,

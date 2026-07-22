@@ -9,13 +9,13 @@ import {
 } from '@/lib/media/service'
 
 import { isOpaqueStorageKey } from './media'
-import type { ComfyMediaType } from './types'
+import type { ComfyInputMediaType } from './types'
 
 export interface OwnedComfyMediaInput {
   userId: string
   projectId: string
   storageKey: string
-  mediaType: ComfyMediaType
+  mediaType: ComfyInputMediaType
 }
 
 export interface ComfyMediaOwnershipStore {
@@ -33,13 +33,12 @@ export async function resolveOwnedComfyMedia(
   store: ComfyMediaOwnershipStore = defaultStore,
 ) {
   if (!isOpaqueStorageKey(input.storageKey)) return false
-  const directorUpload = input.mediaType === 'image'
-    && isOwnedDirectorUploadStorageKey(input.storageKey, input.userId, input.projectId)
+  const directorUpload = isOwnedDirectorUploadStorageKey(input.storageKey, input.userId, input.projectId)
   const record = await store.findFirst({
     where: directorUpload
       ? {
           storageKey: input.storageKey,
-          mimeType: { startsWith: 'image/' },
+          mimeType: { startsWith: `${input.mediaType}/` },
         }
       : ownedMediaWhere(input),
     select: { id: true },
@@ -91,11 +90,10 @@ export async function resolveOwnedComfyMediaRefFromValue(
   const dependencies = { ...defaultRefDependencies, ...overrides }
   const storageKey = await dependencies.resolveStorageKey(input.value)
   if (!storageKey || !isOpaqueStorageKey(storageKey)) return null
-  const directorUpload = input.mediaType === 'image'
-    && isOwnedDirectorUploadStorageKey(storageKey, input.userId, input.projectId)
+  const directorUpload = isOwnedDirectorUploadStorageKey(storageKey, input.userId, input.projectId)
   let record = await dependencies.findFirst({
     where: directorUpload
-      ? { storageKey, mimeType: { startsWith: 'image/' } }
+      ? { storageKey, mimeType: { startsWith: `${input.mediaType}/` } }
       : ownedMediaWhere({ ...input, storageKey }),
     select: { storageKey: true, mimeType: true },
   })
@@ -310,7 +308,7 @@ function ownedMediaWhere(input: OwnedComfyMediaInput): Prisma.MediaObjectWhereIn
 function isOwnedMediaRecord(
   value: unknown,
   storageKey: string,
-  mediaType: ComfyMediaType,
+  mediaType: ComfyInputMediaType,
 ): value is { storageKey: string; mimeType: string | null } {
   if (!value || typeof value !== 'object') return false
   const record = value as { storageKey?: unknown; mimeType?: unknown }

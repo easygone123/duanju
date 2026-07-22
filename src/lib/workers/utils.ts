@@ -30,7 +30,7 @@ import {
   resolveOwnedComfyMediaRefFromValue,
   type ResolveOwnedComfyMediaRefDependencies,
 } from '@/lib/comfyui/media-ownership'
-import type { ComfyMediaRef } from '@/lib/comfyui/types'
+import type { ComfyMediaRef, ComfyVariableValue } from '@/lib/comfyui/types'
 import type { ComfyProviderInvocation } from '@/lib/comfyui/provider'
 import {
   hasTaskModelSnapshotFields,
@@ -97,6 +97,7 @@ export async function buildComfyProviderInvocation(
     sourceImage?: string
     firstFrame?: string
     lastFrame?: string
+    variables?: Record<string, ComfyVariableValue>
   },
   mediaDependencies?: ResolveOwnedComfyMediaRefDependencies,
 ): Promise<ComfyProviderInvocation | undefined> {
@@ -136,6 +137,7 @@ export async function buildComfyProviderInvocation(
     ...(sourceImage ? { sourceImage } : {}),
     ...(firstFrame ? { firstFrame } : {}),
     ...(lastFrame ? { lastFrame } : {}),
+    ...(input.variables ? { variables: input.variables } : {}),
   }
 }
 
@@ -667,6 +669,7 @@ export async function resolveVideoSourceFromGeneration(
     comfyLastFrameSource?: string
     comfyReferenceImages?: string[]
     comfyReferenceImagesOnly?: boolean
+    comfyVariables?: Record<string, ComfyVariableValue>
     options?: {
       prompt?: string
       duration?: number
@@ -766,6 +769,7 @@ export async function resolveVideoSourceFromGeneration(
       ? undefined
       : params.comfyFirstFrameSource ?? params.imageUrl,
     lastFrame: params.comfyLastFrameSource ?? params.options?.lastFrameImageUrl,
+    variables: params.comfyVariables,
   })
 
   const result = await withLogContext(

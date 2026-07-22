@@ -6,6 +6,7 @@ import { getProjectModelConfig } from '@/lib/config-service'
 import {
   LTX_DIRECTOR_TIMELINE_VERSION,
   parseLtxDirectorTimelineSpec,
+  resolveLtxDirectorAspectRatioFromDimensions,
   type LtxDirectorTimelineSpec,
 } from '@/lib/comfyui/ltx-director'
 import { hasLtxDirectorNode } from '@/lib/comfyui/ltx-director-contract'
@@ -43,7 +44,11 @@ async function loadOwnedStoryboard(projectId: string, userId: string, storyboard
             select: {
               panels: {
                 orderBy: { panelIndex: 'asc' },
-                select: { id: true, imageUrl: true },
+                select: {
+                  id: true,
+                  imageUrl: true,
+                  imageMedia: { select: { width: true, height: true } },
+                },
               },
             },
           },
@@ -69,12 +74,21 @@ async function normalizeTimelineSpec(input: {
     || parsed.segments.some((segment) => segment.durationSeconds > 60)) {
     throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_CONFIG_INVALID' })
   }
-  const mediaIds = [...new Set(parsed.segments.flatMap((segment) => (
-    segment.sourceMediaId ? [segment.sourceMediaId] : []
-  )))]
+  if ((parsed.motionSegments?.length ?? 0) > 8 || (parsed.audioSegments?.length ?? 0) > 8
+    || parsed.motionSegments?.some((segment) => segment.durationSeconds > 600)
+    || parsed.audioSegments?.some((segment) => segment.durationSeconds > 600)
+    || (parsed.retakeEnabled && (!parsed.retakeVideoMediaId || !parsed.retakeDurationSeconds))) {
+    throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_TRACK_CONFIG_INVALID' })
+  }
+  const mediaIds = [...new Set([
+    ...parsed.segments.flatMap((segment) => segment.sourceMediaId ? [segment.sourceMediaId] : []),
+    ...(parsed.motionSegments ?? []).map((segment) => segment.sourceMediaId),
+    ...(parsed.audioSegments ?? []).map((segment) => segment.sourceMediaId),
+    ...(parsed.retakeVideoMediaId ? [parsed.retakeVideoMediaId] : []),
+  ])]
   const uploadedMedia = mediaIds.length === 0 ? [] : await prisma.mediaObject.findMany({
     where: { id: { in: mediaIds } },
-    select: { id: true, publicId: true, storageKey: true, mimeType: true },
+    select: { id: true, publicId: true, storageKey: true, mimeType: true, width: true, height: true },
   })
   const mediaById = new Map(uploadedMedia.map((media) => [media.id, media]))
   let sequentialCursor = 0
@@ -122,9 +136,55 @@ async function normalizeTimelineSpec(input: {
     timelineCursor = startSeconds + segment.durationSeconds
     return { ...segment, startSeconds }
   })
+  const normalizeUploadedTrack = <T extends { sourceMediaId: string }>(
+    segments: T[],
+    mediaType: 'video' | 'audio',
+  ) => segments.map((segment) => {
+    const media = mediaById.get(segment.sourceMediaId)
+    if (!media || !media.mimeType?.startsWith(`${mediaType}/`)
+      || !isOwnedDirectorUploadStorageKey(media.storageKey, userId, projectId)) {
+      throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SOURCE_INVALID' })
+    }
+    return { ...segment, sourceUrl: `/m/${encodeURIComponent(media.publicId)}` }
+  })
+  const motionSegments = normalizeUploadedTrack(parsed.motionSegments ?? [], 'video')
+  const audioSegments = normalizeUploadedTrack(parsed.audioSegments ?? [], 'audio')
+  let retakeVideoUrl: string | undefined
+  if (parsed.retakeVideoMediaId) {
+    const media = mediaById.get(parsed.retakeVideoMediaId)
+    if (!media || !media.mimeType?.startsWith('video/')
+      || !isOwnedDirectorUploadStorageKey(media.storageKey, userId, projectId)) {
+      throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_RETAKE_SOURCE_INVALID' })
+    }
+    retakeVideoUrl = `/m/${encodeURIComponent(media.publicId)}`
+  }
+  timelineCursor = [...motionSegments, ...audioSegments].reduce((latest, segment) => Math.max(
+    latest,
+    segment.startSeconds + segment.durationSeconds,
+  ), timelineCursor)
   if (new Set(positionedSegments.map((segment) => segment.id)).size !== positionedSegments.length) {
     throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SEGMENT_ID_DUPLICATE' })
   }
+  const firstSource = positionedSegments[0]
+  const firstPanelId = firstSource && 'sourcePanelId' in firstSource
+    ? firstSource.sourcePanelId
+    : null
+  const firstMediaId = firstSource && 'sourceMediaId' in firstSource
+    ? firstSource.sourceMediaId
+    : null
+  const firstSourceDimensions = firstPanelId
+    ? panelsById.get(firstPanelId)?.imageMedia
+    : firstMediaId
+      ? mediaById.get(firstMediaId)
+      : null
+  const fallbackAspectRatio = parsed.aspectRatio
+    || storyboard.episode.novelPromotionProject.videoRatio
+    || '16:9'
+  const detectedAspectRatio = resolveLtxDirectorAspectRatioFromDimensions(
+    firstSourceDimensions?.width,
+    firstSourceDimensions?.height,
+    fallbackAspectRatio,
+  )
   const hasRangeStart = parsed.rangeStartSeconds !== undefined
   const hasRangeEnd = parsed.rangeEndSeconds !== undefined
   if (hasRangeStart !== hasRangeEnd
@@ -137,9 +197,12 @@ async function normalizeTimelineSpec(input: {
   return {
     ...parsed,
     version: LTX_DIRECTOR_TIMELINE_VERSION,
-    aspectRatio: storyboard.episode.novelPromotionProject.videoRatio || parsed.aspectRatio || '16:9',
+    aspectRatio: detectedAspectRatio,
     resolutionPreset: parsed.resolutionPreset || '720p',
     segments: positionedSegments,
+    motionSegments,
+    audioSegments,
+    ...(retakeVideoUrl ? { retakeVideoUrl } : {}),
   }
 }
 

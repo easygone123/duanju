@@ -614,6 +614,28 @@ describe('ComfyUI dispatcher contract', () => {
     }
   })
 
+  it('uploads Director audio lists with detected audio MIME and project ownership checks', async () => {
+    const wav = Buffer.from([
+      0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00,
+      0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20,
+    ])
+    const deps = dependencies({ readOwnedObject: vi.fn().mockResolvedValue(wav) })
+    await expect(prepareComfyMediaUploads({
+      userId: 'user-1', projectId: 'project-1', requestId: 'request-1',
+      variables: { directorAudios: [{ storageKey: 'novel-promotion/director/user-1/project-1/voice.wav' }] },
+      definitions: [{
+        name: 'directorAudios', type: 'audio_ref_list', required: false, defaultValue: [], maxItems: 8,
+      }],
+      client: deps.client,
+      dependencies: deps,
+    })).resolves.toMatchObject({ directorAudios: [{ name: 'uploaded.png' }] })
+    expect(deps.resolveOwnedMedia).toHaveBeenCalledWith(expect.objectContaining({ mediaType: 'audio' }))
+    expect(deps.client.uploadImage).toHaveBeenCalledWith(expect.objectContaining({
+      contentType: 'audio/wav',
+      filename: expect.stringMatching(/\.wav$/),
+    }))
+  })
+
   it('does not release when a terminal or failover DB write is not durable', async () => {
     const terminal = dependencies({
       readOwnedObject: vi.fn().mockRejectedValue(new ComfyError(

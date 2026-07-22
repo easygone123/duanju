@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import {
   COMFY_REFERENCE_UPLOAD_LIMIT,
   COMFY_REQUEST_STATUS,
+  type ComfyInputMediaType,
   type ComfyMediaType,
   type ComfyMediaRef,
   type ComfyRequestStatus,
@@ -509,7 +510,7 @@ async function sanitizeVariableSnapshot(
     if (value === undefined) continue
     if (!matchesComfyVariableType(value, definition.type)) throw new ApiError('INVALID_PARAMS')
     if (
-      definition.type === 'image_ref_list'
+      ['image_ref_list', 'video_ref_list', 'audio_ref_list'].includes(definition.type)
       && definition.maxItems !== undefined
       && (value as ComfyMediaRef[]).length > definition.maxItems
     ) {
@@ -529,11 +530,14 @@ async function sanitizeVariableSnapshot(
 
 function isVariableDefinition(value: unknown): value is ComfyVariableDefinition {
   return isRecord(value) && typeof value.name === 'string'
-    && ['string', 'number', 'boolean', 'image_ref', 'image_ref_list', 'video_ref']
+    && [
+      'string', 'number', 'boolean', 'image_ref', 'image_ref_list',
+      'video_ref', 'video_ref_list', 'audio_ref', 'audio_ref_list',
+    ]
       .includes(String(value.type))
     && typeof value.required === 'boolean'
     && (value.maxItems === undefined || (
-      value.type === 'image_ref_list'
+      ['image_ref_list', 'video_ref_list', 'audio_ref_list'].includes(String(value.type))
       && Number.isInteger(value.maxItems)
       && (value.maxItems as number) > 0
       && (value.maxItems as number) <= COMFY_REFERENCE_UPLOAD_LIMIT
@@ -548,15 +552,16 @@ async function sanitizeVariableValue(
   projectId: string,
   resolveOwnedMedia: RequestCreateOperations['resolveOwnedMedia'],
 ): Promise<ComfyVariableValue> {
-  if (type === 'image_ref_list') {
+  if (type === 'image_ref_list' || type === 'video_ref_list' || type === 'audio_ref_list') {
+    const mediaType = type === 'video_ref_list' ? 'video' : type === 'audio_ref_list' ? 'audio' : 'image'
     return Promise.all((value as ComfyMediaRef[]).map((ref) => sanitizeMediaRef(
-      ref, variableName, userId, projectId, 'image', resolveOwnedMedia,
+      ref, variableName, userId, projectId, mediaType, resolveOwnedMedia,
     )))
   }
-  if (type === 'image_ref' || type === 'video_ref') {
+  if (type === 'image_ref' || type === 'video_ref' || type === 'audio_ref') {
     return sanitizeMediaRef(
       value as ComfyMediaRef, variableName, userId, projectId,
-      type === 'video_ref' ? 'video' : 'image', resolveOwnedMedia,
+      type === 'video_ref' ? 'video' : type === 'audio_ref' ? 'audio' : 'image', resolveOwnedMedia,
     )
   }
   return value
@@ -567,7 +572,7 @@ async function sanitizeMediaRef(
   variableName: string,
   userId: string,
   projectId: string,
-  mediaType: ComfyMediaType,
+  mediaType: ComfyInputMediaType,
   resolveOwnedMedia: RequestCreateOperations['resolveOwnedMedia'],
 ) {
   if (!isOpaqueStorageKey(value.storageKey) || !resolveOwnedMedia

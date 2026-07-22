@@ -17,7 +17,8 @@ const FINITE_DECIMAL_STRING = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
 const BLOCKED_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor'])
 const SAFE_PATH_SEGMENT = /^[A-Za-z0-9_-]+$/
 const VARIABLE_TYPES = new Set<ComfyVariableType>([
-  'string', 'number', 'boolean', 'image_ref', 'image_ref_list', 'video_ref',
+  'string', 'number', 'boolean', 'image_ref', 'image_ref_list',
+  'video_ref', 'video_ref_list', 'audio_ref', 'audio_ref_list',
 ])
 const BINDING_TRANSFORMS = new Set([
   'filename', 'image_ref', 'filename_list', 'filename_at', 'bernini_image_slots',
@@ -392,14 +393,16 @@ function validateUpscaleContract(
   issues: WorkflowValidationIssue[],
 ) {
   const mediaDefinitions = definitions.filter((definition) => isObject(definition)
-    && ['image_ref', 'image_ref_list', 'video_ref'].includes(String(definition.type)))
+    && ['image_ref', 'image_ref_list', 'video_ref', 'video_ref_list', 'audio_ref', 'audio_ref_list']
+      .includes(String(definition.type)))
   const requiredImageDefinitions = mediaDefinitions.filter((definition) => isObject(definition)
     && definition.type === 'image_ref' && definition.required === true)
   const requiredImageNames = new Set(requiredImageDefinitions
     .map((definition) => isObject(definition) ? definition.name : undefined)
     .filter((name): name is string => typeof name === 'string'))
   const mediaBindings = bindings.filter((binding) => isObject(binding)
-    && ['image_ref', 'image_ref_list', 'video_ref'].includes(String(binding.valueType)))
+    && ['image_ref', 'image_ref_list', 'video_ref', 'video_ref_list', 'audio_ref', 'audio_ref_list']
+      .includes(String(binding.valueType)))
   const imageBindings = mediaBindings.filter((binding) => isObject(binding)
     && binding.valueType === 'image_ref'
     && typeof binding.variable === 'string'
@@ -510,14 +513,14 @@ function validateDefinitions(
       ))
     }
     const maxItemsValid = definition.maxItems === undefined
-      || (definition.type === 'image_ref_list'
+      || (['image_ref_list', 'video_ref_list', 'audio_ref_list'].includes(String(definition.type))
         && Number.isInteger(definition.maxItems)
         && (definition.maxItems as number) > 0
         && (definition.maxItems as number) <= COMFY_REFERENCE_UPLOAD_LIMIT)
     if (!maxItemsValid) {
       issues.push(issue(
         'COMFY_VARIABLE_MAX_ITEMS_INVALID', `${path}.maxItems`,
-        `maxItems must be an integer from 1 to ${COMFY_REFERENCE_UPLOAD_LIMIT} for image_ref_list variables.`,
+        `maxItems must be an integer from 1 to ${COMFY_REFERENCE_UPLOAD_LIMIT} for media list variables.`,
       ))
     }
     if (
@@ -559,7 +562,9 @@ export function matchesComfyVariableType(
   if (type === 'string') return typeof value === 'string'
   if (type === 'number') return typeof value === 'number' && Number.isFinite(value)
   if (type === 'boolean') return typeof value === 'boolean'
-  if (type === 'image_ref_list') return Array.isArray(value) && value.every(isMediaRef)
+  if (type === 'image_ref_list' || type === 'video_ref_list' || type === 'audio_ref_list') {
+    return Array.isArray(value) && value.every(isMediaRef)
+  }
   return isMediaRef(value)
 }
 

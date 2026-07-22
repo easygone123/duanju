@@ -157,8 +157,26 @@ function applyLtxDirectorTimeline(
     throw bindingError(binding, `LTX Director images for "${binding.variable}" are missing or malformed.`)
   }
   const target = graph[binding.nodeId]
+  const parsedSpec = parseLtxDirectorTimelineSpec(variables.prompt)
+  const motionFiles = Array.isArray(uploads.directorVideos)
+    ? uploads.directorVideos.filter(isUploadedFile)
+    : []
+  const audioFiles = Array.isArray(uploads.directorAudios)
+    ? uploads.directorAudios.filter(isUploadedFile)
+    : []
+  const retakeFiles = Array.isArray(uploads.directorRetakeVideos)
+    ? uploads.directorRetakeVideos.filter(isUploadedFile)
+    : []
+  if ((parsedSpec?.motionSegments?.length ?? 0) !== motionFiles.length
+    || (parsedSpec?.audioSegments?.length ?? 0) !== audioFiles.length
+    || (parsedSpec?.retakeVideoMediaId ? 1 : 0) !== retakeFiles.length) {
+    throw bindingError(binding, 'LTX Director auxiliary timeline media are missing or malformed.')
+  }
   const rendered = renderLtxDirectorTimeline({
     files: upload,
+    motionFiles,
+    audioFiles,
+    retakeFile: retakeFiles[0],
     promptValue: variables.prompt,
     baseTimelineData: target.inputs.timeline_data,
     fallbackDurationSeconds: typeof variables.duration === 'number'
@@ -189,7 +207,15 @@ function applyLtxDirectorTimeline(
   target.inputs.frame_rate = rendered.durationFrames / rendered.durationSeconds
   if (Object.hasOwn(target.inputs, 'custom_width')) target.inputs.custom_width = rendered.width
   if (Object.hasOwn(target.inputs, 'custom_height')) target.inputs.custom_height = rendered.height
-  if (Object.hasOwn(target.inputs, 'resize_method')) target.inputs.resize_method = 'maintain aspect ratio'
+  if (Object.hasOwn(target.inputs, 'resize_method')) target.inputs.resize_method = rendered.resizeMethod
+  if (Object.hasOwn(target.inputs, 'display_mode')) target.inputs.display_mode = rendered.displayMode
+  if (Object.hasOwn(target.inputs, 'divisible_by')) target.inputs.divisible_by = rendered.divisibleBy
+  if (Object.hasOwn(target.inputs, 'img_compression')) target.inputs.img_compression = rendered.imageCompression
+  if (Object.hasOwn(target.inputs, 'epsilon') && rendered.epsilon !== undefined) target.inputs.epsilon = rendered.epsilon
+  if (Object.hasOwn(target.inputs, 'use_custom_audio')) target.inputs.use_custom_audio = rendered.useCustomAudio
+  if (Object.hasOwn(target.inputs, 'inpaint_audio')) target.inputs.inpaint_audio = rendered.inpaintAudio
+  if (Object.hasOwn(target.inputs, 'use_custom_motion')) target.inputs.use_custom_motion = rendered.useCustomMotion
+  if (Object.hasOwn(target.inputs, 'override_audio')) target.inputs.override_audio = rendered.overrideAudio
 }
 
 function applyBerniniImageSlots(

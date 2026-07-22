@@ -57,7 +57,9 @@ export async function prepareComfyMediaUploads(input: {
   const uploads: Record<string, ComfyUploadedFile | ComfyUploadedFile[]> = {}
   let totalBytes = 0
   for (const definition of input.definitions) {
-    if (!['image_ref', 'image_ref_list', 'video_ref'].includes(definition.type)) continue
+    if (![
+      'image_ref', 'image_ref_list', 'video_ref', 'video_ref_list', 'audio_ref', 'audio_ref_list',
+    ].includes(definition.type)) continue
     const raw = input.variables[definition.name]
     if (raw === undefined) continue
     const refs = Array.isArray(raw) ? raw : [raw]
@@ -66,7 +68,11 @@ export async function prepareComfyMediaUploads(input: {
       if (!isMediaRef(candidate)) throw inputUploadError()
       const maxBytes = input.maxInputBytes ?? DEFAULT_MAX_INPUT_BYTES
       if (!isOpaqueStorageKey(candidate.storageKey)) throw inputUploadError()
-      const mediaType = definition.type === 'video_ref' ? 'video' : 'image'
+      const mediaType = definition.type === 'video_ref' || definition.type === 'video_ref_list'
+        ? 'video'
+        : definition.type === 'audio_ref' || definition.type === 'audio_ref_list'
+          ? 'audio'
+          : 'image'
       if (!await input.dependencies.resolveOwnedMedia({
         userId: input.userId, projectId: input.projectId,
         storageKey: candidate.storageKey, mediaType,
@@ -177,13 +183,21 @@ function detectMedia(bytes: Uint8Array): { mimeType: string; extension: string }
   if (starts(bytes, [0xff, 0xd8, 0xff])) return { mimeType: 'image/jpeg', extension: 'jpg' }
   if (ascii(bytes, 0, 4) === 'GIF8') return { mimeType: 'image/gif', extension: 'gif' }
   if (ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 4) === 'WEBP') return { mimeType: 'image/webp', extension: 'webp' }
+  if (ascii(bytes, 0, 4) === 'RIFF' && ascii(bytes, 8, 4) === 'WAVE') return { mimeType: 'audio/wav', extension: 'wav' }
+  if (ascii(bytes, 0, 4) === 'fLaC') return { mimeType: 'audio/flac', extension: 'flac' }
+  if (ascii(bytes, 0, 4) === 'OggS') return { mimeType: 'audio/ogg', extension: 'ogg' }
+  if (ascii(bytes, 0, 3) === 'ID3' || (bytes[0] === 0xff && (bytes[1] ?? 0) >= 0xe0)) {
+    return { mimeType: 'audio/mpeg', extension: 'mp3' }
+  }
   if (ascii(bytes, 4, 4) === 'ftyp') return { mimeType: 'video/mp4', extension: 'mp4' }
   if (starts(bytes, [0x1a, 0x45, 0xdf, 0xa3])) return { mimeType: 'video/webm', extension: 'webm' }
   return null
 }
 
 function matchesDefinition(mimeType: string, type: ComfyVariableDefinition['type']) {
-  return type === 'video_ref' ? mimeType.startsWith('video/') : mimeType.startsWith('image/')
+  if (type === 'video_ref' || type === 'video_ref_list') return mimeType.startsWith('video/')
+  if (type === 'audio_ref' || type === 'audio_ref_list') return mimeType.startsWith('audio/')
+  return mimeType.startsWith('image/')
 }
 
 function safeFilename(value: string) {

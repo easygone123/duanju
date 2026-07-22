@@ -4,6 +4,7 @@ import {
   normalizeLtxDirectorGlobalPrompt,
   parseLtxDirectorTimelineSpec,
   renderLtxDirectorTimeline,
+  resolveLtxDirectorAspectRatioFromDimensions,
   resolveLtxDirectorDimensions,
 } from '@/lib/comfyui/ltx-director'
 import { augmentLtxDirectorContract } from '@/lib/comfyui/ltx-director-contract'
@@ -26,6 +27,7 @@ const directorGraph = {
       local_prompts: '',
       segment_lengths: '',
       guide_strength: '',
+      epsilon: 0.001,
       frame_rate: 24,
       custom_width: 768,
       custom_height: 512,
@@ -190,6 +192,76 @@ describe('LTX Director adapter', () => {
       '{"groupId":"internal","sceneKey":"palace","incomingContinuity":"enters in rain"}\ncomic scene',
     )).toBe('palace\nenters in rain\ncomic scene')
     expect(resolveLtxDirectorDimensions('480p', '9:16')).toEqual({ width: 480, height: 854 })
+    expect(resolveLtxDirectorAspectRatioFromDimensions(1080, 1920)).toBe('9:16')
+    expect(resolveLtxDirectorAspectRatioFromDimensions(1920, 1080)).toBe('16:9')
+  })
+
+  it('migrates legacy resize labels to values accepted by the LTXDirector node', () => {
+    expect(parseLtxDirectorTimelineSpec({
+      version: 1,
+      fps: 24,
+      globalPrompt: '',
+      resizeMethod: 'crop to fit',
+      segments: [{ prompt: '', durationSeconds: 1 }],
+    })?.resizeMethod).toBe('crop')
+  })
+
+  it('serializes motion, audio, retake, and advanced node settings into timeline data', () => {
+    const rendered = renderLtxDirectorTimeline({
+      promptValue: JSON.stringify({
+        version: 1,
+        fps: 24,
+        globalPrompt: 'continuous action',
+        displayMode: 'frames',
+        resizeMethod: 'crop',
+        divisibleBy: 64,
+        imageCompression: 26,
+        epsilon: 0.002,
+        useCustomAudio: true,
+        inpaintAudio: false,
+        useCustomMotion: true,
+        overrideAudio: true,
+        retakeEnabled: true,
+        retakeVideoMediaId: 'retake-media',
+        retakeStartSeconds: 1,
+        retakeDurationSeconds: 2,
+        retakePrompt: 'change the reaction',
+        retakeStrength: 0.8,
+        segments: [{ id: 'image', prompt: 'opening', durationSeconds: 4 }],
+        motionSegments: [{
+          id: 'motion', sourceMediaId: 'motion-media', filename: 'motion.mp4',
+          startSeconds: 0.5, durationSeconds: 2, videoStrength: 1.2,
+        }],
+        audioSegments: [{
+          id: 'audio', sourceMediaId: 'audio-media', filename: 'voice.wav',
+          startSeconds: 0, durationSeconds: 3,
+        }],
+      }),
+      files: [{ name: 'image.png', subfolder: 'wdc', type: 'input' }],
+      motionFiles: [{ name: 'motion.mp4', subfolder: 'wdc', type: 'input' }],
+      audioFiles: [{ name: 'voice.wav', subfolder: 'wdc', type: 'input' }],
+      retakeFile: { name: 'retake.mp4', subfolder: 'wdc', type: 'input' },
+    })
+    const timeline = JSON.parse(rendered.timelineData)
+    expect(rendered).toMatchObject({
+      displayMode: 'frames', resizeMethod: 'crop', divisibleBy: 64,
+      imageCompression: 26, epsilon: 0.002, useCustomAudio: true, inpaintAudio: false,
+      useCustomMotion: true, overrideAudio: true,
+    })
+    expect(timeline).toMatchObject({
+      retakeMode: true,
+      retakeStart: 24,
+      retakeLength: 48,
+      retakePrompt: 'change the reaction',
+      retakeStrength: 0.8,
+      retakeVideo: { imageFile: 'wdc/retake.mp4' },
+      motionSegments: [expect.objectContaining({
+        id: 'motion', start: 12, length: 48, videoFile: 'wdc/motion.mp4', videoStrength: 1.2,
+      })],
+      audioSegments: [expect.objectContaining({
+        id: 'audio', start: 0, length: 72, audioFile: 'wdc/voice.wav',
+      })],
+    })
   })
 
   it('fills all LTX Director timeline inputs while rendering a published workflow', () => {
@@ -197,6 +269,7 @@ describe('LTX Director adapter', () => {
       version: 1,
       fps: 24,
       globalPrompt: 'consistent cast',
+      epsilon: 0.002,
       segments: [
         { prompt: 'shot one', durationSeconds: 1.5 },
         { prompt: 'shot two', durationSeconds: 2.5 },
@@ -236,6 +309,7 @@ describe('LTX Director adapter', () => {
       local_prompts: 'shot one|shot two',
       segment_lengths: '36,60',
       frame_rate: 24,
+      epsilon: 0.002,
     })
   })
 })

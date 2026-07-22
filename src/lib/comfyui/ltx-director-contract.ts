@@ -36,6 +36,16 @@ export function augmentLtxDirectorContract(input: {
       maxItems: Math.max(8, variableDefinitions[referenceDefinitionIndex]?.maxItems ?? 0),
     }
   }
+  const supplementalDefinitions: ComfyVariableDefinition[] = [
+    { name: 'directorVideos', type: 'video_ref_list', required: false, defaultValue: [], maxItems: 8 },
+    { name: 'directorAudios', type: 'audio_ref_list', required: false, defaultValue: [], maxItems: 8 },
+    { name: 'directorRetakeVideos', type: 'video_ref_list', required: false, defaultValue: [], maxItems: 1 },
+  ]
+  for (const definition of supplementalDefinitions) {
+    if (!variableDefinitions.some((candidate) => candidate.name === definition.name)) {
+      variableDefinitions.push(definition)
+    }
+  }
   for (const [nodeId, node] of Object.entries(input.graph)) {
     if (node.class_type !== 'LTXDirector') continue
     const hasTimelineBinding = bindings.some((binding) => (

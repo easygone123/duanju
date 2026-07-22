@@ -27,6 +27,7 @@ export const COMFY_ACTIVE_REQUEST_STATUSES = [
 ] as const
 
 export type ComfyMediaType = 'image' | 'video'
+export type ComfyInputMediaType = ComfyMediaType | 'audio'
 
 export type ComfyWorkflowPurpose = 'generation' | 'upscale'
 
@@ -107,6 +108,9 @@ export type ComfyVariableType =
   | 'image_ref'
   | 'image_ref_list'
   | 'video_ref'
+  | 'video_ref_list'
+  | 'audio_ref'
+  | 'audio_ref_list'
 
 export interface ComfyMediaRef {
   storageKey: string

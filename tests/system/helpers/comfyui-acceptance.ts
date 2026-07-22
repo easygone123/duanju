@@ -9,6 +9,7 @@ import { validateWorkflowContract } from '@/lib/comfyui/workflow-schema'
 import type {
   ComfyApiWorkflow,
   ComfyInputBinding,
+  ComfyInputMediaType,
   ComfyMediaType,
   ComfyOutputBinding,
   ComfyOutputRef,
@@ -172,7 +173,7 @@ export class InMemoryComfyStorage {
 
   seed(key: string, value: StoredMedia) { this.objects.set(key, value) }
 
-  async resolveOwnedMedia(input: { userId: string; projectId: string; storageKey: string; mediaType: ComfyMediaType }) {
+  async resolveOwnedMedia(input: { userId: string; projectId: string; storageKey: string; mediaType: ComfyInputMediaType }) {
     const value = this.objects.get(input.storageKey)
     return value?.userId === input.userId && value.projectId === input.projectId
       && value.mediaType === input.mediaType

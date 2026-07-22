@@ -242,17 +242,26 @@ async function prepareLiveTestUploads(
   let totalBytes = 0
   for (const [variable, rawPayload] of Object.entries(inputs)) {
     const definition = byName.get(variable)
-    if (!definition || !['image_ref', 'image_ref_list', 'video_ref'].includes(definition.type)) {
+    if (!definition || ![
+      'image_ref', 'image_ref_list', 'video_ref', 'video_ref_list', 'audio_ref', 'audio_ref_list',
+    ].includes(definition.type)) {
       throw new ApiError('INVALID_PARAMS')
     }
     const payloads = Array.isArray(rawPayload) ? rawPayload : [rawPayload]
-    if ((definition.type === 'image_ref_list') !== Array.isArray(rawPayload)) {
+    const expectsList = definition.type === 'image_ref_list'
+      || definition.type === 'video_ref_list'
+      || definition.type === 'audio_ref_list'
+    if (expectsList !== Array.isArray(rawPayload)) {
       throw new ApiError('INVALID_PARAMS')
     }
     const uploaded: Uploaded[] = []
     for (const payload of payloads) {
-      const expectsVideo = definition.type === 'video_ref'
-      if (expectsVideo !== payload.contentType.startsWith('video/')) {
+      const expectedPrefix = definition.type === 'video_ref' || definition.type === 'video_ref_list'
+        ? 'video/'
+        : definition.type === 'audio_ref' || definition.type === 'audio_ref_list'
+          ? 'audio/'
+          : 'image/'
+      if (!payload.contentType.startsWith(expectedPrefix)) {
         throw new ApiError('INVALID_PARAMS')
       }
       const bytes = decodeBoundedBase64(payload.base64)
