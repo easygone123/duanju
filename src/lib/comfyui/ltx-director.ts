@@ -3,8 +3,10 @@ import type { ComfyUploadedFile } from './types'
 export const LTX_DIRECTOR_TIMELINE_VERSION = 1 as const
 
 export interface LtxDirectorTimelineSegmentSpec {
+  panelId?: string
   prompt: string
   durationSeconds: number
+  guideStrength?: number
   isEndFrame?: boolean
 }
 
@@ -12,6 +14,7 @@ export interface LtxDirectorTimelineSpec {
   version: typeof LTX_DIRECTOR_TIMELINE_VERSION
   fps: number
   globalPrompt: string
+  videoModel?: string
   segments: LtxDirectorTimelineSegmentSpec[]
 }
 
@@ -33,18 +36,30 @@ function cleanPrompt(value: unknown) {
 }
 
 export function parseLtxDirectorTimelineSpec(value: unknown): LtxDirectorTimelineSpec | null {
-  if (typeof value !== 'string' || !value.trim().startsWith('{')) return null
   try {
-    const parsed = JSON.parse(value) as Record<string, unknown>
+    const parsed = typeof value === 'string'
+      ? JSON.parse(value) as Record<string, unknown>
+      : value as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
     if (parsed.version !== LTX_DIRECTOR_TIMELINE_VERSION || !positiveNumber(parsed.fps)
       || typeof parsed.globalPrompt !== 'string' || !Array.isArray(parsed.segments)) return null
     const segments = parsed.segments.flatMap((item) => {
       if (!item || typeof item !== 'object' || Array.isArray(item)) return []
       const candidate = item as Record<string, unknown>
       if (!positiveNumber(candidate.durationSeconds)) return []
+      const guideStrength = typeof candidate.guideStrength === 'number'
+        && Number.isFinite(candidate.guideStrength)
+        && candidate.guideStrength >= 0
+        && candidate.guideStrength <= 2
+        ? candidate.guideStrength
+        : undefined
       return [{
+        ...(typeof candidate.panelId === 'string' && candidate.panelId.trim()
+          ? { panelId: candidate.panelId.trim() }
+          : {}),
         prompt: cleanPrompt(candidate.prompt),
         durationSeconds: candidate.durationSeconds,
+        ...(guideStrength !== undefined ? { guideStrength } : {}),
         ...(candidate.isEndFrame === true ? { isEndFrame: true } : {}),
       }]
     })
@@ -53,6 +68,9 @@ export function parseLtxDirectorTimelineSpec(value: unknown): LtxDirectorTimelin
       version: LTX_DIRECTOR_TIMELINE_VERSION,
       fps: parsed.fps,
       globalPrompt: cleanPrompt(parsed.globalPrompt),
+      ...(typeof parsed.videoModel === 'string' && parsed.videoModel.trim()
+        ? { videoModel: parsed.videoModel.trim() }
+        : {}),
       segments,
     }
   } catch {
@@ -117,7 +135,7 @@ export function renderLtxDirectorTimeline(input: {
     }),
     localPrompts: sourceSegments.map((segment) => segment.prompt).join('|'),
     segmentLengths: frameLengths.join(','),
-    guideStrength: input.files.map(() => '1').join(','),
+    guideStrength: sourceSegments.map((segment) => String(segment.guideStrength ?? 1)).join(','),
     durationSeconds,
     durationFrames,
   }

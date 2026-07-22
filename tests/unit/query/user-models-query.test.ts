@@ -86,6 +86,21 @@ describe('user model query cache', () => {
     }).capabilities).toBeUndefined()
   })
 
+  it('advertises an LTX Director workflow feature from its published graph', () => {
+    expect(buildComfyWorkflowModelOption({
+      id: 'wf-director',
+      name: 'LTX Director',
+      mediaType: 'video',
+      currentVersion: {
+        id: 'version-director',
+        purpose: 'generation',
+        apiFormatJson: {
+          '152': { class_type: 'LTXDirector', inputs: { timeline_data: '' } },
+        },
+      },
+    }).workflowFeatures).toEqual({ ltxDirector: true })
+  })
+
   it('does not advertise another user or untested upscale workflow as executable', () => {
     const base = {
       id: 'wf-upscale', name: 'Upscale', mediaType: 'image',

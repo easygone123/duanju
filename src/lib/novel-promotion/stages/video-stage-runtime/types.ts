@@ -31,6 +31,7 @@ export interface VideoModelOption {
   capabilities?: ModelCapabilities
   videoPricingTiers?: VideoPricingTier[]
   workflowVersionId?: string
+  workflowFeatures?: { ltxDirector?: boolean }
 }
 
 export interface EpisodeVideoUrlsResponse {

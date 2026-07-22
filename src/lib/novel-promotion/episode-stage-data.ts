@@ -146,7 +146,16 @@ export type StoryboardEpisodeStageStoryboard = Pick<NovelPromotionStoryboard, St
 
 export type VideoEpisodeStageStoryboard = Pick<
   NovelPromotionStoryboard,
-  'id' | 'episodeId' | 'clipId' | 'panelCount' | 'layoutMode' | 'groupSequence' | 'continuityAnchor'
+  | 'id'
+  | 'episodeId'
+  | 'clipId'
+  | 'panelCount'
+  | 'layoutMode'
+  | 'groupSequence'
+  | 'continuityAnchor'
+  | 'directorVideoUrl'
+  | 'directorVideoMediaId'
+  | 'directorConfigJson'
 > & {
   panels: VideoEpisodeStagePanel[]
   createdAt: string

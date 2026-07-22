@@ -275,6 +275,7 @@ export interface NovelPromotionStoryboard {
   directorVideoUrl?: string | null
   directorVideoMediaId?: string | null
   directorVideoMedia?: MediaRef | null
+  directorConfigJson?: string | null
   directorTaskRunning?: boolean
   directorTaskError?: string | null
   sheetPromptSnapshot?: string | null

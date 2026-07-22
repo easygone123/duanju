@@ -366,6 +366,7 @@ model NovelPromotionStoryboard {
   directorVideoUrl    String?                @db.Text
   directorVideoMediaId String?
   directorVideoMedia  MediaObject?           @relation("NovelPromotionStoryboardDirectorVideoMedia", fields: [directorVideoMediaId], references: [id], onDelete: SetNull)
+  directorConfigJson  String?                @db.LongText
   sheetPromptSnapshot String?                @db.Text
   sheetModelSnapshot String?                 @db.Text
   sheetGenerationOptionsSnapshot String?     @db.Text

@@ -23,7 +23,6 @@ import SixGridUploadModal from './SixGridUploadModal'
 import { isGridGroupBusy } from '@/lib/query/hooks/useSixGridStoryboard'
 import { useVirtualCardRetention } from '@/components/virtualization/VirtualCardRange'
 import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
-import LtxDirectorControls from './LtxDirectorControls'
 
 type GridUploadSession = {
   storyboardId: string
@@ -255,12 +254,6 @@ export default function StoryboardGroup({
           expectedSheetArtifactVersion: storyboard.sheetArtifactVersion ?? 0,
           cellRatio: sixGridCellRatio,
         })}
-      />
-
-      <LtxDirectorControls
-        projectId={projectId}
-        episodeId={episodeId}
-        storyboard={storyboard}
       />
 
       {clip && (

@@ -49,7 +49,7 @@ describe('LTX Director adapter', () => {
 
   it('discovers a required timeline image binding during workflow import', () => {
     const graphWithoutOptionalPrompt = structuredClone(directorGraph)
-    delete graphWithoutOptionalPrompt['10'].inputs.global_prompt
+    delete (graphWithoutOptionalPrompt['10'].inputs as { global_prompt?: string }).global_prompt
     const analysis = analyzeComfyApiWorkflow({
       graph: graphWithoutOptionalPrompt,
       kind: 'video_generation',
@@ -86,7 +86,7 @@ describe('LTX Director adapter', () => {
       globalPrompt: 'same characters and location',
       segments: [
         { prompt: 'walks into frame', durationSeconds: 2 },
-        { prompt: 'turns and answers', durationSeconds: 3 },
+        { panelId: 'panel-2', prompt: 'turns and answers', durationSeconds: 3, guideStrength: 1.25 },
       ],
     })
     const rendered = renderLtxDirectorTimeline({
@@ -98,6 +98,7 @@ describe('LTX Director adapter', () => {
     })
     expect(rendered.durationFrames).toBe(120)
     expect(rendered.localPrompts).toBe('walks into frame|turns and answers')
+    expect(rendered.guideStrength).toBe('1,1.25')
     expect(JSON.parse(rendered.timelineData).segments).toEqual([
       expect.objectContaining({ start: 0, length: 48, imageFile: 'waoowaoo/1/first.png' }),
       expect.objectContaining({ start: 48, length: 72, imageFile: 'waoowaoo/1/last.png' }),

@@ -12,6 +12,7 @@ export interface VideoModelOption {
   capabilities?: ModelCapabilities
   videoPricingTiers?: VideoPricingTier[]
   workflowVersionId?: string
+  workflowFeatures?: { ltxDirector?: boolean }
 }
 
 export type VideoGenerationMode = 'normal' | 'firstlastframe'
@@ -82,6 +83,9 @@ export interface Storyboard {
   layoutMode?: string | null
   groupSequence?: number | null
   continuityAnchor?: string | null
+  directorVideoUrl?: string | null
+  directorVideoMediaId?: string | null
+  directorConfigJson?: string | null
   panels?: Panel[]
   clip?: {
     start: number

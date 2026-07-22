@@ -580,12 +580,6 @@
             "undo": "撤销到上一版本"
         }
     },
-    "director": {
-        "description": "自动把本组分镜图、逐镜视频提示词和时长转换为 LTX Director 时间线。",
-        "generate": "生成本组视频",
-        "generating": "生成中…",
-        "imagesRequired": "需要本组 1–8 个分镜都已有图片。"
-    },
     "firstLastFrame": {
         "placeholder": "输入首尾帧视频提示词...",
         "modelTitle": "首尾帧模型"

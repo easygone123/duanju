@@ -236,6 +236,31 @@
       }
     }
   },
+  "director": {
+    "modePanels": "逐镜生成",
+    "modeDirector": "LTX Director",
+    "description": "按分镜组编辑 LTX Director 时间线。每个镜头的图片、提示词、时长和引导强度都会直接传入工作流。",
+    "groupTitle": "第 {number} 组时间线",
+    "groupMeta": "{count} 个镜头 · 总时长 {duration} 秒",
+    "model": "LTX Director 工作流",
+    "selectModel": "请选择已发布并测试通过的 Director 工作流",
+    "modelRequired": "没有可用的 LTX Director 工作流，请先在工作流设置中发布并测试包含 LTXDirector 节点的视频工作流。",
+    "fps": "帧率 FPS",
+    "globalPrompt": "全局提示词",
+    "globalPromptPlaceholder": "填写整组镜头统一的人物、场景、风格和连续性要求",
+    "shot": "镜头 {number}",
+    "duration": "镜头时长（秒）",
+    "guideStrengthValue": "图片引导强度 {value}",
+    "shotPrompt": "镜头提示词",
+    "endFrame": "尾帧",
+    "imageMissing": "缺少图片",
+    "imagesRequired": "本组所有分镜都需要先有图片，且每组最多支持 8 个镜头。",
+    "reset": "恢复分镜默认值",
+    "save": "保存配置",
+    "generate": "保存并生成",
+    "generating": "生成中…",
+    "preview": "本组生成结果"
+  },
   "errors": {
     "unknownError": "未知错误"
   },

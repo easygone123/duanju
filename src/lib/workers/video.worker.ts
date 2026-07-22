@@ -15,7 +15,10 @@ import {
   toSignedUrlIfCos,
   uploadVideoSourceToCos,
 } from './utils'
-import { LTX_DIRECTOR_TIMELINE_VERSION } from '@/lib/comfyui/ltx-director'
+import {
+  LTX_DIRECTOR_TIMELINE_VERSION,
+  parseLtxDirectorTimelineSpec,
+} from '@/lib/comfyui/ltx-director'
 import { normalizeToBase64ForGeneration } from '@/lib/media/outbound-image'
 import { resolveBuiltinCapabilitiesByModelKey } from '@/lib/model-capabilities/lookup'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
@@ -393,23 +396,43 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
   if (parseModelKeyStrict(modelId)?.provider !== 'comfyui' || !workflowVersionId) {
     throw new Error('STORYBOARD_DIRECTOR_MODEL_INVALID')
   }
-  const fps = typeof payload.fps === 'number' && Number.isFinite(payload.fps) && payload.fps > 0
-    ? payload.fps
-    : 24
-  const globalPrompt = [
+  const savedTimeline = parseLtxDirectorTimelineSpec(payload.timelineSpec)
+    ?? parseLtxDirectorTimelineSpec(storyboard.directorConfigJson)
+  if (savedTimeline && savedTimeline.segments.length !== panels.length) {
+    throw new Error('STORYBOARD_DIRECTOR_PANELS_CHANGED')
+  }
+  if (savedTimeline?.segments.some((segment, index) => (
+    segment.panelId && segment.panelId !== panels[index]?.id
+  ))) {
+    throw new Error('STORYBOARD_DIRECTOR_PANELS_CHANGED')
+  }
+  const fps = savedTimeline?.fps
+    ?? (typeof payload.fps === 'number' && Number.isFinite(payload.fps) && payload.fps > 0
+      ? payload.fps
+      : 24)
+  const fallbackGlobalPrompt = [
     storyboard.episode.novelPromotionProject.artStylePrompt,
     storyboard.continuityAnchor,
     storyboard.clip.summary,
   ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join('\n')
-  const segments = panels.map((panel) => ({
-    prompt: panel.videoPrompt?.trim() || panel.description?.trim() || panel.imagePrompt?.trim() || '',
-    durationSeconds: positiveDuration(panel.durationOverride, panel.estimatedDuration, panel.duration),
+  const segments = panels.map((panel, index) => ({
+    panelId: panel.id,
+    prompt: savedTimeline?.segments[index]?.prompt
+      ?? panel.videoPrompt?.trim()
+      ?? panel.description?.trim()
+      ?? panel.imagePrompt?.trim()
+      ?? '',
+    durationSeconds: savedTimeline?.segments[index]?.durationSeconds
+      ?? positiveDuration(panel.durationOverride, panel.estimatedDuration, panel.duration),
+    guideStrength: savedTimeline?.segments[index]?.guideStrength ?? 1,
+    ...(savedTimeline?.segments[index]?.isEndFrame ? { isEndFrame: true } : {}),
   }))
   const totalDuration = segments.reduce((sum, segment) => sum + segment.durationSeconds, 0)
   const prompt = JSON.stringify({
     version: LTX_DIRECTOR_TIMELINE_VERSION,
     fps,
-    globalPrompt,
+    globalPrompt: savedTimeline?.globalPrompt ?? fallbackGlobalPrompt,
+    videoModel: modelId,
     segments,
   })
   await reportTaskProgress(job, 15, {

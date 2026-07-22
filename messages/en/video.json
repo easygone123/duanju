@@ -236,6 +236,31 @@
       }
     }
   },
+  "director": {
+    "modePanels": "Per-shot generation",
+    "modeDirector": "LTX Director",
+    "description": "Edit an LTX Director timeline per storyboard group. Each image, prompt, duration, and guide strength is sent directly to the workflow.",
+    "groupTitle": "Timeline group {number}",
+    "groupMeta": "{count} shots · {duration}s total",
+    "model": "LTX Director workflow",
+    "selectModel": "Select a published and tested Director workflow",
+    "modelRequired": "No LTX Director workflow is available. Publish and test a video workflow containing an LTXDirector node first.",
+    "fps": "Frame rate (FPS)",
+    "globalPrompt": "Global prompt",
+    "globalPromptPlaceholder": "Set shared character, scene, style, and continuity requirements for this group",
+    "shot": "Shot {number}",
+    "duration": "Shot duration (seconds)",
+    "guideStrengthValue": "Image guide strength {value}",
+    "shotPrompt": "Shot prompt",
+    "endFrame": "End frame",
+    "imageMissing": "Image missing",
+    "imagesRequired": "Every shot in this group needs an image, and each group supports up to 8 shots.",
+    "reset": "Restore shot defaults",
+    "save": "Save settings",
+    "generate": "Save and generate",
+    "generating": "Generating…",
+    "preview": "Generated group video"
+  },
   "errors": {
     "unknownError": "Unknown error"
   },

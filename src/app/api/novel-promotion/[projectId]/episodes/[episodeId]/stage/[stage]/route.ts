@@ -153,6 +153,9 @@ const videoStoryboardSelect = {
   layoutMode: true,
   groupSequence: true,
   continuityAnchor: true,
+  directorVideoUrl: true,
+  directorVideoMediaId: true,
+  directorConfigJson: true,
   createdAt: true,
   updatedAt: true,
   panels: {

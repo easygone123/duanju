@@ -57,6 +57,7 @@ interface UserModelOption {
   videoPricingTiers?: VideoPricingTier[]
   workflowPurpose?: ComfyWorkflowPurpose
   workflowVersionId?: string
+  workflowFeatures?: { ltxDirector?: boolean }
 }
 
 interface UserModelsPayload {
@@ -201,7 +202,7 @@ export const GET = apiHandler(async () => {
         currentVersion: {
           select: {
             id: true, purpose: true, publishedAt: true, contentHash: true, lastSuccessfulTestAt: true,
-            variableDefinitions: true, bindingSpec: true,
+            variableDefinitions: true, bindingSpec: true, apiFormatJson: true,
             lastTestConnection: { select: { userId: true } },
           },
         },

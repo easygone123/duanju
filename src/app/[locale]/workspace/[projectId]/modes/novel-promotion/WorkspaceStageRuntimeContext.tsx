@@ -19,6 +19,7 @@ export interface WorkspaceStageVideoModelOption {
   capabilities?: ModelCapabilities
   videoPricingTiers?: VideoPricingTier[]
   workflowVersionId?: string
+  workflowFeatures?: { ltxDirector?: boolean }
 }
 
 export interface WorkspaceStageRuntimeValue {

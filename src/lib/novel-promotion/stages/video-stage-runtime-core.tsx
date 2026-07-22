@@ -22,6 +22,7 @@ import { ModelCapabilityDropdown } from '@/components/ui/config-modals/ModelCapa
 import { CombinedPreviewPanel } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/combined-preview'
 import VideoTimelinePanel from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/VideoTimelinePanel'
 import VideoRenderPanel from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/VideoRenderPanel'
+import LtxDirectorWorkspace from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/LtxDirectorWorkspace'
 import type { VideoStageShellProps } from './video-stage-runtime/types'
 import {
   type EffectiveVideoCapabilityDefinition,
@@ -83,6 +84,7 @@ export function useVideoStageRuntime({
   onEnterEditor,
 }: VideoStageShellProps) {
   const t = useTranslations('video')
+  const [workspaceMode, setWorkspaceMode] = useState<'panels' | 'director'>('panels')
 
   const {
     panelVideoPreference,
@@ -110,7 +112,7 @@ export function useVideoStageRuntime({
     projectId,
     storyboards,
   })
-  const { allPanels } = useVideoPanelsProjection({
+  const { sortedStoryboards, allPanels } = useVideoPanelsProjection({
     storyboards,
     clips,
     panelVideoStates,
@@ -555,7 +557,32 @@ export function useVideoStageRuntime({
 
   return (
     <div className="space-y-6 pb-20">
-      <VideoToolbar
+      <div className="glass-surface-soft flex flex-wrap items-center gap-2 rounded-xl p-2">
+        <button
+          type="button"
+          className={`glass-btn-base h-9 rounded-lg px-4 text-sm ${workspaceMode === 'panels' ? 'glass-btn-primary' : 'glass-btn-ghost'}`}
+          onClick={() => setWorkspaceMode('panels')}
+        >
+          {t('director.modePanels')}
+        </button>
+        <button
+          type="button"
+          className={`glass-btn-base h-9 rounded-lg px-4 text-sm ${workspaceMode === 'director' ? 'glass-btn-primary' : 'glass-btn-ghost'}`}
+          onClick={() => setWorkspaceMode('director')}
+        >
+          {t('director.modeDirector')}
+        </button>
+        <button
+          type="button"
+          className="glass-btn-base glass-btn-ghost ml-auto h-9 rounded-lg px-4 text-sm"
+          onClick={onBack}
+        >
+          {t('toolbar.back')}
+        </button>
+      </div>
+
+      {workspaceMode === 'panels' ? <>
+        <VideoToolbar
         totalPanels={projectedPanels.length}
         runningCount={runningCount}
         videosWithUrl={videosWithUrl}
@@ -569,13 +596,13 @@ export function useVideoStageRuntime({
         videosReady={videosWithUrl > 0}
       />
 
-      <CombinedPreviewPanel
+        <CombinedPreviewPanel
         panels={projectedPanels}
         panelVideoPreference={panelVideoPreference}
         videoRatio={videoRatio}
       />
 
-      <VideoTimelinePanel
+        <VideoTimelinePanel
         projectId={projectId}
         episodeId={episodeId}
         allVoiceLines={allVoiceLines}
@@ -586,7 +613,7 @@ export function useVideoStageRuntime({
         onOpenAssetLibraryForCharacter={onOpenAssetLibraryForCharacter}
       />
 
-      <VideoRenderPanel
+        <VideoRenderPanel
         allPanels={projectedPanels}
         linkedPanels={linkedPanels}
         highlightedPanelKey={highlightedPanelKey}
@@ -629,9 +656,18 @@ export function useVideoStageRuntime({
         getLocalPrompt={getLocalPrompt}
         updateLocalPrompt={updateLocalPrompt}
         savePrompt={savePrompt}
-      />
+        />
+      </> : (
+        <LtxDirectorWorkspace
+          projectId={projectId}
+          episodeId={episodeId}
+          storyboards={sortedStoryboards}
+          clips={clips}
+          videoModels={allVideoModelOptions}
+        />
+      )}
 
-      {isBatchConfigOpen && (
+      {workspaceMode === 'panels' && isBatchConfigOpen && (
         <div
           className="fixed inset-0 z-[120] glass-overlay flex items-center justify-center p-4"
           onClick={handleCloseBatchGenerateModal}
@@ -692,7 +728,9 @@ export function useVideoStageRuntime({
         </div>
       )}
 
-      {previewImage && <ImagePreviewModal imageUrl={previewImage} onClose={closePreviewImage} />}
+      {workspaceMode === 'panels' && previewImage && (
+        <ImagePreviewModal imageUrl={previewImage} onClose={closePreviewImage} />
+      )}
     </div>
   )
 }
