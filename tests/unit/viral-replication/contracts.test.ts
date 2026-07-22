@@ -277,26 +277,20 @@ describe('parseViralStoryboardGeneration', () => {
     expect(() => parseViralStoryboardGeneration(generation)).toThrow()
   })
 
-  it('rejects non-continuous zero-based storyboard sequences', () => {
+  it('normalizes model-provided storyboard sequences to array order', () => {
     const generation = validGeneration()
     generation.storyboards[0].sequence = 1
 
-    const error = captureZodError(() => parseViralStoryboardGeneration(generation))
-    expect(error.issues[0]).toMatchObject({
-      code: z.ZodIssueCode.custom,
-      path: ['storyboards', 0, 'sequence'],
-    })
+    expect(parseViralStoryboardGeneration(generation).storyboards[0].sequence).toBe(0)
   })
 
-  it('rejects non-continuous zero-based panel indexes within a storyboard', () => {
-    const generation = validGeneration()
-    generation.storyboards[0].panels[0].panelIndex = 1
+  it('normalizes global panel indexes to zero-based indexes within each storyboard', () => {
+    const generation = generationWithPanelCounts([1, 2])
+    generation.storyboards[1].panels[0].panelIndex = 1
+    generation.storyboards[1].panels[1].panelIndex = 2
 
-    const error = captureZodError(() => parseViralStoryboardGeneration(generation))
-    expect(error.issues[0]).toMatchObject({
-      code: z.ZodIssueCode.custom,
-      path: ['storyboards', 0, 'panels', 0, 'panelIndex'],
-    })
+    const parsed = parseViralStoryboardGeneration(generation)
+    expect(parsed.storyboards[1].panels.map((panel) => panel.panelIndex)).toEqual([0, 1])
   })
 
   it('accepts exactly 72 generated panels across storyboards', () => {

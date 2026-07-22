@@ -55,6 +55,7 @@
   },
   "errors": {
     "generic": "任务暂时未能完成，请重试。",
+    "storyboardGeneration": "原创分镜生成失败，请重试。重试时会保留分析结果，不会重新分析视频。",
     "invalidReport": "分析报告格式无效，请重试分析。",
     "projectMismatch": "该分析任务不属于当前项目。"
   }

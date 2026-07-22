@@ -12,6 +12,7 @@ import {
   useViralReplication,
 } from '@/lib/query/hooks/useViralReplication'
 import type { SSEEvent } from '@/lib/task/types'
+import { VIRAL_STORYBOARD_GENERATION_FAILED } from '@/lib/viral-replication/constants'
 import {
   parseViralAnalysisReportForView,
   resolveViralReplicationViewState,
@@ -52,6 +53,9 @@ export default function ViralReplicationPage({
   const resolvedProjectId = replication?.project?.id || replication?.projectId || null
   const resolvedEpisodeId = replication?.episode?.id || replication?.episodeId || null
   const projectMatches = resolvedProjectId === projectId
+  const failureMessage = replication?.errorMessage === VIRAL_STORYBOARD_GENERATION_FAILED
+    ? t('errors.storyboardGeneration')
+    : t('errors.generic')
 
   useEffect(() => {
     if (typeof replicationBrief === 'string') setBrief(replicationBrief)
@@ -109,7 +113,7 @@ export default function ViralReplicationPage({
       ) : null}
 
       {viewState?.kind === 'failed' ? (
-        <ErrorCard message={t('errors.generic')}>
+        <ErrorCard message={failureMessage}>
           <button
             type="button"
             disabled={retry.isPending}

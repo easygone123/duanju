@@ -9,7 +9,10 @@ import { prisma } from '@/lib/prisma'
 import { deleteObject, uploadObjectStream } from '@/lib/storage'
 import { submitTask } from '@/lib/task/submitter'
 import { TASK_TYPE } from '@/lib/task/types'
-import { VIRAL_REPLICATION_STATUS } from './constants'
+import {
+  VIRAL_REPLICATION_STATUS,
+  VIRAL_STORYBOARD_GENERATION_FAILED,
+} from './constants'
 import { FfmpegBoundaryError, probeVideo } from './ffmpeg'
 import { readOwnedViralReplication } from './ownership'
 import { writeRequestBodyToTempFile } from './temp-file'
@@ -115,6 +118,78 @@ function requireDraftTargets(replication: Awaited<ReturnType<typeof readOwnedVir
   return { projectId, episodeId, sourceVideoMediaId }
 }
 
+function shouldRetryStoryboardGeneration(replication: Awaited<ReturnType<typeof readOwnedViralReplication>>) {
+  return Boolean(replication.reportJson) && (
+    replication.errorMessage === VIRAL_STORYBOARD_GENERATION_FAILED
+    || replication.errorMessage === GENERATION_SUBMIT_FAILURE_MESSAGE
+  )
+}
+
+async function retryViralStoryboardGeneration(input: {
+  id: string
+  userId: string
+  locale: Locale
+  projectId: string
+  episodeId: string
+}) {
+  const prepared = await prisma.$transaction(async (tx) => {
+    const preference = await tx.userPreference.findUnique({ where: { userId: input.userId } })
+    if (!preference?.analysisModel) {
+      throw new ApiError('INVALID_PARAMS', {
+        code: 'ANALYSIS_MODEL_REQUIRED',
+        field: 'analysisModel',
+      })
+    }
+    const updated = await tx.viralReplication.updateMany({
+      where: {
+        id: input.id,
+        userId: input.userId,
+        status: VIRAL_REPLICATION_STATUS.FAILED,
+        projectId: input.projectId,
+        episodeId: input.episodeId,
+      },
+      data: {
+        status: VIRAL_REPLICATION_STATUS.GENERATING,
+        analysisModelSnapshot: preference.analysisModel,
+        errorMessage: null,
+      },
+    })
+    if (updated.count !== 1) {
+      throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_RETRY_CONFLICT' })
+    }
+    return { analysisModelSnapshot: preference.analysisModel }
+  })
+
+  try {
+    const task = await submitTask({
+      userId: input.userId,
+      locale: input.locale,
+      projectId: input.projectId,
+      episodeId: input.episodeId,
+      type: TASK_TYPE.VIRAL_STORYBOARD_GENERATION,
+      targetType: 'ViralReplication',
+      targetId: input.id,
+      dedupeKey: `viral_storyboard_generation:${input.id}`,
+      maxAttempts: 1,
+      payload: { analysisModelSnapshot: prepared.analysisModelSnapshot },
+    })
+    return { id: input.id, status: VIRAL_REPLICATION_STATUS.GENERATING, taskId: task.taskId }
+  } catch {
+    await prisma.viralReplication.updateMany({
+      where: {
+        id: input.id,
+        userId: input.userId,
+        status: VIRAL_REPLICATION_STATUS.GENERATING,
+      },
+      data: {
+        status: VIRAL_REPLICATION_STATUS.FAILED,
+        errorMessage: GENERATION_SUBMIT_FAILURE_MESSAGE,
+      },
+    })
+    return { id: input.id, status: VIRAL_REPLICATION_STATUS.FAILED, taskId: null }
+  }
+}
+
 export async function retryViralReplication(input: {
   id: string
   userId: string
@@ -125,6 +200,13 @@ export async function retryViralReplication(input: {
     throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_RETRY_NOT_ALLOWED' })
   }
   const targets = requireDraftTargets(replication)
+  if (shouldRetryStoryboardGeneration(replication)) {
+    return retryViralStoryboardGeneration({
+      ...input,
+      projectId: targets.projectId,
+      episodeId: targets.episodeId,
+    })
+  }
   const prepared = await prisma.$transaction(async (tx) => {
     const preference = await tx.userPreference.findUnique({ where: { userId: input.userId } })
     if (!preference?.analysisModel) {

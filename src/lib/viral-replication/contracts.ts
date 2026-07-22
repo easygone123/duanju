@@ -143,24 +143,22 @@ export function parseViralAnalysisReport(
 }
 
 export function parseViralStoryboardGeneration(value: unknown): ViralStoryboardGenerationV1 {
-  const generation = viralStoryboardGenerationV1Schema.parse(value)
-
-  generation.storyboards.forEach((storyboard, storyboardIndex) => {
-    if (storyboard.sequence !== storyboardIndex) {
-      throwValidationIssue(
-        ['storyboards', storyboardIndex, 'sequence'],
-        `storyboards[${storyboardIndex}].sequence must be ${storyboardIndex}`,
-      )
-    }
-    storyboard.panels.forEach((panel, panelIndex) => {
-      if (panel.panelIndex !== panelIndex) {
-        throwValidationIssue(
-          ['storyboards', storyboardIndex, 'panels', panelIndex, 'panelIndex'],
-          `storyboards[${storyboardIndex}].panels[${panelIndex}].panelIndex must be ${panelIndex}`,
-        )
-      }
-    })
-  })
+  const parsedGeneration = viralStoryboardGenerationV1Schema.parse(value)
+  // Array order is canonical. Models commonly continue panel numbering across
+  // storyboard groups (or use one-based numbering), which should not make an
+  // otherwise valid generation fail. Normalize these derived indexes before
+  // persistence so every storyboard has stable zero-based local panel indexes.
+  const generation: ViralStoryboardGenerationV1 = {
+    ...parsedGeneration,
+    storyboards: parsedGeneration.storyboards.map((storyboard, storyboardIndex) => ({
+      ...storyboard,
+      sequence: storyboardIndex,
+      panels: storyboard.panels.map((panel, panelIndex) => ({
+        ...panel,
+        panelIndex,
+      })),
+    })),
+  }
 
   const panelCount = generation.storyboards.reduce(
     (total, storyboard) => total + storyboard.panels.length,

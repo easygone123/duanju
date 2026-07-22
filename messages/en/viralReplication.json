@@ -55,6 +55,7 @@
   },
   "errors": {
     "generic": "The task could not be completed. Please retry.",
+    "storyboardGeneration": "Original storyboard generation failed. Retry will keep the analysis result instead of analyzing the video again.",
     "invalidReport": "The analysis report is invalid. Please retry the analysis.",
     "projectMismatch": "This analysis task does not belong to the current project."
   }

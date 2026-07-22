@@ -316,6 +316,59 @@ describe('viral replication streamed upload with real database', () => {
     }))
   })
 
+  it('retries failed storyboard generation without clearing or repeating video analysis', async () => {
+    const { uploadViralReplicationVideo, retryViralReplication } = await import('@/lib/viral-replication/service')
+    const uploaded = await uploadViralReplicationVideo({
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+    })
+    const reportJson = { schemaVersion: 1, overview: { hook: 'kept' } }
+    await prisma.viralReplicationFrame.create({
+      data: {
+        replicationId,
+        mediaId: uploaded.sourceVideoMediaId,
+        shotIndex: 0,
+        timestampMs: 1_000,
+        startMs: 0,
+        endMs: 2_000,
+      },
+    })
+    await prisma.viralReplication.update({
+      where: { id: replicationId },
+      data: {
+        status: 'failed',
+        reportJson,
+        transcriptText: 'keep transcript',
+        errorMessage: 'VIRAL_STORYBOARD_GENERATION_FAILED',
+      },
+    })
+    await prisma.userPreference.update({
+      where: { userId },
+      data: { analysisModel: 'openai::generation-v2' },
+    })
+    submitTaskMock.mockClear()
+
+    const retried = await retryViralReplication({ id: replicationId, userId, locale: 'zh' })
+
+    expect(retried).toMatchObject({ id: replicationId, status: 'generating', taskId: expect.any(String) })
+    expect(await prisma.viralReplicationFrame.count({ where: { replicationId } })).toBe(1)
+    expect(await prisma.viralReplication.findUniqueOrThrow({ where: { id: replicationId } })).toMatchObject({
+      status: 'generating',
+      analysisModelSnapshot: 'openai::generation-v2',
+      reportJson,
+      transcriptText: 'keep transcript',
+      errorMessage: null,
+    })
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'viral_storyboard_generation',
+      maxAttempts: 1,
+      dedupeKey: `viral_storyboard_generation:${replicationId}`,
+      payload: { analysisModelSnapshot: 'openai::generation-v2' },
+    }))
+    expect(submitTaskMock).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'viral_video_analysis',
+    }))
+  })
+
   it('atomically confirms the latest brief and queues one pinned generation task', async () => {
     const { uploadViralReplicationVideo, generateViralReplication } = await import('@/lib/viral-replication/service')
     const uploaded = await uploadViralReplicationVideo({

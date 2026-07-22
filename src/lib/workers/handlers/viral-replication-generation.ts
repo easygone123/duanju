@@ -5,7 +5,10 @@ import { getCompletionContent } from '@/lib/llm/completion-parts'
 import { runModelGatewayTextCompletion } from '@/lib/model-gateway/llm'
 import { prisma } from '@/lib/prisma'
 import type { TaskJobData } from '@/lib/task/types'
-import { VIRAL_REPLICATION_STATUS } from '@/lib/viral-replication/constants'
+import {
+  VIRAL_REPLICATION_STATUS,
+  VIRAL_STORYBOARD_GENERATION_FAILED,
+} from '@/lib/viral-replication/constants'
 import {
   parseViralAnalysisReport,
   parseViralStoryboardGeneration,
@@ -159,7 +162,7 @@ export function createViralReplicationGenerationHandler(
           },
           data: {
             status: VIRAL_REPLICATION_STATUS.FAILED,
-            errorMessage: 'VIRAL_STORYBOARD_GENERATION_FAILED',
+            errorMessage: VIRAL_STORYBOARD_GENERATION_FAILED,
           },
         })
       }

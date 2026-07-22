@@ -117,7 +117,7 @@ describe('ViralReplicationPage', () => {
     expect(state.patch.mock.invocationCallOrder[0]).toBeLessThan(state.generate.mock.invocationCallOrder[0])
   })
 
-  it('rejects invalid report data, locks generation edits, and offers generic retry on failure', () => {
+  it('rejects invalid report data, locks generation edits, and offers stage-aware retry on failure', () => {
     state.detail = detail('review_ready', { reportJson: { ...report, schemaVersion: 2 } })
     const view = render(createElement(ViralReplicationPage, {
       projectId: 'project-1', replicationId: 'rep-1',
@@ -140,6 +140,12 @@ describe('ViralReplicationPage', () => {
     expect(view.queryByText('sensitive internal details')).toBeNull()
     fireEvent.click(view.getByRole('button', { name: 'actions.retry' }))
     expect(state.retry).toHaveBeenCalledTimes(1)
+
+    state.detail = detail('failed', { errorMessage: 'VIRAL_STORYBOARD_GENERATION_FAILED' })
+    view.rerender(createElement(ViralReplicationPage, {
+      projectId: 'project-1', replicationId: 'rep-1',
+    }))
+    expect(view.getByText('errors.storyboardGeneration')).toBeTruthy()
   })
 
   it('rejects project ownership mismatch and navigates a completed result exactly once', async () => {
