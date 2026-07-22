@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { isOwnedDirectorUploadStorageKey } from '@/lib/novel-promotion/director-media'
 import {
   ensureMediaObjectFromStorageKey,
   guessMimeTypeFromStorageKey,
@@ -32,8 +33,15 @@ export async function resolveOwnedComfyMedia(
   store: ComfyMediaOwnershipStore = defaultStore,
 ) {
   if (!isOpaqueStorageKey(input.storageKey)) return false
+  const directorUpload = input.mediaType === 'image'
+    && isOwnedDirectorUploadStorageKey(input.storageKey, input.userId, input.projectId)
   const record = await store.findFirst({
-    where: ownedMediaWhere(input),
+    where: directorUpload
+      ? {
+          storageKey: input.storageKey,
+          mimeType: { startsWith: 'image/' },
+        }
+      : ownedMediaWhere(input),
     select: { id: true },
   })
   if (record !== null) return true
@@ -83,8 +91,12 @@ export async function resolveOwnedComfyMediaRefFromValue(
   const dependencies = { ...defaultRefDependencies, ...overrides }
   const storageKey = await dependencies.resolveStorageKey(input.value)
   if (!storageKey || !isOpaqueStorageKey(storageKey)) return null
+  const directorUpload = input.mediaType === 'image'
+    && isOwnedDirectorUploadStorageKey(storageKey, input.userId, input.projectId)
   let record = await dependencies.findFirst({
-    where: ownedMediaWhere({ ...input, storageKey }),
+    where: directorUpload
+      ? { storageKey, mimeType: { startsWith: 'image/' } }
+      : ownedMediaWhere({ ...input, storageKey }),
     select: { storageKey: true, mimeType: true },
   })
   const repairLegacyOwnedAsset = overrides.repairLegacyOwnedAsset

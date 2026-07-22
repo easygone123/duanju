@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { renderLtxDirectorTimeline } from '@/lib/comfyui/ltx-director'
+import { parseLtxDirectorTimelineSpec, renderLtxDirectorTimeline } from '@/lib/comfyui/ltx-director'
 import { augmentLtxDirectorContract } from '@/lib/comfyui/ltx-director-contract'
 import { analyzeComfyApiWorkflow } from '@/lib/comfyui/workflow-auto-mapper'
 import { renderComfyWorkflow } from '@/lib/comfyui/workflow-renderer'
@@ -32,6 +32,33 @@ const directorGraph = {
 }
 
 describe('LTX Director adapter', () => {
+  it('preserves freely arranged panel and uploaded-media sources', () => {
+    const parsed = parseLtxDirectorTimelineSpec({
+      version: 1,
+      fps: 24,
+      globalPrompt: 'continuous scene',
+      segments: [
+        {
+          id: 'opening',
+          sourcePanelId: 'panel-before',
+          prompt: 'continue from the previous shot',
+          durationSeconds: 2,
+        },
+        {
+          id: 'insert',
+          sourceMediaId: 'media-upload',
+          sourceImageUrl: '/m/uploaded',
+          prompt: 'insert shot',
+          durationSeconds: 1.5,
+        },
+      ],
+    })
+    expect(parsed?.segments).toEqual([
+      expect.objectContaining({ id: 'opening', sourcePanelId: 'panel-before' }),
+      expect.objectContaining({ id: 'insert', sourceMediaId: 'media-upload', sourceImageUrl: '/m/uploaded' }),
+    ])
+  })
+
   it('upgrades an already-published workflow contract at runtime', () => {
     const contract = augmentLtxDirectorContract({
       graph: directorGraph,

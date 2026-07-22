@@ -11,6 +11,7 @@ import {
 import { hasLtxDirectorNode } from '@/lib/comfyui/ltx-director-contract'
 import { isExecutableOwnedWorkflow } from '@/lib/comfyui/workflow-model-option'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
+import { isOwnedDirectorUploadStorageKey } from '@/lib/novel-promotion/director-media'
 import { prisma } from '@/lib/prisma'
 import { submitTask } from '@/lib/task/submitter'
 import { TASK_TYPE } from '@/lib/task/types'
@@ -34,39 +35,88 @@ async function loadOwnedStoryboard(projectId: string, userId: string, storyboard
       id: true,
       episodeId: true,
       directorVideoMediaId: true,
-      panels: {
-        orderBy: { panelIndex: 'asc' },
-        select: { id: true, imageUrl: true },
+      episode: {
+        select: {
+          storyboards: {
+            orderBy: [{ groupSequence: 'asc' }, { createdAt: 'asc' }],
+            select: {
+              panels: {
+                orderBy: { panelIndex: 'asc' },
+                select: { id: true, imageUrl: true },
+              },
+            },
+          },
+        },
       },
     },
   })
   if (!storyboard) throw new ApiError('NOT_FOUND')
-  if (storyboard.panels.length === 0 || storyboard.panels.length > 8
-    || storyboard.panels.some((panel) => !panel.imageUrl)) {
-    throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_IMAGES_INVALID' })
-  }
   return storyboard
 }
 
-function normalizeTimelineSpec(value: unknown, panelIds: string[]): LtxDirectorTimelineSpec {
-  const parsed = parseLtxDirectorTimelineSpec(value)
-  if (!parsed || parsed.segments.length !== panelIds.length || parsed.fps > 240
+async function normalizeTimelineSpec(input: {
+  value: unknown
+  storyboard: Awaited<ReturnType<typeof loadOwnedStoryboard>>
+  userId: string
+  projectId: string
+}): Promise<LtxDirectorTimelineSpec> {
+  const { storyboard, userId, projectId } = input
+  const allPanels = storyboard.episode.storyboards.flatMap((item) => item.panels)
+  const panelsById = new Map(allPanels.map((panel) => [panel.id, panel]))
+  const parsed = parseLtxDirectorTimelineSpec(input.value)
+  if (!parsed || parsed.segments.length === 0 || parsed.segments.length > 8 || parsed.fps > 240
     || parsed.segments.some((segment) => segment.durationSeconds > 60)) {
     throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_CONFIG_INVALID' })
   }
-  const segmentPanelIds = parsed.segments.map((segment) => segment.panelId).filter(Boolean)
-  if (segmentPanelIds.length > 0
-    && (segmentPanelIds.length !== panelIds.length
-      || segmentPanelIds.some((panelId, index) => panelId !== panelIds[index]))) {
-    throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_PANELS_CHANGED' })
+  const mediaIds = [...new Set(parsed.segments.flatMap((segment) => (
+    segment.sourceMediaId ? [segment.sourceMediaId] : []
+  )))]
+  const uploadedMedia = mediaIds.length === 0 ? [] : await prisma.mediaObject.findMany({
+    where: { id: { in: mediaIds } },
+    select: { id: true, publicId: true, storageKey: true, mimeType: true },
+  })
+  const mediaById = new Map(uploadedMedia.map((media) => [media.id, media]))
+  const normalizedSegments = parsed.segments.map((segment, index) => {
+    const sourcePanelId = segment.sourcePanelId || segment.panelId
+    if (sourcePanelId) {
+      const panel = panelsById.get(sourcePanelId)
+      if (!panel?.imageUrl) {
+        throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SOURCE_INVALID' })
+      }
+      return {
+        id: segment.id || `segment-${index + 1}`,
+        sourcePanelId,
+        prompt: segment.prompt,
+        durationSeconds: segment.durationSeconds,
+        guideStrength: segment.guideStrength ?? 1,
+        ...(segment.isEndFrame ? { isEndFrame: true } : {}),
+      }
+    }
+    if (segment.sourceMediaId) {
+      const media = mediaById.get(segment.sourceMediaId)
+      if (!media || !media.mimeType?.startsWith('image/')
+        || !isOwnedDirectorUploadStorageKey(media.storageKey, userId, projectId)) {
+        throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SOURCE_INVALID' })
+      }
+      return {
+        id: segment.id || `segment-${index + 1}`,
+        sourceMediaId: media.id,
+        sourceImageUrl: `/m/${encodeURIComponent(media.publicId)}`,
+        prompt: segment.prompt,
+        durationSeconds: segment.durationSeconds,
+        guideStrength: segment.guideStrength ?? 1,
+        ...(segment.isEndFrame ? { isEndFrame: true } : {}),
+      }
+    }
+    throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SOURCE_REQUIRED' })
+  })
+  if (new Set(normalizedSegments.map((segment) => segment.id)).size !== normalizedSegments.length) {
+    throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SEGMENT_ID_DUPLICATE' })
   }
   return {
     ...parsed,
     version: LTX_DIRECTOR_TIMELINE_VERSION,
-    segments: parsed.segments.map((segment, index) => ({
-      ...segment,
-      panelId: panelIds[index],
-    })),
+    segments: normalizedSegments,
   }
 }
 
@@ -128,7 +178,12 @@ export const PUT = apiHandler(async (
   const storyboardId = typeof body?.storyboardId === 'string' ? body.storyboardId : ''
   if (!storyboardId) throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_REQUIRED' })
   const storyboard = await loadOwnedStoryboard(projectId, authResult.session.user.id, storyboardId)
-  const timelineSpec = normalizeTimelineSpec(body?.timelineSpec, storyboard.panels.map((panel) => panel.id))
+  const timelineSpec = await normalizeTimelineSpec({
+    value: body?.timelineSpec,
+    storyboard,
+    userId: authResult.session.user.id,
+    projectId,
+  })
   const { model } = await resolveDirectorWorkflow({
     projectId,
     userId: authResult.session.user.id,
@@ -154,7 +209,12 @@ export const POST = apiHandler(async (
   const storyboardId = typeof body?.storyboardId === 'string' ? body.storyboardId : ''
   if (!storyboardId) throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_REQUIRED' })
   const storyboard = await loadOwnedStoryboard(projectId, session.user.id, storyboardId)
-  const timelineSpec = normalizeTimelineSpec(body?.timelineSpec, storyboard.panels.map((panel) => panel.id))
+  const timelineSpec = await normalizeTimelineSpec({
+    value: body?.timelineSpec,
+    storyboard,
+    userId: session.user.id,
+    projectId,
+  })
   const { model, workflowVersionId } = await resolveDirectorWorkflow({
     projectId,
     userId: session.user.id,

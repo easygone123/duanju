@@ -18,10 +18,12 @@ import {
 import {
   LTX_DIRECTOR_TIMELINE_VERSION,
   parseLtxDirectorTimelineSpec,
+  type LtxDirectorTimelineSegmentSpec,
 } from '@/lib/comfyui/ltx-director'
 import { normalizeToBase64ForGeneration } from '@/lib/media/outbound-image'
 import { resolveBuiltinCapabilitiesByModelKey } from '@/lib/model-capabilities/lookup'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
+import { isOwnedDirectorUploadStorageKey } from '@/lib/novel-promotion/director-media'
 import { getProviderConfig } from '@/lib/api-config'
 import { resolveVideoGenerationModel } from '@/lib/video/model-selection'
 import { resolvePinnedVideoPrompt } from '@/lib/novel-promotion/video/panel-video-submission'
@@ -385,10 +387,6 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     },
   })
   if (!storyboard) throw new Error('STORYBOARD_DIRECTOR_NOT_FOUND')
-  const panels = storyboard.panels.filter((panel) => Boolean(panel.imageUrl))
-  if (panels.length !== storyboard.panels.length || panels.length === 0 || panels.length > 8) {
-    throw new Error('STORYBOARD_DIRECTOR_IMAGES_INVALID')
-  }
   const modelId = typeof payload.videoModel === 'string' ? payload.videoModel : ''
   const workflowVersionId = typeof payload.comfyWorkflowVersionId === 'string'
     ? payload.comfyWorkflowVersionId
@@ -398,14 +396,50 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
   }
   const savedTimeline = parseLtxDirectorTimelineSpec(payload.timelineSpec)
     ?? parseLtxDirectorTimelineSpec(storyboard.directorConfigJson)
-  if (savedTimeline && savedTimeline.segments.length !== panels.length) {
-    throw new Error('STORYBOARD_DIRECTOR_PANELS_CHANGED')
+  const fallbackPanels = storyboard.panels.filter((panel) => Boolean(panel.imageUrl))
+  if (!savedTimeline && (fallbackPanels.length === 0 || fallbackPanels.length > 8)) {
+    throw new Error('STORYBOARD_DIRECTOR_IMAGES_INVALID')
   }
-  if (savedTimeline?.segments.some((segment, index) => (
-    segment.panelId && segment.panelId !== panels[index]?.id
-  ))) {
-    throw new Error('STORYBOARD_DIRECTOR_PANELS_CHANGED')
+  const timelineSegments: LtxDirectorTimelineSegmentSpec[] = savedTimeline?.segments ?? fallbackPanels.map((panel) => ({
+    id: `panel-${panel.id}`,
+    sourcePanelId: panel.id,
+    prompt: panel.videoPrompt?.trim() || panel.description?.trim() || panel.imagePrompt?.trim() || '',
+    durationSeconds: positiveDuration(panel.durationOverride, panel.estimatedDuration, panel.duration),
+    guideStrength: 1,
+  }))
+  if (timelineSegments.length === 0 || timelineSegments.length > 8) {
+    throw new Error('STORYBOARD_DIRECTOR_IMAGES_INVALID')
   }
+  const sourcePanelIds = [...new Set(timelineSegments.flatMap((segment) => {
+    const panelId = segment.sourcePanelId || segment.panelId
+    return panelId ? [panelId] : []
+  }))]
+  const sourcePanels = sourcePanelIds.length === 0 ? [] : await prisma.novelPromotionPanel.findMany({
+    where: { id: { in: sourcePanelIds }, storyboard: { episodeId: storyboard.episodeId } },
+  })
+  const sourcePanelsById = new Map(sourcePanels.map((panel) => [panel.id, panel]))
+  const sourceMediaIds = [...new Set(timelineSegments.flatMap((segment) => (
+    segment.sourceMediaId ? [segment.sourceMediaId] : []
+  )))]
+  const sourceMedia = await Promise.all(sourceMediaIds.map((mediaId) => getMediaObjectById(mediaId)))
+  const sourceMediaById = new Map(sourceMedia.flatMap((media) => media ? [[media.id, media]] : []))
+  const sourceImages = timelineSegments.map((segment) => {
+    const panelId = segment.sourcePanelId || segment.panelId
+    if (panelId) {
+      const panel = sourcePanelsById.get(panelId)
+      if (!panel?.imageUrl) throw new Error('STORYBOARD_DIRECTOR_SOURCE_INVALID')
+      return panel.imageUrl
+    }
+    if (segment.sourceMediaId) {
+      const media = sourceMediaById.get(segment.sourceMediaId)
+      if (!media?.storageKey || !media.mimeType?.startsWith('image/')
+        || !isOwnedDirectorUploadStorageKey(media.storageKey, job.data.userId, job.data.projectId)) {
+        throw new Error('STORYBOARD_DIRECTOR_SOURCE_INVALID')
+      }
+      return media.url
+    }
+    throw new Error('STORYBOARD_DIRECTOR_SOURCE_REQUIRED')
+  })
   const fps = savedTimeline?.fps
     ?? (typeof payload.fps === 'number' && Number.isFinite(payload.fps) && payload.fps > 0
       ? payload.fps
@@ -415,17 +449,9 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     storyboard.continuityAnchor,
     storyboard.clip.summary,
   ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join('\n')
-  const segments = panels.map((panel, index) => ({
-    panelId: panel.id,
-    prompt: savedTimeline?.segments[index]?.prompt
-      ?? panel.videoPrompt?.trim()
-      ?? panel.description?.trim()
-      ?? panel.imagePrompt?.trim()
-      ?? '',
-    durationSeconds: savedTimeline?.segments[index]?.durationSeconds
-      ?? positiveDuration(panel.durationOverride, panel.estimatedDuration, panel.duration),
-    guideStrength: savedTimeline?.segments[index]?.guideStrength ?? 1,
-    ...(savedTimeline?.segments[index]?.isEndFrame ? { isEndFrame: true } : {}),
+  const segments = timelineSegments.map((segment) => ({
+    ...segment,
+    guideStrength: segment.guideStrength ?? 1,
   }))
   const totalDuration = segments.reduce((sum, segment) => sum + segment.durationSeconds, 0)
   const prompt = JSON.stringify({
@@ -445,8 +471,8 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     modelId,
     invocationKey: `${job.data.taskId}:storyboard:${storyboard.id}:ltx-director`,
     comfyWorkflowVersionId: workflowVersionId,
-    imageUrl: panels[0]!.imageUrl!,
-    comfyReferenceImages: panels.map((panel) => panel.imageUrl!),
+    imageUrl: sourceImages[0]!,
+    comfyReferenceImages: sourceImages,
     comfyReferenceImagesOnly: true,
     options: {
       prompt,

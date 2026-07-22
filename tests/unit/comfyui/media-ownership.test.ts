@@ -41,4 +41,29 @@ describe('ComfyUI media ownership resolver', () => {
       expect.objectContaining({ novelPromotionStoryboardUpscaledSheetImages: expect.any(Object) }),
     ]))
   })
+
+  it('accepts only the current user and project scoped Director upload prefix', async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: 'director-media' })
+    await expect(resolveOwnedComfyMedia({
+      userId: 'user-1',
+      projectId: 'project-1',
+      storageKey: 'novel-promotion/director/user-1/project-1/upload.webp',
+      mediaType: 'image',
+    }, { findFirst })).resolves.toBe(true)
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        storageKey: 'novel-promotion/director/user-1/project-1/upload.webp',
+        mimeType: { startsWith: 'image/' },
+      },
+      select: { id: true },
+    })
+
+    findFirst.mockResolvedValueOnce(null)
+    await expect(resolveOwnedComfyMedia({
+      userId: 'user-2',
+      projectId: 'project-1',
+      storageKey: 'novel-promotion/director/user-1/project-1/upload.webp',
+      mediaType: 'image',
+    }, { findFirst })).resolves.toBe(false)
+  })
 })

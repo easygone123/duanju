@@ -3,7 +3,11 @@ import type { ComfyUploadedFile } from './types'
 export const LTX_DIRECTOR_TIMELINE_VERSION = 1 as const
 
 export interface LtxDirectorTimelineSegmentSpec {
+  id?: string
   panelId?: string
+  sourcePanelId?: string
+  sourceMediaId?: string
+  sourceImageUrl?: string
   prompt: string
   durationSeconds: number
   guideStrength?: number
@@ -54,8 +58,20 @@ export function parseLtxDirectorTimelineSpec(value: unknown): LtxDirectorTimelin
         ? candidate.guideStrength
         : undefined
       return [{
+        ...(typeof candidate.id === 'string' && candidate.id.trim()
+          ? { id: candidate.id.trim() }
+          : {}),
         ...(typeof candidate.panelId === 'string' && candidate.panelId.trim()
           ? { panelId: candidate.panelId.trim() }
+          : {}),
+        ...(typeof candidate.sourcePanelId === 'string' && candidate.sourcePanelId.trim()
+          ? { sourcePanelId: candidate.sourcePanelId.trim() }
+          : {}),
+        ...(typeof candidate.sourceMediaId === 'string' && candidate.sourceMediaId.trim()
+          ? { sourceMediaId: candidate.sourceMediaId.trim() }
+          : {}),
+        ...(typeof candidate.sourceImageUrl === 'string' && candidate.sourceImageUrl.trim()
+          ? { sourceImageUrl: candidate.sourceImageUrl.trim() }
           : {}),
         prompt: cleanPrompt(candidate.prompt),
         durationSeconds: candidate.durationSeconds,
