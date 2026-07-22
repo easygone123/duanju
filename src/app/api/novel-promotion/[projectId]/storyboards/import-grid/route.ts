@@ -20,23 +20,43 @@ const panelSchema = z.object({
 }).strict()
 
 const groupSchema = z.object({
+  mode: z.enum(['four_grid', 'six_grid']).default('four_grid'),
   summary: z.string().trim().min(1).max(10_000),
   content: z.string().trim().max(30_000).optional(),
   sheetPrompt: z.string().trim().min(1).max(60_000),
-  panels: z.array(panelSchema).length(4),
-}).strict()
+  panels: z.array(panelSchema).min(4).max(6),
+}).strict().superRefine((group, context) => {
+  const expectedPanelCount = group.mode === 'six_grid' ? 6 : 4
+  if (group.panels.length !== expectedPanelCount) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['panels'],
+      message: `${group.mode} requires exactly ${expectedPanelCount} panels`,
+    })
+  }
+})
 
 const requestSchema = z.object({
   episodeId: z.string().trim().min(1).max(200),
   title: z.string().trim().min(1).max(500).optional(),
   replaceExisting: z.literal(true),
   groups: z.array(groupSchema).min(1).max(30),
-}).strict()
+}).strict().superRefine((request, context) => {
+  const modes = new Set(request.groups.map((group) => group.mode))
+  if (modes.size > 1) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['groups'],
+      message: 'all imported groups must use the same grid mode',
+    })
+  }
+})
 
 /**
  * Import storyboard planning produced by an external analysis model. The
  * imported groups intentionally contain no generated media; the normal grid
- * upload route remains the only way to attach and crop a finished 2x2 sheet.
+ * upload route remains the only way to attach and crop a finished 2x2 or 3x2
+ * sheet.
  */
 export const POST = apiHandler(async (
   request: NextRequest,
@@ -88,6 +108,7 @@ export const POST = apiHandler(async (
     let timelineSeconds = 0
     for (let groupIndex = 0; groupIndex < body.groups.length; groupIndex += 1) {
       const group = body.groups[groupIndex]
+      const panelCount = group.mode === 'six_grid' ? 6 : 4
       const clipDuration = group.panels.reduce((sum, panel) => sum + panel.duration, 0)
       const clip = await tx.novelPromotionClip.create({
         data: {
@@ -97,7 +118,7 @@ export const POST = apiHandler(async (
           duration: Math.round(clipDuration * 1000),
           summary: group.summary,
           content: group.content || group.panels.map((panel) => panel.description).join('\n'),
-          shotCount: 4,
+          shotCount: panelCount,
           createdAt: new Date(Date.now() + groupIndex * 1000),
         },
       })
@@ -106,8 +127,8 @@ export const POST = apiHandler(async (
         data: {
           episodeId: episode.id,
           clipId: clip.id,
-          panelCount: 4,
-          layoutMode: 'four_grid',
+          panelCount,
+          layoutMode: group.mode,
           groupSequence: groupIndex + 1,
           continuityAnchor: JSON.stringify({
             source: 'external_analysis_import',
@@ -118,13 +139,13 @@ export const POST = apiHandler(async (
           sheetPromptSnapshot: group.sheetPrompt,
           sheetModelSnapshot: null,
           sheetGenerationOptionsSnapshot: JSON.stringify({
-            storyboardGenerationMode: 'four_grid',
+            storyboardGenerationMode: group.mode,
             gridSpec: {
               version: 1,
-              mode: 'four_grid',
+              mode: group.mode,
               rows: 2,
-              columns: 2,
-              panelCount: 4,
+              columns: group.mode === 'six_grid' ? 3 : 2,
+              panelCount,
               cellAspectRatio: '16:9',
             },
           }),
@@ -170,7 +191,7 @@ export const POST = apiHandler(async (
     await tx.novelPromotionProject.update({
       where: { projectId },
       data: {
-        storyboardGenerationMode: 'four_grid',
+        storyboardGenerationMode: body.groups[0]!.mode,
         sixGridCellAspectRatio: '16:9',
         sixGridProcessingOrder: 'crop_then_panel_upscale',
         lastEpisodeId: episode.id,
