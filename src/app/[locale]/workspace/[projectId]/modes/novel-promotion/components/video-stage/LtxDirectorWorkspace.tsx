@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslations } from 'next-intl'
 
@@ -14,7 +14,10 @@ import { GlassButton, GlassInput, GlassTextarea } from '@/components/ui/primitiv
 import { apiFetch } from '@/lib/api-fetch'
 import {
   LTX_DIRECTOR_TIMELINE_VERSION,
+  normalizeLtxDirectorGlobalPrompt,
   parseLtxDirectorTimelineSpec,
+  resolveLtxDirectorDimensions,
+  type LtxDirectorResolutionPreset,
   type LtxDirectorTimelineSegmentSpec,
   type LtxDirectorTimelineSpec,
 } from '@/lib/comfyui/ltx-director'
@@ -25,6 +28,7 @@ import { queryKeys } from '@/lib/query/keys'
 
 const SOURCE_DRAG_TYPE = 'application/x-waoowaoo-director-source'
 const SEGMENT_DRAG_TYPE = 'application/x-waoowaoo-director-segment'
+const TIMELINE_PX_PER_SECOND = 64
 let segmentNonce = 0
 
 interface LtxDirectorWorkspaceProps {
@@ -33,6 +37,7 @@ interface LtxDirectorWorkspaceProps {
   storyboards: Storyboard[]
   clips: Clip[]
   videoModels: VideoModelOption[]
+  videoRatio?: string
 }
 
 interface DirectorSource {
@@ -60,7 +65,7 @@ function panelPrompt(panel: NonNullable<Storyboard['panels']>[number]) {
   return panel.videoPrompt?.trim() || panel.description?.trim() || panel.imagePrompt?.trim() || ''
 }
 
-function createSegment(source?: DirectorSource): LtxDirectorTimelineSegmentSpec {
+function createSegment(source?: DirectorSource, startSeconds = 0): LtxDirectorTimelineSegmentSpec {
   return {
     id: nextSegmentId(),
     ...(source?.sourcePanelId ? { sourcePanelId: source.sourcePanelId } : {}),
@@ -69,6 +74,7 @@ function createSegment(source?: DirectorSource): LtxDirectorTimelineSegmentSpec 
       sourceImageUrl: source.imageUrl,
     } : {}),
     prompt: source?.prompt || '',
+    startSeconds,
     durationSeconds: 3,
     guideStrength: 1,
   }
@@ -94,26 +100,64 @@ function buildDefaultSpec(
   storyboard: Storyboard,
   clips: Clip[],
   defaultModel: string,
+  videoRatio: string,
 ): LtxDirectorTimelineSpec {
   const saved = parseLtxDirectorTimelineSpec(storyboard.directorConfigJson)
-  if (saved) return { ...saved, videoModel: saved.videoModel || defaultModel }
+  if (saved) return {
+    ...saved,
+    videoModel: saved.videoModel || defaultModel,
+    aspectRatio: videoRatio,
+    resolutionPreset: saved.resolutionPreset || '720p',
+  }
   const panels = (storyboard.panels || []).filter((panel) => panel.id && panel.imageUrl)
   const clip = clips.find((candidate) => candidate.id === storyboard.clipId)
+  let cursor = 0
   return {
     version: LTX_DIRECTOR_TIMELINE_VERSION,
     fps: 24,
-    globalPrompt: [storyboard.continuityAnchor, clip?.summary]
+    globalPrompt: normalizeLtxDirectorGlobalPrompt([storyboard.continuityAnchor, clip?.summary]
       .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-      .join('\n'),
+      .join('\n')),
     videoModel: defaultModel,
-    segments: panels.map((panel) => ({
-      id: `panel-${panel.id}`,
-      sourcePanelId: panel.id,
-      prompt: panelPrompt(panel),
-      durationSeconds: panelDuration(panel),
-      guideStrength: 1,
-    })),
+    aspectRatio: videoRatio,
+    resolutionPreset: '720p',
+    segments: panels.map((panel) => {
+      const durationSeconds = panelDuration(panel)
+      const segment = {
+        id: `panel-${panel.id}`,
+        sourcePanelId: panel.id,
+        prompt: panelPrompt(panel),
+        startSeconds: cursor,
+        durationSeconds,
+        guideStrength: 1,
+      }
+      cursor += durationSeconds
+      return segment
+    }),
   }
+}
+
+function startOfSegment(segments: LtxDirectorTimelineSegmentSpec[], index: number) {
+  if (typeof segments[index]?.startSeconds === 'number') return segments[index]!.startSeconds!
+  return segments.slice(0, index).reduce((sum, segment) => sum + segment.durationSeconds, 0)
+}
+
+function totalTimelineDuration(segments: LtxDirectorTimelineSegmentSpec[]) {
+  return segments.reduce((latest, segment, index) => Math.max(
+    latest,
+    startOfSegment(segments, index) + segment.durationSeconds,
+  ), 0)
+}
+
+function resolveTimelineCollisions(segments: LtxDirectorTimelineSegmentSpec[]) {
+  let cursor = 0
+  return [...segments]
+    .sort((left, right) => (left.startSeconds ?? 0) - (right.startSeconds ?? 0))
+    .map((segment) => {
+      const startSeconds = Math.max(cursor, segment.startSeconds ?? cursor)
+      cursor = startSeconds + segment.durationSeconds
+      return { ...segment, startSeconds }
+    })
 }
 
 function DirectorStoryboardEditor({
@@ -125,6 +169,7 @@ function DirectorStoryboardEditor({
   clips,
   models,
   allStoryboards,
+  videoRatio,
 }: {
   projectId: string
   episodeId: string
@@ -134,13 +179,22 @@ function DirectorStoryboardEditor({
   clips: Clip[]
   models: VideoModelOption[]
   allStoryboards: Storyboard[]
+  videoRatio: string
 }) {
   const t = useTranslations('video.director')
   const queryClient = useQueryClient()
   const uploadInputRef = useRef<HTMLInputElement>(null)
+  const timelineTrackRef = useRef<HTMLDivElement>(null)
+  const resizeGestureRef = useRef<{
+    index: number
+    segmentId?: string
+    pointerId: number
+    originX: number
+    originDuration: number
+  } | null>(null)
   const defaultSpec = useMemo(
-    () => buildDefaultSpec(storyboard, clips, models[0]?.value || ''),
-    [clips, models, storyboard],
+    () => buildDefaultSpec(storyboard, clips, models[0]?.value || '', videoRatio),
+    [clips, models, storyboard, videoRatio],
   )
   const sources = useMemo(
     () => storyboardSources(allStoryboards, storyboardIndex),
@@ -217,8 +271,33 @@ function DirectorStoryboardEditor({
     },
   })
 
-  const totalDuration = spec.segments.reduce((sum, segment) => sum + segment.durationSeconds, 0)
+  const totalDuration = totalTimelineDuration(spec.segments)
+  const rangeSelected = spec.rangeStartSeconds !== undefined && spec.rangeEndSeconds !== undefined
+  const rangeStart = Math.min(totalDuration, Math.max(0, spec.rangeStartSeconds ?? 0))
+  const rangeEnd = Math.min(totalDuration, Math.max(rangeStart, spec.rangeEndSeconds ?? totalDuration))
+  const resolutionPreset = spec.resolutionPreset ?? '720p'
+  const dimensions = resolveLtxDirectorDimensions(resolutionPreset, videoRatio)
+  const timelineVisualDuration = Math.max(5, Math.ceil(totalDuration) + 1)
+  const timelineWidth = timelineVisualDuration * TIMELINE_PX_PER_SECOND
+  const rulerTicks = Array.from({ length: timelineVisualDuration + 1 }, (_, index) => index)
   const selectedSegment = spec.segments[selectedIndex] || null
+
+  useEffect(() => {
+    if (!rangeSelected) return
+    const rawStart = spec.rangeStartSeconds ?? 0
+    const rawEnd = spec.rangeEndSeconds ?? totalDuration
+    if (totalDuration <= 0 || rawStart >= totalDuration || rawEnd <= rawStart) {
+      setSpec((current) => ({
+        ...current,
+        rangeStartSeconds: undefined,
+        rangeEndSeconds: undefined,
+      }))
+      return
+    }
+    if (rawEnd > totalDuration) {
+      setSpec((current) => ({ ...current, rangeEndSeconds: totalDuration }))
+    }
+  }, [rangeSelected, spec.rangeEndSeconds, spec.rangeStartSeconds, totalDuration])
 
   function resolveSegmentSource(segment: LtxDirectorTimelineSegmentSpec): DirectorSource | null {
     const panelId = segment.sourcePanelId || segment.panelId
@@ -238,6 +317,7 @@ function DirectorStoryboardEditor({
   const ready = spec.segments.length > 0
     && spec.segments.length <= 8
     && Boolean(spec.videoModel)
+    && (!rangeSelected || rangeEnd > rangeStart)
     && spec.segments.every((segment) => Boolean(resolveSegmentSource(segment)))
   const error = saveMutation.error instanceof Error
     ? saveMutation.error.message
@@ -262,6 +342,19 @@ function DirectorStoryboardEditor({
     setDirty(true)
   }
 
+  function patchSegmentTiming(index: number, patch: Partial<LtxDirectorTimelineSegmentSpec>) {
+    const targetId = spec.segments[index]?.id
+    const segments = resolveTimelineCollisions(spec.segments.map((segment, segmentIndex) => (
+      segmentIndex === index ? { ...segment, ...patch } : segment
+    )))
+    setSpec((current) => ({ ...current, segments }))
+    const nextIndex = segments.findIndex((segment, segmentIndex) => (
+      targetId ? segment.id === targetId : segmentIndex === index
+    ))
+    if (nextIndex >= 0) setSelectedIndex(nextIndex)
+    setDirty(true)
+  }
+
   function applySource(index: number, source: DirectorSource) {
     const currentPrompt = spec.segments[index]?.prompt || ''
     patchSegment(index, {
@@ -274,10 +367,12 @@ function DirectorStoryboardEditor({
     setSelectedIndex(index)
   }
 
-  function appendSource(source?: DirectorSource) {
+  function appendSource(source?: DirectorSource, startSeconds = totalDuration) {
     if (spec.segments.length >= 8) return
-    setSpec((current) => ({ ...current, segments: [...current.segments, createSegment(source)] }))
-    setSelectedIndex(spec.segments.length)
+    const created = createSegment(source, Math.max(0, startSeconds))
+    const segments = resolveTimelineCollisions([...spec.segments, created])
+    setSpec((current) => ({ ...current, segments }))
+    setSelectedIndex(Math.max(0, segments.findIndex((segment) => segment.id === created.id)))
     setDirty(true)
   }
 
@@ -285,7 +380,7 @@ function DirectorStoryboardEditor({
     if (!previousSource) return
     setSpec((current) => {
       if (current.segments.length === 0) {
-        return { ...current, segments: [createSegment(previousSource)] }
+        return { ...current, segments: [createSegment(previousSource, 0)] }
       }
       const first = current.segments[0]!
       return {
@@ -319,7 +414,15 @@ function DirectorStoryboardEditor({
       const [moved] = segments.splice(from, 1)
       if (!moved) return current
       segments.splice(to, 0, moved)
-      return { ...current, segments }
+      let cursor = 0
+      return {
+        ...current,
+        segments: segments.map((segment) => {
+          const positioned = { ...segment, startSeconds: cursor }
+          cursor += segment.durationSeconds
+          return positioned
+        }),
+      }
     })
     setSelectedIndex(to)
     setDirty(true)
@@ -342,21 +445,85 @@ function DirectorStoryboardEditor({
 
   function dropOnSegment(event: DragEvent, index: number) {
     event.preventDefault()
-    event.stopPropagation()
     const source = readDraggedSource(event)
     if (source) {
+      event.stopPropagation()
       applySource(index, source)
       return
     }
-    const from = Number(event.dataTransfer.getData(SEGMENT_DRAG_TYPE))
-    if (Number.isInteger(from)) moveSegment(from, index)
+    dropOnTimeline(event)
   }
 
   function dropOnTimeline(event: DragEvent) {
     event.preventDefault()
     event.stopPropagation()
     const source = readDraggedSource(event)
-    if (source) appendSource(source)
+    const track = timelineTrackRef.current
+    const rect = track?.getBoundingClientRect()
+    const startSeconds = rect
+      ? Math.max(0, (event.clientX - rect.left) / TIMELINE_PX_PER_SECOND)
+      : totalDuration
+    if (source) {
+      appendSource(source, Math.round(startSeconds * 10) / 10)
+      return
+    }
+    const from = Number(event.dataTransfer.getData(SEGMENT_DRAG_TYPE))
+    if (!Number.isInteger(from)) return
+    const movedId = spec.segments[from]?.id
+    const segments = resolveTimelineCollisions(spec.segments.map((segment, index) => (
+      index === from ? { ...segment, startSeconds: Math.round(startSeconds * 10) / 10 } : segment
+    )))
+    setSpec((current) => ({ ...current, segments }))
+    const nextIndex = segments.findIndex((segment) => segment.id === movedId)
+    if (nextIndex >= 0) setSelectedIndex(nextIndex)
+    setDirty(true)
+  }
+
+  function beginResize(event: ReactPointerEvent<HTMLDivElement>, index: number) {
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    resizeGestureRef.current = {
+      index,
+      segmentId: spec.segments[index]?.id,
+      pointerId: event.pointerId,
+      originX: event.clientX,
+      originDuration: spec.segments[index]?.durationSeconds ?? 0.5,
+    }
+  }
+
+  function resizeSegment(event: ReactPointerEvent<HTMLDivElement>) {
+    const gesture = resizeGestureRef.current
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    const durationSeconds = Math.max(
+      0.5,
+      Math.round((gesture.originDuration + (event.clientX - gesture.originX) / TIMELINE_PX_PER_SECOND) * 10) / 10,
+    )
+    setSpec((current) => ({
+      ...current,
+      segments: resolveTimelineCollisions(current.segments.map((segment, index) => (
+        (gesture.segmentId ? segment.id === gesture.segmentId : index === gesture.index)
+          ? { ...segment, durationSeconds }
+          : segment
+      ))),
+    }))
+    setDirty(true)
+  }
+
+  function endResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (resizeGestureRef.current?.pointerId === event.pointerId) resizeGestureRef.current = null
+  }
+
+  function selectRange(startSeconds: number, endSeconds: number) {
+    const start = Math.max(0, Math.min(totalDuration, Math.round(startSeconds * 10) / 10))
+    const end = Math.max(start + 0.1, Math.min(totalDuration, Math.round(endSeconds * 10) / 10))
+    patchSpec({ rangeStartSeconds: start, rangeEndSeconds: end })
+  }
+
+  function selectCurrentSegmentRange() {
+    if (!selectedSegment) return
+    const start = startOfSegment(spec.segments, selectedIndex)
+    selectRange(start, start + selectedSegment.durationSeconds)
   }
 
   return (
@@ -376,7 +543,12 @@ function DirectorStoryboardEditor({
             variant="ghost"
             disabled={saveMutation.isPending || taskRunning}
             onClick={() => {
-              setSpec(buildDefaultSpec({ ...storyboard, directorConfigJson: null }, clips, models[0]?.value || ''))
+              setSpec(buildDefaultSpec(
+                { ...storyboard, directorConfigJson: null },
+                clips,
+                models[0]?.value || '',
+                videoRatio,
+              ))
               setSelectedIndex(0)
               setDirty(true)
             }}
@@ -398,12 +570,12 @@ function DirectorStoryboardEditor({
             loading={taskRunning || (saveMutation.isPending && saveMutation.variables === true)}
             onClick={() => saveMutation.mutate(true)}
           >
-            {taskRunning ? t('generating') : t('generate')}
+            {taskRunning ? t('generating') : rangeSelected ? t('generateRange') : t('generate')}
           </GlassButton>
         </div>
       </header>
 
-      <div className="grid gap-3 border-b border-[var(--glass-stroke-base)] p-4 md:grid-cols-[minmax(0,1fr)_140px] md:p-5">
+      <div className="grid gap-3 border-b border-[var(--glass-stroke-base)] p-4 md:grid-cols-[minmax(0,1fr)_140px_180px] md:p-5">
         <label className="space-y-1.5 text-xs text-[var(--glass-text-secondary)]">
           <span>{t('model')}</span>
           <select
@@ -426,7 +598,25 @@ function DirectorStoryboardEditor({
             onChange={(event) => patchSpec({ fps: Math.min(240, Math.max(1, Number(event.target.value) || 24)) })}
           />
         </label>
-        <label className="space-y-1.5 text-xs text-[var(--glass-text-secondary)] md:col-span-2">
+        <label className="space-y-1.5 text-xs text-[var(--glass-text-secondary)]">
+          <span>{t('resolution')}</span>
+          <select
+            className="glass-input-base h-9 w-full rounded-lg px-3 text-sm"
+            value={resolutionPreset}
+            onChange={(event) => patchSpec({
+              aspectRatio: videoRatio,
+              resolutionPreset: event.target.value as LtxDirectorResolutionPreset,
+            })}
+          >
+            <option value="480p">480p</option>
+            <option value="720p">720p</option>
+            <option value="1080p">1080p</option>
+          </select>
+          <span className="block text-[10px] text-[var(--glass-text-tertiary)]">
+            {t('adaptiveSize', { ratio: videoRatio, width: dimensions.width, height: dimensions.height })}
+          </span>
+        </label>
+        <label className="space-y-1.5 text-xs text-[var(--glass-text-secondary)] md:col-span-3">
           <span>{t('globalPrompt')}</span>
           <GlassTextarea
             rows={2}
@@ -513,21 +703,93 @@ function DirectorStoryboardEditor({
             onDragOver={(event) => event.preventDefault()}
             onDrop={dropOnTimeline}
           >
-            <div className="flex min-h-[180px] min-w-max items-stretch gap-2">
+            <div className="mb-3 flex min-w-[680px] flex-wrap items-end gap-2 rounded-lg bg-black/20 p-2">
+              <div className="mr-auto">
+                <div className="text-[11px] font-medium text-[var(--glass-text-secondary)]">{t('generationRange')}</div>
+                <div className="text-[10px] text-[var(--glass-text-tertiary)]">
+                  {rangeSelected
+                    ? t('rangeSummary', { start: rangeStart.toFixed(1), end: rangeEnd.toFixed(1) })
+                    : t('fullRangeSummary', { duration: totalDuration.toFixed(1) })}
+                </div>
+              </div>
+              <GlassButton
+                size="sm"
+                variant={rangeSelected ? 'ghost' : 'primary'}
+                onClick={() => patchSpec({ rangeStartSeconds: undefined, rangeEndSeconds: undefined })}
+              >
+                {t('fullTimeline')}
+              </GlassButton>
+              <GlassButton size="sm" variant={rangeSelected ? 'primary' : 'ghost'} disabled={!selectedSegment} onClick={selectCurrentSegmentRange}>
+                {t('selectedShotRange')}
+              </GlassButton>
+              {rangeSelected && (
+                <>
+                  <label className="w-24 text-[10px] text-[var(--glass-text-tertiary)]">
+                    {t('rangeStart')}
+                    <GlassInput
+                      type="number"
+                      min={0}
+                      max={Math.max(0, rangeEnd - 0.1)}
+                      step={0.1}
+                      value={rangeStart}
+                      onChange={(event) => selectRange(Number(event.target.value) || 0, rangeEnd)}
+                    />
+                  </label>
+                  <label className="w-24 text-[10px] text-[var(--glass-text-tertiary)]">
+                    {t('rangeEnd')}
+                    <GlassInput
+                      type="number"
+                      min={rangeStart + 0.1}
+                      max={totalDuration}
+                      step={0.1}
+                      value={rangeEnd}
+                      onChange={(event) => selectRange(rangeStart, Number(event.target.value) || totalDuration)}
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+            <div
+              ref={timelineTrackRef}
+              className="relative min-h-[220px] min-w-max overflow-hidden rounded-lg border border-white/5 bg-black/25"
+              style={{ width: `${timelineWidth}px` }}
+            >
+              <div className="absolute inset-x-0 top-0 h-7 border-b border-white/10 bg-black/20">
+                {rulerTicks.map((tick) => (
+                  <div
+                    key={tick}
+                    className="absolute inset-y-0 border-l border-white/15 pl-1 pt-1 text-[9px] text-white/45"
+                    style={{ left: `${tick * TIMELINE_PX_PER_SECOND}px` }}
+                  >
+                    {tick}s
+                  </div>
+                ))}
+              </div>
+              {rangeSelected && (
+                <div
+                  className="pointer-events-none absolute bottom-0 top-7 border-x border-[var(--glass-accent-from)]/80 bg-[var(--glass-accent-from)]/10"
+                  style={{
+                    left: `${rangeStart * TIMELINE_PX_PER_SECOND}px`,
+                    width: `${Math.max(2, (rangeEnd - rangeStart) * TIMELINE_PX_PER_SECOND)}px`,
+                  }}
+                />
+              )}
               {spec.segments.map((segment, index) => {
                 const source = resolveSegmentSource(segment)
-                const start = spec.segments.slice(0, index).reduce((sum, item) => sum + item.durationSeconds, 0)
+                const start = startOfSegment(spec.segments, index)
                 return (
-                  <button
+                  <div
                     key={segment.id || index}
-                    type="button"
                     draggable
-                    className={`group relative flex shrink-0 flex-col overflow-hidden rounded-xl border text-left transition ${
+                    className={`group absolute top-10 flex h-[156px] flex-col overflow-hidden rounded-xl border text-left shadow-lg transition ${
                       selectedIndex === index
                         ? 'border-[var(--glass-accent-from)] ring-2 ring-[var(--glass-accent-from)]/20'
                         : 'border-[var(--glass-stroke-base)] hover:border-[var(--glass-stroke-strong)]'
                     } bg-[var(--glass-bg-surface)]`}
-                    style={{ width: `${Math.min(360, Math.max(180, segment.durationSeconds * 52))}px` }}
+                    style={{
+                      left: `${start * TIMELINE_PX_PER_SECOND}px`,
+                      width: `${Math.max(76, segment.durationSeconds * TIMELINE_PX_PER_SECOND)}px`,
+                    }}
                     onClick={() => setSelectedIndex(index)}
                     onDragStart={(event) => {
                       event.dataTransfer.effectAllowed = 'move'
@@ -536,7 +798,7 @@ function DirectorStoryboardEditor({
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => dropOnSegment(event, index)}
                   >
-                    <div className="relative h-[108px] w-full bg-black/70">
+                    <div className="relative h-[86px] w-full bg-black/70">
                       {source ? (
                         <Image src={source.imageUrl} alt={t('shot', { number: index + 1 })} fill sizes="240px" unoptimized className="object-cover" />
                       ) : (
@@ -555,20 +817,43 @@ function DirectorStoryboardEditor({
                         {segment.prompt || t('promptEmpty')}
                       </p>
                     </div>
-                  </button>
+                    <div
+                      role="separator"
+                      aria-label={t('resizeShot')}
+                      className="absolute bottom-0 right-0 top-0 w-3 cursor-ew-resize border-l border-white/20 bg-white/5 opacity-0 transition group-hover:opacity-100"
+                      onPointerDown={(event) => beginResize(event, index)}
+                      onPointerMove={resizeSegment}
+                      onPointerUp={endResize}
+                      onPointerCancel={endResize}
+                    />
+                  </div>
                 )
               })}
-              <button
-                type="button"
-                disabled={spec.segments.length >= 8}
-                className="flex w-[150px] shrink-0 items-center justify-center rounded-xl border border-dashed border-[var(--glass-stroke-strong)] text-sm text-[var(--glass-text-tertiary)] disabled:opacity-40"
-                onClick={() => appendSource()}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={dropOnTimeline}
-              >
-                + {t('addShot')}
-              </button>
             </div>
+            {rangeSelected && (
+              <div className="relative mt-3 h-8 min-w-max" style={{ width: `${timelineWidth}px` }}>
+                <input
+                  aria-label={t('rangeStart')}
+                  className="absolute inset-x-0 top-0 w-full accent-[var(--glass-accent-from)]"
+                  type="range"
+                  min={0}
+                  max={Math.max(0.1, totalDuration)}
+                  step={0.1}
+                  value={rangeStart}
+                  onChange={(event) => selectRange(Number(event.target.value), rangeEnd)}
+                />
+                <input
+                  aria-label={t('rangeEnd')}
+                  className="absolute inset-x-0 top-3 w-full accent-[var(--glass-accent-to)]"
+                  type="range"
+                  min={0.1}
+                  max={Math.max(0.1, totalDuration)}
+                  step={0.1}
+                  value={rangeEnd}
+                  onChange={(event) => selectRange(rangeStart, Number(event.target.value))}
+                />
+              </div>
+            )}
           </div>
 
           {selectedSegment && (
@@ -588,6 +873,19 @@ function DirectorStoryboardEditor({
               </div>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="space-y-1 text-xs text-[var(--glass-text-secondary)]">
+                  <span>{t('startTime')}</span>
+                  <GlassInput
+                    type="number"
+                    min={0}
+                    max={600}
+                    step={0.1}
+                    value={startOfSegment(spec.segments, selectedIndex)}
+                    onChange={(event) => patchSegmentTiming(selectedIndex, {
+                      startSeconds: Math.max(0, Number(event.target.value) || 0),
+                    })}
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-[var(--glass-text-secondary)]">
                   <span>{t('duration')}</span>
                   <GlassInput
                     type="number"
@@ -595,7 +893,7 @@ function DirectorStoryboardEditor({
                     max={60}
                     step={0.1}
                     value={selectedSegment.durationSeconds}
-                    onChange={(event) => patchSegment(selectedIndex, {
+                    onChange={(event) => patchSegmentTiming(selectedIndex, {
                       durationSeconds: Math.min(60, Math.max(0.1, Number(event.target.value) || 0.1)),
                     })}
                   />
@@ -657,6 +955,7 @@ export default function LtxDirectorWorkspace({
   storyboards,
   clips,
   videoModels,
+  videoRatio = '16:9',
 }: LtxDirectorWorkspaceProps) {
   const t = useTranslations('video.director')
   const directorModels = useMemo(
@@ -681,6 +980,7 @@ export default function LtxDirectorWorkspace({
           clips={clips}
           models={directorModels}
           allStoryboards={storyboards}
+          videoRatio={videoRatio}
         />
       ))}
     </div>

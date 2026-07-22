@@ -160,6 +160,7 @@ function applyLtxDirectorTimeline(
   const rendered = renderLtxDirectorTimeline({
     files: upload,
     promptValue: variables.prompt,
+    baseTimelineData: target.inputs.timeline_data,
     fallbackDurationSeconds: typeof variables.duration === 'number'
       ? variables.duration
       : typeof variables.duration_seconds === 'number'
@@ -179,13 +180,16 @@ function applyLtxDirectorTimeline(
   target.inputs.guide_strength = rendered.guideStrength
   target.inputs.global_prompt = parseLtxDirectorTimelineSpec(variables.prompt)?.globalPrompt
     ?? (typeof variables.prompt === 'string' ? variables.prompt : target.inputs.global_prompt)
-  target.inputs.start_second = 0
-  target.inputs.end_second = rendered.durationSeconds
+  target.inputs.start_second = rendered.startSecond
+  target.inputs.end_second = rendered.endSecond
   target.inputs.duration_seconds = rendered.durationSeconds
-  target.inputs.start_frame = 0
-  target.inputs.end_frame = rendered.durationFrames
+  target.inputs.start_frame = rendered.startFrame
+  target.inputs.end_frame = rendered.endFrame
   target.inputs.duration_frames = rendered.durationFrames
   target.inputs.frame_rate = rendered.durationFrames / rendered.durationSeconds
+  if (Object.hasOwn(target.inputs, 'custom_width')) target.inputs.custom_width = rendered.width
+  if (Object.hasOwn(target.inputs, 'custom_height')) target.inputs.custom_height = rendered.height
+  if (Object.hasOwn(target.inputs, 'resize_method')) target.inputs.resize_method = 'maintain aspect ratio'
 }
 
 function applyBerniniImageSlots(

@@ -664,6 +664,7 @@ export function useVideoStageRuntime({
           storyboards={sortedStoryboards}
           clips={clips}
           videoModels={allVideoModelOptions}
+          videoRatio={videoRatio}
         />
       )}
 

@@ -17,6 +17,7 @@ import {
 } from './utils'
 import {
   LTX_DIRECTOR_TIMELINE_VERSION,
+  normalizeLtxDirectorGlobalPrompt,
   parseLtxDirectorTimelineSpec,
   type LtxDirectorTimelineSegmentSpec,
 } from '@/lib/comfyui/ltx-director'
@@ -400,13 +401,21 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
   if (!savedTimeline && (fallbackPanels.length === 0 || fallbackPanels.length > 8)) {
     throw new Error('STORYBOARD_DIRECTOR_IMAGES_INVALID')
   }
-  const timelineSegments: LtxDirectorTimelineSegmentSpec[] = savedTimeline?.segments ?? fallbackPanels.map((panel) => ({
-    id: `panel-${panel.id}`,
-    sourcePanelId: panel.id,
-    prompt: panel.videoPrompt?.trim() || panel.description?.trim() || panel.imagePrompt?.trim() || '',
-    durationSeconds: positiveDuration(panel.durationOverride, panel.estimatedDuration, panel.duration),
-    guideStrength: 1,
-  }))
+  let fallbackCursor = 0
+  const fallbackSegments = fallbackPanels.map((panel) => {
+    const durationSeconds = positiveDuration(panel.durationOverride, panel.estimatedDuration, panel.duration)
+    const segment = {
+      id: `panel-${panel.id}`,
+      sourcePanelId: panel.id,
+      prompt: panel.videoPrompt?.trim() || panel.description?.trim() || panel.imagePrompt?.trim() || '',
+      startSeconds: fallbackCursor,
+      durationSeconds,
+      guideStrength: 1,
+    }
+    fallbackCursor += durationSeconds
+    return segment
+  })
+  const timelineSegments: LtxDirectorTimelineSegmentSpec[] = savedTimeline?.segments ?? fallbackSegments
   if (timelineSegments.length === 0 || timelineSegments.length > 8) {
     throw new Error('STORYBOARD_DIRECTOR_IMAGES_INVALID')
   }
@@ -448,12 +457,22 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     storyboard.episode.novelPromotionProject.artStylePrompt,
     storyboard.continuityAnchor,
     storyboard.clip.summary,
-  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join('\n')
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => normalizeLtxDirectorGlobalPrompt(value))
+    .filter(Boolean)
+    .join('\n')
   const segments = timelineSegments.map((segment) => ({
     ...segment,
     guideStrength: segment.guideStrength ?? 1,
   }))
-  const totalDuration = segments.reduce((sum, segment) => sum + segment.durationSeconds, 0)
+  const totalDuration = segments.reduce((latest, segment) => Math.max(
+    latest,
+    (segment.startSeconds ?? latest) + segment.durationSeconds,
+  ), 0)
+  const generationDuration = savedTimeline?.rangeStartSeconds !== undefined
+    && savedTimeline.rangeEndSeconds !== undefined
+    ? savedTimeline.rangeEndSeconds - savedTimeline.rangeStartSeconds
+    : totalDuration
   const prompt = JSON.stringify({
     version: LTX_DIRECTOR_TIMELINE_VERSION,
     fps,
@@ -476,7 +495,7 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     comfyReferenceImagesOnly: true,
     options: {
       prompt,
-      duration: totalDuration,
+      duration: generationDuration,
       fps,
       aspectRatio: storyboard.episode.novelPromotionProject.videoRatio,
     },

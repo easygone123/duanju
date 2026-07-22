@@ -37,6 +37,7 @@ async function loadOwnedStoryboard(projectId: string, userId: string, storyboard
       directorVideoMediaId: true,
       episode: {
         select: {
+          novelPromotionProject: { select: { videoRatio: true } },
           storyboards: {
             orderBy: [{ groupSequence: 'asc' }, { createdAt: 'asc' }],
             select: {
@@ -76,7 +77,10 @@ async function normalizeTimelineSpec(input: {
     select: { id: true, publicId: true, storageKey: true, mimeType: true },
   })
   const mediaById = new Map(uploadedMedia.map((media) => [media.id, media]))
+  let sequentialCursor = 0
   const normalizedSegments = parsed.segments.map((segment, index) => {
+    const startSeconds = segment.startSeconds ?? sequentialCursor
+    sequentialCursor = Math.max(sequentialCursor, startSeconds + segment.durationSeconds)
     const sourcePanelId = segment.sourcePanelId || segment.panelId
     if (sourcePanelId) {
       const panel = panelsById.get(sourcePanelId)
@@ -87,6 +91,7 @@ async function normalizeTimelineSpec(input: {
         id: segment.id || `segment-${index + 1}`,
         sourcePanelId,
         prompt: segment.prompt,
+        startSeconds,
         durationSeconds: segment.durationSeconds,
         guideStrength: segment.guideStrength ?? 1,
         ...(segment.isEndFrame ? { isEndFrame: true } : {}),
@@ -103,20 +108,38 @@ async function normalizeTimelineSpec(input: {
         sourceMediaId: media.id,
         sourceImageUrl: `/m/${encodeURIComponent(media.publicId)}`,
         prompt: segment.prompt,
+        startSeconds,
         durationSeconds: segment.durationSeconds,
         guideStrength: segment.guideStrength ?? 1,
         ...(segment.isEndFrame ? { isEndFrame: true } : {}),
       }
     }
     throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SOURCE_REQUIRED' })
+  }).sort((left, right) => left.startSeconds - right.startSeconds)
+  let timelineCursor = 0
+  const positionedSegments = normalizedSegments.map((segment) => {
+    const startSeconds = Math.max(timelineCursor, segment.startSeconds)
+    timelineCursor = startSeconds + segment.durationSeconds
+    return { ...segment, startSeconds }
   })
-  if (new Set(normalizedSegments.map((segment) => segment.id)).size !== normalizedSegments.length) {
+  if (new Set(positionedSegments.map((segment) => segment.id)).size !== positionedSegments.length) {
     throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SEGMENT_ID_DUPLICATE' })
+  }
+  const hasRangeStart = parsed.rangeStartSeconds !== undefined
+  const hasRangeEnd = parsed.rangeEndSeconds !== undefined
+  if (hasRangeStart !== hasRangeEnd
+    || (hasRangeStart && hasRangeEnd && (
+      parsed.rangeEndSeconds! <= parsed.rangeStartSeconds!
+      || parsed.rangeEndSeconds! > timelineCursor
+    ))) {
+    throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_RANGE_INVALID' })
   }
   return {
     ...parsed,
     version: LTX_DIRECTOR_TIMELINE_VERSION,
-    segments: normalizedSegments,
+    aspectRatio: storyboard.episode.novelPromotionProject.videoRatio || parsed.aspectRatio || '16:9',
+    resolutionPreset: parsed.resolutionPreset || '720p',
+    segments: positionedSegments,
   }
 }
 

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseLtxDirectorTimelineSpec, renderLtxDirectorTimeline } from '@/lib/comfyui/ltx-director'
+import {
+  normalizeLtxDirectorGlobalPrompt,
+  parseLtxDirectorTimelineSpec,
+  renderLtxDirectorTimeline,
+  resolveLtxDirectorDimensions,
+} from '@/lib/comfyui/ltx-director'
 import { augmentLtxDirectorContract } from '@/lib/comfyui/ltx-director-contract'
 import { analyzeComfyApiWorkflow } from '@/lib/comfyui/workflow-auto-mapper'
 import { renderComfyWorkflow } from '@/lib/comfyui/workflow-renderer'
@@ -22,6 +27,9 @@ const directorGraph = {
       segment_lengths: '',
       guide_strength: '',
       frame_rate: 24,
+      custom_width: 768,
+      custom_height: 512,
+      resize_method: 'maintain aspect ratio',
     },
     _meta: { title: 'LTX Director' },
   },
@@ -130,6 +138,58 @@ describe('LTX Director adapter', () => {
       expect.objectContaining({ start: 0, length: 48, imageFile: 'waoowaoo/1/first.png' }),
       expect.objectContaining({ start: 48, length: 72, imageFile: 'waoowaoo/1/last.png' }),
     ])
+    expect(rendered).toMatchObject({
+      startFrame: 0,
+      endFrame: 120,
+      fullDurationFrames: 120,
+      width: 1280,
+      height: 720,
+    })
+  })
+
+  it('renders a selected range while preserving free timeline gaps and adaptive portrait resolution', () => {
+    const rendered = renderLtxDirectorTimeline({
+      promptValue: JSON.stringify({
+        version: 1,
+        fps: 24,
+        globalPrompt: 'portrait continuity',
+        aspectRatio: '9:16',
+        resolutionPreset: '1080p',
+        rangeStartSeconds: 1,
+        rangeEndSeconds: 5,
+        segments: [
+          { prompt: 'opening', startSeconds: 0, durationSeconds: 2 },
+          { prompt: 'arrival', startSeconds: 4, durationSeconds: 3 },
+        ],
+      }),
+      files: [
+        { name: 'opening.png', subfolder: 'wdc', type: 'input' },
+        { name: 'arrival.png', subfolder: 'wdc', type: 'input' },
+      ],
+    })
+    expect(rendered).toMatchObject({
+      startSecond: 1,
+      endSecond: 5,
+      durationSeconds: 4,
+      startFrame: 24,
+      endFrame: 120,
+      durationFrames: 96,
+      fullDurationFrames: 168,
+      width: 1080,
+      height: 1920,
+    })
+    expect(rendered.segmentLengths).toBe('72,24')
+    expect(JSON.parse(rendered.timelineData).segments).toEqual([
+      expect.objectContaining({ start: 0, length: 48 }),
+      expect.objectContaining({ start: 96, length: 72 }),
+    ])
+  })
+
+  it('converts continuity metadata into readable global prompting', () => {
+    expect(normalizeLtxDirectorGlobalPrompt(
+      '{"groupId":"internal","sceneKey":"palace","incomingContinuity":"enters in rain"}\ncomic scene',
+    )).toBe('palace\nenters in rain\ncomic scene')
+    expect(resolveLtxDirectorDimensions('480p', '9:16')).toEqual({ width: 480, height: 854 })
   })
 
   it('fills all LTX Director timeline inputs while rendering a published workflow', () => {
@@ -171,6 +231,8 @@ describe('LTX Director adapter', () => {
       duration_seconds: 4,
       duration_frames: 96,
       end_frame: 96,
+      custom_width: 1280,
+      custom_height: 720,
       local_prompts: 'shot one|shot two',
       segment_lengths: '36,60',
       frame_rate: 24,
