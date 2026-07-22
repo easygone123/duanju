@@ -18,6 +18,7 @@ import {
 } from '@/lib/novel-promotion/narration/sync'
 import { parseNarrationMode } from '@/lib/novel-promotion/narration/state'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
+import { estimatePanelDuration } from '@/lib/novel-promotion/six-grid/duration'
 
 type CropArtifact = Pick<SixGridCropArtifact, 'cellIndex' | 'mediaId' | 'url' | 'normalizedCropRect'> & { lineage: unknown }
 const currentCropPanelSelect = {
@@ -29,6 +30,8 @@ const currentCropPanelSelect = {
   imageMediaId: true,
   imageUrl: true,
   hasDialogue: true,
+  dialogueText: true,
+  srtSegment: true,
   narrationMode: true,
   narrationRecommended: true,
   narrationSuggestedText: true,
@@ -107,6 +110,16 @@ export async function commitSixGridCropBatch(input: {
       const previous = currentByCell.get(artifact.cellIndex)
       if (!previous) throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
       const analysis = input.panelAnalysis?.[artifact.cellIndex]
+      const analyzedDuration = analysis ? estimatePanelDuration({
+        dialogueText: previous.dialogueText,
+        narrationText: analysis.narration_text,
+        sourceText: previous.srtSegment,
+        description: analysis.description,
+        videoPrompt: analysis.video_prompt,
+        cameraMove: analysis.camera_move,
+        shotType: analysis.shot_type,
+        plannerDuration: analysis.duration,
+      }).estimatedDuration : null
       const persistedPanel: CurrentCropPanel = await tx.novelPromotionPanel.update({
         where: { id: previous.id },
         data: {
@@ -128,8 +141,8 @@ export async function commitSixGridCropBatch(input: {
             firstLastFramePrompt: analysis.first_last_frame_prompt,
             shotType: analysis.shot_type,
             cameraMove: analysis.camera_move,
-            duration: analysis.duration,
-            estimatedDuration: analysis.duration,
+            duration: analyzedDuration,
+            estimatedDuration: analyzedDuration,
             durationOverride: null,
             narrationRecommended: analysis.narration_recommended,
             narrationSuggestedText: analysis.narration_text,

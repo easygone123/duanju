@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { estimatePanelDuration } from '@/lib/novel-promotion/six-grid/duration'
+import { estimateStoryboardPanelDuration } from '@/lib/novel-promotion/six-grid/duration'
 import {
   buildGridSheetPrompt,
   normalizePanelDialogue,
@@ -12,7 +12,6 @@ import {
 import { serializeGraphArtifactPayload } from '@/lib/run-runtime/service'
 import {
   normalizeGridPersistenceGroups,
-  readNonNegativeNumber,
   runWithSixGridPersistenceRetry,
   sha256PersistencePayload,
   stableGridStoryboardId as stableGridStoryboardIdFromContract,
@@ -160,10 +159,8 @@ export async function persistGridStoryboardOutputs(params: PersistGridParams) {
       for (let panelIndex = 0; panelIndex < group.panels.length; panelIndex += 1) {
         const panel = group.panels[panelIndex]
         const dialogue = normalizePanelDialogue(panel)
-        const duration = estimatePanelDuration({
+        const duration = estimateStoryboardPanelDuration(panel, {
           dialogueText: dialogue.text,
-          actionComplexity: readNonNegativeNumber(panel.actionComplexity),
-          cameraComplexity: readNonNegativeNumber(panel.cameraComplexity),
         })
         const plannedPanelFields = {
           gridCellIndex: panelIndex,

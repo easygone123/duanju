@@ -197,8 +197,9 @@ function normalizePanel(
   for (const field of ['scene_type', 'shot_type', 'camera_move', 'video_prompt'] as const) {
     if (value[field] !== undefined) readRequiredText(value[field], GRID_PANEL_INVALID, spec, context)
   }
-  if (value.duration !== undefined
-    && (typeof value.duration !== 'number' || !Number.isFinite(value.duration) || value.duration <= 0)) {
+  if (typeof value.duration !== 'number'
+    || !Number.isFinite(value.duration)
+    || value.duration <= 0) {
     throw validationError(GRID_PANEL_INVALID, spec, context)
   }
   return {

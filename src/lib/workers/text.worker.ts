@@ -37,6 +37,7 @@ import { handleReferenceToCharacterTask } from './handlers/reference-to-characte
 import { handleShotAITask } from './handlers/shot-ai-tasks'
 import { handleCharacterProfileTask } from './handlers/character-profile'
 import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
+import { estimateStoryboardPanelDuration } from '@/lib/novel-promotion/six-grid/duration'
 
 function readAssetKind(value: Record<string, unknown>): string {
   return typeof value.assetKind === 'string' ? value.assetKind : 'location'
@@ -406,6 +407,7 @@ async function handleRegenerateStoryboardTextTask(job: Job<TaskJobData>) {
 
     for (let i = 0; i < finalPanels.length; i++) {
       const panel = finalPanels[i]
+      const panelDuration = estimateStoryboardPanelDuration(panel)
       const srtRange = Array.isArray(panel.srt_range) ? panel.srt_range : []
       const srtStart = typeof srtRange[0] === 'number' ? srtRange[0] : null
       const srtEnd = typeof srtRange[1] === 'number' ? srtRange[1] : null
@@ -422,7 +424,9 @@ async function handleRegenerateStoryboardTextTask(job: Job<TaskJobData>) {
           props: panel.props ? JSON.stringify(panel.props) : null,
           srtStart,
           srtEnd,
-          duration: panel.duration || null,
+          duration: panelDuration.estimatedDuration,
+          estimatedDuration: panelDuration.estimatedDuration,
+          durationOverride: null,
           videoPrompt: panel.video_prompt || null,
           sceneType: typeof panel.scene_type === 'string' ? panel.scene_type : null,
           srtSegment: panel.source_text || null,
@@ -594,7 +598,7 @@ async function handleInsertPanelTask(job: Job<TaskJobData>) {
   const generatedVideoPrompt = typeof generatedPanel.video_prompt === 'string' ? generatedPanel.video_prompt : null
   const generatedLocation = typeof generatedPanel.location === 'string' ? generatedPanel.location : null
   const generatedSrtSegment = typeof generatedPanel.source_text === 'string' ? generatedPanel.source_text : null
-  const generatedDuration = typeof generatedPanel.duration === 'number' ? generatedPanel.duration : null
+  const generatedDuration = estimateStoryboardPanelDuration(generatedPanel).estimatedDuration
 
   await reportTaskProgress(job, 80, { stage: 'insert_panel_persist' })
 
@@ -638,6 +642,8 @@ async function handleInsertPanelTask(job: Job<TaskJobData>) {
         props: generatedPanel.props ? JSON.stringify(generatedPanel.props) : readNullableText(prevPanel as unknown as Record<string, unknown>, 'props'),
         srtSegment: generatedSrtSegment || prevPanel.srtSegment,
         duration: generatedDuration,
+        estimatedDuration: generatedDuration,
+        durationOverride: null,
       },
     })
 

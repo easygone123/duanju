@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 import { buildGridSheetPrompt } from '@/lib/novel-promotion/six-grid/prompt-builder'
+import type { StoryboardPanel } from '@/lib/storyboard-phases'
 
 const state = vi.hoisted(() => ({
   storyboards: [] as Array<Record<string, unknown>>,
@@ -41,6 +42,12 @@ const tx = vi.hoisted(() => ({
     }),
   },
   novelPromotionPanel: {
+    findMany: vi.fn(async ({ where }: { where?: { storyboardId?: { in?: string[] } } }) => {
+      const storyboardIds = where?.storyboardId?.in
+      return state.panels
+        .filter((row) => !storyboardIds || storyboardIds.includes(row.storyboardId as string))
+        .map((row) => ({ id: row.id as string }))
+    }),
     findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
       const panel = state.panels.find((row) => row.id === where.id)
       return panel ? { hasDialogue: panel.hasDialogue as boolean } : null
@@ -260,7 +267,7 @@ import {
 } from '@/lib/novel-promotion/six-grid/persistence-contract'
 import { persistStoryboardOutputs } from '@/lib/workers/handlers/script-to-storyboard-helpers'
 
-function panels(count: 4 | 6) {
+function panels(count: 4 | 6): StoryboardPanel[] {
   return Array.from({ length: count }, (_, index) => ({
     panel_number: index + 1,
     description: `visual beat ${index + 1}`,
@@ -271,6 +278,7 @@ function panels(count: 4 | 6) {
     shot_type: 'wide shot',
     camera_move: 'static',
     video_prompt: `animate beat ${index + 1}`,
+    duration: 2.5 + index,
   }))
 }
 
@@ -366,6 +374,39 @@ describe('grid storyboard persistence', () => {
     expect(state.panels.map((panel) => panel.gridCellIndex)).toEqual([0, 1, 2, 3])
     expect(state.panels.map((panel) => panel.panelNumber)).toEqual([1, 2, 3, 4])
     expect(state.voices).toHaveLength(4)
+  })
+
+  it('persists the analysis model durations without replacing them with a fixed formula', async () => {
+    const gridGroup = group('four_grid')
+    gridGroup.finalPanels[0] = {
+      ...gridGroup.finalPanels[0],
+      duration: 2.6,
+      description: 'Ming looks at the clock.',
+    }
+    gridGroup.finalPanels[1] = {
+      ...gridGroup.finalPanels[1],
+      duration: 7.4,
+      source_text: 'Ming says: 「Wait, do not leave yet. We still need to explain what happened tonight.」',
+    }
+    gridGroup.finalPanels[2] = {
+      ...gridGroup.finalPanels[2],
+      duration: 5.8,
+      description: 'Ming stands, then turns, walks to the door, opens it, and looks back.',
+      camera_move: 'tracking shot then dolly in',
+    }
+    gridGroup.finalPanels[3] = { ...gridGroup.finalPanels[3], duration: 8 }
+
+    await persistGridStoryboardOutputs({
+      episodeId: 'episode-1',
+      runId: 'run-1',
+      clipPanels: [gridGroup],
+      voiceLineRows: null,
+      runSnapshot: runSnapshot('four_grid'),
+    })
+
+    const durations = state.panels.map((panel) => panel.estimatedDuration as number)
+    expect(new Set(durations).size).toBeGreaterThan(2)
+    expect(durations).toEqual([2.6, 7.4, 5.8, 8])
   })
 
   it('preserves panel narration identity, config, and audio across grid replanning', async () => {
@@ -541,10 +582,10 @@ describe('grid storyboard persistence', () => {
       select: { id: true },
     })
     expect(tx.novelPromotionVoiceLine.updateMany).toHaveBeenCalledWith({
-      where: {
+      where: expect.objectContaining({
         episodeId: 'episode-1',
-        matchedStoryboardId: { in: ['stale-six-grid', 'stale-individual'] },
-      },
+        OR: [{ matchedStoryboardId: { in: ['stale-six-grid', 'stale-individual'] } }],
+      }),
       data: {
         matchedPanelId: null,
         matchedStoryboardId: null,
@@ -712,6 +753,11 @@ describe('grid storyboard persistence', () => {
     expect(state.storyboards[0]).not.toHaveProperty('layoutMode')
     expect(state.panels).toHaveLength(1)
     expect(state.panels[0]).not.toHaveProperty('gridCellIndex')
+    expect(state.panels[0]).toMatchObject({
+      duration: expect.any(Number),
+      estimatedDuration: expect.any(Number),
+      durationOverride: null,
+    })
   })
 
   it('replaces stale grid storyboards when rebuilding as individual panels', async () => {
@@ -745,10 +791,10 @@ describe('grid storyboard persistence', () => {
       select: { id: true, clipId: true, layoutMode: true },
     })
     expect(tx.novelPromotionVoiceLine.updateMany).toHaveBeenCalledWith({
-      where: {
+      where: expect.objectContaining({
         episodeId: 'episode-1',
-        matchedStoryboardId: { in: ['stale-four-grid', 'stale-six-grid'] },
-      },
+        OR: [{ matchedStoryboardId: { in: ['stale-four-grid', 'stale-six-grid'] } }],
+      }),
       data: {
         matchedPanelId: null,
         matchedStoryboardId: null,

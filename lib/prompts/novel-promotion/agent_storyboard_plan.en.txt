@@ -57,5 +57,7 @@ Planning rules:
 8. You may omit `slot` when the shot is mainly about movement, entry/exit, path traversal, transition space, temporary space, empty space, imagination, dream, memory, or abstract/non-literal space.
 9. When no `slot` is used, decide placement freely from source text, action flow, and cinematic staging instead of forcing one of the provided slots.
 10. Do not shorten, rewrite, summarize, or replace a provided slot phrase with a short token such as `slot_1`, `left`, or `throne_front`.
-11. Return strict JSON only.
-12. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
+11. Set a positive `duration` for every panel. This is the final analysis-model duration used by the system, so it must cover the complete spoken line or narration at a natural pace, plus pauses, acting and reactions, and all sequential visible actions.
+12. Never assign every panel a mechanical two seconds or the same duration. Split an overloaded beat into more panels instead of compressing unfinished dialogue or action.
+13. Return strict JSON only.
+14. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.

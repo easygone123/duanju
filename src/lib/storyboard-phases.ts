@@ -361,6 +361,15 @@ export async function executePhase1(
                 continue
             }
 
+            const missingDuration = planPanels.some((panel) => (
+                typeof panel.duration !== 'number'
+                || !Number.isFinite(panel.duration)
+                || panel.duration <= 0
+            ))
+            if (missingDuration) {
+                throw new Error(`Phase 1: STORYBOARD_DURATION_INVALID clip ${clipId}`)
+            }
+
             // 成功，跳出循环
             break
         } catch (error: unknown) {
@@ -673,6 +682,13 @@ export async function executePhase3(
 
             if (finalPanels.length === 0) {
                 throw new Error(`Phase 3: 过滤后无有效分镜 clip ${clipId}`)
+            }
+            if (finalPanels.some((panel) => (
+                typeof panel.duration !== 'number'
+                || !Number.isFinite(panel.duration)
+                || panel.duration <= 0
+            ))) {
+                throw new Error(`Phase 3: STORYBOARD_DURATION_INVALID clip ${clipId}`)
             }
 
             // 注意：photographyRules的合并已移至route.ts中，与并行执行的Phase 2结果合并

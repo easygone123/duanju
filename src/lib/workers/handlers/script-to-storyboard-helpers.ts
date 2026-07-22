@@ -6,6 +6,7 @@ import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narrat
 import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 import type { ResolvedStoryboardRunSnapshot } from '@/lib/novel-promotion/six-grid/run-snapshot'
 import { getRunIdentitySnapshot } from '@/lib/run-runtime/service'
+import { estimateStoryboardPanelDuration } from '@/lib/novel-promotion/six-grid/duration'
 
 export type JsonRecord = Record<string, unknown>
 
@@ -205,6 +206,7 @@ export async function persistStoryboardsAndPanels(params: {
       const persistedPanels: PersistedStoryboard['panels'] = []
       for (let i = 0; i < clipEntry.finalPanels.length; i += 1) {
         const panel = clipEntry.finalPanels[i]
+        const panelDuration = estimateStoryboardPanelDuration(panel)
         const created = await panelModel.create({
           data: {
             storyboardId: storyboard.id,
@@ -220,7 +222,9 @@ export async function persistStoryboardsAndPanels(params: {
             srtSegment: panel.source_text || null,
             photographyRules: panel.photographyPlan ? JSON.stringify(panel.photographyPlan) : null,
             actingNotes: panel.actingNotes ? JSON.stringify(panel.actingNotes) : null,
-            duration: panel.duration || null,
+            duration: panelDuration.estimatedDuration,
+            estimatedDuration: panelDuration.estimatedDuration,
+            durationOverride: null,
           },
           select: {
             id: true,
@@ -360,6 +364,7 @@ export async function persistStoryboardOutputs(params: {
       const persistedPanels: PersistedStoryboard['panels'] = []
       for (let i = 0; i < clipEntry.finalPanels.length; i += 1) {
         const panel = clipEntry.finalPanels[i]
+        const panelDuration = estimateStoryboardPanelDuration(panel)
         const created = await panelModel.create({
           data: {
             storyboardId: storyboard.id,
@@ -375,7 +380,9 @@ export async function persistStoryboardOutputs(params: {
             srtSegment: panel.source_text || null,
             photographyRules: panel.photographyPlan ? JSON.stringify(panel.photographyPlan) : null,
             actingNotes: panel.actingNotes ? JSON.stringify(panel.actingNotes) : null,
-            duration: panel.duration || null,
+            duration: panelDuration.estimatedDuration,
+            estimatedDuration: panelDuration.estimatedDuration,
+            durationOverride: null,
           },
           select: {
             id: true,

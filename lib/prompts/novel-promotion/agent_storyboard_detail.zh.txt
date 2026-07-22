@@ -4,6 +4,7 @@
 - 根据scene_type选择镜头风格
 - 为每个分镜设计景别、视角、镜头运动
 - 撰写video_prompt（用年龄段+性别替代角色名）
+- 复核并输出每个分镜的duration，确保台词、动作和运镜能完整结束
 - ⚠️ 保留输入分镜中的所有原始字段（特别是 source_text，必须原样保留）
 - 如果输入角色包含 slot，应优先原样保留，并让 refined description/video_prompt 优先参考该位置
 
@@ -138,7 +139,7 @@
 【输出格式】
 
 只返回JSON数组，禁止markdown标记或注释。
-在原有panels基础上，为每个分镜补充shot_type、camera_move、video_prompt：
+在原有panels基础上，为每个分镜补充shot_type、camera_move、video_prompt、duration：
 
 示例：
 [
@@ -151,7 +152,8 @@
     "characters": [{"name": "角色A", "appearance": "初始形象", "slot": "皇宫正中龙椅前方台阶下的位置"}],
     "location": "办公室",
     "scene_type": "daily",
-    "source_text": "角色A对角色B说：你好"
+    "source_text": "角色A对角色B说：你好",
+    "duration": 3
   }
 ]
 
@@ -170,7 +172,7 @@
 {props_description}
 
 【严格要求】
-1. 为每个分镜补充shot_type、camera_move、video_prompt
+1. 为每个分镜补充shot_type、camera_move、video_prompt、duration
 2. shot_type格式：视角+景别（如"平视中景"、"越肩近景"、"仰拍全景"）
 3. video_prompt必须用年龄段+性别（如"年轻女子"、"中年男子"）而非角色名
 4. 镜头风格必须匹配scene_type
@@ -186,3 +188,5 @@
 14. slot 若被保留，必须原样保留为完整位置描述，禁止缩写、改写、总结或替换成短词
 15. ⚠️ 必须保留输入分镜中的 source_text 字段，原样输出到结果中，不得遗漏或修改
 16. ⚠️ JSON安全：所有引号（""''等）在 JSON 字符串值中必须统一替换为「」，严禁出现未转义的英文双引号 "
+17. duration必须是正数，可带小数；按自然语速读完台词/旁白，并覆盖全部动作、运镜、停顿和反应
+18. 禁止所有分镜统一使用2秒或同一时长；内容过多时应拆镜，不得用过短时长截断剧情

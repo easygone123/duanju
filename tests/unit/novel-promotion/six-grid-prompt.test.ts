@@ -22,6 +22,7 @@ function sceneGroup(panelCount = 6) {
       props: ['red umbrella'],
       shot_type: index % 2 ? 'close-up' : 'wide shot',
       camera_move: index % 2 ? 'slow push-in' : 'locked camera',
+      duration: 2.5 + index,
       dialogue: index === 2
         ? { speaker: 'Ming', text: '不要离开', emotion: 'afraid' }
         : undefined,

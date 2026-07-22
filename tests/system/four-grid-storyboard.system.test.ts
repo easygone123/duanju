@@ -763,6 +763,7 @@ function sceneGroup(clipId: string) {
       source_text: `source beat ${index + 1}`,
       characters: [{ name: 'Ming' }],
       props: ['folder'],
+      duration: 2.5 + index,
     })),
   }
 }

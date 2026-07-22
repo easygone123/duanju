@@ -234,6 +234,17 @@ function mergePanelsWithRules(params: {
   })
 }
 
+function requireAnalyzedDurations(panels: StoryboardPanel[], label: string): StoryboardPanel[] {
+  if (panels.some((panel) => (
+    typeof panel.duration !== 'number'
+    || !Number.isFinite(panel.duration)
+    || panel.duration <= 0
+  ))) {
+    throw new Error(`${label}: STORYBOARD_DURATION_INVALID`)
+  }
+  return panels
+}
+
 const MAX_STEP_ATTEMPTS = 3
 const MAX_RETRY_DELAY_MS = 10_000
 
@@ -356,12 +367,14 @@ async function runGridScriptToStoryboardOrchestrator(
     `Plan the complete episode into continuous ${panelCountWord}-shot scene groups for a ${layout} storyboard layout.`,
     'Return JSON only: one array with no markdown fences or commentary.',
     `Every group must contain sceneKey, clipId, incomingContinuity, outgoingContinuity, and exactly ${panelCountWord} panels for the ${layout} layout.`,
-    `Every panel must contain panel_number, description, location, source_text, and characters. panel_number must be the integers 1 through ${gridSpec.panelCount} in order; description, location, and source_text must be non-empty strings; characters must be an array. Optional props must be an array of non-empty strings.`,
+    `Every panel must contain panel_number, description, location, source_text, characters, and duration. panel_number must be the integers 1 through ${gridSpec.panelCount} in order; description, location, and source_text must be non-empty strings; characters must be an array; duration must be a positive number of seconds. Optional props must be an array of non-empty strings.`,
     'Each panel.location must exactly equal its group sceneKey. sceneKey is the canonical location identity, not a free-form scene description.',
     'Never cross a hard location boundary to fill a group. Adjacent groups in the same scene must copy the previous outgoingContinuity exactly into incomingContinuity.',
     'Continuity anchors must preserve characters, clothing, props, lighting, and emotion.',
     `If source material is sparse, fill the ${gridSpec.panelCount} distinct panels with grounded reaction, environment, insert, or detail shots that remain faithful to the source; never use blank or duplicate panels.`,
     'If source material is dense, split it into additional consecutive groups. Preserve complete story coverage and do not drop any source event merely to fit a group.',
+    'Allocate each panel duration independently from natural dialogue or narration speaking time, sequential action complexity, camera movement, pauses, and reactions. Never assign every panel a mechanical two seconds or one uniform duration.',
+    'A panel must have enough duration to finish its story beat. If one beat would exceed a practical shot, split it across consecutive panels or groups instead of truncating dialogue or action.',
     `Immutable run settings: ${JSON.stringify(input.runSettings)}`,
     `Immutable grid spec: ${JSON.stringify(gridSpec)}`,
     `Complete episode clips: ${JSON.stringify(clips, null, 2)}`,
@@ -472,6 +485,7 @@ async function runGridScriptToStoryboardOrchestrator(
         `This group is arranged as a ${layout} storyboard.`,
         'Do not continue numbering from any previous group and do not use 0-based or episode-global numbering.',
         `Return exactly ${gridSpec.panelCount} distinct panels. Never add blanks or duplicate a panel to reach the required count.`,
+        'Every panel must retain a positive duration calculated for its own complete dialogue, action, camera movement, pauses, and reaction. Do not normalize all durations to two seconds or a single value.',
         'Return the complete JSON array only.',
       ].join('\n')
 
@@ -704,7 +718,7 @@ export async function runScriptToStoryboardOrchestrator(
           if (panels.length === 0) {
             throw new Error(`Phase 1 returned empty panels for clip ${formatClipId(clip)}`)
           }
-          return panels
+          return requireAnalyzedDurations(panels, `phase1:${formatClipId(clip)}`)
         },
       )
       phase1PanelsByClipId.set(clip.id, planPanels)
@@ -790,7 +804,7 @@ export async function runScriptToStoryboardOrchestrator(
           if (filtered.length === 0) {
             throw new Error(`Phase 3 returned empty valid panels for clip ${formatClipId(clip)}`)
           }
-          return filtered
+          return requireAnalyzedDurations(filtered, `phase3:${formatClipId(clip)}`)
         },
       )
 

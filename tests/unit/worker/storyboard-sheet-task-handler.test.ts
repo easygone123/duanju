@@ -956,8 +956,10 @@ describe('six-grid crop atomic persistence', () => {
         previousImageUrl: '/m/old-0',
       }),
     }))
-    expect(JSON.stringify(update.mock.calls)).not.toContain('dialogueText')
-    expect(JSON.stringify(update.mock.calls)).not.toContain('estimatedDuration')
+    const updateData = (update.mock.calls as unknown as Array<[{ data: unknown }]>)
+      .map(([args]) => args.data)
+    expect(JSON.stringify(updateData)).not.toContain('dialogueText')
+    expect(JSON.stringify(updateData)).not.toContain('estimatedDuration')
   })
 
   it('binds four analyzed prompts and durations to their matching crop cells atomically', async () => {

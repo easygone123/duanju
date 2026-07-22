@@ -51,7 +51,7 @@ describe('panel duration estimation', () => {
   })
 
   it('clamps estimates to stable minimum and maximum bounds', () => {
-    expect(estimatePanelDuration({}).estimatedDuration).toBe(2)
+    expect(estimatePanelDuration({}).estimatedDuration).toBe(2.5)
     expect(estimatePanelDuration({
       dialogueText: '很长'.repeat(1000),
       actionComplexity: 100,
@@ -61,21 +61,59 @@ describe('panel duration estimation', () => {
 
   it('uses the published action/camera coefficients and tenth-second rounding', () => {
     expect(PANEL_DURATION_FORMULA).toMatchObject({
-      minimumSeconds: 2,
+      minimumSeconds: 2.5,
       actionSecondsPerPoint: 0.65,
       cameraSecondsPerPoint: 0.45,
     })
     expect(estimatePanelDuration({
       actionComplexity: 2,
       cameraComplexity: 3,
-    }).estimatedDuration).toBe(4.7)
+    }).estimatedDuration).toBe(5.2)
   })
 
   it.each([
-    ['English', 'Go now', 2.1],
-    ['Chinese', '请马上离开这里', 2.6],
-  ])('locks the %s readable-character timing formula', (_locale, dialogueText, expected) => {
+    ['English', 'Go now', 2.5],
+    ['Chinese', '请马上离开这里', 3.1],
+  ])('uses a natural %s speaking-rate floor', (_locale, dialogueText, expected) => {
     expect(estimatePanelDuration({ dialogueText }).estimatedDuration).toBe(expected)
+  })
+
+  it('extracts quoted speech from source text when dialogue metadata is absent', () => {
+    const silent = estimatePanelDuration({ description: '角色站在门口' })
+    const speaking = estimatePanelDuration({
+      description: '角色站在门口说话',
+      sourceText: '张三说：「等等，不要离开这里，我们必须马上一起回去。」',
+    })
+
+    expect(speaking.estimatedDuration).toBeGreaterThan(silent.estimatedDuration)
+    expect(speaking.estimatedDuration).toBeGreaterThan(6)
+  })
+
+  it('allocates more time to sequential action and moving-camera shots', () => {
+    const staticReaction = estimatePanelDuration({
+      description: '李四皱眉看向门口',
+      cameraMove: '固定',
+    })
+    const complexMove = estimatePanelDuration({
+      description: '李四站起身，然后转身走向门口，接着伸手推开门并回头点头',
+      cameraMove: '镜头跟随，随后缓缓推近',
+    })
+
+    expect(complexMove.estimatedDuration).toBeGreaterThan(staticReaction.estimatedDuration + 2)
+  })
+
+  it('treats analysis-model duration as authoritative', () => {
+    expect(estimatePanelDuration({ plannerDuration: 8 }).estimatedDuration).toBe(8)
+    expect(estimatePanelDuration({
+      plannerDuration: 2,
+      dialogueText: '你先别急着走，我们还有很多事情没有说清楚。',
+    }).estimatedDuration).toBe(2)
+  })
+
+  it('uses semantic estimation only when the analysis model omitted duration', () => {
+    expect(estimatePanelDuration({
+      dialogueText: '你先别急着走，我们还有很多事情没有说清楚。',
+    }).estimatedDuration).toBeGreaterThan(2)
   })
 
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(

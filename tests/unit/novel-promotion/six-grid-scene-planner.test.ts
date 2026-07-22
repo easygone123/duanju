@@ -25,6 +25,7 @@ function panels(location: string, count = 6) {
     location,
     source_text: `${location} source ${index + 1}`,
     characters: [],
+    duration: 2.5 + index,
   }))
 }
 

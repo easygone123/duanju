@@ -10,6 +10,9 @@ Character info:
 Location info:
 {locations_description}
 
+Prop info:
+{props_description}
+
 Task:
 For each panel, output a complete panel object with improved cinematic detail.
 If any character already has `slot`, prefer preserving it exactly and use it as a preferred placement anchor.
@@ -25,7 +28,7 @@ Required fields per panel:
 - shot_type
 - camera_move
 - video_prompt
-- duration (optional)
+- duration (required positive seconds)
 
 Output schema example (field names must be preserved):
 [
@@ -53,4 +56,6 @@ Rules:
 7. When no `slot` is used, decide placement freely from source text, action flow, spatial logic, and cinematic staging.
 8. Do not shorten, rewrite, summarize, or replace a provided `slot` phrase with a short token.
 9. Return JSON array only.
-10. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
+10. Recalculate duration so the complete dialogue or narration can be spoken naturally and every sequential action, camera move, pause, and reaction can finish.
+11. Do not assign every panel two seconds or one uniform duration. Split an overloaded beat instead of truncating it.
+12. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.

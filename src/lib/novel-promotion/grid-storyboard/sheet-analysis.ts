@@ -101,6 +101,13 @@ function plannedDuration(panel: FourGridPlannedPanel) {
       : null
 }
 
+function exampleTimeline(duration: number) {
+  const safeDuration = Math.max(2.5, Math.round(duration * 10) / 10)
+  const firstEnd = Math.round((safeDuration * 0.4) * 10) / 10
+  const secondEnd = Math.round((safeDuration * 0.75) * 10) / 10
+  return `【0-${firstEnd}秒】...\n【${firstEnd}-${secondEnd}秒】...\n【${secondEnd}-${safeDuration}秒】...`
+}
+
 export function buildFourGridSheetAnalysisPrompt(input: {
   locale: 'zh' | 'en'
   panels: FourGridPlannedPanel[]
@@ -129,21 +136,19 @@ export function buildFourGridSheetAnalysisPrompt(input: {
       : null,
     planned_duration: plannedDuration(panel),
   }))
-  const targetDuration = plotPlan.reduce((total, panel) => (
-    total + (typeof panel.planned_duration === 'number' ? panel.planned_duration : 0)
-  ), 0)
   const language = input.locale === 'zh' ? 'Simplified Chinese' : 'English'
   const exampleNarrationPanelIndex = orderedPanels.findIndex((panel) => !panel.dialogueText?.trim())
   const jsonExample = {
     panels: Array.from({ length: panelCount }, (_, index) => {
       const demonstratesNarration = index === exampleNarrationPanelIndex
+      const exampleDuration = plotPlan[index]?.planned_duration || 4
       return {
         panel_number: index + 1,
         description: '...',
         image_prompt: '...',
-        video_prompt: '【0-3秒】...\n【4-6秒】...\n【6-10秒】...',
-        first_last_frame_prompt: '首帧...；尾帧...；中间按三段时间轴自然过渡。',
-        duration: 3.5,
+        video_prompt: exampleTimeline(exampleDuration),
+        first_last_frame_prompt: '首帧...；尾帧...；在分配时长内按时间轴自然过渡。',
+        duration: exampleDuration,
         shot_type: '...',
         camera_move: '...',
         narration_recommended: demonstratesNarration,
@@ -161,7 +166,7 @@ export function buildFourGridSheetAnalysisPrompt(input: {
     'Do not rewrite the plot to justify an incorrect generated image. Keep every requested plot beat recognizable.',
     'For each cell, produce a grounded still-image prompt and a video prompt whose starting state exactly matches that cell.',
     'Use the target video model profile to choose concrete camera movement, action density, dialogue timing, and physically achievable transitions. Do not mention unsupported controls.',
-    'For every approximately ten-second panel, video_prompt must contain exactly these three labeled chronological blocks: 【0-3秒】, 【4-6秒】, and 【6-10秒】.',
+    'For every panel, video_prompt must contain 2 to 4 labeled chronological time blocks that start at 0 and continuously cover that panel own allocated duration. Never force a ten-second template onto a shorter or longer panel.',
     'Each time block must specify camera/framing, visible character action and expression, and any spoken dialogue that occurs in that interval.',
     'Keep dialogue verbatim from the authoritative plot plan. Do not invent a second line that changes the story.',
     'Also produce first_last_frame_prompt: lock the opening composition to the visible cell, describe the intended final composition, and explain the natural three-stage transition between them.',
@@ -171,11 +176,11 @@ export function buildFourGridSheetAnalysisPrompt(input: {
     'Never use narration to restate visible action.',
     'When narration_recommended is true, provide non-empty narration_text; otherwise set narration_text and narration_emotion to null.',
     'Eligible-panel true branch semantics (not a numbered panel recommendation): {"narration_recommended":true,"narration_text":"Time passed before they reached the city.","narration_emotion":"reflective"}.',
-    'Allocate duration from dialogue length, action complexity, and camera movement. Every duration must be a positive number of seconds.',
+    'Independently decide the final duration for each panel from the visible cell and authoritative plot: natural dialogue length, narration length, sequential action complexity, camera movement, pauses, and reactions. Every duration must be a positive number of seconds.',
+    'planned_duration is context only. Keep it when it is already appropriate, but revise it whenever the image-grounded action or speaking time requires a different duration; the returned duration becomes authoritative.',
+    'Never assign every panel a mechanical two seconds or one uniform duration. A spoken line and its reaction must finish before the panel ends.',
     'Include narration speaking time in duration allocation.',
-    targetDuration > 0
-      ? `The ${panelCount} durations should total approximately ${targetDuration.toFixed(2)} seconds.`
-      : 'Choose a concise positive duration for every cell.',
+    'Choose a concise but complete positive duration for every cell; there is no fixed per-panel duration and no required total duration.',
     `Write all natural-language fields in ${language}.`,
     'Return JSON only in this exact shape:',
     JSON.stringify(jsonExample),

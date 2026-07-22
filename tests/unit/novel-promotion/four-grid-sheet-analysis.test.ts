@@ -164,6 +164,8 @@ describe('four-grid sheet analysis', () => {
     expect(prompt).toContain('time/location transition, inner thought, off-screen background information, or necessary causal context')
     expect(prompt).toContain('Never use narration to restate visible action')
     expect(prompt).toContain('Include narration speaking time in duration allocation')
+    expect(prompt).toContain('the returned duration becomes authoritative')
+    expect(prompt).toContain('there is no fixed per-panel duration and no required total duration')
     expect(prompt).toContain('Evaluate every eligible dialogue-free panel independently')
     expect(prompt).toContain('never default all eligible panels to narration_recommended false')
     expect(prompt).toContain('"narration_recommended":true,"narration_text":"Time passed before they reached the city.","narration_emotion":"reflective"')

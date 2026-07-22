@@ -28,10 +28,18 @@
   - description: 画面描述（人物动作、场景元素、构图要点）
    - characters: [{name: "角色名", appearance: "形象名", slot: "场景固定位置描述"}]
    - location: 场景名称（从资产库选择）
-   - scene_type: daily/emotion/action/epic/suspense
-   - source_text: 对应原文片段 ⚠️ 必填，不得为空
+  - scene_type: daily/emotion/action/epic/suspense
+  - source_text: 对应原文片段 ⚠️ 必填，不得为空
+  - duration: 该镜头完成全部台词、动作和运镜所需的合理秒数（正数，可带小数）
 
-3. source_text 规则（极其重要）：
+3. duration 时长规划规则（极其重要）：
+   - 禁止把所有分镜统一填写为2秒或同一个时长
+   - 有台词/旁白时，必须按自然说话速度完整读完，并预留约1秒给表演、停顿和反应
+   - 连续动作必须给到所有动作完成的时间；一个镜头塞不下时，应拆成多个镜头，而不是压缩时长
+   - 固定空镜、快速反应、普通动作、复杂调度应使用不同的合理时长
+   - duration 是分析模型对该镜头的最终时长判断，系统仅在缺失或非法时使用兜底值
+
+4. source_text 规则（极其重要）：
    ⚠️ 每个分镜都必须包含，不得为null或空字符串
    - 多个镜头可以共享同一段原文
    - 直接从输入内容中复制原文
@@ -242,7 +250,8 @@
     ],
     "location": "办公室",
     "scene_type": "daily",
-    "source_text": "张三走进办公室，看着正在工作的李四和王五"
+    "source_text": "张三走进办公室，看着正在工作的李四和王五",
+    "duration": 3.5
   },
   {
     "panel_number": 2,
@@ -254,7 +263,8 @@
     ],
     "location": "办公室",
     "scene_type": "daily",
-    "source_text": "说：开会了"
+    "source_text": "说：开会了",
+    "duration": 3
   },
   {
     "panel_number": 3,
@@ -266,7 +276,8 @@
     ],
     "location": "办公室",
     "scene_type": "daily",
-    "source_text": "李四抬头点了点头，王五放下手中的笔"
+    "source_text": "李四抬头点了点头，王五放下手中的笔",
+    "duration": 4
   },
   {
     "panel_number": 4,
@@ -278,7 +289,8 @@
     ],
     "location": "办公室",
     "scene_type": "daily",
-    "source_text": "王五站起身"
+    "source_text": "王五站起身",
+    "duration": 3
   }
 ]
 
@@ -327,3 +339,4 @@ Clip信息：
 14. 对话必须拆分：每段对话至少 2 个镜头（说话者 + 听者反应）
 15. ⚠️ 镜头合理性：只描述当前镜头**实际能拍摄到**的角色，特写/反打等拍不到的可省略
 16. ⚠️ JSON安全：原文中的所有引号（""''「」等）在 JSON 字符串值中必须统一替换为「」，严禁出现未转义的英文双引号 "
+17. 每个分镜必须输出正数 duration；禁止所有镜头机械使用2秒或相同时长

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
 import {
   GRID_NUMBERING_INVALID,
+  GRID_PANEL_INVALID,
   GRID_REQUIRES_EXACT_PANEL_COUNT,
   validateGridEpisodePlan,
   validateGridSceneGroups,
@@ -16,6 +17,7 @@ function panels(location: string, count: number) {
     location,
     source_text: `${location} source ${index + 1}`,
     characters: [],
+    duration: 2.5 + index,
   }))
 }
 
@@ -62,6 +64,14 @@ describe('grid storyboard scene planner', () => {
 
     expect(() => validateGridSceneGroups([invalid], spec))
       .toThrow(GRID_NUMBERING_INVALID)
+  })
+
+  it('requires every grid panel to contain an analysis-model duration', () => {
+    const spec = resolveStoryboardGridSpec('four_grid', '16:9')
+    const invalid = group(4)
+    delete (invalid.panels[1] as { duration?: number }).duration
+
+    expect(() => validateGridSceneGroups([invalid], spec)).toThrow(GRID_PANEL_INVALID)
   })
 
   it('builds a four-grid sheet prompt with exact 2x2 layout and four ordered beats', () => {

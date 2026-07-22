@@ -16,6 +16,9 @@ Character details:
 Location details:
 {locations_description}
 
+Prop details:
+{props_description}
+
 Task:
 Generate exactly one transition panel with coherent action and cinematic continuity.
 
@@ -41,4 +44,5 @@ Rules:
 5. You may omit `slot` when the inserted panel is mainly about movement, entry/exit, path traversal, transition space, temporary space, empty space, imagination, dream, memory, or abstract/non-literal space.
 6. If `slot` is used, it must copy one full placement phrase from the available slots list verbatim. Do not shorten or rename it.
 7. JSON only, no markdown.
-8. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
+8. Set duration to positive seconds that cover the entire transition action, camera move, and any spoken line; do not default mechanically to two seconds.
+9. ⚠️ JSON SAFETY: All quotation marks in text (""''「」 etc.) MUST be converted to corner brackets「」in JSON string values. NEVER use raw ASCII double quotes " inside string values.
