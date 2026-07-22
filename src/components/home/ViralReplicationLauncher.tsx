@@ -24,6 +24,22 @@ export function validateViralReplicationVideoFile(file: File): 'formatError' | '
   return null
 }
 
+function resolveUploadErrorKey(error: unknown) {
+  const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : ''
+  if (code === 'ANALYSIS_MODEL_REQUIRED') return 'uploadErrors.analysisModelRequired'
+  if (code === 'INVALID_VIDEO_DURATION') return 'uploadErrors.duration'
+  if (code === 'VIRAL_VIDEO_TOO_LARGE') return 'uploadErrors.size'
+  if (['INVALID_MEDIA_HEADER', 'UNSUPPORTED_MEDIA_TYPE', 'UNSUPPORTED_CONTAINER', 'UNSUPPORTED_CONTAINER_BRAND'].includes(code)) {
+    return 'uploadErrors.format'
+  }
+  if (code === 'VIRAL_UPLOAD_CONFLICT' || code === 'VIRAL_UPLOAD_NOT_ALLOWED') return 'uploadErrors.conflict'
+  if (code === 'UNAUTHORIZED') return 'uploadErrors.unauthorized'
+  if (code === 'VIRAL_VIDEO_UPLOAD_NETWORK_FAILED') return 'uploadErrors.network'
+  return 'genericError'
+}
+
 export default function ViralReplicationLauncher() {
   const t = useTranslations('home.viralReplication')
   const router = useRouter()
@@ -37,7 +53,7 @@ export default function ViralReplicationLauncher() {
   const [progress, setProgress] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [validationError, setValidationError] = useState<'formatError' | 'sizeError' | null>(null)
-  const [submitError, setSubmitError] = useState(false)
+  const [submitErrorKey, setSubmitErrorKey] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -60,7 +76,7 @@ export default function ViralReplicationLauncher() {
     setProgress(0)
     setSubmitting(false)
     setValidationError(null)
-    setSubmitError(false)
+    setSubmitErrorKey(null)
   }
 
   const close = () => {
@@ -70,7 +86,7 @@ export default function ViralReplicationLauncher() {
   }
 
   const selectFile = (nextFile: File | null) => {
-    setSubmitError(false)
+    setSubmitErrorKey(null)
     if (!nextFile) {
       setFile(null)
       setValidationError(null)
@@ -85,7 +101,7 @@ export default function ViralReplicationLauncher() {
     const normalizedBrief = brief.trim()
     if (!file || !normalizedBrief || submitting) return
     setSubmitting(true)
-    setSubmitError(false)
+    setSubmitErrorKey(null)
     setProgress(0)
     const controller = new AbortController()
     abortControllerRef.current = controller
@@ -105,7 +121,7 @@ export default function ViralReplicationLauncher() {
       })
     } catch (error: unknown) {
       if (!(error instanceof DOMException && error.name === 'AbortError')) {
-        setSubmitError(true)
+        setSubmitErrorKey(resolveUploadErrorKey(error))
       }
     } finally {
       if (abortControllerRef.current === controller) abortControllerRef.current = null
@@ -155,7 +171,7 @@ export default function ViralReplicationLauncher() {
                   value={brief}
                   maxLength={2_000}
                   disabled={submitting}
-                  onChange={(event) => { setBrief(event.target.value); setSubmitError(false) }}
+                  onChange={(event) => { setBrief(event.target.value); setSubmitErrorKey(null) }}
                   placeholder={t('briefPlaceholder')}
                   className="glass-input-base w-full px-4 py-3 text-sm"
                 />
@@ -184,9 +200,9 @@ export default function ViralReplicationLauncher() {
                   </div>
                 </div>
               ) : null}
-              {submitError ? (
+              {submitErrorKey ? (
                 <div className="flex items-center justify-between gap-3 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600">
-                  <span>{t('genericError')}</span>
+                  <span>{t(submitErrorKey)}</span>
                   <button type="button" onClick={() => void submit()} className="font-semibold underline">{t('retry')}</button>
                 </div>
               ) : null}

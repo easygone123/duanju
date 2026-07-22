@@ -24,7 +24,10 @@ import {
   parseFrameSourceMeta,
   type FrameLinkStoryboard,
 } from './frame-link-resolver'
-import { buildFirstLastFramePrompt } from './first-last-frame-prompt'
+import {
+  buildAdjacentPanelContinuityPrompt,
+  buildFirstLastFramePrompt,
+} from './first-last-frame-prompt'
 import {
   parseNarrationMode,
   resolveNarrationContent,
@@ -63,6 +66,12 @@ export type VideoPanelRecord = {
   estimatedDuration: number | null
   durationOverride: number | null
   duration: number | null
+}
+
+export type BatchPanelVideoHandoff = {
+  firstFrameSourcePanelId: string
+  sourcePanelId: string
+  lastFrameVideoPrompt?: string | null
 }
 
 export const VIDEO_PANEL_SELECT = {
@@ -233,14 +242,13 @@ async function loadAvailableVideoModel(input: {
   if (comfyWorkflowVersionId && (!comfyVersion || !comfyVersion.contentHash.trim())) {
     throw new ApiError('INVALID_PARAMS', { code: VIDEO_MODEL_INVALID })
   }
-  if (
-    parsed.provider === 'comfyui'
-    && input.requireFirstLastFrame
-    && !supportsComfyFirstLastFrameContract(
+  const supportsFirstLastFrame = parsed.provider === 'comfyui'
+    ? supportsComfyFirstLastFrameContract(
       comfyVersion?.variableDefinitions,
       comfyVersion?.bindingSpec,
     )
-  ) {
+    : resolveBuiltinCapabilitiesByModelKey('video', input.modelKey)?.video?.firstlastframe === true
+  if (input.requireFirstLastFrame && !supportsFirstLastFrame) {
     throw new ApiError('INVALID_PARAMS', {
       code: 'FIRSTLASTFRAME_MODEL_UNSUPPORTED',
       field: 'firstLastFrame.flModel',
@@ -257,6 +265,7 @@ async function loadAvailableVideoModel(input: {
     modelKey: input.modelKey,
     available: true,
     comfyWorkflowVersionId,
+    supportsFirstLastFrame,
     duration,
   }
 }
@@ -345,42 +354,11 @@ async function resolveTrustedFirstLastFrame(
 
     const episodeId = panel.storyboard?.episodeId
     if (!episodeId) return {}
-    const storyboardRows = await prisma.novelPromotionStoryboard.findMany({
-      where: {
-        episodeId,
-        episode: { novelPromotionProject: { projectId, project: { userId } } },
-      },
-      select: {
-        id: true,
-        createdAt: true,
-        clip: { select: { createdAt: true } },
-        layoutMode: true,
-        groupSequence: true,
-        continuityAnchor: true,
-        panels: {
-          orderBy: { panelIndex: 'asc' },
-          select: {
-            id: true,
-            storyboardId: true,
-            panelIndex: true,
-            gridCellIndex: true,
-            firstFrameSourceMeta: true,
-            lastFrameSourceMeta: true,
-            linkedToNextPanel: true,
-            videoPrompt: true,
-          },
-        },
-      },
+    const { storyboardRows, storyboards } = await loadEpisodeFrameLinkStoryboards({
+      episodeId,
+      projectId,
+      userId,
     })
-    const storyboards: FrameLinkStoryboard[] = storyboardRows.map((storyboard) => ({
-      id: storyboard.id,
-      layoutMode: storyboard.layoutMode,
-      groupSequence: storyboard.groupSequence,
-      continuityAnchor: storyboard.continuityAnchor,
-      createdAt: storyboard.createdAt,
-      clipCreatedAt: storyboard.clip?.createdAt,
-      panels: storyboard.panels,
-    }))
     const sourcePanelId = buildFrameLinkResolutionIndex({ storyboards })
       .automaticChoicesByPanelId.get(panel.id)?.lastFrame?.sourcePanelId
     const sourcePanel = storyboardRows
@@ -403,25 +381,118 @@ async function resolveTrustedFirstLastFrame(
   }
 }
 
+async function loadEpisodeFrameLinkStoryboards(input: {
+  episodeId: string
+  projectId: string
+  userId: string
+}) {
+  const storyboardRows = await prisma.novelPromotionStoryboard.findMany({
+    where: {
+      episodeId: input.episodeId,
+      episode: { novelPromotionProject: { projectId: input.projectId, project: { userId: input.userId } } },
+    },
+    select: {
+      id: true,
+      createdAt: true,
+      clip: { select: { createdAt: true } },
+      layoutMode: true,
+      groupSequence: true,
+      continuityAnchor: true,
+      panels: {
+        orderBy: { panelIndex: 'asc' },
+        select: {
+          id: true,
+          storyboardId: true,
+          panelIndex: true,
+          gridCellIndex: true,
+          firstFrameSourceMeta: true,
+          lastFrameSourceMeta: true,
+          linkedToNextPanel: true,
+          videoPrompt: true,
+        },
+      },
+    },
+  })
+  const storyboards: FrameLinkStoryboard[] = storyboardRows.map((storyboard) => ({
+    id: storyboard.id,
+    layoutMode: storyboard.layoutMode,
+    groupSequence: storyboard.groupSequence,
+    continuityAnchor: storyboard.continuityAnchor,
+    createdAt: storyboard.createdAt,
+    clipCreatedAt: storyboard.clip?.createdAt,
+    panels: storyboard.panels,
+  }))
+  return { storyboardRows, storyboards }
+}
+
+export async function resolveBatchPanelVideoHandoffs(input: {
+  episodeId: string
+  projectId: string
+  userId: string
+}): Promise<Map<string, BatchPanelVideoHandoff>> {
+  const { storyboardRows, storyboards } = await loadEpisodeFrameLinkStoryboards(input)
+  const index = buildFrameLinkResolutionIndex({ storyboards })
+  const promptsByPanelId = new Map(
+    storyboardRows.flatMap((storyboard) => storyboard.panels)
+      .map((panel) => [panel.id, panel.videoPrompt] as const),
+  )
+  const handoffs = new Map<string, BatchPanelVideoHandoff>()
+  for (const [panelId, choices] of index.choicesByPanelId) {
+    if (!choices.firstFrame || !choices.lastFrame) continue
+    handoffs.set(panelId, {
+      firstFrameSourcePanelId: choices.firstFrame.sourcePanelId,
+      sourcePanelId: choices.lastFrame.sourcePanelId,
+      lastFrameVideoPrompt: promptsByPanelId.get(choices.lastFrame.sourcePanelId),
+    })
+  }
+  return handoffs
+}
+
+async function resolveAutomaticBatchHandoff(
+  panel: VideoPanelRecord,
+  projectId: string,
+  userId: string,
+  modelKey: string,
+) {
+  try {
+    return await resolveTrustedFirstLastFrame(
+      { flModel: modelKey },
+      panel,
+      projectId,
+      userId,
+    )
+  } catch (error) {
+    if (
+      error instanceof ApiError
+      && error.code === 'INVALID_PARAMS'
+      && error.details?.code === 'FIRSTLASTFRAME_SOURCE_INVALID'
+    ) {
+      return null
+    }
+    throw error
+  }
+}
+
 export async function resolveAuthoritativePanelPayload(input: {
   body: Record<string, unknown>
   panel: VideoPanelRecord
   projectId: string
   userId: string
   routingMode?: 'single' | 'batch'
+  batchFrameHandoff?: BatchPanelVideoHandoff | null
 }) {
   const panel = await applyDurationOverrideCas(input.body, input.panel)
   const runtimeSelections = toRuntimeSelections(input.body.generationOptions)
   const isBatch = input.routingMode === 'batch'
   const firstLast = !isBatch && isRecord(input.body.firstLastFrame) ? input.body.firstLastFrame : null
-  const trustedFirstLastFrame = firstLast
+  const explicitTrustedFirstLastFrame = firstLast
     ? await resolveTrustedFirstLastFrame(firstLast, panel, input.projectId, input.userId)
     : null
   const projectModels = await getProjectModelConfig(input.projectId, input.userId)
   const explicitModel = isBatch
     ? null
-    : typeof trustedFirstLastFrame?.flModel === 'string'
-      ? trustedFirstLastFrame.flModel
+    : typeof explicitTrustedFirstLastFrame?.flModel === 'string'
+      ? explicitTrustedFirstLastFrame.flModel
       : typeof input.body.explicitVideoModel === 'string'
         ? input.body.explicitVideoModel
         : input.body.useProjectRouting !== true && typeof input.body.videoModel === 'string'
@@ -441,7 +512,7 @@ export async function resolveAuthoritativePanelPayload(input: {
       panel,
       trustedComfyWorkflowVersionId: projectDefaultComfyWorkflowVersionId,
       runtimeFps: positiveNumber(runtimeSelections.fps) ? runtimeSelections.fps : undefined,
-      requireFirstLastFrame: Boolean(trustedFirstLastFrame),
+      requireFirstLastFrame: Boolean(explicitTrustedFirstLastFrame),
     })]
   } catch (error) {
     if (!explicitModel && automaticDialogueModel) {
@@ -449,12 +520,31 @@ export async function resolveAuthoritativePanelPayload(input: {
     }
     throw error
   }
+  const automaticBatchHandoff = isBatch
+    ? input.batchFrameHandoff !== undefined
+      ? input.batchFrameHandoff
+        ? { ...input.batchFrameHandoff, flModel: selectedCandidate }
+        : null
+      : await resolveAutomaticBatchHandoff(
+        panel,
+        input.projectId,
+        input.userId,
+        selectedCandidate,
+      )
+    : null
+  const trustedFirstLastFrame = explicitTrustedFirstLastFrame
+    || (models[0]?.supportsFirstLastFrame ? automaticBatchHandoff : null)
   let submission
   try {
     const firstLastFramePrompt = trustedFirstLastFrame
       ? panel.firstLastFramePrompt?.trim()
         || buildFirstLastFramePrompt(panel.videoPrompt, trustedFirstLastFrame.lastFrameVideoPrompt)
-      : panel.videoPrompt
+      : automaticBatchHandoff
+        ? buildAdjacentPanelContinuityPrompt(
+          panel.videoPrompt,
+          automaticBatchHandoff.lastFrameVideoPrompt,
+        )
+        : panel.videoPrompt
     submission = resolvePanelVideoSubmission({
       panel: {
         ...panel,

@@ -94,4 +94,16 @@ describe('viral replication homepage launcher', () => {
       pathname: '/workspace/project-1/viral-replication/rep-1',
     }))
   })
+
+  it('shows the actionable server upload error instead of a generic failure', async () => {
+    client.uploadViralReplicationVideo.mockRejectedValueOnce({ code: 'ANALYSIS_MODEL_REQUIRED' })
+    const view = await openLauncher()
+    fireEvent.change(view.getByLabelText('briefLabel'), { target: { value: '原创故事' } })
+    fireEvent.change(view.getByLabelText('videoLabel'), {
+      target: { files: [new File(['video'], 'source.mp4')] },
+    })
+    fireEvent.click(view.getByRole('button', { name: 'start' }))
+
+    await waitFor(() => expect(view.getByText('uploadErrors.analysisModelRequired')).toBeTruthy())
+  })
 })

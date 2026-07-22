@@ -30,6 +30,15 @@
     },
     "uploadProgress": "Upload progress",
     "genericError": "Creation or upload failed. Please try again.",
+    "uploadErrors": {
+      "analysisModelRequired": "Select an analysis model in Settings before uploading a video",
+      "duration": "The video must be between 15 seconds and 3 minutes",
+      "size": "The video exceeds the 500 MB upload limit",
+      "format": "This video container or codec is unsupported. Convert it to a standard H.264 MP4 and try again",
+      "conflict": "The upload state has changed. Close this dialog and start again",
+      "unauthorized": "Your session has expired. Sign in again before uploading",
+      "network": "The upload connection was interrupted. Check the network or server address and try again"
+    },
     "retry": "Retry",
     "cancel": "Cancel",
     "start": "Start analysis"

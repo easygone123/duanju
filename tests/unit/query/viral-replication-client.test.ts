@@ -46,6 +46,12 @@ class FakeXMLHttpRequest {
     this.responseText = JSON.stringify(payload)
     this.onload?.()
   }
+
+  fail(status: number, payload: unknown) {
+    this.status = status
+    this.responseText = JSON.stringify(payload)
+    this.onload?.()
+  }
 }
 
 describe('viral replication client', () => {
@@ -103,5 +109,33 @@ describe('viral replication client', () => {
 
     expect(abortSpy).toHaveBeenCalledOnce()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('normalizes an empty browser MIME from the accepted MP4 file extension', async () => {
+    const pending = uploadViralReplicationVideo('rep-1', new File(['video'], 'source.mp4'))
+    const xhr = FakeXMLHttpRequest.instances[0]
+    expect(xhr.headers.get('Content-Type')).toBe('video/mp4')
+    xhr.succeed({ replication: { id: 'rep-1', status: 'analyzing' } })
+    await expect(pending).resolves.toMatchObject({ id: 'rep-1' })
+  })
+
+  it('surfaces the specific server upload error instead of generic invalid parameters', async () => {
+    const pending = uploadViralReplicationVideo(
+      'rep-1',
+      new File(['video'], 'source.mp4', { type: 'video/mp4' }),
+    )
+    FakeXMLHttpRequest.instances[0].fail(400, {
+      requestId: 'request-1',
+      error: {
+        code: 'INVALID_PARAMS',
+        message: 'Invalid parameters',
+        details: { code: 'INVALID_VIDEO_DURATION', requestId: 'request-1' },
+      },
+    })
+    await expect(pending).rejects.toMatchObject({
+      code: 'INVALID_VIDEO_DURATION',
+      requestId: 'request-1',
+      status: 400,
+    })
   })
 })

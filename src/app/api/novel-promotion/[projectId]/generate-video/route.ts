@@ -13,7 +13,11 @@ import { parseModelKeyStrict, type CapabilityValue } from '@/lib/model-config-co
 import { resolveBuiltinCapabilitiesByModelKey } from '@/lib/model-capabilities/lookup'
 import { resolveBuiltinPricing } from '@/lib/model-pricing/lookup'
 import { resolveProjectModelCapabilityGenerationOptions } from '@/lib/config-service'
-import { resolveAuthoritativePanelPayload, VIDEO_PANEL_SELECT } from '@/lib/novel-promotion/video/server-panel-video-submission'
+import {
+  resolveAuthoritativePanelPayload,
+  resolveBatchPanelVideoHandoffs,
+  VIDEO_PANEL_SELECT,
+} from '@/lib/novel-promotion/video/server-panel-video-submission'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -220,9 +224,20 @@ export const POST = apiHandler(async (
       return NextResponse.json({ tasks: [], total: 0 })
     }
 
+    const batchFrameHandoffs = await resolveBatchPanelVideoHandoffs({
+      episodeId,
+      projectId,
+      userId: session.user.id,
+    })
+
     const results = await Promise.all(panels.map(async (panel) => {
       const payload = await resolveAuthoritativePanelPayload({
-        body, panel, projectId, userId: session.user.id, routingMode: 'batch',
+        body,
+        panel,
+        projectId,
+        userId: session.user.id,
+        routingMode: 'batch',
+        batchFrameHandoff: batchFrameHandoffs.get(panel.id) ?? null,
       })
       requireVideoModelKeyFromPayload(payload)
       await validateVideoCapabilityCombination({

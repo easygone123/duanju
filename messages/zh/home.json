@@ -30,6 +30,15 @@
     },
     "uploadProgress": "上传进度",
     "genericError": "上传或创建失败，请重试",
+    "uploadErrors": {
+      "analysisModelRequired": "请先在系统设置中选择分析模型，再上传视频",
+      "duration": "视频时长必须在 15 秒至 3 分钟之间",
+      "size": "视频超过 500 MB，无法上传",
+      "format": "视频容器或编码格式不受支持，请转换为标准 MP4（H.264）后重试",
+      "conflict": "该上传任务状态已变化，请关闭窗口后重新开始",
+      "unauthorized": "登录状态已失效，请重新登录后上传",
+      "network": "上传连接中断，请检查网络或服务器地址后重试"
+    },
     "retry": "重试",
     "cancel": "取消",
     "start": "开始分析"

@@ -170,6 +170,8 @@ export function buildFourGridSheetAnalysisPrompt(input: {
     'Each time block must specify camera/framing, visible character action and expression, and any spoken dialogue that occurs in that interval.',
     'Keep dialogue verbatim from the authoritative plot plan. Do not invent a second line that changes the story.',
     'Also produce first_last_frame_prompt: lock the opening composition to the visible cell, describe the intended final composition, and explain the natural three-stage transition between them.',
+    'For every cell except the last one, inspect the following visible cell as the continuity target. When the plot remains in the same continuous scene, the current final composition must match the following cell opening state: identity, wardrobe, props, screen direction, character placement, gaze, pose, and unfinished action. Do not invent an unrelated ending pose.',
+    'When the following cell is a deliberate scene or time change, finish on a clean cut-ready state instead of forcing an impossible physical morph between scenes.',
     'Narration is allowed only on panels whose authoritative dialogue is empty after trimming; never add narration to a dialogue panel.',
     'Set narration_recommended to true only for a time/location transition, inner thought, off-screen background information, or necessary causal context not clear from the image or action.',
     'Evaluate every eligible dialogue-free panel independently against those criteria; never default all eligible panels to narration_recommended false.',

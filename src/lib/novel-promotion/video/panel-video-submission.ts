@@ -26,6 +26,7 @@ export interface AvailablePanelVideoModel {
   modelKey: string
   available: boolean
   comfyWorkflowVersionId?: string | null
+  supportsFirstLastFrame?: boolean
   duration: VideoDurationContract
 }
 
@@ -89,6 +90,17 @@ function positive(value: unknown): value is number {
 
 function singleLine(value: string | null | undefined, maxLength: number): string {
   return (value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength)
+}
+
+function structuredPrompt(value: string | null | undefined, maxLength: number): string {
+  return (value ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f]/g, ' ')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, maxLength)
 }
 
 function findAvailableModel(
@@ -209,7 +221,7 @@ const NARRATION_TIMING_INSTRUCTION = '[NARRATION_TIMING] Fit the complete litera
 
 export function resolvePanelVideoSubmission(input: PanelVideoSubmissionInput): PanelVideoSubmission {
   const { model, reason } = resolveModel(input)
-  const visualPrompt = singleLine(input.panel.videoPrompt, 8000)
+  const visualPrompt = structuredPrompt(input.panel.videoPrompt, 8000)
   const dialogueFragment = buildDialogueFragment(input.panel)
   const dialogueTimingInstruction = dialogueFragment ? DIALOGUE_TIMING_INSTRUCTION : undefined
   const narrationFragment = buildNarrationFragment(input.panel)

@@ -551,6 +551,109 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     ])
   })
 
+  it('automatically bridges adjacent batch panels when the selected Comfy workflow supports first-last frames', async () => {
+    panelFindManyMock.mockResolvedValue([
+      {
+        id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: '人物抬手准备推门',
+        firstLastFramePrompt: '从抬手自然过渡到门被推开的状态',
+        estimatedDuration: 5, durationOverride: null, duration: 5,
+        firstFrameSourceMeta: null,
+        lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'panel-2' }),
+        storyboard: { episodeId: 'episode-1' },
+      },
+    ])
+    storyboardFindManyMock.mockResolvedValueOnce([{
+      id: 'storyboard-1', createdAt: new Date('2026-07-13T01:00:00Z'),
+      clip: { createdAt: new Date('2026-07-13T01:00:00Z') },
+      layoutMode: 'six_grid', groupSequence: 1,
+      continuityAnchor: JSON.stringify({ sceneKey: 'room' }),
+      panels: [
+        {
+          id: 'panel-1', storyboardId: 'storyboard-1', panelIndex: 0, gridCellIndex: 0,
+          firstFrameSourceMeta: null,
+          lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'panel-2' }),
+          linkedToNextPanel: true, videoPrompt: '人物抬手准备推门',
+        },
+        {
+          id: 'panel-2', storyboardId: 'storyboard-1', panelIndex: 1, gridCellIndex: 1,
+          firstFrameSourceMeta: null, lastFrameSourceMeta: null,
+          linkedToNextPanel: false, videoPrompt: '人物已经推开门并迈入房间',
+        },
+      ],
+    }])
+    getProjectModelConfigMock.mockResolvedValue({
+      videoModel: 'comfyui::wf-video', dialogueVideoModel: null,
+      comfyVideoWorkflowVersionId: 'video-version-1',
+    })
+
+    const response = await POST(request({
+      all: true,
+      episodeId: 'episode-1',
+      useProjectRouting: true,
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      targetId: 'panel-1',
+      payload: expect.objectContaining({
+        videoPrompt: '从抬手自然过渡到门被推开的状态',
+        firstLastFrame: {
+          flModel: 'comfyui::wf-video',
+          firstFrameSourcePanelId: 'panel-1',
+          sourcePanelId: 'panel-2',
+        },
+      }),
+    }))
+  })
+
+  it('adds an adjacent-shot handoff prompt for batch models without first-last-frame support', async () => {
+    capabilityMock.mockReturnValue({ video: { durationOptions: [5, 10] } })
+    panelFindManyMock.mockResolvedValue([
+      {
+        id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
+        hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
+        includeDialogueInVideoPrompt: true, videoPrompt: '人物抬手准备推门', firstLastFramePrompt: null,
+        estimatedDuration: 5, durationOverride: null, duration: 5,
+        firstFrameSourceMeta: null,
+        lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'panel-2' }),
+        storyboard: { episodeId: 'episode-1' },
+      },
+    ])
+    storyboardFindManyMock.mockResolvedValueOnce([{
+      id: 'storyboard-1', createdAt: new Date('2026-07-13T01:00:00Z'),
+      clip: { createdAt: new Date('2026-07-13T01:00:00Z') },
+      layoutMode: 'six_grid', groupSequence: 1,
+      continuityAnchor: JSON.stringify({ sceneKey: 'room' }),
+      panels: [
+        {
+          id: 'panel-1', storyboardId: 'storyboard-1', panelIndex: 0, gridCellIndex: 0,
+          firstFrameSourceMeta: null,
+          lastFrameSourceMeta: JSON.stringify({ mode: 'manual', sourcePanelId: 'panel-2' }),
+          linkedToNextPanel: true, videoPrompt: '人物抬手准备推门',
+        },
+        {
+          id: 'panel-2', storyboardId: 'storyboard-1', panelIndex: 1, gridCellIndex: 1,
+          firstFrameSourceMeta: null, lastFrameSourceMeta: null,
+          linkedToNextPanel: false, videoPrompt: '人物已经推开门并迈入房间',
+        },
+      ],
+    }])
+
+    const response = await POST(request({
+      all: true,
+      episodeId: 'episode-1',
+      useProjectRouting: true,
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    const payload = submitTaskMock.mock.calls[0]?.[0].payload
+    expect(payload).not.toHaveProperty('firstLastFrame')
+    expect(payload.videoPrompt).toContain('[CONTINUITY_HANDOFF]')
+    expect(payload.videoPrompt).toContain('下一镜头开场参考：人物已经推开门并迈入房间')
+  })
+
   it('ignores an injected explicitVideoModel for batch project routing', async () => {
     panelFindManyMock.mockResolvedValue([
       {

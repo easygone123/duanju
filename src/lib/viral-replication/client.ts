@@ -41,6 +41,20 @@ export type ViralReplicationDetail = {
 
 type ReplicationResponse = { replication: ViralReplicationDetail }
 
+export class ViralReplicationUploadError extends Error {
+  readonly code: string
+  readonly requestId?: string
+  readonly status: number
+
+  constructor(input: { code: string; message?: string; requestId?: string; status: number }) {
+    super(input.message || input.code)
+    this.name = 'ViralReplicationUploadError'
+    this.code = input.code
+    this.requestId = input.requestId
+    this.status = input.status
+  }
+}
+
 export async function getViralReplicationAvailability(): Promise<{ available: boolean }> {
   const response = await apiFetch('/api/viral-replications')
   const payload = await response.json().catch(() => null) as { available?: unknown } | null
@@ -113,6 +127,14 @@ function abortError(): DOMException {
   return new DOMException('Upload aborted', 'AbortError')
 }
 
+export function resolveViralVideoUploadMimeType(file: Pick<File, 'name' | 'type'>): string {
+  const declared = file.type.split(';', 1)[0].trim().toLowerCase()
+  if (['application/mp4', 'video/mp4'].includes(declared)) return 'video/mp4'
+  if (['video/mov', 'video/quicktime', 'video/x-quicktime'].includes(declared)) return 'video/quicktime'
+  const extension = file.name.toLowerCase().split('.').pop()
+  return extension === 'mov' ? 'video/quicktime' : 'video/mp4'
+}
+
 export function uploadViralReplicationVideo(
   id: string,
   file: File,
@@ -146,7 +168,7 @@ export function uploadViralReplicationVideo(
 
     xhr.open('PUT', `/api/viral-replications/${encodeURIComponent(id)}/video`)
     xhr.setRequestHeader('Accept-Language', getPageLocale())
-    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream')
+    xhr.setRequestHeader('Content-Type', resolveViralVideoUploadMimeType(file))
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || event.total <= 0) return
       const percentage = Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100)))
@@ -155,7 +177,14 @@ export function uploadViralReplicationVideo(
     xhr.onload = () => {
       let payload: {
         replication?: ViralReplicationDetail
-        error?: { message?: string; code?: string }
+        requestId?: string
+        code?: string
+        message?: string
+        error?: {
+          message?: string
+          code?: string
+          details?: { code?: string; requestId?: string }
+        }
       } | null = null
       try {
         payload = JSON.parse(xhr.responseText || 'null')
@@ -166,9 +195,31 @@ export function uploadViralReplicationVideo(
         succeed(payload.replication)
         return
       }
-      fail(new Error(payload?.error?.message || payload?.error?.code || 'VIRAL_VIDEO_UPLOAD_FAILED'))
+      const statusCode = xhr.status === 413
+        ? 'VIRAL_VIDEO_TOO_LARGE'
+        : xhr.status === 401
+          ? 'UNAUTHORIZED'
+          : xhr.status === 409
+            ? 'VIRAL_UPLOAD_CONFLICT'
+            : null
+      const specificCode = payload?.error?.details?.code
+        || payload?.code
+        || payload?.error?.code
+        || statusCode
+        || 'VIRAL_VIDEO_UPLOAD_FAILED'
+      fail(new ViralReplicationUploadError({
+        code: specificCode,
+        message: specificCode === 'VIRAL_VIDEO_UPLOAD_FAILED'
+          ? payload?.error?.message || payload?.message || specificCode
+          : specificCode,
+        requestId: payload?.requestId || payload?.error?.details?.requestId,
+        status: xhr.status,
+      }))
     }
-    xhr.onerror = () => fail(new Error('VIRAL_VIDEO_UPLOAD_FAILED'))
+    xhr.onerror = () => fail(new ViralReplicationUploadError({
+      code: 'VIRAL_VIDEO_UPLOAD_NETWORK_FAILED',
+      status: 0,
+    }))
     xhr.onabort = () => fail(abortError())
     options.signal?.addEventListener('abort', onSignalAbort, { once: true })
     xhr.send(file)
