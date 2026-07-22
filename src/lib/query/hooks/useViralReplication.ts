@@ -9,7 +9,30 @@ import {
   getViralReplicationDetail,
   patchViralReplicationBrief,
   retryViralReplicationClient,
+  type ViralReplicationDetail,
 } from '@/lib/viral-replication/client'
+
+export function mergeViralReplicationDetail(
+  previous: ViralReplicationDetail | undefined,
+  incoming: ViralReplicationDetail,
+): ViralReplicationDetail {
+  if (!previous || previous.id !== incoming.id) return incoming
+  return { ...previous, ...incoming }
+}
+
+function updateCachedViralReplication(
+  queryClient: ReturnType<typeof useQueryClient>,
+  id: string,
+  replication: ViralReplicationDetail,
+) {
+  const queryKey = queryKeys.viralReplication.detail(id)
+  const previous = queryClient.getQueryData<ViralReplicationDetail>(queryKey)
+  if (!previous) {
+    void queryClient.invalidateQueries({ queryKey })
+    return
+  }
+  queryClient.setQueryData<ViralReplicationDetail>(queryKey, mergeViralReplicationDetail(previous, replication))
+}
 
 export function useViralReplication(id: string | null) {
   return useQuery({
@@ -32,7 +55,7 @@ export function usePatchViralReplicationBrief(id: string) {
   return useMutation({
     mutationFn: (brief: string) => patchViralReplicationBrief(id, brief),
     onSuccess: (replication) => {
-      queryClient.setQueryData(queryKeys.viralReplication.detail(id), replication)
+      updateCachedViralReplication(queryClient, id, replication)
     },
   })
 }
@@ -42,7 +65,7 @@ export function useRetryViralReplication(id: string) {
   return useMutation({
     mutationFn: () => retryViralReplicationClient(id),
     onSuccess: (replication) => {
-      queryClient.setQueryData(queryKeys.viralReplication.detail(id), replication)
+      updateCachedViralReplication(queryClient, id, replication)
     },
   })
 }
@@ -52,7 +75,7 @@ export function useGenerateViralReplication(id: string) {
   return useMutation({
     mutationFn: (brief: string) => generateViralReplicationClient(id, brief),
     onSuccess: (replication) => {
-      queryClient.setQueryData(queryKeys.viralReplication.detail(id), replication)
+      updateCachedViralReplication(queryClient, id, replication)
     },
   })
 }
