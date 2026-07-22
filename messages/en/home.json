@@ -15,7 +15,7 @@
     "close": "Close",
     "videoLabel": "Reference video",
     "chooseVideo": "Choose or drop a video",
-    "videoHint": "MP4 or MOV, 15 seconds to 3 minutes, up to 500 MB",
+    "videoHint": "MP4 or MOV, 5 seconds to 3 minutes, up to 500 MB",
     "formatError": "Only MP4 and MOV videos are supported",
     "sizeError": "The video must not exceed 500 MB",
     "briefLabel": "Original direction",
@@ -32,7 +32,7 @@
     "genericError": "Creation or upload failed. Please try again.",
     "uploadErrors": {
       "analysisModelRequired": "Select an analysis model in Settings before uploading a video",
-      "duration": "The video must be between 15 seconds and 3 minutes",
+      "duration": "The video must be between 5 seconds and 3 minutes",
       "size": "The video exceeds the 500 MB upload limit",
       "format": "This video container or codec is unsupported. Convert it to a standard H.264 MP4 and try again",
       "conflict": "The upload state has changed. Close this dialog and start again",

@@ -148,7 +148,7 @@ describe('viral replication constants', () => {
       'failed',
     ])
     expect(VIRAL_UPLOAD_MAX_BYTES).toBe(500 * 1024 * 1024)
-    expect(VIRAL_VIDEO_MIN_DURATION_MS).toBe(15_000)
+    expect(VIRAL_VIDEO_MIN_DURATION_MS).toBe(5_000)
     expect(VIRAL_VIDEO_MAX_DURATION_MS).toBe(180_000)
     expect(VIRAL_MAX_ANALYSIS_FRAMES).toBe(72)
     expect(VIRAL_MAX_GENERATED_PANELS).toBe(72)

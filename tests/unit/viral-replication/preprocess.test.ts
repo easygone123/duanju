@@ -131,8 +131,8 @@ describe('viral upload validation', () => {
   })
 
   it.each([
-    [14_999, false],
-    [15_000, true],
+    [4_999, false],
+    [5_000, true],
     [180_000, true],
     [180_001, false],
   ])('validates exact duration boundary %i ms', (durationMs, accepted) => {
@@ -459,7 +459,7 @@ describe('preprocessViralVideo', () => {
     const runner: CommandRunner = async (binary, args) => {
       calls.push({ binary, args })
       return {
-        stdout: fakeProbePayload({ containerDuration: '30', videoDuration: '10' }),
+        stdout: fakeProbePayload({ containerDuration: '30', videoDuration: '4.9' }),
         stderr: '',
       }
     }

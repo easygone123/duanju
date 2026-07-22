@@ -15,7 +15,7 @@
     "close": "关闭",
     "videoLabel": "参考视频",
     "chooseVideo": "选择或拖入视频",
-    "videoHint": "支持 MP4、MOV，15 秒至 3 分钟，最大 500 MB",
+    "videoHint": "支持 MP4、MOV，5 秒至 3 分钟，最大 500 MB",
     "formatError": "仅支持 MP4 或 MOV 视频",
     "sizeError": "视频不能超过 500 MB",
     "briefLabel": "原创方向",
@@ -32,7 +32,7 @@
     "genericError": "上传或创建失败，请重试",
     "uploadErrors": {
       "analysisModelRequired": "请先在系统设置中选择分析模型，再上传视频",
-      "duration": "视频时长必须在 15 秒至 3 分钟之间",
+      "duration": "视频时长必须在 5 秒至 3 分钟之间",
       "size": "视频超过 500 MB，无法上传",
       "format": "视频容器或编码格式不受支持，请转换为标准 MP4（H.264）后重试",
       "conflict": "该上传任务状态已变化，请关闭窗口后重新开始",
