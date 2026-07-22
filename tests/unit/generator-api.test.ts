@@ -127,6 +127,25 @@ describe('generator-api gateway routing', () => {
     expect(getProviderConfigMock).not.toHaveBeenCalled()
   })
 
+  it('routes a ComfyUI upscale source into the canonical sourceImage variable', async () => {
+    resolveModelSelectionMock.mockResolvedValueOnce({
+      provider: 'comfyui', modelId: 'wf-upscale', modelKey: 'comfyui::wf-upscale', mediaType: 'image',
+    })
+    await generateImage('user-1', 'comfyui::wf-upscale', 'upscale source image', {
+      comfy: {
+        context: { projectId: 'project-1', taskId: 'task-upscale', invocationKey: 'task-upscale:image:0' },
+        sourceImage: { storageKey: 'owned/source.png', mimeType: 'image/png' },
+      },
+    })
+
+    expect(submitComfyImageGenerationMock).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: 'wf-upscale',
+      variables: {
+        sourceImage: { storageKey: 'owned/source.png', mimeType: 'image/png' },
+      },
+    }))
+  })
+
   it('routes ComfyUI videos before provider API-key resolution', async () => {
     resolveModelSelectionMock.mockResolvedValueOnce({
       provider: 'comfyui', modelId: 'wf-video', modelKey: 'comfyui::wf-video', mediaType: 'video',

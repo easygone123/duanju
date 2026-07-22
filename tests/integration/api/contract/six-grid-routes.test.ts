@@ -374,6 +374,29 @@ describe('six-grid route/task registration contract', () => {
       payload: expect.objectContaining({ workflowPurpose: 'upscale', workflowVersionId: 'version-1' }),
     }))
   })
+
+  it('allows an uploaded four-grid sheet without a historical generation prompt to be upscaled', async () => {
+    const route = await import('@/app/api/novel-promotion/[projectId]/storyboard-sheet/route')
+    prismaMock.novelPromotionStoryboard.findFirst.mockResolvedValueOnce({
+      ...storyboardFixture('four_grid'),
+      sheetPromptSnapshot: null,
+      sheetModelSnapshot: null,
+    })
+
+    const response = await callRoute(route.POST, 'POST', {
+      operation: 'upscale', episodeId: 'episode-1', storyboardId: 'storyboard-1',
+      workflowId: 'workflow-1', workflowVersionId: 'version-1', locale: 'zh',
+    }, { params: { projectId: 'project-1' } })
+
+    expect(response.status).toBe(200)
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        promptSnapshot: 'upscale source image',
+        modelSnapshot: 'comfyui::workflow-1',
+        workflowPurpose: 'upscale',
+      }),
+    }))
+  })
 })
 
 function storyboardFixture(layoutMode: 'four_grid' | 'six_grid' = 'six_grid') {

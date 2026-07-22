@@ -23,6 +23,7 @@ export interface ComfyProviderInvocation {
   workflowVersionId?: string
   variables?: Record<string, ComfyVariableValue>
   inputImages?: ComfyMediaRef[]
+  sourceImage?: ComfyMediaRef
   firstFrame?: ComfyMediaRef
   lastFrame?: ComfyMediaRef
 }

@@ -116,12 +116,13 @@ describe('ComfyUI worker polling deadline', () => {
     await expect(buildComfyProviderInvocation({
       userId: 'user-1', projectId: 'project-1', taskId: 'task-1',
       modelKey: 'comfyui::wf-video', invocationKey: 'task-1:panel:p1:video',
-      inputImages: ['edit'], firstFrame: 'first', lastFrame: 'last',
+      inputImages: ['edit'], sourceImage: 'source', firstFrame: 'first', lastFrame: 'last',
     }, { resolveStorageKey, findFirst })).resolves.toEqual({
       context: {
         projectId: 'project-1', taskId: 'task-1', invocationKey: 'task-1:panel:p1:video',
       },
       inputImages: [{ storageKey: 'owned/edit.png', mimeType: 'image/png' }],
+      sourceImage: { storageKey: 'owned/source.png', mimeType: 'image/png' },
       firstFrame: { storageKey: 'owned/first.png', mimeType: 'image/png' },
       lastFrame: { storageKey: 'owned/last.png', mimeType: 'image/png' },
     })

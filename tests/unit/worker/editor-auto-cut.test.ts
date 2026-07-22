@@ -201,6 +201,14 @@ describe('editor auto cut', () => {
       metadata: { autoCutReason: '对白落点' },
     })
     expect(edited.timeline[1].transition).toBeUndefined()
+    expect(edited.autoCut).toMatchObject({
+      status: 'completed',
+      summary: 'AI 已完成自动剪辑',
+      sourceClipCount: 2,
+      outputClipCount: 2,
+      durationInFrames: 180,
+    })
+    expect(edited.autoCut?.completedAt).toEqual(expect.any(String))
   })
 
   it('fills missing decisions so an incomplete model response cannot drop source shots', () => {

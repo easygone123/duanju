@@ -502,7 +502,7 @@ describe('six-grid sheet and panel execution', () => {
     expect(generationMock.getBytes).toHaveBeenCalledWith('owned/source.png')
     expect(generationMock.normalize).not.toHaveBeenCalled()
     expect(generationMock.resolve).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      comfyWorkflowVersionId: 'version-old', comfyReferenceImages: ['owned/source.png'],
+      comfyWorkflowVersionId: 'version-old', comfySourceImage: 'owned/source.png',
     }))
     expect(JSON.stringify(generationMock.resolve.mock.calls)).not.toContain('attacker.invalid')
   })
@@ -606,7 +606,9 @@ describe('six-grid sheet and panel execution', () => {
     await handleStoryboardPanelUpscaleTask(job(task, TASK_TYPE.STORYBOARD_PANEL_UPSCALE))
     expect(generationMock.getBytes).toHaveBeenCalledWith('owned/crop-2.png')
     expect(generationMock.normalize).not.toHaveBeenCalled()
-    expect(generationMock.resolve).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ comfyWorkflowVersionId: 'version-old', comfyReferenceImages: ['owned/crop-2.png'] }))
+    expect(generationMock.resolve).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      comfyWorkflowVersionId: 'version-old', comfySourceImage: 'owned/crop-2.png',
+    }))
     expect(JSON.stringify(generationMock.resolve.mock.calls)).not.toContain('attacker.invalid')
   })
 

@@ -2,7 +2,7 @@
 import { logError as _ulogError } from '@/lib/logging/core'
 import { useTranslations } from 'next-intl'
 
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { AppIcon } from '@/components/ui/icons'
 import { useEditorState } from '../hooks/useEditorState'
 import { useEditorActions } from '../hooks/useEditorActions'
@@ -63,8 +63,8 @@ export function VideoEditorStage({
     const { saveProject, autoCutProject } = useEditorActions({ projectId, episodeId })
     const [autoCutInstruction, setAutoCutInstruction] = useState('')
     const [autoCutLoading, setAutoCutLoading] = useState(false)
-    const [autoCutSummary, setAutoCutSummary] = useState<string | null>(null)
     const [autoCutError, setAutoCutError] = useState<string | null>(null)
+    const previewSectionRef = useRef<HTMLDivElement>(null)
 
     const totalDuration = calculateTimelineDuration(project.timeline)
     const totalTime = framesToTime(totalDuration, project.config.fps)
@@ -111,13 +111,18 @@ export function VideoEditorStage({
             await saveProject(result.project)
             loadProject(result.project)
             markSaved()
-            setAutoCutSummary([result.plan.summary, result.plan.rhythm].filter(Boolean).join(' · '))
         } catch (error) {
             _ulogError('Auto cut failed:', error)
             setAutoCutError(error instanceof Error ? error.message : t('editor.autoCut.failed'))
         } finally {
             setAutoCutLoading(false)
         }
+    }
+
+    const handlePreviewResult = () => {
+        seek(0)
+        play()
+        previewSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
 
     const includedPanelIds = new Set(project.timeline.map((clip) => clip.metadata.panelId))
@@ -215,9 +220,31 @@ export function VideoEditorStage({
                 >
                     {autoCutLoading ? t('editor.autoCut.running') : t('editor.autoCut.start')}
                 </button>
-                {(autoCutSummary || autoCutError) && (
-                    <div className={`basis-full text-xs ${autoCutError ? 'text-[var(--glass-tone-danger-fg)]' : 'text-[var(--glass-tone-success-fg)]'}`}>
-                        {autoCutError || autoCutSummary}
+                {autoCutError && (
+                    <div className="basis-full text-xs text-[var(--glass-tone-danger-fg)]">
+                        {autoCutError}
+                    </div>
+                )}
+                {project.autoCut?.status === 'completed' && (
+                    <div className="basis-full flex flex-wrap items-center gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-[var(--glass-tone-success-fg)]">
+                        <div className="min-w-[240px] flex-1">
+                            <div className="font-semibold">{t('editor.autoCut.completed')}</div>
+                            <div className="mt-0.5">
+                                {t('editor.autoCut.completedDetail', {
+                                    count: project.autoCut.outputClipCount,
+                                    duration: framesToTime(project.autoCut.durationInFrames, project.config.fps),
+                                })}
+                                {project.autoCut.summary ? ` · ${project.autoCut.summary}` : ''}
+                                {project.autoCut.rhythm ? ` · ${project.autoCut.rhythm}` : ''}
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handlePreviewResult}
+                            className="glass-btn-base glass-btn-tone-success px-4 py-2"
+                        >
+                            {t('editor.autoCut.previewResult')}
+                        </button>
                     </div>
                 )}
             </div>
@@ -278,7 +305,7 @@ export function VideoEditorStage({
                 {/* Center - Preview + Properties */}
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                     {/* Preview */}
-                    <div style={{
+                    <div ref={previewSectionRef} style={{
                         flex: 1,
                         display: 'flex',
                         alignItems: 'center',

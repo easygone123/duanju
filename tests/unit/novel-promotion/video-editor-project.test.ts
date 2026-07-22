@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { createProjectFromPanels } from '@/features/video-editor/hooks/useEditorActions'
+import {
+  createProjectFromPanels,
+  refreshEditorProjectMedia,
+} from '@/features/video-editor/hooks/useEditorActions'
 
 describe('createProjectFromPanels', () => {
   it('imports generated videos and binds voice lines by panel identity', () => {
@@ -71,6 +74,86 @@ describe('createProjectFromPanels', () => {
         subtitle: { text: 'second dialogue\nsecond narration' },
       },
       metadata: { panelId: 'panel-2' },
+    })
+  })
+
+  it('refreshes expired saved media URLs without losing edit decisions', () => {
+    const source = createProjectFromPanels('episode-1', [{
+      id: 'panel-1',
+      storyboardId: 'storyboard-1',
+      panelIndex: 0,
+      videoUrl: '/m/current-video',
+      duration: 4,
+    }], [{
+      id: 'voice-1',
+      speaker: 'A',
+      content: 'current subtitle',
+      audioUrl: '/m/current-audio',
+      matchedPanelId: 'panel-1',
+    }])
+    const saved = {
+      ...source,
+      autoCut: {
+        status: 'completed' as const,
+        completedAt: '2026-07-22T00:00:00.000Z',
+        summary: 'saved plan',
+        sourceClipCount: 1,
+        outputClipCount: 1,
+        durationInFrames: 60,
+      },
+      timeline: [{
+        ...source.timeline[0],
+        src: 'https://expired.example/video.mp4',
+        durationInFrames: 60,
+        trim: { from: 15, to: 75 },
+        attachment: {
+          audio: {
+            ...source.timeline[0].attachment!.audio!,
+            src: 'https://expired.example/audio.mp3',
+            volume: 0.6,
+          },
+          subtitle: { text: 'old subtitle', style: 'cinematic' as const },
+        },
+        transition: { type: 'fade' as const, durationInFrames: 10 },
+      }],
+    }
+
+    const refreshed = refreshEditorProjectMedia(saved, source)
+
+    expect(refreshed.timeline[0]).toMatchObject({
+      src: '/m/current-video',
+      durationInFrames: 60,
+      trim: { from: 15, to: 75 },
+      transition: { type: 'fade', durationInFrames: 10 },
+      attachment: {
+        audio: { src: '/m/current-audio', volume: 0.6 },
+        subtitle: { text: 'current subtitle', style: 'cinematic' },
+      },
+    })
+    expect(refreshed.autoCut?.summary).toBe('saved plan')
+  })
+
+  it('recognizes a previously saved auto-cut timeline from clip metadata', () => {
+    const source = createProjectFromPanels('episode-1', [{
+      id: 'panel-1',
+      storyboardId: 'storyboard-1',
+      videoUrl: '/m/current-video',
+    }])
+    const saved = {
+      ...source,
+      timeline: source.timeline.map((clip) => ({
+        ...clip,
+        metadata: { ...clip.metadata, autoCutReason: '保留剧情落点' },
+      })),
+    }
+
+    const refreshed = refreshEditorProjectMedia(saved, source)
+
+    expect(refreshed.autoCut).toMatchObject({
+      status: 'completed',
+      sourceClipCount: 1,
+      outputClipCount: 1,
+      durationInFrames: 90,
     })
   })
 })

@@ -18,6 +18,19 @@ export interface VideoEditorProject {
 
     // BGM 轨道 (绝对定位)
     bgmTrack: BgmClip[]
+
+    // 最近一次 AI 自动剪辑结果。跟随工程保存，刷新页面后仍可确认是否成功。
+    autoCut?: EditorAutoCutResult
+}
+
+export interface EditorAutoCutResult {
+    status: 'completed'
+    completedAt: string
+    summary: string
+    rhythm?: string
+    sourceClipCount: number
+    outputClipCount: number
+    durationInFrames: number
 }
 
 /**

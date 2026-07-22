@@ -6,6 +6,7 @@ import type { VideoEpisodeStageStoryboard } from '@/lib/novel-promotion/episode-
 import {
   VideoEditorStage,
   createProjectFromPanels,
+  refreshEditorProjectMedia,
   useEditorActions,
   type VideoEditorProject,
 } from '@/features/video-editor'
@@ -78,7 +79,11 @@ export default function EditorStageRoute() {
     setLoadError(null)
     void loadProject()
       .then((savedProject) => {
-        if (!canceled) setInitialProject(savedProject || sourceProject)
+        if (!canceled) {
+          setInitialProject(savedProject
+            ? refreshEditorProjectMedia(savedProject, sourceProject)
+            : sourceProject)
+        }
       })
       .catch((error: unknown) => {
         if (canceled) return

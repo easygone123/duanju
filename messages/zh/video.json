@@ -174,7 +174,7 @@
       "saveDirty": "保存 *",
       "saved": "已保存",
       "export": "导出视频",
-      "exportProject": "导出剪辑工程",
+      "exportProject": "下载剪辑工程 JSON",
       "brand": "ChatCut AI 自动剪辑",
       "autoArrange": "AI 自动剪辑",
       "autoCutting": "AI 剪辑中…",
@@ -187,7 +187,10 @@
       "placeholder": "例如：保持剧情顺序，保留全部对白，前半段节奏轻快，包袱处停顿 0.5 秒，场景切换自然。留空则由 AI 自动判断。",
       "start": "一键自动剪辑",
       "running": "正在分析并剪辑…",
-      "failed": "自动剪辑失败"
+      "failed": "自动剪辑失败",
+      "completed": "自动剪辑成功，工程已保存",
+      "completedDetail": "已生成 {count} 个剪辑片段，总时长 {duration}",
+      "previewResult": "播放剪辑结果"
     },
     "left": {
       "title": "素材库",
@@ -210,7 +213,10 @@
       "selectClipHint": "选择一个片段查看属性"
     },
     "preview": {
-      "emptyStartEditing": "添加素材开始编辑"
+      "emptyStartEditing": "添加素材开始编辑",
+      "loading": "正在加载剪辑视频…",
+      "failed": "剪辑视频加载失败",
+      "failedDetail": "剪辑视频无法播放：{message}"
     },
     "timeline": {
       "zoomLabel": "缩放:",

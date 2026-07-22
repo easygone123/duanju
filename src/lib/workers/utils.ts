@@ -94,6 +94,7 @@ export async function buildComfyProviderInvocation(
     invocationKey: string
     workflowVersionId?: string
     inputImages?: string[]
+    sourceImage?: string
     firstFrame?: string
     lastFrame?: string
   },
@@ -121,6 +122,7 @@ export async function buildComfyProviderInvocation(
   const inputImages = input.inputImages?.length
     ? await Promise.all(input.inputImages.map((value) => resolveImage(value, 'referenceImages')))
     : undefined
+  const sourceImage = input.sourceImage ? await resolveImage(input.sourceImage, 'sourceImage') : undefined
   const firstFrame = input.firstFrame ? await resolveImage(input.firstFrame, 'firstFrame') : undefined
   const lastFrame = input.lastFrame ? await resolveImage(input.lastFrame, 'lastFrame') : undefined
   return {
@@ -131,6 +133,7 @@ export async function buildComfyProviderInvocation(
     },
     ...(input.workflowVersionId ? { workflowVersionId: input.workflowVersionId } : {}),
     ...(inputImages ? { inputImages } : {}),
+    ...(sourceImage ? { sourceImage } : {}),
     ...(firstFrame ? { firstFrame } : {}),
     ...(lastFrame ? { lastFrame } : {}),
   }
@@ -393,6 +396,7 @@ export async function resolveImageSourceFromGeneration(
     allowTaskExternalIdResume?: boolean
     preferComfyStorageKey?: boolean
     comfyReferenceImages?: string[]
+    comfySourceImage?: string
     pollProgress?: { start?: number; end?: number }
   },
 ): Promise<string> {
@@ -457,6 +461,7 @@ export async function resolveImageSourceFromGeneration(
     invocationKey: params.invocationKey,
     workflowVersionId: snapshot.comfyWorkflowVersionId,
     inputImages: params.comfyReferenceImages ?? params.options?.referenceImages,
+    sourceImage: params.comfySourceImage,
   })
 
   const result = await withLogContext(

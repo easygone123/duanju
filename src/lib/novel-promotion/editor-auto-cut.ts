@@ -209,5 +209,14 @@ export function applyEditorAutoCutPlan(
     ...sourceProject,
     id: projectId,
     timeline,
+    autoCut: {
+      status: 'completed',
+      completedAt: new Date().toISOString(),
+      summary: plan.summary,
+      rhythm: plan.rhythm || undefined,
+      sourceClipCount: sourceProject.timeline.length,
+      outputClipCount: timeline.length,
+      durationInFrames: timeline.reduce((total, clip) => total + clip.durationInFrames, 0),
+    },
   }
 }

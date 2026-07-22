@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useMemo, useRef, useEffect } from 'react'
+import React, { useMemo, useRef, useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Player, PlayerRef } from '@remotion/player'
 import { AppIcon } from '@/components/ui/icons'
@@ -30,6 +30,8 @@ export const RemotionPreview: React.FC<RemotionPreviewProps> = ({
     const t = useTranslations('video')
     const playerRef = useRef<PlayerRef>(null)
     const lastSyncedFrame = useRef<number>(0)
+    const [buffering, setBuffering] = useState(false)
+    const [previewError, setPreviewError] = useState<string | null>(null)
 
     const totalDuration = useMemo(
         () => calculateTimelineDuration(project.timeline),
@@ -99,6 +101,32 @@ export const RemotionPreview: React.FC<RemotionPreviewProps> = ({
         }
     }, [onPlayingChange])
 
+    useEffect(() => {
+        const player = playerRef.current
+        if (!player) return
+
+        const handleWaiting = () => setBuffering(true)
+        const handleResume = () => {
+            setBuffering(false)
+            setPreviewError(null)
+        }
+        const handleError = ({ detail }: { detail: { error: Error } }) => {
+            setBuffering(false)
+            setPreviewError(detail.error.message || t('editor.preview.failed'))
+            onPlayingChange?.(false)
+        }
+
+        player.addEventListener('waiting', handleWaiting)
+        player.addEventListener('resume', handleResume)
+        player.addEventListener('error', handleError)
+
+        return () => {
+            player.removeEventListener('waiting', handleWaiting)
+            player.removeEventListener('resume', handleResume)
+            player.removeEventListener('error', handleError)
+        }
+    }, [onPlayingChange, t])
+
     // 如果没有片段，显示占位
     if (project.timeline.length === 0) {
         return (
@@ -126,6 +154,7 @@ export const RemotionPreview: React.FC<RemotionPreviewProps> = ({
 
     return (
         <div style={{
+            position: 'relative',
             width: '100%',
             aspectRatio: `${project.config.width} / ${project.config.height}`,
             maxHeight: '100%',
@@ -149,10 +178,28 @@ export const RemotionPreview: React.FC<RemotionPreviewProps> = ({
                     width: '100%',
                     height: '100%'
                 }}
-                controls={false}  // 使用自定义控制
+                controls
+                initiallyShowControls
+                alwaysShowControls
                 loop={false}
-                clickToPlay={false}  // 禁用点击播放，由外部控制
+                clickToPlay
+                spaceKeyToPlayOrPause
+                errorFallback={({ error }) => (
+                    <div className="flex h-full w-full items-center justify-center bg-black/90 px-6 text-center text-sm text-red-200">
+                        {t('editor.preview.failedDetail', { message: error.message || t('editor.preview.failed') })}
+                    </div>
+                )}
             />
+            {buffering && !previewError && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/45 text-sm text-white">
+                    {t('editor.preview.loading')}
+                </div>
+            )}
+            {previewError && (
+                <div className="absolute left-3 right-3 top-3 rounded-md bg-red-950/90 px-3 py-2 text-xs text-red-100">
+                    {t('editor.preview.failedDetail', { message: previewError })}
+                </div>
+            )}
         </div>
     )
 }

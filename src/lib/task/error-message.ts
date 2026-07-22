@@ -40,15 +40,20 @@ export function resolveTaskErrorSummary(payload: unknown, fallbackMessage = 'Tas
   const sourceError = asObject(source.error) || {}
   const sourceErrorDetails = asObject(sourceError.details)
   const sourceDetails = asObject(source.details)
+  const nestedCode = asString(sourceErrorDetails?.code) || asString(sourceDetails?.code)
+  const outerMessage = asString(sourceError.message)
+  const genericOuterMessage = outerMessage === 'Invalid parameters'
+    || outerMessage === 'Invalid Parameters'
 
   const code =
+    nestedCode ||
     asString(sourceError.code) ||
     asString(source.errorCode) ||
     asString(source.code)
 
   const message =
-    asString(sourceError.message) ||
     asString(sourceErrorDetails?.message) ||
+    (genericOuterMessage && nestedCode ? nestedCode : outerMessage) ||
     asString(source.error) ||
     asString(sourceDetails?.message) ||
     asString(source.details) ||

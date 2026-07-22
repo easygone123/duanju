@@ -309,6 +309,28 @@ describe('ComfyUI request state machine', () => {
     }))
   })
 
+  it('accepts a promptless upscale contract and drops the generic system prompt', async () => {
+    const dependencies = requestDependenciesWithDefinitions([{
+      name: 'sourceImage', type: 'image_ref', required: true,
+    }])
+    dependencies.resolveOwnedMedia.mockResolvedValue(true)
+
+    await createComfyGenerationRequest({
+      invocationKey: 'invoke-upscale-source', userId: 'user-1', projectId: 'project-1',
+      taskId: 'task-1', mediaType: 'image', workflowId: 'workflow-1',
+      variables: {
+        prompt: 'upscale source image',
+        sourceImage: { storageKey: 'images/source.png' },
+      },
+    }, dependencies)
+
+    expect(dependencies.create).toHaveBeenCalledWith(expect.objectContaining({
+      variableSnapshot: {
+        sourceImage: { storageKey: 'images/source.png' },
+      },
+    }))
+  })
+
   it('converts an undeclared guided aspect ratio into dynamic width and height without reference images', async () => {
     const dependencies = requestDependenciesWithDefinitions([
       { name: 'prompt', type: 'string', required: true },

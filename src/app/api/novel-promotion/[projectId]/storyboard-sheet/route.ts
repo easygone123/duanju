@@ -85,7 +85,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     : ''
   const prompt = basePrompt && artStylePrompt
     ? `${basePrompt}\nART_STYLE=${artStylePrompt}`
-    : basePrompt
+    : basePrompt || (operation === 'sheet_upscale' ? 'upscale source image' : null)
   if (!model || !prompt) throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_SHEET_SNAPSHOT_MISSING' })
   const parsedModel = parseModelKeyStrict(model)
   const configuredWorkflowVersionId = operation === 'generate' && projectModelConfig

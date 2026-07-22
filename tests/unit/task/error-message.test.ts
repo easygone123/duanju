@@ -36,6 +36,18 @@ describe('task error message normalization', () => {
     expect(message).toBe('provider failed')
   })
 
+  it('shows the concrete nested validation code instead of generic Invalid parameters', () => {
+    const summary = resolveTaskErrorSummary({
+      error: {
+        code: 'INVALID_PARAMS',
+        message: 'Invalid parameters',
+        details: { code: 'UPSCALE_WORKFLOW_NOT_FOUND', field: 'workflowVersionId' },
+      },
+    })
+
+    expect(summary.message).toBe('UPSCALE_WORKFLOW_NOT_FOUND')
+  })
+
   it('supports flat error/details string payload', () => {
     expect(resolveTaskErrorMessage({
       error: 'provider failed',

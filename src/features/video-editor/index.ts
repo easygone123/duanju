@@ -39,4 +39,4 @@ export { TransitionPicker } from './components/TransitionPicker'
 
 // Hooks
 export { useEditorState } from './hooks/useEditorState'
-export { useEditorActions, createProjectFromPanels } from './hooks/useEditorActions'
+export { useEditorActions, createProjectFromPanels, refreshEditorProjectMedia } from './hooks/useEditorActions'

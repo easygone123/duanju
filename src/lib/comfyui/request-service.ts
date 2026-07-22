@@ -183,6 +183,10 @@ function normalizeSystemVariables(
   ))
   const names = new Set(definitions.map((definition) => definition.name as string))
   const normalized: Record<string, ComfyVariableValue> = { ...variables }
+  // Prompt is a system convenience input, but image upscale workflows often
+  // consist of only sourceImage -> image output. Do not reject those workflows
+  // merely because the generic image generator supplied a prompt.
+  if (!names.has('prompt')) delete normalized.prompt
   normalizeSystemAlias({
     normalized, names, legacy: 'input_images', canonical: 'referenceImages',
   })

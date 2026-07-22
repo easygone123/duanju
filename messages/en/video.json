@@ -174,7 +174,7 @@
       "saveDirty": "Save *",
       "saved": "Saved",
       "export": "Export Video",
-      "exportProject": "Export Edit Project",
+      "exportProject": "Download Edit Project JSON",
       "brand": "ChatCut AI Auto Edit",
       "autoArrange": "AI Auto Edit",
       "autoCutting": "AI editing…",
@@ -187,7 +187,10 @@
       "placeholder": "Example: preserve story order and all dialogue, keep the opening brisk, pause on punchlines, and use subtle scene transitions. Leave blank for automatic decisions.",
       "start": "Auto Edit Now",
       "running": "Analyzing and editing…",
-      "failed": "Automatic editing failed"
+      "failed": "Automatic editing failed",
+      "completed": "Automatic edit completed and saved",
+      "completedDetail": "Created {count} edited clips with a total duration of {duration}",
+      "previewResult": "Play Edited Result"
     },
     "left": {
       "title": "Media Library",
@@ -210,7 +213,10 @@
       "selectClipHint": "Select a clip to view properties"
     },
     "preview": {
-      "emptyStartEditing": "Add media to start editing"
+      "emptyStartEditing": "Add media to start editing",
+      "loading": "Loading edited videos…",
+      "failed": "Edited video failed to load",
+      "failedDetail": "Edited video cannot be played: {message}"
     },
     "timeline": {
       "zoomLabel": "Zoom:",

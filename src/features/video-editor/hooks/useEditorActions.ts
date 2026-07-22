@@ -110,6 +110,64 @@ export function createProjectFromPanels(
     }
 }
 
+/**
+ * 保存的剪辑工程可能包含已经过期的签名媒体 URL。按 panelId 用当前分镜
+ * 数据刷新视频、配音和字幕来源，同时保留用户的排序、裁剪和转场设置。
+ */
+export function refreshEditorProjectMedia(
+    savedProject: VideoEditorProject,
+    sourceProject: VideoEditorProject,
+): VideoEditorProject {
+    const currentByPanelId = new Map(
+        sourceProject.timeline.map((clip) => [clip.metadata.panelId, clip]),
+    )
+
+    const timeline = savedProject.timeline.map((savedClip) => {
+        const currentClip = currentByPanelId.get(savedClip.metadata.panelId)
+        if (!currentClip) return savedClip
+
+        const currentAudio = currentClip.attachment?.audio
+        const savedAudio = savedClip.attachment?.audio
+        const currentSubtitle = currentClip.attachment?.subtitle
+        const savedSubtitle = savedClip.attachment?.subtitle
+
+        return {
+            ...savedClip,
+            src: currentClip.src,
+            attachment: currentAudio || currentSubtitle || savedAudio || savedSubtitle ? {
+                audio: currentAudio ? {
+                    ...currentAudio,
+                    volume: savedAudio?.volume ?? currentAudio.volume,
+                } : savedAudio,
+                subtitle: currentSubtitle ? {
+                    ...currentSubtitle,
+                    style: savedSubtitle?.style ?? currentSubtitle.style,
+                } : savedSubtitle,
+            } : undefined,
+            metadata: {
+                ...currentClip.metadata,
+                ...savedClip.metadata,
+                description: currentClip.metadata.description || savedClip.metadata.description,
+            },
+        }
+    })
+    const legacyAutoCut = !savedProject.autoCut
+        && timeline.some((clip) => !!clip.metadata.autoCutReason)
+
+    return {
+        ...savedProject,
+        timeline,
+        autoCut: savedProject.autoCut || (legacyAutoCut ? {
+            status: 'completed',
+            completedAt: '',
+            summary: '',
+            sourceClipCount: sourceProject.timeline.length,
+            outputClipCount: timeline.length,
+            durationInFrames: timeline.reduce((total, clip) => total + clip.durationInFrames, 0),
+        } : undefined),
+    }
+}
+
 export function useEditorActions({ projectId, episodeId }: UseEditorActionsProps) {
     const autoCutProject = useCallback(async (
         sourceProject: VideoEditorProject,

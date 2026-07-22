@@ -225,7 +225,9 @@ export async function handleStoryboardSheetTask(job: Job<TaskJobData>) {
       ...(references ? { referenceImages: references.remote } : {}),
       ...(sheetReferences ? { referenceImages: sheetReferences.remote } : {}),
     },
-    ...(references ? { comfyReferenceImages: references.comfy } : {}),
+    ...(snapshot.operation === 'sheet_upscale' && sourceMedia?.storageKey
+      ? { comfySourceImage: sourceMedia.storageKey }
+      : {}),
     ...(sheetReferences ? { comfyReferenceImages: sheetReferences.comfy } : {}),
     allowTaskExternalIdResume: !snapshot.modelSnapshot.startsWith('comfyui::'),
     preferComfyStorageKey: isComfyModel,
@@ -285,7 +287,8 @@ export async function handleStoryboardPanelUpscaleTask(job: Job<TaskJobData>) {
   await assertTaskActive(job, 'six_grid_panel_upscale_before_provider')
   const generated = await resolveImageSourceFromGeneration(job, { userId: job.data.userId, modelId: snapshot.modelSnapshot,
     invocationKey: `${job.data.taskId}:${lineage}`, comfyWorkflowVersionId: snapshot.workflowVersionId, prompt: snapshot.promptSnapshot,
-    options: { ...snapshot.optionsSnapshot, referenceImages: references.remote }, comfyReferenceImages: references.comfy,
+    options: { ...snapshot.optionsSnapshot, referenceImages: references.remote },
+    comfySourceImage: panel.imageMedia.storageKey || undefined,
     allowTaskExternalIdResume: !snapshot.modelSnapshot.startsWith('comfyui::') })
   await assertTaskActive(job, 'six_grid_panel_upscale_after_provider')
   await assertTaskActive(job, 'six_grid_panel_upscale_before_upload')

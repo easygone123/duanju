@@ -83,6 +83,7 @@ export async function generateImage(
                 ...(options?.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
                 ...(size ? { width: Number(size[1]), height: Number(size[2]) } : {}),
                 ...(comfy.inputImages?.length ? { input_images: comfy.inputImages } : {}),
+                ...(comfy.sourceImage ? { sourceImage: comfy.sourceImage } : {}),
                 ...(comfy.variables ?? {}),
             },
         })
