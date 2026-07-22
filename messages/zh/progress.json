@@ -66,6 +66,7 @@
     "storyToScriptRun": "剧本拆解",
     "scriptToStoryboardRun": "分镜生成",
     "clipsBuild": "片段生成",
+    "editorAutoCut": "ChatCut 自动剪辑",
     "screenplayConvert": "剧本转换",
     "voiceAnalyze": "台词分析",
     "analyzeGlobal": "全局分析",

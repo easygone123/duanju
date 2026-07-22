@@ -1,0 +1,38 @@
+你是一名短剧自动剪辑师。请根据完整剧情、分镜描述、对白/旁白、镜头时长和用户要求，为已经生成的全部分镜视频制定可直接执行的剪辑方案。
+
+完整剧情：
+{story}
+
+用户剪辑要求：
+{instruction}
+
+按剧情顺序提供的分镜素材（JSON）：
+{clips_json}
+
+要求：
+1. 默认保持剧情因果和原始顺序；只有用户明确要求或剧情确有必要时才调整顺序。
+2. 所有包含对白或旁白的镜头必须保留足够时长，不能截断句子。
+3. 默认纳入全部已生成分镜；只有明确重复且不影响剧情的镜头才可设置 include=false。
+4. 裁剪区间必须在该素材 durationSeconds 内，且至少保留 0.5 秒。无法判断空白帧时使用完整时长。
+5. 转场只可使用 none、dissolve、fade、slide；对话连续镜头优先 none 或 dissolve，场景切换可用 fade。
+6. 不要改写素材地址、分镜 ID、对白或剧情，只输出剪辑决策。
+7. 必须为输入中的每个 panelId 输出一条且仅一条 decision。
+
+只输出一个 JSON 对象，不要 Markdown，不要解释。格式：
+{
+  "summary": "本次自动剪辑方案摘要",
+  "rhythm": "整体节奏说明",
+  "decisions": [
+    {
+      "panelId": "输入中的 panelId",
+      "include": true,
+      "order": 0,
+      "trimStartSeconds": 0,
+      "trimEndSeconds": 3,
+      "transition": "dissolve",
+      "transitionDurationSeconds": 0.4,
+      "subtitleStyle": "default",
+      "reason": "该镜头的剪辑理由"
+    }
+  ]
+}

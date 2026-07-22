@@ -188,7 +188,8 @@ export default function StoryboardStage({
           onBack={onBack}
         />
 
-        {sortedStoryboards.some((storyboard) => isGridStoryboardMode(storyboard.layoutMode)) && (
+        {(isGridStoryboardMode(storyboardGenerationMode)
+          || sortedStoryboards.some((storyboard) => isGridStoryboardMode(storyboard.layoutMode))) && (
           <StoryboardUpscaleModelSelector />
         )}
 

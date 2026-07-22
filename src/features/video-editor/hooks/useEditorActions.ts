@@ -3,6 +3,12 @@
 import { useCallback } from 'react'
 import { VideoClip, VideoEditorProject } from '../types/editor.types'
 import { apiFetch } from '@/lib/api-fetch'
+import { resolveTaskResponse } from '@/lib/task/client'
+import {
+    applyEditorAutoCutPlan,
+    type EditorAutoCutPlan,
+    type EditorAutoCutSourceClip,
+} from '@/lib/novel-promotion/editor-auto-cut'
 
 interface UseEditorActionsProps {
     projectId: string
@@ -105,6 +111,36 @@ export function createProjectFromPanels(
 }
 
 export function useEditorActions({ projectId, episodeId }: UseEditorActionsProps) {
+    const autoCutProject = useCallback(async (
+        sourceProject: VideoEditorProject,
+        instruction: string,
+        targetProjectId?: string,
+    ): Promise<{ project: VideoEditorProject; plan: EditorAutoCutPlan }> => {
+        const clips: EditorAutoCutSourceClip[] = sourceProject.timeline.map((clip, sourceOrder) => ({
+            clipId: clip.id,
+            panelId: clip.metadata.panelId,
+            storyboardId: clip.metadata.storyboardId,
+            sourceOrder,
+            durationSeconds: clip.durationInFrames / sourceProject.config.fps,
+            description: clip.metadata.description || '',
+            subtitleText: clip.attachment?.subtitle?.text || '',
+            hasVoiceAudio: !!clip.attachment?.audio,
+        }))
+
+        const response = await apiFetch(`/api/novel-promotion/${projectId}/editor/auto-cut`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ episodeId, instruction, clips })
+        })
+        const result = await resolveTaskResponse<{ plan?: EditorAutoCutPlan }>(response)
+        if (!result.plan) throw new Error('自动剪辑没有返回有效方案')
+
+        return {
+            plan: result.plan,
+            project: applyEditorAutoCutPlan(sourceProject, result.plan, targetProjectId),
+        }
+    }, [episodeId, projectId])
+
     /**
      * 保存项目到服务器
      */
@@ -174,6 +210,7 @@ export function useEditorActions({ projectId, episodeId }: UseEditorActionsProps
     }, [projectId])
 
     return {
+        autoCutProject,
         saveProject,
         loadProject,
         startRender,

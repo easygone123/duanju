@@ -419,6 +419,8 @@ describe('ComfyUI workflow settings UI contract', () => {
       expect(messages.workflows.deleteWorkflowConfirm).toBeTruthy()
       expect(messages.workflows.workflowProjectDefaultConflict).toBeTruthy()
       expect(messages.workflows.projectDefaultsSaveFailed).toBeTruthy()
+      expect(messages.workflows.defaultUpscaleWorkflow).toBeTruthy()
+      expect(messages.workflows.noUpscaleWorkflow).toBeTruthy()
       expect(messages.workflows.purposes.upscale).toBeTruthy()
       expect(messages.workflows.upscaleContractHint).toBeTruthy()
     }

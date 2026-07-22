@@ -14,6 +14,18 @@ import { useWorkspaceStageRuntime } from '../WorkspaceStageRuntimeContext'
 import { useWorkspaceEpisodeStageData } from '../hooks/useWorkspaceEpisodeStageData'
 import StageDataBoundary from './StageDataBoundary'
 
+function buildEditorPanelDescription(panel: VideoEpisodeStageStoryboard['panels'][number]) {
+  const fields = [
+    panel.description,
+    panel.shotType ? `景别：${panel.shotType}` : null,
+    panel.cameraMove ? `运镜：${panel.cameraMove}` : null,
+    panel.videoPrompt ? `视频提示词：${panel.videoPrompt}` : null,
+    panel.dialogueText ? `对白：${panel.dialogueText}` : null,
+    panel.srtSegment ? `剧情片段：${panel.srtSegment}` : null,
+  ]
+  return Array.from(new Set(fields.map((field) => field?.trim()).filter(Boolean))).join('\n')
+}
+
 export default function EditorStageRoute() {
   const runtime = useWorkspaceStageRuntime()
   const { projectId, episodeId } = useWorkspaceProvider()
@@ -42,7 +54,7 @@ export default function EditorStageRoute() {
           panelIndex: panel.panelIndex,
           storyboardId: storyboard.id,
           videoUrl: panel.lipSyncVideoUrl || panel.videoUrl || undefined,
-          description: panel.description || undefined,
+          description: buildEditorPanelDescription(panel) || undefined,
           duration: panel.durationOverride
             ?? panel.estimatedDuration
             ?? panel.duration

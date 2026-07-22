@@ -2,7 +2,7 @@
 import { logError as _ulogError } from '@/lib/logging/core'
 import { useTranslations } from 'next-intl'
 
-import React from 'react'
+import React, { useState } from 'react'
 import { AppIcon } from '@/components/ui/icons'
 import { useEditorState } from '../hooks/useEditorState'
 import { useEditorActions } from '../hooks/useEditorActions'
@@ -60,7 +60,11 @@ export function VideoEditorStage({
         loadProject
     } = useEditorState({ episodeId, initialProject })
 
-    const { saveProject } = useEditorActions({ projectId, episodeId })
+    const { saveProject, autoCutProject } = useEditorActions({ projectId, episodeId })
+    const [autoCutInstruction, setAutoCutInstruction] = useState('')
+    const [autoCutLoading, setAutoCutLoading] = useState(false)
+    const [autoCutSummary, setAutoCutSummary] = useState<string | null>(null)
+    const [autoCutError, setAutoCutError] = useState<string | null>(null)
 
     const totalDuration = calculateTimelineDuration(project.timeline)
     const totalTime = framesToTime(totalDuration, project.config.fps)
@@ -97,10 +101,23 @@ export function VideoEditorStage({
         }
     }
 
-    const handleAutoArrange = () => {
+    const handleAutoCut = async () => {
         if (!sourceProject) return
         if (isDirty && !confirm(t('editor.toolbar.autoArrangeConfirm'))) return
-        loadProject({ ...sourceProject, id: project.id })
+        setAutoCutLoading(true)
+        setAutoCutError(null)
+        try {
+            const result = await autoCutProject(sourceProject, autoCutInstruction, project.id)
+            await saveProject(result.project)
+            loadProject(result.project)
+            markSaved()
+            setAutoCutSummary([result.plan.summary, result.plan.rhythm].filter(Boolean).join(' · '))
+        } catch (error) {
+            _ulogError('Auto cut failed:', error)
+            setAutoCutError(error instanceof Error ? error.message : t('editor.autoCut.failed'))
+        } finally {
+            setAutoCutLoading(false)
+        }
     }
 
     const includedPanelIds = new Set(project.timeline.map((clip) => clip.metadata.panelId))
@@ -158,14 +175,6 @@ export function VideoEditorStage({
                 </span>
 
                 <button
-                    onClick={handleAutoArrange}
-                    disabled={!sourceProject || sourceProject.timeline.length === 0}
-                    className="glass-btn-base glass-btn-secondary px-4 py-2 disabled:opacity-50"
-                >
-                    {t('editor.toolbar.autoArrange')}
-                </button>
-
-                <button
                     onClick={handleSave}
                     className={`glass-btn-base px-4 py-2 ${isDirty ? 'glass-btn-primary text-white' : 'glass-btn-secondary'}`}
                 >
@@ -178,6 +187,39 @@ export function VideoEditorStage({
                 >
                     {t('editor.toolbar.exportProject')}
                 </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 border-b border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface-strong)] px-4 py-3">
+                <div className="min-w-[190px]">
+                    <div className="text-sm font-semibold text-[var(--glass-text-primary)]">
+                        {t('editor.autoCut.title')}
+                    </div>
+                    <div className="text-[11px] text-[var(--glass-text-tertiary)]">
+                        {t('editor.autoCut.description')}
+                    </div>
+                </div>
+                <textarea
+                    value={autoCutInstruction}
+                    onChange={(event) => setAutoCutInstruction(event.target.value)}
+                    disabled={autoCutLoading}
+                    rows={2}
+                    maxLength={4000}
+                    placeholder={t('editor.autoCut.placeholder')}
+                    className="min-w-[260px] flex-1 resize-none rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] px-3 py-2 text-xs text-[var(--glass-text-primary)] outline-none focus:border-[var(--glass-focus-ring)] disabled:opacity-60"
+                />
+                <button
+                    type="button"
+                    onClick={handleAutoCut}
+                    disabled={autoCutLoading || !sourceProject || sourceProject.timeline.length === 0}
+                    className="glass-btn-base glass-btn-primary px-5 py-2.5 text-white disabled:opacity-50"
+                >
+                    {autoCutLoading ? t('editor.autoCut.running') : t('editor.autoCut.start')}
+                </button>
+                {(autoCutSummary || autoCutError) && (
+                    <div className={`basis-full text-xs ${autoCutError ? 'text-[var(--glass-tone-danger-fg)]' : 'text-[var(--glass-tone-success-fg)]'}`}>
+                        {autoCutError || autoCutSummary}
+                    </div>
+                )}
             </div>
 
             {/* Main Content */}
@@ -316,6 +358,11 @@ export function VideoEditorStage({
                                 <p style={{ margin: '0 0 8px 0' }}>
                                     <span style={{ color: 'var(--glass-text-secondary)' }}>{t('editor.right.durationLabel')}</span> {framesToTime(selectedClip.durationInFrames, project.config.fps)}
                                 </p>
+                                {selectedClip.metadata.autoCutReason && (
+                                    <p style={{ margin: '0 0 8px 0' }}>
+                                        <span style={{ color: 'var(--glass-text-secondary)' }}>{t('editor.right.autoCutReasonLabel')}</span> {selectedClip.metadata.autoCutReason}
+                                    </p>
+                                )}
                             </div>
 
                             {/* 转场设置 */}

@@ -66,6 +66,7 @@
     "storyToScriptRun": "Story to script",
     "scriptToStoryboardRun": "Script to storyboard",
     "clipsBuild": "Clip generation",
+    "editorAutoCut": "ChatCut auto edit",
     "screenplayConvert": "Screenplay conversion",
     "voiceAnalyze": "Voice line analysis",
     "analyzeGlobal": "Global analysis",

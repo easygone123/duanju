@@ -31,6 +31,7 @@ interface UserModels {
     image: ModelOption[]
     video: ModelOption[]
     audio: ModelOption[]
+    upscale: ModelOption[]
 }
 
 interface SettingsModalProps {
@@ -132,6 +133,7 @@ export function SettingsModal({
         image: Array.isArray(availableModels?.image) ? availableModels.image : [],
         video: Array.isArray(availableModels?.video) ? availableModels.video : [],
         audio: Array.isArray(availableModels?.audio) ? availableModels.audio : [],
+        upscale: Array.isArray(availableModels?.upscale) ? availableModels.upscale : [],
     }), [availableModels])
     const normalVideoModels = useMemo<ModelOption[]>(
         () => filterNormalVideoModelOptions(userModels.video),

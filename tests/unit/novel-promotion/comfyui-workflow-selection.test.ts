@@ -13,13 +13,15 @@ describe('ComfyUI project and task workflow selection', () => {
     expect(sanitizeComfyDiagnosticId('x'.repeat(129))).toBeNull()
   })
 
-  it('offers tested ComfyUI workflows as image and video project defaults', () => {
+  it('offers tested ComfyUI workflows as image, video, and upscale project defaults', () => {
     const source = read(`${workspace}/components/WorkspaceHeaderShell.tsx`)
     expect(source).toContain('comfyImageWorkflowId')
     expect(source).toContain('comfyVideoWorkflowId')
     expect(source).toContain("lastSuccessfulTestAt")
     expect(source).toContain("onUpdateConfigStrict('comfyImageWorkflowId'")
     expect(source).toContain("onUpdateConfigStrict('comfyVideoWorkflowId'")
+    expect(source).toContain("onUpdateConfigStrict('storyboardUpscaleModel'")
+    expect(source).toContain('availableModels?.upscale')
     const container = read(`${workspace}/NovelPromotionWorkspace.tsx`)
     expect(container).toContain('onUpdateConfigStrict={vm.actions.handleUpdateConfigStrict}')
   })

@@ -312,6 +312,27 @@ const ROUTE_CASES: ReadonlyArray<LLMRouteCase> = [
     expectedProjectId: 'project-1',
   },
   {
+    routeFile: 'src/app/api/novel-promotion/[projectId]/editor/auto-cut/route.ts',
+    body: {
+      episodeId: 'episode-1',
+      instruction: '保留全部对白，节奏紧凑',
+      clips: [{
+        clipId: 'clip-1',
+        panelId: 'panel-1',
+        storyboardId: 'storyboard-1',
+        sourceOrder: 0,
+        durationSeconds: 3,
+        description: '开场镜头',
+        subtitleText: '开始吧',
+        hasVoiceAudio: true,
+      }],
+    },
+    params: { projectId: 'project-1' },
+    expectedTaskType: TASK_TYPE.EDITOR_AUTO_CUT,
+    expectedTargetType: 'NovelPromotionEpisode',
+    expectedProjectId: 'project-1',
+  },
+  {
     routeFile: 'src/app/api/novel-promotion/[projectId]/episodes/split/route.ts',
     body: { content: 'x'.repeat(120) },
     params: { projectId: 'project-1' },
@@ -390,7 +411,7 @@ describe('api contract - llm observe routes (behavior)', () => {
   })
 
   it('keeps expected coverage size', () => {
-    expect(ROUTE_CASES.length).toBe(25)
+    expect(ROUTE_CASES.length).toBe(26)
   })
 
   for (const routeCase of ROUTE_CASES) {

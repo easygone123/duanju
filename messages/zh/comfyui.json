@@ -375,6 +375,8 @@
     "projectDefaultsSaveFailed": "无法保存项目默认工作流，已恢复之前的值。",
     "defaultImageWorkflow": "默认图片工作流",
     "defaultVideoWorkflow": "默认视频工作流",
+    "defaultUpscaleWorkflow": "分镜放大模型",
+    "noUpscaleWorkflow": "不使用放大模型",
     "noDefault": "使用已选择的云模型",
     "projectDefaultTestHint": "仅可选择已发布且实时测试成功的版本。",
     "taskImageWorkflow": "本次生成的图片工作流",

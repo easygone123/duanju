@@ -28,6 +28,7 @@ import { handleVoiceAnalyzeTask } from './handlers/voice-analyze'
 import { handleAssetHubAIDesignTask } from './handlers/asset-hub-ai-design'
 import { handleAiStoryExpandTask } from './handlers/ai-story-expand'
 import { handleClipsBuildTask } from './handlers/clips-build'
+import { handleEditorAutoCutTask } from './handlers/editor-auto-cut'
 import { handleAnalyzeNovelTask } from './handlers/analyze-novel'
 import { handleScreenplayConvertTask } from './handlers/screenplay-convert'
 import { handleEpisodeSplitTask } from './handlers/episode-split'
@@ -678,6 +679,8 @@ async function processTextTask(job: Job<TaskJobData>) {
       return await handleAiStoryExpandTask(job)
     case TASK_TYPE.CLIPS_BUILD:
       return await handleClipsBuildTask(job)
+    case TASK_TYPE.EDITOR_AUTO_CUT:
+      return await handleEditorAutoCutTask(job)
     case TASK_TYPE.SCREENPLAY_CONVERT:
       return await handleScreenplayConvertTask(job)
     case TASK_TYPE.EPISODE_SPLIT_LLM:

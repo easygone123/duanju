@@ -375,6 +375,8 @@
     "projectDefaultsSaveFailed": "Could not save the project workflow default. The previous value was restored.",
     "defaultImageWorkflow": "Default image workflow",
     "defaultVideoWorkflow": "Default video workflow",
+    "defaultUpscaleWorkflow": "Storyboard upscale model",
+    "noUpscaleWorkflow": "Do not use an upscale model",
     "noDefault": "Use the selected cloud model",
     "projectDefaultTestHint": "Only published versions with a successful live test can be selected.",
     "taskImageWorkflow": "Image workflow for this generation",
