@@ -8,10 +8,14 @@ import ImagePreviewModal from '@/components/ui/ImagePreviewModal'
 import StoryboardStageShell from './StoryboardStageShell'
 import StoryboardToolbar from './StoryboardToolbar'
 import StoryboardCanvas from './StoryboardCanvas'
+import StoryboardUpscaleModelSelector from './StoryboardUpscaleModelSelector'
 import { useStoryboardStageController } from './hooks/useStoryboardStageController'
 import { useStoryboardModalRuntime } from './hooks/useStoryboardModalRuntime'
 import type { StoryboardGenerationMode } from '@/lib/novel-promotion/six-grid/contracts'
-import { allowsIndividualStoryboardGroupCreation } from '@/lib/novel-promotion/grid-storyboard/spec'
+import {
+  allowsIndividualStoryboardGroupCreation,
+  isGridStoryboardMode,
+} from '@/lib/novel-promotion/grid-storyboard/spec'
 
 interface StoryboardStageProps {
   projectId: string
@@ -183,6 +187,10 @@ export default function StoryboardStage({
           allowStoryboardGroupCreation={allowStoryboardGroupCreation}
           onBack={onBack}
         />
+
+        {sortedStoryboards.some((storyboard) => isGridStoryboardMode(storyboard.layoutMode)) && (
+          <StoryboardUpscaleModelSelector />
+        )}
 
         <StoryboardCanvas
           sortedStoryboards={sortedStoryboards}
