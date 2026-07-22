@@ -15,6 +15,7 @@ import {
   toSignedUrlIfCos,
   uploadVideoSourceToCos,
 } from './utils'
+import { LTX_DIRECTOR_TIMELINE_VERSION } from '@/lib/comfyui/ltx-director'
 import { normalizeToBase64ForGeneration } from '@/lib/media/outbound-image'
 import { resolveBuiltinCapabilitiesByModelKey } from '@/lib/model-capabilities/lookup'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
@@ -355,6 +356,98 @@ async function handleVideoPanelTask(job: Job<TaskJobData>) {
   }
 }
 
+function positiveDuration(...values: Array<number | null | undefined>) {
+  return values.find((value): value is number => (
+    typeof value === 'number' && Number.isFinite(value) && value > 0
+  )) ?? 3
+}
+
+async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
+  const payload = (job.data.payload || {}) as AnyObj
+  const storyboard = await prisma.novelPromotionStoryboard.findFirst({
+    where: {
+      id: job.data.targetId,
+      episodeId: job.data.episodeId || undefined,
+      episode: {
+        novelPromotionProject: {
+          projectId: job.data.projectId,
+          project: { userId: job.data.userId },
+        },
+      },
+    },
+    include: {
+      clip: true,
+      episode: { include: { novelPromotionProject: true } },
+      panels: { orderBy: { panelIndex: 'asc' } },
+    },
+  })
+  if (!storyboard) throw new Error('STORYBOARD_DIRECTOR_NOT_FOUND')
+  const panels = storyboard.panels.filter((panel) => Boolean(panel.imageUrl))
+  if (panels.length !== storyboard.panels.length || panels.length === 0 || panels.length > 8) {
+    throw new Error('STORYBOARD_DIRECTOR_IMAGES_INVALID')
+  }
+  const modelId = typeof payload.videoModel === 'string' ? payload.videoModel : ''
+  const workflowVersionId = typeof payload.comfyWorkflowVersionId === 'string'
+    ? payload.comfyWorkflowVersionId
+    : undefined
+  if (parseModelKeyStrict(modelId)?.provider !== 'comfyui' || !workflowVersionId) {
+    throw new Error('STORYBOARD_DIRECTOR_MODEL_INVALID')
+  }
+  const fps = typeof payload.fps === 'number' && Number.isFinite(payload.fps) && payload.fps > 0
+    ? payload.fps
+    : 24
+  const globalPrompt = [
+    storyboard.episode.novelPromotionProject.artStylePrompt,
+    storyboard.continuityAnchor,
+    storyboard.clip.summary,
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join('\n')
+  const segments = panels.map((panel) => ({
+    prompt: panel.videoPrompt?.trim() || panel.description?.trim() || panel.imagePrompt?.trim() || '',
+    durationSeconds: positiveDuration(panel.durationOverride, panel.estimatedDuration, panel.duration),
+  }))
+  const totalDuration = segments.reduce((sum, segment) => sum + segment.durationSeconds, 0)
+  const prompt = JSON.stringify({
+    version: LTX_DIRECTOR_TIMELINE_VERSION,
+    fps,
+    globalPrompt,
+    segments,
+  })
+  await reportTaskProgress(job, 15, {
+    stage: 'build_ltx_director_timeline',
+    storyboardId: storyboard.id,
+    segmentCount: segments.length,
+  })
+  const source = await resolveVideoSourceFromGeneration(job, {
+    userId: job.data.userId,
+    modelId,
+    invocationKey: `${job.data.taskId}:storyboard:${storyboard.id}:ltx-director`,
+    comfyWorkflowVersionId: workflowVersionId,
+    imageUrl: panels[0]!.imageUrl!,
+    comfyReferenceImages: panels.map((panel) => panel.imageUrl!),
+    comfyReferenceImagesOnly: true,
+    options: {
+      prompt,
+      duration: totalDuration,
+      fps,
+      aspectRatio: storyboard.episode.novelPromotionProject.videoRatio,
+    },
+    pollProgress: { start: 25, end: 92 },
+  })
+  const storageKey = source.storageKey
+    ?? await uploadVideoSourceToCos(source.url, 'storyboard-director', storyboard.id, source.downloadHeaders)
+  const videoMedia = await ensureMediaObjectFromStorageKey(storageKey)
+  await assertTaskActive(job, 'persist_storyboard_director_video')
+  await prisma.novelPromotionStoryboard.update({
+    where: { id: storyboard.id },
+    data: { directorVideoUrl: storageKey, directorVideoMediaId: videoMedia.id },
+  })
+  return {
+    storyboardId: storyboard.id,
+    directorVideoUrl: videoMedia.url,
+    directorVideoMediaId: videoMedia.id,
+  }
+}
+
 async function handleLipSyncTask(job: Job<TaskJobData>) {
   const payload = (job.data.payload || {}) as AnyObj
   const lipSyncModel = typeof payload.lipSyncModel === 'string' && payload.lipSyncModel.trim()
@@ -503,6 +596,8 @@ async function processVideoTask(job: Job<TaskJobData>) {
   switch (job.data.type) {
     case TASK_TYPE.VIDEO_PANEL:
       return await handleVideoPanelTask(job)
+    case TASK_TYPE.STORYBOARD_DIRECTOR_VIDEO:
+      return await handleStoryboardDirectorVideoTask(job)
     case TASK_TYPE.LIP_SYNC:
       return await handleLipSyncTask(job)
     default:

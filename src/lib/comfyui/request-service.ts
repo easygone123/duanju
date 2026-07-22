@@ -10,10 +10,12 @@ import {
   type ComfyMediaRef,
   type ComfyRequestStatus,
   type ComfyVariableValue,
+  type ComfyVariableDefinition,
+  type ComfyApiWorkflow,
+  type ComfyInputBinding,
 } from './types'
 import { isBoundedLiveVariables } from './workflow-limits'
 import { matchesComfyVariableType } from './workflow-schema'
-import type { ComfyVariableDefinition } from './types'
 import { isOpaqueStorageKey } from './media'
 import {
   resolveOwnedComfyMedia,
@@ -21,6 +23,7 @@ import {
 } from './media-ownership'
 import { resolveComfyDimensionsForAspectRatio } from './aspect-ratio'
 import { canonicalDurationDefinition } from './duration-contract'
+import { augmentLtxDirectorContract } from './ltx-director-contract'
 
 export const ALLOWED_COMFY_REQUEST_TRANSITIONS: Record<
   ComfyRequestStatus,
@@ -145,12 +148,21 @@ export async function createComfyGenerationRequest(
           : workflow.currentVersionId === null || selectedVersion.id !== workflow.currentVersionId)) {
         throw new ApiError('NOT_FOUND')
       }
+      const runtimeContract = augmentLtxDirectorContract({
+        graph: selectedVersion.apiFormatJson as ComfyApiWorkflow,
+        variableDefinitions: Array.isArray(selectedVersion.variableDefinitions)
+          ? selectedVersion.variableDefinitions as ComfyVariableDefinition[]
+          : [],
+        bindings: Array.isArray(selectedVersion.bindingSpec)
+          ? selectedVersion.bindingSpec as ComfyInputBinding[]
+          : [],
+      })
       const normalizedVariables = normalizeSystemVariables(
         input.variables,
-        selectedVersion.variableDefinitions,
+        runtimeContract.variableDefinitions,
       )
       const variableSnapshot = await sanitizeVariableSnapshot(
-        normalizedVariables, selectedVersion.variableDefinitions, input.userId, input.projectId,
+        normalizedVariables, runtimeContract.variableDefinitions, input.userId, input.projectId,
         client.resolveOwnedMedia,
       )
       return client.create({

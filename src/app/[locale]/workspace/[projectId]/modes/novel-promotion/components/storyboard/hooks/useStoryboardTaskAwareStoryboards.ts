@@ -24,6 +24,7 @@ export function buildStoryboardTaskTypeContract() {
     text: ['regenerate_storyboard_text', 'insert_panel'],
     grid: ['storyboard_sheet_generate', 'storyboard_sheet_upscale', 'storyboard_sheet_crop'],
     panel: ['storyboard_panel_upscale'],
+    director: ['storyboard_director_video'],
   }
 }
 
@@ -85,6 +86,18 @@ function buildStoryboardGridTargets(storyboards: NovelPromotionStoryboard[]): Ta
   }))
 }
 
+function buildStoryboardDirectorTargets(storyboards: NovelPromotionStoryboard[]): TaskTarget[] {
+  const directorTypes = buildStoryboardTaskTypeContract().director
+  return storyboards.map((storyboard) => ({
+    key: `storyboard-director:${storyboard.id}`,
+    targetType: 'NovelPromotionStoryboard',
+    targetId: storyboard.id,
+    types: directorTypes,
+    resource: 'video',
+    hasOutput: !!storyboard.directorVideoUrl,
+  }))
+}
+
 function buildPanelTargets(storyboards: NovelPromotionStoryboard[], type: 'image' | 'video' | 'lip-sync'): TaskTarget[] {
   const targets: TaskTarget[] = []
   const sixGridPanelTypes = buildStoryboardTaskTypeContract().panel
@@ -138,6 +151,10 @@ export function useStoryboardTaskAwareStoryboards({
     () => buildStoryboardGridTargets(initialStoryboards),
     [initialStoryboards],
   )
+  const storyboardDirectorTargets = useMemo(
+    () => buildStoryboardDirectorTargets(initialStoryboards),
+    [initialStoryboards],
+  )
   const panelImageTargets = useMemo(
     () => buildPanelTargets(initialStoryboards, 'image'),
     [initialStoryboards],
@@ -160,6 +177,11 @@ export function useStoryboardTaskAwareStoryboards({
     projectId,
     storyboardGridTargets,
     !!projectId && storyboardGridTargets.length > 0,
+  )
+  const storyboardDirectorStates = useStoryboardTaskPresentation(
+    projectId,
+    storyboardDirectorTargets,
+    !!projectId && storyboardDirectorTargets.length > 0,
   )
   const panelImageStates = useStoryboardTaskPresentation(
     projectId,
@@ -188,6 +210,9 @@ export function useStoryboardTaskAwareStoryboards({
           : null
       const gridTaskState = storyboardGridStates.getTaskState(`storyboard-grid:${storyboard.id}`)
       const gridTaskRunning = isRunningPhase(gridTaskState?.phase)
+      const directorTaskState = storyboardDirectorStates.getTaskState(
+        `storyboard-director:${storyboard.id}`,
+      )
 
       return {
         ...storyboard,
@@ -197,6 +222,10 @@ export function useStoryboardTaskAwareStoryboards({
         gridTaskType: gridTaskRunning ? gridTaskState?.runningTaskType ?? null : null,
         gridTaskError: gridTaskState?.phase === 'failed'
           ? gridTaskState.lastError?.message ?? null
+          : null,
+        directorTaskRunning: isRunningPhase(directorTaskState?.phase),
+        directorTaskError: directorTaskState?.phase === 'failed'
+          ? directorTaskState.lastError?.message ?? null
           : null,
         panels: (storyboard.panels || []).map((panel) => {
           const panelImageTaskState = panelImageStates.getTaskState(`panel-image:${panel.id}`)
@@ -221,6 +250,7 @@ export function useStoryboardTaskAwareStoryboards({
     panelLipSyncStates,
     panelVideoStates,
     storyboardGridStates,
+    storyboardDirectorStates,
     storyboardTextStates,
   ])
 

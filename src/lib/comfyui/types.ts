@@ -136,6 +136,7 @@ export type ComfyBindingTransform =
   | 'filename_list'
   | 'filename_at'
   | 'bernini_image_slots'
+  | 'ltx_director_timeline'
 
 export type ComfyNumericUnit = 'seconds' | 'frames' | 'fps'
 

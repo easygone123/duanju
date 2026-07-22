@@ -141,6 +141,7 @@ const ROUTE_FILES = [
   'src/app/api/novel-promotion/[projectId]/speaker-voice/route.ts',
   'src/app/api/novel-promotion/[projectId]/story-to-script-stream/route.ts',
   'src/app/api/novel-promotion/[projectId]/storyboard-group/route.ts',
+  'src/app/api/novel-promotion/[projectId]/storyboard-director/route.ts',
   'src/app/api/novel-promotion/[projectId]/storyboards/route.ts',
   'src/app/api/novel-promotion/[projectId]/storyboard-sheet/route.ts',
   'src/app/api/novel-promotion/[projectId]/storyboard-sheet/crop/route.ts',

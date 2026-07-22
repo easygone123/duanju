@@ -665,6 +665,8 @@ export async function resolveVideoSourceFromGeneration(
     imageUrl: string
     comfyFirstFrameSource?: string
     comfyLastFrameSource?: string
+    comfyReferenceImages?: string[]
+    comfyReferenceImagesOnly?: boolean
     options?: {
       prompt?: string
       duration?: number
@@ -759,7 +761,10 @@ export async function resolveVideoSourceFromGeneration(
     modelKey: snapshot.model,
     invocationKey: params.invocationKey,
     workflowVersionId: snapshot.comfyWorkflowVersionId,
-    firstFrame: params.comfyFirstFrameSource ?? params.imageUrl,
+    inputImages: params.comfyReferenceImages,
+    firstFrame: params.comfyReferenceImagesOnly
+      ? undefined
+      : params.comfyFirstFrameSource ?? params.imageUrl,
     lastFrame: params.comfyLastFrameSource ?? params.options?.lastFrameImageUrl,
   })
 

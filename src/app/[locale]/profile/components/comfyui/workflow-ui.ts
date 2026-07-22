@@ -189,6 +189,7 @@ export function confirmWorkflowAnalysis(
 
     const isReferenceList = canonicalName === 'referenceImages'
     const isBerniniSlots = proposal.transform === 'bernini_image_slots'
+    const isLtxDirectorTimeline = proposal.transform === 'ltx_director_timeline'
     const valueType = isReferenceList ? 'image_ref_list' : proposal.valueType
     const existing = definitions.get(canonicalName)
     const required = requiredByCanonical.get(canonicalName) ?? false
@@ -218,6 +219,8 @@ export function confirmWorkflowAnalysis(
       ...(isReferenceList
         ? proposal.transform === 'bernini_image_slots'
           ? { transform: 'bernini_image_slots' as const }
+          : isLtxDirectorTimeline
+            ? { transform: 'ltx_director_timeline' as const }
           : {
             transform: proposal.transform === 'filename_list' ? 'filename_list' : 'filename_at',
             ...(proposal.transform === 'filename_list' ? {} : { valueIndex: referenceIndex }),

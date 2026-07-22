@@ -21,6 +21,7 @@ const VARIABLE_TYPES = new Set<ComfyVariableType>([
 ])
 const BINDING_TRANSFORMS = new Set([
   'filename', 'image_ref', 'filename_list', 'filename_at', 'bernini_image_slots',
+  'ltx_director_timeline',
 ])
 const NUMERIC_TRANSFORM_KEYS = new Set([
   'sourceUnit', 'targetUnit', 'output', 'fps', 'rounding', 'frameOffset',
@@ -193,6 +194,15 @@ export function validateWorkflowContract(input: WorkflowContractInput): Workflow
         issues.push(issue(
           'COMFY_BINDING_TRANSFORM_TARGET_INVALID', `${path}.transform`,
           'Bernini image slots require a BerniniStudio.image0 binding.',
+        ))
+      }
+    }
+    if (binding.transform === 'ltx_director_timeline' && nodeIdValid) {
+      const target = graph[binding.nodeId as string]
+      if (target?.class_type !== 'LTXDirector' || binding.inputPath !== 'timeline_data') {
+        issues.push(issue(
+          'COMFY_BINDING_TRANSFORM_TARGET_INVALID', `${path}.transform`,
+          'LTX Director timeline requires an LTXDirector.timeline_data binding.',
         ))
       }
     }
@@ -437,6 +447,7 @@ export function isComfyTransformCompatible(
   if (transform === 'filename_list') return type === 'image_ref_list'
   if (transform === 'filename_at') return type === 'image_ref_list'
   if (transform === 'bernini_image_slots') return type === 'image_ref_list'
+  if (transform === 'ltx_director_timeline') return type === 'image_ref_list'
   return (transform === 'filename' || transform === 'image_ref')
     && (type === 'image_ref' || type === 'video_ref')
 }

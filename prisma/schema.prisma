@@ -363,6 +363,9 @@ model NovelPromotionStoryboard {
   upscaledSheetImageUrl String?              @db.Text
   upscaledSheetImageMediaId String?
   upscaledSheetImageMedia MediaObject?       @relation("NovelPromotionStoryboardUpscaledSheetImageMedia", fields: [upscaledSheetImageMediaId], references: [id], onDelete: SetNull)
+  directorVideoUrl    String?                @db.Text
+  directorVideoMediaId String?
+  directorVideoMedia  MediaObject?           @relation("NovelPromotionStoryboardDirectorVideoMedia", fields: [directorVideoMediaId], references: [id], onDelete: SetNull)
   sheetPromptSnapshot String?                @db.Text
   sheetModelSnapshot String?                 @db.Text
   sheetGenerationOptionsSnapshot String?     @db.Text
@@ -377,6 +380,7 @@ model NovelPromotionStoryboard {
   @@unique([episodeId, layoutMode, groupSequence], map: "novel_storyboards_episode_layout_group_idx")
   @@index([sheetImageMediaId])
   @@index([upscaledSheetImageMediaId])
+  @@index([directorVideoMediaId])
   @@map("novel_promotion_storyboards")
 }
 
@@ -1039,6 +1043,7 @@ model MediaObject {
   novelPromotionPanelUpscaledImages     NovelPromotionPanel[]       @relation("NovelPromotionPanelUpscaledImageMedia")
   novelPromotionStoryboardSheetImages   NovelPromotionStoryboard[]  @relation("NovelPromotionStoryboardSheetImageMedia")
   novelPromotionStoryboardUpscaledSheetImages NovelPromotionStoryboard[] @relation("NovelPromotionStoryboardUpscaledSheetImageMedia")
+  novelPromotionStoryboardDirectorVideos NovelPromotionStoryboard[] @relation("NovelPromotionStoryboardDirectorVideoMedia")
   novelPromotionShotImages              NovelPromotionShot[]        @relation("NovelPromotionShotImageMedia")
   supplementaryPanelImages              SupplementaryPanel[]        @relation("SupplementaryPanelImageMedia")
   novelPromotionVoiceLineAudios         NovelPromotionVoiceLine[]   @relation("NovelPromotionVoiceLineAudioMedia")

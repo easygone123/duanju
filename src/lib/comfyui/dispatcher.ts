@@ -26,6 +26,7 @@ import type {
 import { extractComfyOutputs } from './workflow-output'
 import { renderComfyWorkflow } from './workflow-renderer'
 import type { ComfyAcceptedPromptResult, ComfySubmissionFenceResult } from './submission'
+import { augmentLtxDirectorContract } from './ltx-director-contract'
 
 export {
   claimComfySubmissionFenceWithStore,
@@ -187,12 +188,17 @@ export async function dispatchComfyRequest(
     }
 
     await mustOwn(dependencies.transition({ ...owner, from: request.status, to: 'uploading' }))
+    const runtimeContract = augmentLtxDirectorContract({
+      graph: context.version.graph ?? {},
+      variableDefinitions: context.version.variableDefinitions ?? [],
+      bindings: context.version.bindings ?? [],
+    })
     const uploads = await prepareComfyMediaUploads({
       userId: request.userId,
       projectId: request.projectId ?? 'unknown',
       requestId: request.id,
       variables: request.variableSnapshot ?? {},
-      definitions: context.version.variableDefinitions ?? [],
+      definitions: runtimeContract.variableDefinitions,
       client: dependencies.client,
       dependencies,
       ...(dependencies.maxInputBytes === undefined
@@ -202,8 +208,8 @@ export async function dispatchComfyRequest(
     const graph = renderComfyWorkflow({
       graph: context.version.graph ?? {},
       variables: request.variableSnapshot ?? {},
-      variableDefinitions: context.version.variableDefinitions ?? [],
-      bindings: context.version.bindings ?? [],
+      variableDefinitions: runtimeContract.variableDefinitions,
+      bindings: runtimeContract.bindings,
       uploads,
       onNumericConversion: (diagnostic) => numericDiagnostics.push(diagnostic),
     })

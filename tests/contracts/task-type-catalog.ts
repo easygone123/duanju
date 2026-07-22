@@ -28,6 +28,7 @@ const TASK_TYPE_OWNER_MAP = {
   [TASK_TYPE.STORYBOARD_SHEET_CROP]: 'tests/unit/worker/storyboard-sheet-task-handler.test.ts',
   [TASK_TYPE.STORYBOARD_PANEL_UPSCALE]: 'tests/unit/worker/storyboard-sheet-task-handler.test.ts',
   [TASK_TYPE.VIDEO_PANEL]: 'tests/unit/worker/video-worker.test.ts',
+  [TASK_TYPE.STORYBOARD_DIRECTOR_VIDEO]: 'tests/unit/worker/video-worker.test.ts',
   [TASK_TYPE.LIP_SYNC]: 'tests/unit/worker/video-worker.test.ts',
   [TASK_TYPE.VOICE_LINE]: 'tests/unit/worker/voice-worker.test.ts',
   [TASK_TYPE.VOICE_DESIGN]: 'tests/unit/worker/voice-worker.test.ts',

@@ -15,6 +15,7 @@ import type {
   ComfyVariableValue,
   RenderWorkflowInput,
 } from './types'
+import { parseLtxDirectorTimelineSpec, renderLtxDirectorTimeline } from './ltx-director'
 
 const WHOLE_PLACEHOLDER = /^\$\{([^{}]+)\}$/
 const EMBEDDED_PLACEHOLDER = /\$\{([^{}]+)\}/g
@@ -66,6 +67,10 @@ export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflo
     if (value !== undefined) {
       if (binding.transform === 'bernini_image_slots') {
         applyBerniniImageSlots(rendered, binding, value, input.uploads)
+        continue
+      }
+      if (binding.transform === 'ltx_director_timeline') {
+        applyLtxDirectorTimeline(rendered, binding, value, variables, input.uploads)
         continue
       }
       const transformed = transformBindingValue(
@@ -120,6 +125,7 @@ function assertSafeBinding(graph: ComfyApiWorkflow, binding: ComfyInputBinding):
     binding.transform !== undefined
     && ![
       'filename', 'image_ref', 'filename_list', 'filename_at', 'bernini_image_slots',
+      'ltx_director_timeline',
     ].includes(binding.transform)
   ) {
     throw bindingError(binding, `Unsupported transform "${String(binding.transform)}".`)
@@ -128,6 +134,58 @@ function assertSafeBinding(graph: ComfyApiWorkflow, binding: ComfyInputBinding):
     && (graph[binding.nodeId].class_type !== 'BerniniStudio' || binding.inputPath !== 'image0')) {
     throw bindingError(binding, 'Bernini image slots require a BerniniStudio.image0 binding.')
   }
+  if (binding.transform === 'ltx_director_timeline'
+    && (graph[binding.nodeId].class_type !== 'LTXDirector'
+      || binding.inputPath !== 'timeline_data')) {
+    throw bindingError(
+      binding,
+      'LTX Director timeline requires an LTXDirector.timeline_data binding.',
+    )
+  }
+}
+
+function applyLtxDirectorTimeline(
+  graph: ComfyApiWorkflow,
+  binding: ComfyInputBinding,
+  value: ComfyVariableValue,
+  variables: Record<string, ComfyVariableValue | undefined>,
+  uploads: RenderWorkflowInput['uploads'],
+) {
+  const upload = uploads[binding.variable]
+  if (!Array.isArray(value) || !Array.isArray(upload)
+    || upload.length !== value.length || !upload.every(isUploadedFile) || upload.length === 0) {
+    throw bindingError(binding, `LTX Director images for "${binding.variable}" are missing or malformed.`)
+  }
+  const target = graph[binding.nodeId]
+  const rendered = renderLtxDirectorTimeline({
+    files: upload,
+    promptValue: variables.prompt,
+    fallbackDurationSeconds: typeof variables.duration === 'number'
+      ? variables.duration
+      : typeof variables.duration_seconds === 'number'
+        ? variables.duration_seconds
+        : typeof target.inputs.duration_seconds === 'number'
+          ? target.inputs.duration_seconds
+          : undefined,
+    fallbackFps: typeof variables.fps === 'number'
+      ? variables.fps
+      : typeof target.inputs.frame_rate === 'number'
+        ? target.inputs.frame_rate
+        : undefined,
+  })
+  target.inputs.timeline_data = rendered.timelineData
+  target.inputs.local_prompts = rendered.localPrompts
+  target.inputs.segment_lengths = rendered.segmentLengths
+  target.inputs.guide_strength = rendered.guideStrength
+  target.inputs.global_prompt = parseLtxDirectorTimelineSpec(variables.prompt)?.globalPrompt
+    ?? (typeof variables.prompt === 'string' ? variables.prompt : target.inputs.global_prompt)
+  target.inputs.start_second = 0
+  target.inputs.end_second = rendered.durationSeconds
+  target.inputs.duration_seconds = rendered.durationSeconds
+  target.inputs.start_frame = 0
+  target.inputs.end_frame = rendered.durationFrames
+  target.inputs.duration_frames = rendered.durationFrames
+  target.inputs.frame_rate = rendered.durationFrames / rendered.durationSeconds
 }
 
 function applyBerniniImageSlots(

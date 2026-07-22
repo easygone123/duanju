@@ -155,6 +155,10 @@ async function attachMediaFieldsToStoryboard<T extends Record<string, unknown>>(
     storyboard.upscaledSheetImageMediaId,
     storyboard.upscaledSheetImageUrl,
   )
+  const directorVideoMedia = await resolver.resolve(
+    storyboard.directorVideoMediaId,
+    storyboard.directorVideoUrl,
+  )
   const panels = await Promise.all(
     ((storyboard.panels as Array<Record<string, unknown>>) || []).map((panel) => (
       attachMediaFieldsToPanel(panel, resolver)
@@ -167,9 +171,11 @@ async function attachMediaFieldsToStoryboard<T extends Record<string, unknown>>(
     storyboardImageMedia,
     sheetImageMedia,
     upscaledSheetImageMedia,
+    directorVideoMedia,
     storyboardImageUrl: storyboardImageMedia?.url || storyboard.storyboardImageUrl || null,
     sheetImageUrl: sheetImageMedia?.url || storyboard.sheetImageUrl || null,
     upscaledSheetImageUrl: upscaledSheetImageMedia?.url || storyboard.upscaledSheetImageUrl || null,
+    directorVideoUrl: directorVideoMedia?.url || storyboard.directorVideoUrl || null,
     panels,
   }
 }
@@ -182,6 +188,7 @@ function collectStageMediaCandidates(projectLike: Record<string, unknown>): Medi
       { legacyValue: storyboard.storyboardImageUrl },
       { mediaId: storyboard.sheetImageMediaId, legacyValue: storyboard.sheetImageUrl },
       { mediaId: storyboard.upscaledSheetImageMediaId, legacyValue: storyboard.upscaledSheetImageUrl },
+      { mediaId: storyboard.directorVideoMediaId, legacyValue: storyboard.directorVideoUrl },
     )
     for (const panel of (storyboard.panels as Array<Record<string, unknown>>) || []) {
       candidates.push(

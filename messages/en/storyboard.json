@@ -580,6 +580,12 @@
             "undo": "Undo previous"
         }
     },
+    "director": {
+        "description": "Build an LTX Director timeline from this group's images, prompts, and shot durations.",
+        "generate": "Generate group video",
+        "generating": "Generating…",
+        "imagesRequired": "All 1–8 panels in this group need an image."
+    },
     "firstLastFrame": {
         "placeholder": "Enter first/last frame video prompt...",
         "modelTitle": "First/Last Frame Model"

@@ -30,6 +30,7 @@ const TASK_INTENT_BY_TYPE: Record<TaskType, TaskIntent> = {
   [TASK_TYPE.STORYBOARD_SHEET_CROP]: 'process',
   [TASK_TYPE.STORYBOARD_PANEL_UPSCALE]: 'process',
   [TASK_TYPE.VIDEO_PANEL]: 'generate',
+  [TASK_TYPE.STORYBOARD_DIRECTOR_VIDEO]: 'generate',
   [TASK_TYPE.LIP_SYNC]: 'process',
   [TASK_TYPE.VOICE_LINE]: 'generate',
   [TASK_TYPE.VOICE_DESIGN]: 'generate',

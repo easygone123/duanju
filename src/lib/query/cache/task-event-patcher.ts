@@ -99,6 +99,42 @@ function patchStoryboards(
   return { value: changed ? value : storyboards, eligible, matched, changed }
 }
 
+function patchStoryboardRecord(
+  storyboards: unknown,
+  storyboardId: string,
+  updates: Record<string, unknown>,
+) {
+  if (!Array.isArray(storyboards)) return { value: storyboards, eligible: false, matched: false, changed: false }
+  let matched = false
+  let changed = false
+  const value = storyboards.map((storyboard) => {
+    if (!storyboard || typeof storyboard !== 'object' || Array.isArray(storyboard)) return storyboard
+    const record = storyboard as Record<string, unknown>
+    if (record.id !== storyboardId) return storyboard
+    matched = true
+    if (!Object.entries(updates).some(([key, value]) => record[key] !== value)) return storyboard
+    changed = true
+    return { ...record, ...updates }
+  })
+  return { value: changed ? value : storyboards, eligible: true, matched, changed }
+}
+
+function patchStoryboardEpisodePayload(current: unknown, storyboardId: string, updates: Record<string, unknown>) {
+  if (!current || typeof current !== 'object' || Array.isArray(current)) {
+    return { value: current, eligible: false, matched: false, changed: false }
+  }
+  const root = current as Record<string, unknown>
+  if (root.episode && typeof root.episode === 'object' && !Array.isArray(root.episode)) {
+    const episode = root.episode as Record<string, unknown>
+    const result = patchStoryboardRecord(episode.storyboards, storyboardId, updates)
+    return result.changed
+      ? { ...result, value: { ...root, episode: { ...episode, storyboards: result.value } } }
+      : { ...result, value: current }
+  }
+  const result = patchStoryboardRecord(root.storyboards, storyboardId, updates)
+  return result.changed ? { ...result, value: { ...root, storyboards: result.value } } : { ...result, value: current }
+}
+
 function patchEpisodePayload(
   current: unknown,
   panelId: string,
@@ -154,6 +190,23 @@ export function applyWorkspaceTaskCompletion(
   queryClient: QueryClient,
   input: TaskCompletionInput,
 ): PatchResult {
+  if (input.targetType === 'NovelPromotionStoryboard'
+    && input.taskType === 'storyboard_director_video'
+    && input.targetId && input.payload) {
+    const updates = pickDefined(input.payload, ['directorVideoUrl', 'directorVideoMediaId'])
+    let changed = false
+    for (const stage of ['storyboard', 'videos'] as const) {
+      queryClient.setQueriesData(
+        { queryKey: queryKeys.episodeStage(input.projectId, input.episodeId, stage) },
+        (current) => {
+          const result = patchStoryboardEpisodePayload(current, input.targetId!, updates)
+          changed ||= result.changed
+          return result.value
+        },
+      )
+    }
+    return { handled: true, patched: changed, stages: ['storyboard', 'videos'] }
+  }
   const patch = resolvePanelPatch(input)
   if (!patch) return { handled: false, patched: false, stages: [] }
   if (Object.keys(patch.updates).length === 0) {

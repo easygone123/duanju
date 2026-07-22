@@ -36,6 +36,7 @@ const VARIABLE_TYPES = new Set(['string', 'number', 'boolean', 'image_ref', 'ima
 const MAPPING_CONFIDENCE = new Set(['high', 'ambiguous', 'preserve_original', 'blocking'])
 const BINDING_TRANSFORMS = new Set([
   'filename', 'image_ref', 'filename_list', 'filename_at', 'bernini_image_slots',
+  'ltx_director_timeline',
 ])
 const CANONICAL_VALUE_TYPES: Record<CanonicalWorkflowInput, ComfyVariableType> = {
   prompt: 'string',

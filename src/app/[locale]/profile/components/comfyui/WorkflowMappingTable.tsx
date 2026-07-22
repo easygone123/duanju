@@ -6,7 +6,10 @@ import type { ComfyInputBinding, ComfyOutputBinding, ComfyVariableDefinition } f
 import { removeWorkflowOutput, setPrimaryOutput } from './workflow-ui'
 import WorkflowNumericTransformEditor from './WorkflowNumericTransformEditor'
 
-const TRANSFORMS = ['filename', 'image_ref', 'filename_list', 'bernini_image_slots'] as const
+// Base media transforms remain ['filename', 'image_ref', 'filename_list', 'bernini_image_slots'].
+const TRANSFORMS = [
+  'filename', 'image_ref', 'filename_list', 'bernini_image_slots', 'ltx_director_timeline',
+] as const
 
 interface Props {
   variables: ComfyVariableDefinition[]

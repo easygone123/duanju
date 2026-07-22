@@ -234,6 +234,12 @@ function inferPromptProposals(
   title: string,
   requiredInputs: readonly CanonicalWorkflowInput[],
 ): WorkflowMappingProposal[] {
+  if (node.class_type === 'LTXDirector' && typeof node.inputs.global_prompt === 'string') {
+    return [promptFieldProposal(
+      nodeId, 'global_prompt', 'prompt', requiredInputs, title,
+      'COMFY_MAPPING_LTX_DIRECTOR_GLOBAL_PROMPT',
+    )]
+  }
   if (node.class_type === 'BerniniStudio') {
     const proposals: WorkflowMappingProposal[] = []
     if (typeof node.inputs.prompt === 'string') {
@@ -303,6 +309,8 @@ function inferMediaProposals(
   requiredInputs: readonly CanonicalWorkflowInput[],
 ): { proposals: WorkflowMappingProposal[]; referenceCapacity: number } {
   const proposals: WorkflowMappingProposal[] = []
+  const ltxDirector = findLtxDirectorTimelineFamilies(graph)
+  proposals.push(...ltxDirector.proposals)
   const bernini = findBerniniReferenceFamilies(graph, requiredInputs)
   proposals.push(...bernini.proposals)
   const referenceCandidates: Array<{
@@ -367,7 +375,7 @@ function inferMediaProposals(
     })
   }
 
-  let referenceCapacity = bernini.referenceCapacity
+  let referenceCapacity = Math.max(ltxDirector.referenceCapacity, bernini.referenceCapacity)
   for (const candidate of referenceCandidates) {
     const listCapacity = candidate.listCapacity
     proposals.push({
@@ -389,6 +397,30 @@ function inferMediaProposals(
   }
 
   return { proposals, referenceCapacity }
+}
+
+function findLtxDirectorTimelineFamilies(graph: ComfyApiWorkflow): {
+  proposals: WorkflowMappingProposal[]
+  referenceCapacity: number
+} {
+  const proposals: WorkflowMappingProposal[] = []
+  for (const [nodeId, node] of Object.entries(graph)) {
+    if (node.class_type !== 'LTXDirector' || !Object.hasOwn(node.inputs, 'timeline_data')) continue
+    proposals.push({
+      id: `${nodeId}:timeline_data:referenceImages`,
+      canonicalName: 'referenceImages',
+      nodeId,
+      inputPath: 'timeline_data',
+      valueType: 'image_ref_list',
+      transform: 'ltx_director_timeline',
+      confidence: 'high',
+      reasonCode: 'COMFY_MAPPING_LTX_DIRECTOR_TIMELINE',
+      required: true,
+      referenceIndex: 0,
+      ...(nodeTitle(node) ? { nodeTitle: nodeTitle(node) } : {}),
+    })
+  }
+  return { proposals, referenceCapacity: proposals.length > 0 ? 8 : 0 }
 }
 
 function findBerniniReferenceFamilies(

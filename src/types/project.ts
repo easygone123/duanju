@@ -272,6 +272,11 @@ export interface NovelPromotionStoryboard {
   upscaledSheetImageUrl?: string | null
   upscaledSheetImageMediaId?: string | null
   upscaledSheetImageMedia?: MediaRef | null
+  directorVideoUrl?: string | null
+  directorVideoMediaId?: string | null
+  directorVideoMedia?: MediaRef | null
+  directorTaskRunning?: boolean
+  directorTaskError?: string | null
   sheetPromptSnapshot?: string | null
   sheetModelSnapshot?: string | null
   sheetGenerationOptionsSnapshot?: string | null

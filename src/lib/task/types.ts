@@ -46,6 +46,7 @@ export const TASK_TYPE = {
   STORYBOARD_SHEET_CROP: 'storyboard_sheet_crop',
   STORYBOARD_PANEL_UPSCALE: 'storyboard_panel_upscale',
   VIDEO_PANEL: 'video_panel',
+  STORYBOARD_DIRECTOR_VIDEO: 'storyboard_director_video',
   LIP_SYNC: 'lip_sync',
   VOICE_LINE: 'voice_line',
   VOICE_DESIGN: 'voice_design',

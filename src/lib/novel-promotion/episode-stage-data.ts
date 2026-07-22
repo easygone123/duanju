@@ -132,6 +132,8 @@ type StoryboardFields =
   | 'sheetImageMediaId'
   | 'upscaledSheetImageUrl'
   | 'upscaledSheetImageMediaId'
+  | 'directorVideoUrl'
+  | 'directorVideoMediaId'
   | 'sheetPromptSnapshot'
   | 'sheetArtifactVersion'
 

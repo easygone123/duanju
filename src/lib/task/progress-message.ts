@@ -9,6 +9,7 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   [TASK_TYPE.STORYBOARD_SHEET_CROP]: 'progress.taskType.storyboardSheetCrop',
   [TASK_TYPE.STORYBOARD_PANEL_UPSCALE]: 'progress.taskType.storyboardPanelUpscale',
   [TASK_TYPE.VIDEO_PANEL]: 'progress.taskType.videoPanel',
+  [TASK_TYPE.STORYBOARD_DIRECTOR_VIDEO]: 'progress.taskType.videoPanel',
   [TASK_TYPE.LIP_SYNC]: 'progress.taskType.lipSync',
   [TASK_TYPE.VOICE_LINE]: 'progress.taskType.voiceLine',
   [TASK_TYPE.VOICE_DESIGN]: 'progress.taskType.voiceDesign',
