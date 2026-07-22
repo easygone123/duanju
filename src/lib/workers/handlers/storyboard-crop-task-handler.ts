@@ -17,6 +17,7 @@ import {
   type NarrationTransactionClient,
 } from '@/lib/novel-promotion/narration/sync'
 import { parseNarrationMode } from '@/lib/novel-promotion/narration/state'
+import { parseModelKeyStrict } from '@/lib/model-config-contract'
 
 type CropArtifact = Pick<SixGridCropArtifact, 'cellIndex' | 'mediaId' | 'url' | 'normalizedCropRect'> & { lineage: unknown }
 const currentCropPanelSelect = {
@@ -78,8 +79,7 @@ export async function commitSixGridCropBatch(input: {
     throw new Error('SIX_GRID_CROP_BATCH_INCOMPLETE')
   }
   if (input.panelAnalysis
-    && (gridSpec.mode !== 'four_grid'
-      || input.panelAnalysis.length !== gridSpec.panelCount
+    && (input.panelAnalysis.length !== gridSpec.panelCount
       || input.panelAnalysis.some((row, index) => row.panel_number !== index + 1))) {
     throw new Error('FOUR_GRID_SHEET_ANALYSIS_INVALID')
   }
@@ -125,6 +125,7 @@ export async function commitSixGridCropBatch(input: {
             description: analysis.description,
             imagePrompt: analysis.image_prompt,
             videoPrompt: analysis.video_prompt,
+            firstLastFramePrompt: analysis.first_last_frame_prompt,
             shotType: analysis.shot_type,
             cameraMove: analysis.camera_move,
             duration: analysis.duration,
@@ -264,7 +265,7 @@ export async function handleStoryboardCropTask(job: Job<TaskJobData>) {
   if (!source || !sourceMatchesSnapshot(source, snapshot)) throw new Error('SIX_GRID_SOURCE_STALE')
   const reconciled = await reconcileCommittedCrop(snapshot, job.data.userId)
   if (reconciled) return { storyboardId: snapshot.storyboardId, mediaIds: reconciled, reconciled: true }
-  const panelAnalysis = snapshot.gridSpec.mode === 'four_grid'
+  const panelAnalysis = snapshot.analysisModelSnapshot
     ? await analyzeFourGridBeforeCrop({
         snapshot,
         userId: job.data.userId,
@@ -341,6 +342,7 @@ async function analyzeFourGridBeforeCrop(input: {
           description: true,
           imagePrompt: true,
           videoPrompt: true,
+          firstLastFramePrompt: true,
           shotType: true,
           cameraMove: true,
           location: true,
@@ -364,6 +366,10 @@ async function analyzeFourGridBeforeCrop(input: {
   await input.assertActive('four_grid_sheet_analysis_before_read')
   const bytes = await getObjectBuffer(input.source.storageKey)
   const imageDataUrl = `data:${input.source.mimeType};base64,${bytes.toString('base64')}`
+  const videoModelProfile = await resolveVideoModelProfile(
+    input.userId,
+    input.snapshot.videoModelSnapshot,
+  )
   await input.assertActive('four_grid_sheet_analysis_before_provider')
   const analysis = await analyzeFourGridSheet({
     userId: input.userId,
@@ -375,9 +381,53 @@ async function analyzeFourGridBeforeCrop(input: {
       ...panel,
       panelIndex: index,
     })),
+    videoModelProfile,
   })
   await input.assertActive('four_grid_sheet_analysis_after_provider')
   return analysis
+}
+
+async function resolveVideoModelProfile(userId: string, modelKey: string | undefined) {
+  if (!modelKey) return null
+  const parsed = parseModelKeyStrict(modelKey)
+  if (!parsed) return modelKey
+  if (parsed.provider !== 'comfyui') {
+    return JSON.stringify({
+      modelKey: parsed.modelKey,
+      provider: parsed.provider,
+      modelId: parsed.modelId,
+    })
+  }
+
+  const workflow = await prisma.comfyWorkflow.findFirst({
+    where: { id: parsed.modelId, userId },
+    select: {
+      name: true,
+      currentVersion: { select: { variableDefinitions: true } },
+    },
+  })
+  let rawVariableDefinitions: unknown = workflow?.currentVersion?.variableDefinitions
+  if (typeof rawVariableDefinitions === 'string') {
+    try {
+      rawVariableDefinitions = JSON.parse(rawVariableDefinitions) as unknown
+    } catch {
+      rawVariableDefinitions = []
+    }
+  }
+  const variableDefinitions = Array.isArray(rawVariableDefinitions)
+    ? rawVariableDefinitions.flatMap((candidate) => {
+        if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return []
+        const value = candidate as Record<string, unknown>
+        if (typeof value.name !== 'string' || typeof value.type !== 'string') return []
+        return [{ name: value.name, type: value.type }]
+      })
+    : []
+  return JSON.stringify({
+    modelKey: parsed.modelKey,
+    provider: 'comfyui',
+    workflowName: workflow?.name || parsed.modelId,
+    inputVariables: variableDefinitions,
+  })
 }
 
 async function reconcileCommittedCrop(snapshot: ReturnType<typeof parseSixGridImageTaskSnapshot>, userId: string) {

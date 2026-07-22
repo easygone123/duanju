@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { isErrorResponse, requireProjectAuthLight } from '@/lib/api-auth'
 import { ApiError, apiHandler } from '@/lib/api-errors'
 import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
+import { writeDialogueVoiceLine } from '@/lib/novel-promotion/narration/sync'
 import { prisma } from '@/lib/prisma'
 
 const panelSchema = z.object({
@@ -17,6 +18,10 @@ const panelSchema = z.object({
   characters: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
   props: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
   sourceText: z.string().trim().max(20_000).optional(),
+  dialogueSpeaker: z.string().trim().min(1).max(500).optional(),
+  dialogueText: z.string().trim().min(1).max(10_000).optional(),
+  dialogueEmotion: z.string().trim().min(1).max(500).optional(),
+  includeDialogueInVideoPrompt: z.boolean().optional(),
 }).strict()
 
 const groupSchema = z.object({
@@ -106,6 +111,12 @@ export const POST = apiHandler(async (
 
     const storyboards = []
     let timelineSeconds = 0
+    let dialogueLineIndex = 0
+    const incomingDialogueIndexes = Array.from({
+      length: body.groups.reduce((total, group) => (
+        total + group.panels.filter((panel) => Boolean(panel.dialogueText)).length
+      ), 0),
+    }, (_, index) => index + 1)
     for (let groupIndex = 0; groupIndex < body.groups.length; groupIndex += 1) {
       const group = body.groups[groupIndex]
       const panelCount = group.mode === 'six_grid' ? 6 : 4
@@ -171,6 +182,13 @@ export const POST = apiHandler(async (
                 estimatedDuration: panel.duration,
                 videoPrompt: panel.videoPrompt,
                 firstLastFramePrompt: panel.firstLastFramePrompt || panel.videoPrompt,
+                hasDialogue: Boolean(panel.dialogueText),
+                dialogueSpeaker: panel.dialogueText ? panel.dialogueSpeaker || null : null,
+                dialogueText: panel.dialogueText || null,
+                dialogueEmotion: panel.dialogueText ? panel.dialogueEmotion || null : null,
+                includeDialogueInVideoPrompt: panel.dialogueText
+                  ? panel.includeDialogueInVideoPrompt !== false
+                  : false,
               }
             }),
           },
@@ -185,8 +203,37 @@ export const POST = apiHandler(async (
         },
       })
       storyboards.push(storyboard)
+      for (let panelIndex = 0; panelIndex < group.panels.length; panelIndex += 1) {
+        const panel = group.panels[panelIndex]
+        if (!panel.dialogueText) continue
+        dialogueLineIndex += 1
+        const persistedPanel = storyboard.panels[panelIndex]
+        if (!persistedPanel) throw new ApiError('INTERNAL_ERROR')
+        await writeDialogueVoiceLine({
+          tx,
+          episodeId: episode.id,
+          lineIndex: dialogueLineIndex,
+          incomingDialogueIndexes,
+          speaker: panel.dialogueSpeaker || (body.title ? body.title : '角色'),
+          content: panel.dialogueText,
+          emotionStrength: 0.6,
+          matchedPanelId: persistedPanel.id,
+          matchedStoryboardId: storyboard.id,
+          matchedPanelIndex: panelIndex,
+        })
+      }
       timelineSeconds += clipDuration
     }
+
+    await tx.novelPromotionVoiceLine.deleteMany({
+      where: {
+        episodeId: episode.id,
+        lineType: 'dialogue',
+        ...(incomingDialogueIndexes.length > 0
+          ? { lineIndex: { notIn: incomingDialogueIndexes } }
+          : {}),
+      },
+    })
 
     await tx.novelPromotionProject.update({
       where: { projectId },

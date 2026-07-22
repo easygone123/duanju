@@ -3,14 +3,16 @@ import { z } from 'zod'
 import { executeAiVisionStep } from '@/lib/ai-runtime/client'
 import { safeParseJsonArray } from '@/lib/json-repair'
 
-const FOUR_GRID_PANEL_COUNT = 4
+const MIN_GRID_PANEL_COUNT = 4
+const MAX_GRID_PANEL_COUNT = 6
 const MAX_PROMPT_LENGTH = 12_000
 
 const analysisRowSchema = z.object({
-  panel_number: z.number().int().min(1).max(FOUR_GRID_PANEL_COUNT),
+  panel_number: z.number().int().min(1).max(MAX_GRID_PANEL_COUNT),
   description: z.string().trim().min(1).max(MAX_PROMPT_LENGTH),
   image_prompt: z.string().trim().min(1).max(MAX_PROMPT_LENGTH),
   video_prompt: z.string().trim().min(1).max(MAX_PROMPT_LENGTH),
+  first_last_frame_prompt: z.string().trim().min(1).max(MAX_PROMPT_LENGTH).nullable().optional(),
   duration: z.number().finite().positive().max(120),
   shot_type: z.string().trim().min(1).max(200),
   camera_move: z.string().trim().min(1).max(500),
@@ -20,12 +22,14 @@ const analysisRowSchema = z.object({
 }).strict()
 
 export type FourGridSheetAnalysisRow = z.infer<typeof analysisRowSchema>
+export type GridSheetAnalysisRow = FourGridSheetAnalysisRow
 
 export type FourGridPlannedPanel = {
   panelIndex: number
   description: string | null
   imagePrompt: string | null
   videoPrompt: string | null
+  firstLastFramePrompt?: string | null
   shotType: string | null
   cameraMove: string | null
   location: string | null
@@ -46,7 +50,7 @@ function invalid(cause?: unknown): never {
 }
 
 function orderedPlannedPanels(panels: FourGridPlannedPanel[]) {
-  if (panels.length !== FOUR_GRID_PANEL_COUNT) invalid()
+  if (panels.length !== MIN_GRID_PANEL_COUNT && panels.length !== MAX_GRID_PANEL_COUNT) invalid()
   const orderedPanels = [...panels].sort((left, right) => left.panelIndex - right.panelIndex)
   if (orderedPanels.some((panel, index) => panel.panelIndex !== index)) invalid()
   return orderedPanels
@@ -57,11 +61,13 @@ export function parseFourGridSheetAnalysis(
   panels: FourGridPlannedPanel[],
 ): FourGridSheetAnalysisRow[] {
   try {
+    const panelCount = panels.length
+    if (panelCount !== MIN_GRID_PANEL_COUNT && panelCount !== MAX_GRID_PANEL_COUNT) invalid()
     const parsed = safeParseJsonArray(text, 'panels')
-    const rows = z.array(analysisRowSchema).length(FOUR_GRID_PANEL_COUNT).parse(parsed)
+    const rows = z.array(analysisRowSchema).length(panelCount).parse(parsed)
     const numbers = new Set(rows.map((row) => row.panel_number))
-    if (numbers.size !== FOUR_GRID_PANEL_COUNT
-      || Array.from({ length: FOUR_GRID_PANEL_COUNT }, (_, index) => index + 1)
+    if (numbers.size !== panelCount
+      || Array.from({ length: panelCount }, (_, index) => index + 1)
         .some((panelNumber) => !numbers.has(panelNumber))) invalid()
     const orderedRows = [...rows].sort((left, right) => left.panel_number - right.panel_number)
     const orderedPanels = orderedPlannedPanels(panels)
@@ -98,8 +104,11 @@ function plannedDuration(panel: FourGridPlannedPanel) {
 export function buildFourGridSheetAnalysisPrompt(input: {
   locale: 'zh' | 'en'
   panels: FourGridPlannedPanel[]
+  videoModelProfile?: string | null
 }) {
   const orderedPanels = orderedPlannedPanels(input.panels)
+  const panelCount = orderedPanels.length
+  const columns = panelCount === 6 ? 3 : 2
   const plotPlan = orderedPanels.map((panel) => ({
     panel_number: panel.panelIndex + 1,
     plot_description: panel.description,
@@ -126,13 +135,14 @@ export function buildFourGridSheetAnalysisPrompt(input: {
   const language = input.locale === 'zh' ? 'Simplified Chinese' : 'English'
   const exampleNarrationPanelIndex = orderedPanels.findIndex((panel) => !panel.dialogueText?.trim())
   const jsonExample = {
-    panels: Array.from({ length: FOUR_GRID_PANEL_COUNT }, (_, index) => {
+    panels: Array.from({ length: panelCount }, (_, index) => {
       const demonstratesNarration = index === exampleNarrationPanelIndex
       return {
         panel_number: index + 1,
         description: '...',
         image_prompt: '...',
-        video_prompt: '...',
+        video_prompt: '【0-3秒】...\n【4-6秒】...\n【6-10秒】...',
+        first_last_frame_prompt: '首帧...；尾帧...；中间按三段时间轴自然过渡。',
         duration: 3.5,
         shot_type: '...',
         camera_move: '...',
@@ -144,12 +154,17 @@ export function buildFourGridSheetAnalysisPrompt(input: {
   }
 
   return [
-    'Analyze the attached complete 2x2 storyboard sheet before it is cropped.',
-    'Read cells in row-major order: 1 top-left, 2 top-right, 3 bottom-left, 4 bottom-right.',
+    `Analyze the attached complete ${columns}x2 storyboard sheet before it is cropped.`,
+    `Read all ${panelCount} cells in row-major order, left-to-right on the top row and then left-to-right on the bottom row.`,
     'The plot plan is authoritative for story events, identities, dialogue, and continuity.',
     'The image is authoritative only for visible composition, pose, expression, wardrobe, lighting, and spatial placement.',
     'Do not rewrite the plot to justify an incorrect generated image. Keep every requested plot beat recognizable.',
     'For each cell, produce a grounded still-image prompt and a video prompt whose starting state exactly matches that cell.',
+    'Use the target video model profile to choose concrete camera movement, action density, dialogue timing, and physically achievable transitions. Do not mention unsupported controls.',
+    'For every approximately ten-second panel, video_prompt must contain exactly these three labeled chronological blocks: 【0-3秒】, 【4-6秒】, and 【6-10秒】.',
+    'Each time block must specify camera/framing, visible character action and expression, and any spoken dialogue that occurs in that interval.',
+    'Keep dialogue verbatim from the authoritative plot plan. Do not invent a second line that changes the story.',
+    'Also produce first_last_frame_prompt: lock the opening composition to the visible cell, describe the intended final composition, and explain the natural three-stage transition between them.',
     'Narration is allowed only on panels whose authoritative dialogue is empty after trimming; never add narration to a dialogue panel.',
     'Set narration_recommended to true only for a time/location transition, inner thought, off-screen background information, or necessary causal context not clear from the image or action.',
     'Evaluate every eligible dialogue-free panel independently against those criteria; never default all eligible panels to narration_recommended false.',
@@ -159,12 +174,13 @@ export function buildFourGridSheetAnalysisPrompt(input: {
     'Allocate duration from dialogue length, action complexity, and camera movement. Every duration must be a positive number of seconds.',
     'Include narration speaking time in duration allocation.',
     targetDuration > 0
-      ? `The four durations should total approximately ${targetDuration.toFixed(2)} seconds.`
+      ? `The ${panelCount} durations should total approximately ${targetDuration.toFixed(2)} seconds.`
       : 'Choose a concise positive duration for every cell.',
     `Write all natural-language fields in ${language}.`,
     'Return JSON only in this exact shape:',
     JSON.stringify(jsonExample),
-    'Return exactly four unique panels numbered 1, 2, 3, and 4.',
+    `Return exactly ${panelCount} unique panels numbered 1 through ${panelCount}.`,
+    `TARGET_VIDEO_MODEL_PROFILE=${input.videoModelProfile || 'unspecified; use a conservative image-to-video prompt profile'}`,
     `AUTHORITATIVE_PLOT_PLAN=${JSON.stringify(plotPlan)}`,
   ].join('\n')
 }
@@ -176,20 +192,27 @@ export async function analyzeFourGridSheet(input: {
   imageDataUrl: string
   locale: 'zh' | 'en'
   panels: FourGridPlannedPanel[]
+  videoModelProfile?: string | null
 }, dependencies: { runVision?: VisionRunner } = {}) {
   const runVision = dependencies.runVision ?? executeAiVisionStep
   const result = await runVision({
     userId: input.userId,
     projectId: input.projectId,
     model: input.model,
-    prompt: buildFourGridSheetAnalysisPrompt({ locale: input.locale, panels: input.panels }),
+    prompt: buildFourGridSheetAnalysisPrompt({
+      locale: input.locale,
+      panels: input.panels,
+      videoModelProfile: input.videoModelProfile,
+    }),
     imageUrls: [input.imageDataUrl],
     temperature: 0.1,
     reasoning: true,
-    action: 'four_grid_sheet_analysis',
+    action: input.panels.length === 6 ? 'six_grid_sheet_analysis' : 'four_grid_sheet_analysis',
     meta: {
-      stepId: 'four_grid_sheet_analysis',
-      stepTitle: input.locale === 'zh' ? '分析四宫格分镜' : 'Analyze four-grid storyboard',
+      stepId: input.panels.length === 6 ? 'six_grid_sheet_analysis' : 'four_grid_sheet_analysis',
+      stepTitle: input.locale === 'zh'
+        ? `分析${input.panels.length === 6 ? '六' : '四'}宫格分镜`
+        : `Analyze ${input.panels.length === 6 ? 'six' : 'four'}-grid storyboard`,
       stepIndex: 1,
       stepTotal: 1,
     },

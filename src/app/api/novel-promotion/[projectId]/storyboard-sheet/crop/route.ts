@@ -13,6 +13,7 @@ const rect = z.object({ x: z.number().finite().min(0), y: z.number().finite().mi
   .refine((value) => value.x + value.width <= 1 && value.y + value.height <= 1, 'out of bounds')
 const schema = z.object({ episodeId: z.string().trim().min(1).max(200), storyboardId: z.string().trim().min(1).max(200),
   cropRects: z.array(z.object({ cellIndex: z.number().int().min(0).max(5), normalizedCropRect: rect }).strict()).min(1).max(6).optional(),
+  reanalyzePrompts: z.boolean().optional(),
   locale: z.string().max(20).optional(), meta: z.object({ locale: z.string().max(20).optional() }).strict().optional() }).strict()
 
 export const POST = apiHandler(async (request: NextRequest, context: { params: Promise<{ projectId: string }> }) => {
@@ -32,10 +33,13 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     throw new ApiError('INVALID_PARAMS', { code: 'SIX_GRID_CROP_INDEXES_INVALID', field: 'cropRects' })
   }
   const locale = resolveRequiredTaskLocale(request, body)
-  const analysisModelSnapshot = storyboard.gridSpec.mode === 'four_grid'
-    ? (await getProjectModelConfig(projectId, auth.session.user.id)).analysisModel
+  const reanalyzePrompts = body.reanalyzePrompts !== false
+  const projectModels = reanalyzePrompts
+    ? await getProjectModelConfig(projectId, auth.session.user.id)
     : null
-  if (storyboard.gridSpec.mode === 'four_grid' && !analysisModelSnapshot) {
+  const analysisModelSnapshot = projectModels?.analysisModel ?? null
+  const videoModelSnapshot = projectModels?.videoModel ?? null
+  if (reanalyzePrompts && !analysisModelSnapshot) {
     throw new ApiError('INVALID_PARAMS', {
       code: 'ANALYSIS_MODEL_NOT_CONFIGURED', field: 'analysisModel',
     })
@@ -48,6 +52,7 @@ export const POST = apiHandler(async (request: NextRequest, context: { params: P
     expectedSheetArtifactVersion: storyboard.sheetArtifactVersion, cropRectSource, cropRects,
     promptSnapshot: storyboard.sheetPromptSnapshot || '', modelSnapshot: storyboard.sheetModelSnapshot || 'local:sharp', optionsSnapshot: {}, locale,
     ...(analysisModelSnapshot ? { analysisModelSnapshot } : {}),
+    ...(videoModelSnapshot ? { videoModelSnapshot } : {}),
   }
   const { dedupeKey } = finalizeSnapshot(snapshot)
   const result = await submitTask({ userId: auth.session.user.id, locale, requestId: getRequestId(request), projectId, episodeId: body.episodeId,
