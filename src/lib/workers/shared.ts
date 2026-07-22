@@ -70,7 +70,16 @@ function extractFlowFields(jobData: TaskJobData): Record<string, unknown> {
 }
 
 function withFlowFields(jobData: TaskJobData, payload?: Record<string, unknown> | null): Record<string, unknown> {
-  const base = { ...(payload || {}) }
+  const jobPayload = toObject(jobData.payload)
+  const base = {
+    ...jobPayload,
+    ...(payload || {}),
+  }
+  base.meta = {
+    ...toObject(jobPayload.meta),
+    ...toObject(base.meta),
+    locale: jobData.locale,
+  }
   const flowFields = extractFlowFields(jobData)
   for (const [key, value] of Object.entries(flowFields)) {
     if (base[key] === undefined || base[key] === null || base[key] === '') {

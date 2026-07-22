@@ -151,6 +151,11 @@ describe('worker shared direct run events', () => {
       taskType: 'story_to_script_run',
       type: 'task.progress',
     }))
+    expect(tryUpdateTaskProgressMock).toHaveBeenCalledWith(
+      'task-1',
+      42,
+      expect.objectContaining({ meta: { locale: 'zh' } }),
+    )
     expect(mapTaskSSEEventToRunEventsMock).toHaveBeenCalledTimes(1)
     expect(publishRunEventMock).toHaveBeenCalledWith(expect.objectContaining({
       runId: 'run-1',
