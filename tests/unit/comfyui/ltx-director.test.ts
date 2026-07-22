@@ -4,6 +4,7 @@ import { renderLtxDirectorTimeline } from '@/lib/comfyui/ltx-director'
 import { augmentLtxDirectorContract } from '@/lib/comfyui/ltx-director-contract'
 import { analyzeComfyApiWorkflow } from '@/lib/comfyui/workflow-auto-mapper'
 import { renderComfyWorkflow } from '@/lib/comfyui/workflow-renderer'
+import { confirmWorkflowAnalysis } from '@/app/[locale]/profile/components/comfyui/workflow-ui'
 
 const directorGraph = {
   '10': {
@@ -47,8 +48,19 @@ describe('LTX Director adapter', () => {
   })
 
   it('discovers a required timeline image binding during workflow import', () => {
-    const analysis = analyzeComfyApiWorkflow({ graph: directorGraph, kind: 'video_generation' })
+    const graphWithoutOptionalPrompt = structuredClone(directorGraph)
+    delete graphWithoutOptionalPrompt['10'].inputs.global_prompt
+    const analysis = analyzeComfyApiWorkflow({
+      graph: graphWithoutOptionalPrompt,
+      kind: 'video_generation',
+    })
     expect(analysis.referenceCapacity).toBe(8)
+    expect(analysis.proposals).toContainEqual(expect.objectContaining({
+      nodeId: '10',
+      inputPath: 'global_prompt',
+      canonicalName: 'prompt',
+      required: true,
+    }))
     expect(analysis.proposals).toContainEqual(expect.objectContaining({
       nodeId: '10',
       inputPath: 'timeline_data',
@@ -56,6 +68,15 @@ describe('LTX Director adapter', () => {
       transform: 'ltx_director_timeline',
       required: true,
     }))
+    const confirmed = confirmWorkflowAnalysis(analysis, {
+      roles: {},
+      primaryOutputNodeId: '20',
+      requiredInputs: ['prompt'],
+    })
+    expect(confirmed.variableDefinitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'prompt', required: true }),
+      expect.objectContaining({ name: 'referenceImages', required: true, maxItems: 8 }),
+    ]))
   })
 
   it('converts shot prompts and durations into remote ComfyUI timeline filenames', () => {

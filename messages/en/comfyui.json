@@ -301,6 +301,8 @@
       "COMFY_MAPPING_SOURCE_VIDEO_LABEL": "Recognized from a source-video loader.",
       "COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS": "This image loader can have more than one role.",
       "COMFY_MAPPING_VIDEO_ROLE_AMBIGUOUS": "This video loader role is not labeled.",
+      "COMFY_MAPPING_LTX_DIRECTOR_GLOBAL_PROMPT": "Automatically mapped to the LTX Director global prompt.",
+      "COMFY_MAPPING_LTX_DIRECTOR_TIMELINE": "Automatically maps storyboard images, prompts, and durations to the LTX Director timeline.",
       "unknown": "The technical basis for this mapping could not be recognized."
     },
     "importFile": "Import JSON file",

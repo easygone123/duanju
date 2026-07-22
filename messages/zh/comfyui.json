@@ -301,6 +301,8 @@
       "COMFY_MAPPING_SOURCE_VIDEO_LABEL": "根据源视频加载节点识别。",
       "COMFY_MAPPING_IMAGE_ROLE_AMBIGUOUS": "这个图片加载节点可能承担多种角色。",
       "COMFY_MAPPING_VIDEO_ROLE_AMBIGUOUS": "这个视频加载节点没有标明用途。",
+      "COMFY_MAPPING_LTX_DIRECTOR_GLOBAL_PROMPT": "自动映射到 LTX Director 的全局提示词。",
+      "COMFY_MAPPING_LTX_DIRECTOR_TIMELINE": "自动把分镜图片、提示词和时长映射到 LTX Director 时间线。",
       "unknown": "无法识别这项映射的技术依据。"
     },
     "importFile": "导入 JSON 文件",

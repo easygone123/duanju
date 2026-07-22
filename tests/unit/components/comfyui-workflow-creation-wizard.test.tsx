@@ -785,6 +785,56 @@ describe('workflow request helpers', () => {
     })
   })
 
+  it('accepts an LTX Director API workflow with an omitted optional global_prompt input', async () => {
+    const graph = {
+      '138': {
+        class_type: 'VAEDecode',
+        inputs: { samples: ['152', 2] },
+      },
+      '139': {
+        class_type: 'VHS_VideoCombine',
+        inputs: { images: ['138', 0], save_output: true },
+      },
+      '152': {
+        class_type: 'LTXDirector',
+        inputs: {
+          start_second: 0,
+          end_second: 20,
+          duration_seconds: 20,
+          start_frame: 0,
+          end_frame: 480,
+          duration_frames: 480,
+          timeline_data: '{}',
+          local_prompts: '',
+          segment_lengths: '',
+          guide_strength: '',
+          frame_rate: 24,
+        },
+      },
+    }
+    const expectedAnalysis = analyzeComfyApiWorkflow({ graph, kind: 'video_generation' })
+    const sourceText = JSON.stringify(graph)
+    vi.spyOn(apiFetchModule, 'apiFetch').mockResolvedValue(new Response(JSON.stringify({
+      analysis: expectedAnalysis,
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const file = new File([sourceText], 'ltx-director.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: () => Promise.resolve(sourceText) })
+
+    await expect(analyzeWorkflowJson('video_generation', file)).resolves.toMatchObject({
+      analysis: {
+        proposals: expect.arrayContaining([
+          expect.objectContaining({
+            canonicalName: 'prompt', inputPath: 'global_prompt', required: true,
+          }),
+          expect.objectContaining({
+            canonicalName: 'referenceImages', inputPath: 'timeline_data',
+            transform: 'ltx_director_timeline', required: true,
+          }),
+        ]),
+      },
+    })
+  })
+
   it('accepts upscale analysis with multiple output candidates before the user selects one', async () => {
     const graph = {
       '1': { class_type: 'LoadImage', inputs: { image: 'input.png' } },

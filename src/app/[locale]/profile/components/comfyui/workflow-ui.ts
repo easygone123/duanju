@@ -179,7 +179,7 @@ export function confirmWorkflowAnalysis(
     requiredByCanonical.set(
       canonicalName,
       requiredInputs
-        ? requiredInputs.has(canonicalName)
+        ? requiredInputs.has(canonicalName) || proposal.required
         : Boolean(requiredByCanonical.get(canonicalName) || proposal.required),
     )
   }

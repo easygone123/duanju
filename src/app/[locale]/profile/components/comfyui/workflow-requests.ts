@@ -229,15 +229,22 @@ function isConsistentWorkflowAnalysis(
   if (hasDuplicate(analysis.proposals.map((proposal) => `${proposal.nodeId}\u0000${proposal.inputPath}`))) return false
   const referenceIndexes: number[] = []
   for (const proposal of analysis.proposals) {
-    const allowsSynthesizedInput = proposal.transform === 'bernini_image_slots'
-      && analysis.graph[proposal.nodeId]?.class_type === 'BerniniStudio'
-      && proposal.inputPath === 'image0'
+    const targetClass = analysis.graph[proposal.nodeId]?.class_type
+    const allowsSynthesizedInput = (proposal.transform === 'bernini_image_slots'
+      && targetClass === 'BerniniStudio'
+      && proposal.inputPath === 'image0')
+      || (targetClass === 'LTXDirector'
+        && (proposal.inputPath === 'global_prompt'
+          || (proposal.transform === 'ltx_director_timeline'
+            && proposal.inputPath === 'timeline_data')))
+    const expectedRequired = meta.requiredInputs.includes(proposal.canonicalName)
+      || proposal.transform === 'ltx_director_timeline'
     if (!Object.hasOwn(analysis.graph, proposal.nodeId)
       || !isSafeDottedPath(proposal.inputPath)
       || (!allowsSynthesizedInput
         && !hasDottedInput(analysis.graph, proposal.nodeId, proposal.inputPath))
       || proposal.valueType !== CANONICAL_VALUE_TYPES[proposal.canonicalName]
-      || proposal.required !== meta.requiredInputs.includes(proposal.canonicalName)) return false
+      || proposal.required !== expectedRequired) return false
     if (proposal.transform && !isComfyTransformCompatible(proposal.transform, proposal.valueType)) return false
     if (proposal.transform === 'filename_at' && proposal.referenceIndex === undefined) return false
     if (proposal.referenceIndex !== undefined) {

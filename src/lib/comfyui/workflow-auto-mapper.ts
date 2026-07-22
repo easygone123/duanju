@@ -234,7 +234,10 @@ function inferPromptProposals(
   title: string,
   requiredInputs: readonly CanonicalWorkflowInput[],
 ): WorkflowMappingProposal[] {
-  if (node.class_type === 'LTXDirector' && typeof node.inputs.global_prompt === 'string') {
+  // global_prompt is an optional force_input on LTXDirector, so ComfyUI omits it
+  // from API Format JSON when it is not connected. The renderer can safely add
+  // the input at submission time; still expose it as the canonical prompt.
+  if (node.class_type === 'LTXDirector') {
     return [promptFieldProposal(
       nodeId, 'global_prompt', 'prompt', requiredInputs, title,
       'COMFY_MAPPING_LTX_DIRECTOR_GLOBAL_PROMPT',
