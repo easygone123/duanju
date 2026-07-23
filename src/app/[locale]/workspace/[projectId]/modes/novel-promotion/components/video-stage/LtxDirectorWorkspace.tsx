@@ -99,6 +99,11 @@ function readMediaDuration(file: File) {
   })
 }
 
+function isImageFile(file: File) {
+  if (file.type.startsWith('image/')) return true
+  return /\.(?:avif|bmp|gif|jpe?g|png|webp)$/i.test(file.name)
+}
+
 function panelDuration(panel: NonNullable<Storyboard['panels']>[number]) {
   const values = [panel.durationOverride, panel.estimatedDuration, panel.duration]
   return values.find((value): value is number => (
@@ -148,15 +153,37 @@ function buildDefaultSpec(
   videoRatio: string,
 ): LtxDirectorTimelineSpec {
   const saved = parseLtxDirectorTimelineSpec(storyboard.directorConfigJson)
-  if (saved) return {
-    ...saved,
-    videoModel: saved.videoModel || defaultModel,
-    aspectRatio: saved.aspectRatio || videoRatio,
-    resolutionPreset: saved.resolutionPreset || '720p',
-    segments: saved.segments.map((segment, index) => ({
+  if (saved) {
+    const savedSegments = saved.segments.map((segment, index) => ({
       ...segment,
       id: segment.id || `saved-${storyboard.id}-${index}`,
-    })),
+    }))
+    const savedPanelIds = new Set(savedSegments.flatMap((segment) => {
+      const panelId = segment.sourcePanelId || segment.panelId
+      return panelId ? [panelId] : []
+    }))
+    let cursor = totalTimelineDuration(savedSegments)
+    const missingPanelSegments = (storyboard.panels || []).flatMap((panel) => {
+      if (!panel.id || !panel.imageUrl || savedPanelIds.has(panel.id)) return []
+      const durationSeconds = panelDuration(panel)
+      const segment: LtxDirectorTimelineSegmentSpec = {
+        id: `panel-${panel.id}`,
+        sourcePanelId: panel.id,
+        prompt: panelPrompt(panel),
+        startSeconds: cursor,
+        durationSeconds,
+        guideStrength: 1,
+      }
+      cursor += durationSeconds
+      return [segment]
+    })
+    return {
+      ...saved,
+      videoModel: saved.videoModel || defaultModel,
+      aspectRatio: saved.aspectRatio || videoRatio,
+      resolutionPreset: saved.resolutionPreset || '720p',
+      segments: [...savedSegments, ...missingPanelSegments],
+    }
   }
   const panels = (storyboard.panels || []).filter((panel) => panel.id && panel.imageUrl)
   const clip = clips.find((candidate) => candidate.id === storyboard.clipId)
@@ -241,7 +268,7 @@ function snapSegmentStart(
   return Math.max(0, Math.round(snappedStart * 10) / 10)
 }
 
-function moveTimelineSegment(
+export function moveTimelineSegment(
   segments: LtxDirectorTimelineSegmentSpec[],
   segmentId: string,
   requestedStart: number,
@@ -288,6 +315,19 @@ function moveTimelineSegment(
     }
   }
   return positioned
+}
+
+export function buildEpisodeDirectorStoryboard(storyboards: Storyboard[]): Storyboard | null {
+  const anchor = storyboards[0]
+  if (!anchor) return null
+  return {
+    ...anchor,
+    panels: storyboards.flatMap((storyboard) => storyboard.panels || []),
+    continuityAnchor: storyboards
+      .map((storyboard) => storyboard.continuityAnchor)
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .join('\n') || anchor.continuityAnchor,
+  }
 }
 
 function DirectorStoryboardEditor({
@@ -394,6 +434,8 @@ function DirectorStoryboardEditor({
   const [historyVersion, setHistoryVersion] = useState(0)
   const [timelineScale, setTimelineScale] = useState(TIMELINE_PX_PER_SECOND)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [sourceDrawerOpen, setSourceDrawerOpen] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState<DirectorContextMenuState | null>(null)
   const [audioWaveforms, setAudioWaveforms] = useState<Record<string, number[]>>({})
   const [helpOpen, setHelpOpen] = useState(false)
@@ -519,12 +561,24 @@ function DirectorStoryboardEditor({
           linkedAudio: true,
           guideStrength: 1,
         }
-        const nextSegments = sortTimelineSegments([...spec.segments, segment])
+        const nextSegments = moveTimelineSegment(
+          [...spec.segments, segment],
+          segment.id!,
+          playheadSeconds,
+          playheadSeconds,
+          magneticFill,
+        )
         setSpec((current) => ({
           ...current,
           audioTrackEnabled: true,
           useCustomAudio: true,
-          segments: sortTimelineSegments([...current.segments, segment]),
+          segments: moveTimelineSegment(
+            [...current.segments, segment],
+            segment.id!,
+            playheadSeconds,
+            playheadSeconds,
+            magneticFill,
+          ),
         }))
         setSelectedIndex(Math.max(0, nextSegments.findIndex((item) => item.id === segment.id)))
         setSelectedSegmentIds([segment.id!])
@@ -863,6 +917,34 @@ function DirectorStoryboardEditor({
     )
     setSpec((current) => ({ ...current, segments }))
     setSelectedIndex(Math.max(0, segments.findIndex((segment) => segment.id === created.id)))
+    setDirty(true)
+  }
+
+  function addTextSegment(startSeconds = playheadSeconds) {
+    if (spec.segments.length >= 64) return
+    const created = createSegment(undefined, Math.max(0, startSeconds))
+    created.type = 'text'
+    created.guideStrength = 0
+    const segments = moveTimelineSegment(
+      [...spec.segments, created],
+      created.id!,
+      startSeconds,
+      startSeconds,
+      magneticFill,
+    )
+    setSpec((current) => ({
+      ...current,
+      segments: moveTimelineSegment(
+        [...current.segments, created],
+        created.id!,
+        startSeconds,
+        startSeconds,
+        magneticFill,
+      ),
+    }))
+    setSelectedIndex(Math.max(0, segments.findIndex((segment) => segment.id === created.id)))
+    setSelectedSegmentIds([created.id!])
+    setSelectedAuxiliary(null)
     setDirty(true)
   }
 
@@ -1551,7 +1633,7 @@ function DirectorStoryboardEditor({
   }
 
   return (
-    <section className="glass-surface overflow-hidden rounded-2xl outline-none" tabIndex={0} onKeyDown={handleTimelineKeyDown} onPaste={handleTimelinePaste}>
+    <section className="glass-surface overflow-hidden rounded-2xl bg-[#303136] text-white outline-none" tabIndex={0} onKeyDown={handleTimelineKeyDown} onPaste={handleTimelinePaste}>
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--glass-stroke-base)] p-4 md:p-5">
         <div>
           <h3 className="text-base font-semibold text-[var(--glass-text-primary)]">
@@ -1764,8 +1846,104 @@ function DirectorStoryboardEditor({
         </div>
       </div>
 
-      <div className="grid min-h-[570px] lg:grid-cols-[230px_minmax(0,1fr)]">
-        <aside className="border-b border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-3 lg:border-b-0 lg:border-r">
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-white/10 bg-[#24262b] px-3 py-2 text-xs text-white/85">
+        <button
+          type="button"
+          className="rounded border border-white/15 bg-[#34363c] px-2.5 py-1.5 hover:bg-[#41444b]"
+          disabled={uploadMutation.isPending}
+          onClick={() => uploadInputRef.current?.click()}
+        >
+          ⇧ 添加图片
+        </button>
+        <button
+          type="button"
+          className="rounded border border-white/15 bg-[#34363c] px-2.5 py-1.5 hover:bg-[#41444b]"
+          disabled={spec.segments.length >= 64}
+          onClick={() => addTextSegment()}
+        >
+          T 添加文本
+        </button>
+        <button
+          type="button"
+          className="rounded border border-white/15 bg-[#34363c] px-2.5 py-1.5 hover:bg-[#41444b]"
+          disabled={uploadMutation.isPending}
+          onClick={() => audioUploadInputRef.current?.click()}
+        >
+          ♫ 添加音频
+        </button>
+        <button
+          type="button"
+          className="rounded border border-white/15 bg-[#34363c] px-2.5 py-1.5 hover:bg-[#41444b]"
+          disabled={uploadMutation.isPending}
+          onClick={() => mainVideoUploadInputRef.current?.click()}
+        >
+          ▣ 添加视频
+        </button>
+        <button
+          type="button"
+          className="rounded border border-white/15 bg-[#34363c] px-2.5 py-1.5 hover:bg-[#41444b]"
+          disabled={uploadMutation.isPending}
+          onClick={() => motionUploadInputRef.current?.click()}
+        >
+          ▣ 添加 IC‑LoRA
+        </button>
+        <button
+          type="button"
+          className="rounded border border-white/15 bg-[#34363c] px-2.5 py-1.5 text-red-200 hover:bg-red-500/20 disabled:opacity-35"
+          disabled={!selectedSegment && !selectedAuxiliary && selectedSegmentIds.length === 0}
+          onClick={() => {
+            if (selectedAuxiliary) removeSelectedAuxiliary()
+            else removeSelectedSegments()
+          }}
+        >
+          ♜ 删除
+        </button>
+        <button
+          type="button"
+          className={`rounded border px-2.5 py-1.5 ${sourceDrawerOpen ? 'border-cyan-300/50 bg-cyan-400/20 text-cyan-100' : 'border-white/15 bg-[#34363c]'}`}
+          onClick={() => setSourceDrawerOpen((current) => !current)}
+        >
+          ▦ 项目素材
+        </button>
+        <button
+          type="button"
+          className={`rounded border px-2.5 py-1.5 ${previewOpen ? 'border-cyan-300/50 bg-cyan-400/20 text-cyan-100' : 'border-white/15 bg-[#34363c]'}`}
+          onClick={() => setPreviewOpen((current) => !current)}
+        >
+          ◫ 预览
+        </button>
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            className={`rounded border px-2.5 py-1.5 ${spec.retakeEnabled ? 'border-cyan-300/50 bg-cyan-400/20 text-cyan-100' : 'border-white/15 bg-[#34363c]'}`}
+            onClick={() => {
+              if (spec.retakeEnabled) patchSpec({ retakeEnabled: false })
+              else if (spec.retakeVideoMediaId) patchSpec({ retakeEnabled: true })
+              else retakeUploadInputRef.current?.click()
+            }}
+          >
+            ↻ Retake Mode
+          </button>
+          <button
+            type="button"
+            title="吸附 S"
+            className={`rounded border px-2.5 py-1.5 ${magneticFill ? 'border-cyan-300/50 bg-cyan-400/20 text-cyan-100' : 'border-white/15 bg-[#34363c]'}`}
+            onClick={toggleMagneticFill}
+          >
+            🧲
+          </button>
+          <button type="button" title="设置入点 I" className="rounded border border-white/15 bg-[#34363c] px-2.5 py-1.5" onClick={markRangeStart}>{'{'}</button>
+          <button type="button" title="设置出点 O" className="rounded border border-white/15 bg-[#34363c] px-2.5 py-1.5" onClick={markRangeEnd}>{'}'}</button>
+          <button type="button" title="标记选择 X" className="rounded border border-white/15 bg-[#34363c] px-2.5 py-1.5" onClick={markSelectedSegments}>{'{ }'}</button>
+          <button type="button" title="快捷键" className="rounded border border-white/15 bg-[#34363c] px-2.5 py-1.5" onClick={() => setHelpOpen(true)}>?</button>
+          <button type="button" title="设置" className="rounded border border-white/15 bg-[#34363c] px-2.5 py-1.5" onClick={() => setAdvancedOpen((current) => !current)}>⚙</button>
+        </div>
+      </div>
+
+      <div className="min-h-[570px]">
+        <aside className={sourceDrawerOpen
+          ? 'border-b border-[var(--glass-stroke-base)] bg-[#202126] p-3'
+          : 'hidden'}>
           <div className="flex items-center justify-between gap-2">
             <div className="text-xs font-semibold uppercase tracking-wide text-[var(--glass-text-secondary)]">
               {t('mediaPool')}
@@ -1783,7 +1961,7 @@ function DirectorStoryboardEditor({
               }}
             />
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-1">
+          <div className="hidden">
             <GlassButton size="sm" variant="ghost" loading={uploadMutation.isPending} onClick={() => uploadInputRef.current?.click()}>
               ＋ {t('uploadImage')}
             </GlassButton>
@@ -1800,11 +1978,7 @@ function DirectorStoryboardEditor({
               ↻ {t('uploadRetake')}
             </GlassButton>
             <GlassButton size="sm" variant="ghost" disabled={spec.segments.length >= 64} onClick={() => {
-              const created = createSegment(undefined, playheadSeconds)
-              created.type = 'text'
-              created.guideStrength = 0
-              setSpec((current) => ({ ...current, segments: sortTimelineSegments([...current.segments, created]) }))
-              setDirty(true)
+              addTextSegment()
             }}>
               ＋ 纯提示词
             </GlassButton>
@@ -1829,7 +2003,7 @@ function DirectorStoryboardEditor({
               multiple
               onChange={(event) => {
                 for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 64 - (spec.motionSegments?.length ?? 0)))) {
-                  uploadMutation.mutate({ file, track: file.type.startsWith('image/') ? 'motionImage' : 'motion' })
+                  uploadMutation.mutate({ file, track: isImageFile(file) ? 'motionImage' : 'motion' })
                 }
                 event.target.value = ''
               }}
@@ -1838,7 +2012,7 @@ function DirectorStoryboardEditor({
               ref={audioUploadInputRef}
               className="hidden"
               type="file"
-              accept="audio/wav,audio/mpeg,audio/ogg,audio/flac"
+              accept="audio/*,.aac,.flac,.m4a,.mp3,.ogg,.wav,.webm"
               multiple
               onChange={(event) => {
                 for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 64 - (spec.audioSegments?.length ?? 0)))) {
@@ -1851,7 +2025,7 @@ function DirectorStoryboardEditor({
               ref={retakeUploadInputRef}
               className="hidden"
               type="file"
-              accept="video/mp4,video/webm"
+              accept="video/*,.avi,.m4v,.mkv,.mov,.mp4,.webm"
               onChange={(event) => {
                 const file = event.target.files?.[0]
                 if (file) uploadMutation.mutate({ file, track: 'retake' })
@@ -1879,13 +2053,13 @@ function DirectorStoryboardEditor({
             </div>
           )}
 
-          <div className="mt-3 grid max-h-[390px] grid-cols-2 gap-2 overflow-y-auto pr-1 lg:grid-cols-1 xl:grid-cols-2">
+          <div className="mt-3 flex max-w-full gap-2 overflow-x-auto pb-2">
             {sources.map((source) => (
               <button
                 key={source.key}
                 type="button"
                 draggable
-                className="rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] p-1.5 text-left transition hover:border-[var(--glass-stroke-strong)]"
+                className="w-[128px] min-w-[128px] rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] p-1.5 text-left transition hover:border-[var(--glass-stroke-strong)]"
                 onDragStart={(event) => writeSourceDrag(event, source)}
                 onClick={() => appendSource(source)}
               >
@@ -1899,7 +2073,7 @@ function DirectorStoryboardEditor({
         </aside>
 
         <main className="min-w-0 p-3 md:p-4">
-          <div className="mb-3 grid gap-3 rounded-xl border border-white/10 bg-[#111318] p-3 md:grid-cols-[minmax(280px,0.7fr)_minmax(280px,1fr)]">
+          <div className={`${previewOpen ? 'grid' : 'hidden'} mb-3 gap-3 rounded-xl border border-white/10 bg-[#111318] p-3 md:grid-cols-[minmax(280px,0.7fr)_minmax(280px,1fr)]`}>
             <div className="relative aspect-video overflow-hidden rounded-lg bg-black shadow-inner">
               {spec.retakeEnabled && spec.retakeVideoUrl ? (
                 <video
@@ -2715,11 +2889,7 @@ function DirectorStoryboardEditor({
                   setContextMenu(null)
                 }}>粘贴片段</button>
                 <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
-                  const created = createSegment(undefined, contextMenu.timelineSeconds)
-                  created.type = 'text'
-                  created.guideStrength = 0
-                  setSpec((current) => ({ ...current, segments: sortTimelineSegments([...current.segments, created]) }))
-                  setDirty(true)
+                  addTextSegment(contextMenu.timelineSeconds)
                   setContextMenu(null)
                 }}>＋ 纯提示词片段</button>
                 <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
@@ -2776,27 +2946,33 @@ export default function LtxDirectorWorkspace({
     () => videoModels.filter((model) => model.workflowFeatures?.ltxDirector === true),
     [videoModels],
   )
+  const episodeStoryboard = useMemo(
+    () => buildEpisodeDirectorStoryboard(storyboards),
+    [storyboards],
+  )
 
   return (
     <div className="space-y-4">
       <div className="glass-surface-soft rounded-xl p-4">
         <h2 className="text-base font-semibold text-[var(--glass-text-primary)]">LTX Director</h2>
-        <p className="mt-1 text-sm text-[var(--glass-text-tertiary)]">{t('description')}</p>
+        <p className="mt-1 text-sm text-[var(--glass-text-tertiary)]">
+          {t('description')} · 整集单一时间线 · {storyboards.length} 组分镜
+        </p>
       </div>
-      {storyboards.map((storyboard, index) => (
+      {episodeStoryboard && (
         <DirectorStoryboardEditor
-          key={storyboard.id}
+          key={episodeStoryboard.id}
           projectId={projectId}
           episodeId={episodeId}
-          storyboard={storyboard}
-          storyboardIndex={index}
-          displayNumber={storyboard.groupSequence ?? (index + 1)}
+          storyboard={episodeStoryboard}
+          storyboardIndex={Math.max(0, storyboards.length - 1)}
+          displayNumber={1}
           clips={clips}
           models={directorModels}
           allStoryboards={storyboards}
           videoRatio={videoRatio}
         />
-      ))}
+      )}
     </div>
   )
 }
