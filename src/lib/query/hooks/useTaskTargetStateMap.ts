@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { queryKeys } from '../keys'
 import type { TaskIntent } from '@/lib/task/intent'
@@ -121,6 +121,22 @@ function shouldTraceMergeTarget(targetType: string) {
   return targetType === 'NovelPromotionPanel'
 }
 
+function isTerminalPhase(phase: TaskTargetState['phase']) {
+  return phase === 'completed' || phase === 'failed'
+}
+
+function terminalStateIsAtLeastAsFresh(
+  current: TaskTargetState,
+  runtime: TaskTargetOverlayMap[string],
+) {
+  if (!isTerminalPhase(current.phase)) return false
+  const currentUpdatedAt = current.updatedAt ? Date.parse(current.updatedAt) : Number.NaN
+  const runtimeUpdatedAt = runtime.updatedAt ? Date.parse(runtime.updatedAt) : Number.NaN
+  return Number.isFinite(currentUpdatedAt)
+    && Number.isFinite(runtimeUpdatedAt)
+    && currentUpdatedAt >= runtimeUpdatedAt
+}
+
 function logMergeDecision(params: {
   projectId: string | null | undefined
   key: string
@@ -130,6 +146,7 @@ function logMergeDecision(params: {
   | 'overlay_phase_ignored'
   | 'overlay_task_type_mismatch'
   | 'server_processing_authoritative'
+  | 'server_terminal_authoritative'
   runtimePhase: string | null
   runtimeTaskId: string | null
   runtimeTaskType: string | null
@@ -312,8 +329,26 @@ export function useTaskTargetStateMap(
     initialData: {},
     queryFn: async () => ({}),
   })
+  const [overlayClock, setOverlayClock] = useState(0)
+
+  // Optimistic overlays are not backed by a network query, so their TTL does
+  // not cause a render by itself. Wake the hook at the nearest expiry to avoid
+  // leaving a missed terminal event displayed as "generating" forever.
+  useEffect(() => {
+    const now = Date.now()
+    const nextExpiry = Object.values(overlayQuery.data || {})
+      .map((state) => state.expiresAt)
+      .filter((expiresAt) => Number.isFinite(expiresAt) && expiresAt > now)
+      .sort((left, right) => left - right)[0]
+    if (!nextExpiry) return
+    const timer = setTimeout(() => {
+      setOverlayClock((current) => current + 1)
+    }, Math.max(1, nextExpiry - now + 1))
+    return () => clearTimeout(timer)
+  }, [overlayClock, overlayQuery.data])
 
   const mergedByKey = useMemo(() => {
+    void overlayClock
     const map = new Map<string, TaskTargetState>()
     for (const state of query.data || []) {
       map.set(stateKey(state.targetType, state.targetId), state)
@@ -390,6 +425,21 @@ export function useTaskTargetStateMap(
           }
           continue
         }
+        if (terminalStateIsAtLeastAsFresh(current, runtime)) {
+          if (shouldTraceMergeTarget(target.targetType)) {
+            logMergeDecision({
+              projectId,
+              key,
+              decision: 'server_terminal_authoritative',
+              runtimePhase: runtime.phase,
+              runtimeTaskId: runtime.runningTaskId,
+              runtimeTaskType: runtime.runningTaskType,
+              currentPhase: current.phase,
+              whitelist: target.types || [],
+            })
+          }
+          continue
+        }
       }
       map.set(key, {
         ...(current || buildIdleState(target)),
@@ -413,7 +463,7 @@ export function useTaskTargetStateMap(
       }
     }
     return map
-  }, [normalizedTargets, overlayQuery.data, projectId, query.data])
+  }, [normalizedTargets, overlayClock, overlayQuery.data, projectId, query.data])
 
   const mergedData = useMemo(() => {
     return normalizedTargets.map((target) =>

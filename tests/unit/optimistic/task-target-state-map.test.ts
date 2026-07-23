@@ -27,7 +27,9 @@ vi.mock('react', async () => {
   const actual = await vi.importActual<typeof import('react')>('react')
   return {
     ...actual,
+    useEffect: () => undefined,
     useMemo: <T,>(factory: () => T) => factory(),
+    useState: <T,>(initial: T) => [initial, vi.fn()],
   }
 })
 
@@ -190,7 +192,7 @@ describe('task target state map behavior', () => {
     expect(state?.runningTaskType).toBe('VIDEO_PANEL')
   })
 
-  it('allows active overlay to override completed state even with timestamp skew', async () => {
+  it('keeps a newer completed server state authoritative over a stale active overlay', async () => {
     runtime.apiStates = [
       {
         targetType: 'NovelPromotionPanel',
@@ -232,9 +234,53 @@ describe('task target state map behavior', () => {
     ])
 
     const state = result.getState('NovelPromotionPanel', 'panel-3')
-    expect(state?.phase).toBe('queued')
-    expect(state?.runningTaskId).toBe('task-overlay-old')
-    expect(state?.runningTaskType).toBe('VIDEO_PANEL')
+    expect(state?.phase).toBe('completed')
+    expect(state?.runningTaskId).toBeNull()
+  })
+
+  it('keeps a newer failed server state authoritative over a stale active overlay', async () => {
+    runtime.apiStates = [{
+      targetType: 'NovelPromotionStoryboard',
+      targetId: 'storyboard-1',
+      phase: 'failed',
+      runningTaskId: null,
+      runningTaskType: 'storyboard_director_video',
+      intent: 'generate',
+      hasOutputAtStart: true,
+      progress: null,
+      stage: 'comfy_waiting_capacity',
+      stageLabel: '等待节点',
+      lastError: { code: 'NETWORK_ERROR', message: 'Queue job already terminated' },
+      updatedAt: '2026-07-23T07:04:17.338Z',
+    }]
+    runtime.overlayStates = {
+      'NovelPromotionStoryboard:storyboard-1': {
+        targetType: 'NovelPromotionStoryboard',
+        targetId: 'storyboard-1',
+        phase: 'processing',
+        runningTaskId: 'task-stale',
+        runningTaskType: 'storyboard_director_video',
+        intent: 'generate',
+        hasOutputAtStart: true,
+        progress: 25,
+        stage: 'comfy_running',
+        stageLabel: '生成中',
+        updatedAt: '2026-07-23T03:00:00.000Z',
+        lastError: null,
+        expiresAt: Date.now() + 30_000,
+      },
+    }
+
+    const { useTaskTargetStateMap } = await import('@/lib/query/hooks/useTaskTargetStateMap')
+    const result = useTaskTargetStateMap('project-1', [{
+      targetType: 'NovelPromotionStoryboard',
+      targetId: 'storyboard-1',
+      types: ['storyboard_director_video'],
+    }])
+
+    const state = result.getState('NovelPromotionStoryboard', 'storyboard-1')
+    expect(state?.phase).toBe('failed')
+    expect(state?.lastError?.message).toBe('Queue job already terminated')
   })
 
   it('matches task type whitelist case-insensitively', async () => {
