@@ -372,6 +372,7 @@ describe('ComfyUI database assignment CAS', () => {
         status: { in: [
           'leased', 'uploading', 'submitting', 'submitted', 'running', 'transferring', 'reconciling',
         ] },
+        task: { status: { in: ['queued', 'processing'] } },
       },
     })
     expect(updateConnection).not.toHaveBeenCalled()
@@ -389,6 +390,7 @@ describe('ComfyUI database assignment CAS', () => {
         id: 'request-1', userId: 'user-1',
         status: { in: ['waiting_capacity', 'blocked_no_compatible_instance'] },
         connectionId: null, leaseId: null,
+        task: { status: { in: ['queued', 'processing'] } },
       },
       data: {
         status: 'leased', connectionId: 'connection-1', leaseId: 'lease-1',

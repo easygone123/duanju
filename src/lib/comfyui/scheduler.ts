@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { redis } from '@/lib/redis'
+import { TASK_STATUS } from '@/lib/task/types'
 
 import { comfyHealthKey } from './health'
 import {
@@ -17,6 +18,7 @@ import {
 } from './types'
 
 const SCHEDULABLE_STATUSES = ['waiting_capacity', 'blocked_no_compatible_instance'] as const
+const ACTIVE_PARENT_TASK_STATUSES = [TASK_STATUS.QUEUED, TASK_STATUS.PROCESSING] as const
 
 export interface ComfySchedulableRequest {
   id: string
@@ -191,7 +193,11 @@ export function createDefaultComfySchedulerDependencies(
   return {
     listSchedulableRequests: async (userId) => {
       const records = await prisma.comfyGenerationRequest.findMany({
-        where: { userId, status: { in: [...SCHEDULABLE_STATUSES] } },
+        where: {
+          userId,
+          status: { in: [...SCHEDULABLE_STATUSES] },
+          task: { status: { in: [...ACTIVE_PARENT_TASK_STATUSES] } },
+        },
         include: { task: { select: { priority: true } } },
         orderBy: [{ queuedAt: 'asc' }, { id: 'asc' }],
       })
@@ -263,6 +269,7 @@ export async function assignComfyRequestWithStore(
           connectionId: input.connectionId,
           id: { not: input.requestId },
           status: { in: [...COMFY_ACTIVE_REQUEST_STATUSES] },
+          task: { status: { in: [...ACTIVE_PARENT_TASK_STATUSES] } },
         },
       })
       if (activeRequests > 0) throw CONNECTION_BUSY
@@ -276,6 +283,7 @@ export async function assignComfyRequestWithStore(
           id: input.requestId, userId: input.userId,
           status: { in: [...SCHEDULABLE_STATUSES] },
           connectionId: null, leaseId: null,
+          task: { status: { in: [...ACTIVE_PARENT_TASK_STATUSES] } },
         },
         data: {
           status: 'leased', connectionId: input.connectionId, leaseId: input.leaseId,
