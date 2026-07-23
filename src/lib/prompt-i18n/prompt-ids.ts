@@ -33,6 +33,7 @@ export const PROMPT_IDS = {
   NP_VOICE_ANALYSIS: 'np_voice_analysis',
   VIRAL_REPORT_AGGREGATION: 'viral_report_aggregation',
   VIRAL_SHOT_ANALYSIS: 'viral_shot_analysis',
+  VIRAL_AUDIO_TRANSCRIPTION: 'viral_audio_transcription',
   VIRAL_STORYBOARD_GENERATION: 'viral_storyboard_generation',
 } as const
 

@@ -129,6 +129,17 @@ export class ComfyClient {
     return this.requestJson('object_info', { method: 'GET', signal }, COMFY_ERROR_CODE.CONNECTION_OFFLINE)
   }
 
+  postBerniniDirector<T>(
+    endpoint: 'enhance_models' | 'get_template' | 'enhance' | 'unload_model',
+    payload: Record<string, unknown>,
+  ): Promise<T> {
+    return this.requestJson(
+      `bernini/director/${endpoint}`,
+      { method: 'POST', body: JSON.stringify(payload), headers: jsonHeaders() },
+      COMFY_ERROR_CODE.CONNECTION_OFFLINE,
+    )
+  }
+
   getModels(folder: string, signal?: AbortSignal): Promise<string[]> {
     return this.requestJson(
       `models/${encodeURIComponent(folder)}`,

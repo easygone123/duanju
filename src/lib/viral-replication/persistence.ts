@@ -11,6 +11,18 @@ type PersistenceTransaction = {
     } | null>
     update(args: Record<string, unknown>): Promise<unknown>
   }
+  novelPromotionCharacter: {
+    create(args: Record<string, unknown>): Promise<{ id: string }>
+  }
+  characterAppearance: {
+    create(args: Record<string, unknown>): Promise<unknown>
+  }
+  novelPromotionLocation: {
+    create(args: Record<string, unknown>): Promise<{ id: string }>
+  }
+  locationImage: {
+    create(args: Record<string, unknown>): Promise<unknown>
+  }
   novelPromotionClip: {
     create(args: Record<string, unknown>): Promise<{ id: string }>
   }
@@ -39,6 +51,8 @@ export async function persistViralStoryboardGeneration(
     projectId: string
     episodeId: string
     generation: ViralStoryboardGenerationV1
+    transcriptText?: string | null
+    sourceAudioMediaId?: string | null
   },
   database: PersistencePrisma = prisma as unknown as PersistencePrisma,
 ): Promise<void> {
@@ -65,8 +79,57 @@ export async function persistViralStoryboardGeneration(
         name: input.generation.title,
         description: input.generation.synopsis,
         novelText: input.generation.novelText,
+        srtContent: input.transcriptText || null,
+        audioMediaId: input.sourceAudioMediaId || undefined,
       },
     })
+
+    for (const character of input.generation.characters) {
+      const created = await tx.novelPromotionCharacter.create({
+        data: {
+          novelPromotionProjectId: episode.novelPromotionProjectId,
+          name: character.name,
+          introduction: character.description,
+          profileData: JSON.stringify({
+            visual_keywords: [character.description],
+            expected_appearances: [{
+              appearanceIndex: 0,
+              description: character.description,
+            }],
+          }),
+          profileConfirmed: false,
+        },
+        select: { id: true },
+      })
+      await tx.characterAppearance.create({
+        data: {
+          characterId: created.id,
+          appearanceIndex: 0,
+          changeReason: '爆款原声重绘初始形象',
+          description: character.description,
+          descriptions: JSON.stringify([character.description]),
+        },
+      })
+    }
+
+    for (const location of input.generation.locations) {
+      const created = await tx.novelPromotionLocation.create({
+        data: {
+          novelPromotionProjectId: episode.novelPromotionProjectId,
+          name: location.name,
+          summary: location.description,
+        },
+        select: { id: true },
+      })
+      await tx.locationImage.create({
+        data: {
+          locationId: created.id,
+          imageIndex: 0,
+          description: location.description,
+          isSelected: false,
+        },
+      })
+    }
 
     for (const generatedStoryboard of input.generation.storyboards) {
       const duration = Math.ceil(generatedStoryboard.panels.reduce(
@@ -107,9 +170,19 @@ export async function persistViralStoryboardGeneration(
             duration: panel.durationSeconds,
             shotType: panel.shotType,
             cameraMove: panel.cameraMove,
+            location: panel.location,
+            characters: panel.characters.length > 0 ? JSON.stringify(panel.characters) : null,
+            srtSegment: panel.audioText,
+            srtStart: panel.startMs / 1_000,
+            srtEnd: panel.endMs / 1_000,
             description: panel.description,
             imagePrompt: panel.imagePrompt,
             videoPrompt: panel.videoPrompt,
+            hasDialogue: panel.audioText !== null,
+            dialogueText: panel.audioText,
+            includeDialogueInVideoPrompt: false,
+            estimatedDuration: panel.durationSeconds,
+            durationOverride: panel.durationSeconds,
           },
         })
       }

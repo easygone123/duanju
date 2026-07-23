@@ -205,6 +205,9 @@ export interface StoryboardEpisodeStagePayload {
 export interface VideosEpisodeStagePayload {
   stage: 'videos'
   episode: EpisodeStageCore & {
+    audioUrl: string | null
+    audioMediaId: string | null
+    audioMedia?: MediaRef | null
     clips: VideoEpisodeStageClip[]
     storyboards: VideoEpisodeStageStoryboard[]
   }

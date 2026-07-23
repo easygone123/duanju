@@ -38,6 +38,9 @@ export default function EditorStageRoute() {
 
   const sourceProject = useMemo(() => {
     if (!episodeId) return null
+    const videoEpisode = stageQuery.data?.stage === 'videos'
+      ? stageQuery.data.episode
+      : null
 
     const storyboards = [...(stageQuery.storyboards as unknown as VideoEpisodeStageStoryboard[])]
       .sort((left, right) => {
@@ -61,6 +64,7 @@ export default function EditorStageRoute() {
             ?? panel.duration
             ?? undefined,
           hasEmbeddedDialogueAudio: !!panel.lipSyncVideoUrl,
+          subtitleText: panel.srtSegment || undefined,
         }))
     ))
 
@@ -69,8 +73,16 @@ export default function EditorStageRoute() {
       matchedPanelId: (voiceLine as typeof voiceLine & { matchedPanelId?: string | null }).matchedPanelId,
     }))
 
-    return createProjectFromPanels(episodeId, panels, voiceLines)
-  }, [episodeId, stageQuery.storyboards, voiceLinesQuery.data?.voiceLines])
+    return createProjectFromPanels(episodeId, panels, voiceLines, {
+      originalAudioUrl: videoEpisode?.audioUrl,
+      originalAudioDurationSeconds: videoEpisode?.audioMedia?.durationMs
+        ? videoEpisode.audioMedia.durationMs / 1_000
+        : videoEpisode?.clips.reduce(
+            (total, clip) => total + (clip.duration || 0),
+            0,
+          ),
+    })
+  }, [episodeId, stageQuery.data, stageQuery.storyboards, voiceLinesQuery.data?.voiceLines])
 
   useEffect(() => {
     if (!episodeId || !sourceProject || stageQuery.data === undefined || voiceLinesQuery.isLoading) return

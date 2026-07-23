@@ -181,7 +181,9 @@ async function attachMediaFieldsToStoryboard<T extends Record<string, unknown>>(
 }
 
 function collectStageMediaCandidates(projectLike: Record<string, unknown>): MediaResolveCandidate[] {
-  const candidates: MediaResolveCandidate[] = []
+  const candidates: MediaResolveCandidate[] = [
+    { mediaId: projectLike.audioMediaId, legacyValue: projectLike.audioUrl },
+  ]
   const storyboards = (projectLike.storyboards as Array<Record<string, unknown>>) || []
   for (const storyboard of storyboards) {
     candidates.push(
@@ -210,12 +212,19 @@ function collectStageMediaCandidates(projectLike: Record<string, unknown>): Medi
 
 export async function attachMediaFieldsToStagePayload<T extends Record<string, unknown>>(projectLike: T) {
   const resolver = await createReadOnlyMediaResolver(collectStageMediaCandidates(projectLike))
+  const audioMedia = await resolver.resolve(projectLike.audioMediaId, projectLike.audioUrl)
   const storyboards = await Promise.all(
     ((projectLike.storyboards as Array<Record<string, unknown>>) || []).map((storyboard) => (
       attachMediaFieldsToStoryboard(storyboard, resolver)
     )),
   )
-  return { ...projectLike, storyboards }
+  return {
+    ...projectLike,
+    media: audioMedia,
+    audioMedia,
+    audioUrl: audioMedia?.url || projectLike.audioUrl || null,
+    storyboards,
+  }
 }
 
 async function attachMediaFieldsToProjectCharacter<T extends Record<string, unknown>>(character: T) {

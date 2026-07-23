@@ -25,6 +25,8 @@ export type FfmpegBoundaryErrorCode =
   | 'FFPROBE_INVALID_DURATION'
   | 'FRAME_ARTIFACT_INVALID'
   | 'FRAME_ARTIFACT_TOO_LARGE'
+  | 'AUDIO_ARTIFACT_INVALID'
+  | 'AUDIO_ARTIFACT_TOO_LARGE'
   | 'UNSUPPORTED_CONTAINER'
   | 'UNSUPPORTED_CONTAINER_BRAND'
 
@@ -84,6 +86,7 @@ export const MAX_SCENE_TIMESTAMPS = 288
 export const MAX_FRAME_LONGEST_EDGE = 2_048
 export const MAX_FRAME_PIXELS = MAX_FRAME_LONGEST_EDGE * MAX_FRAME_LONGEST_EDGE
 export const MAX_FRAME_JPEG_BYTES = 8 * 1024 * 1024
+export const MAX_ANALYSIS_AUDIO_BYTES = 8 * 1024 * 1024
 const MAX_SCENE_TIMESTAMP_MS = 180_000
 const MAX_SCENE_LINE_BUFFER_CHARS = 16_384
 
@@ -708,4 +711,60 @@ export async function extractEmbeddedSubtitles(
   ])
   const text = stdout.trim()
   return text.length > 0 ? text : null
+}
+
+export async function extractAnalysisAudio(
+  sourcePath: string,
+  outputPath: string,
+  audioStreamIndex: number,
+  runner: CommandRunner = defaultCommandRunner,
+): Promise<void> {
+  assertAbsolutePath(sourcePath, 'sourcePath')
+  assertAbsolutePath(outputPath, 'outputPath')
+  assertStreamIndexValue(audioStreamIndex, 'audio stream index')
+
+  const temporaryPath = path.join(
+    path.dirname(outputPath),
+    `.${path.basename(outputPath)}.${randomUUID()}.tmp.mp3`,
+  )
+  let published = false
+  try {
+    await runner('ffmpeg', [
+      '-hide_banner', '-nostdin', '-loglevel', 'error', '-y',
+      '-i', sourcePath,
+      '-map', `0:${audioStreamIndex}`,
+      '-vn', '-sn',
+      '-ac', '1',
+      '-ar', '16000',
+      '-c:a', 'libmp3lame',
+      '-b:a', '64k',
+      temporaryPath,
+    ])
+
+    let artifact: Awaited<ReturnType<typeof fs.lstat>>
+    try {
+      artifact = await fs.lstat(temporaryPath)
+    } catch {
+      throw new FfmpegBoundaryError(
+        'AUDIO_ARTIFACT_INVALID',
+        'FFmpeg did not produce an analysis audio artifact',
+      )
+    }
+    if (!artifact.isFile() || artifact.size <= 0) {
+      throw new FfmpegBoundaryError(
+        'AUDIO_ARTIFACT_INVALID',
+        'FFmpeg produced an empty or non-regular analysis audio artifact',
+      )
+    }
+    if (artifact.size > MAX_ANALYSIS_AUDIO_BYTES) {
+      throw new FfmpegBoundaryError(
+        'AUDIO_ARTIFACT_TOO_LARGE',
+        `FFmpeg analysis audio artifact exceeds ${MAX_ANALYSIS_AUDIO_BYTES} bytes`,
+      )
+    }
+    await fs.rename(temporaryPath, outputPath)
+    published = true
+  } finally {
+    if (!published) await fs.rm(temporaryPath, { force: true })
+  }
 }

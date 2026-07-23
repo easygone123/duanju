@@ -173,6 +173,63 @@ async function prepare(request: NextRequest, projectId: string, body: RequestBod
   return { auth, storyboard, spec: { ...spec, videoModel: workflow.model }, ...workflow }
 }
 
+export const GET = apiHandler(async (
+  request: NextRequest,
+  context: { params: Promise<{ projectId: string }> },
+) => {
+  const { projectId } = await context.params
+  const auth = await requireProjectAuthLight(projectId)
+  if (isErrorResponse(auth)) return auth
+  const storyboardId = request.nextUrl.searchParams.get('storyboardId')?.trim() || ''
+  if (!storyboardId) throw new ApiError('INVALID_PARAMS', { code: 'BERNINI_DIRECTOR_REQUIRED' })
+  const storyboard = await loadOwnedStoryboard(projectId, auth.session.user.id, storyboardId)
+  const spec = parseBerniniDirectorSpec(storyboard.directorConfigJson)
+  if (!spec) return NextResponse.json({ media: [] })
+  const orders = collectBerniniDirectorMediaOrders(spec)
+  const panelMediaById = new Map(storyboard.episode.storyboards
+    .flatMap((item) => item.panels)
+    .flatMap((panel) => panel.imageMediaId ? [[panel.id, panel.imageMediaId] as const] : []))
+  const panelMediaIds = orders.imageKeys.flatMap((key) => (
+    key.startsWith('panel:') && panelMediaById.get(key.slice(6))
+      ? [panelMediaById.get(key.slice(6))!]
+      : []
+  ))
+  const explicitIds = [
+    ...orders.imageKeys.filter((key) => key.startsWith('media:')).map((key) => key.slice(6)),
+    ...orders.videoMediaIds,
+  ]
+  const ids = [...new Set([...panelMediaIds, ...explicitIds])]
+  const media = ids.length === 0 ? [] : await prisma.mediaObject.findMany({
+    where: { id: { in: ids } },
+    select: {
+      id: true,
+      publicId: true,
+      storageKey: true,
+      mimeType: true,
+      width: true,
+      height: true,
+      durationMs: true,
+    },
+  })
+  const explicit = new Set(explicitIds)
+  return NextResponse.json({
+    media: media.flatMap((item) => (
+      explicit.has(item.id)
+        && !isOwnedDirectorUploadStorageKey(item.storageKey, auth.session.user.id, projectId)
+        ? []
+        : [{
+            id: item.id,
+            url: `/m/${encodeURIComponent(item.publicId)}`,
+            filename: item.storageKey.split('/').pop() || item.id,
+            mimeType: item.mimeType,
+            width: item.width,
+            height: item.height,
+            durationMs: item.durationMs,
+          }]
+    )),
+  })
+})
+
 export const PUT = apiHandler(async (request: NextRequest, context: { params: Promise<{ projectId: string }> }) => {
   const { projectId } = await context.params
   const body = await request.json().catch(() => null) as RequestBody | null

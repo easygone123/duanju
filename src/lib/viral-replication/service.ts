@@ -491,6 +491,7 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
           novelPromotionProjectId: novelProject.id,
           episodeNumber: 1,
           name: '第 1 集',
+          audioMediaId: metadata.hasAudio ? media.id : null,
         },
       })
       const linked = await tx.viralReplication.updateMany({

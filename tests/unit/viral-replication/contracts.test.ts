@@ -72,6 +72,12 @@ const validGeneration = () => ({
       description: 'A careful night courier with a dry sense of humor.',
     },
   ],
+  locations: [
+    {
+      name: 'Rain-dark counter',
+      description: 'A narrow courier counter under cold midnight light.',
+    },
+  ],
   storyboards: [
     {
       sequence: 0,
@@ -79,9 +85,15 @@ const validGeneration = () => ({
       panels: [
         {
           panelIndex: 0,
+          sourceShotIndex: 0,
+          startMs: 0,
+          endMs: 1_500,
           durationSeconds: 1.5,
           shotType: 'close-up',
           cameraMove: 'locked-off',
+          location: 'Rain-dark counter',
+          characters: ['Lin'],
+          audioText: null,
           description: 'A glowing parcel lands on a rain-dark counter.',
           imagePrompt: 'Cinematic close-up of a glowing parcel on a wet counter',
           videoPrompt: 'The parcel lands and emits one soft pulse of light',

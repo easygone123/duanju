@@ -223,6 +223,10 @@ describe('episode stage data route', () => {
       }
 
       if (stage === 'videos') {
+        expect(body.episode).toMatchObject({
+          audioUrl: 'legacy-audio.mp3',
+          audioMediaId: 'audio-media-1',
+        })
         expect(body.episode.storyboards[0]).not.toHaveProperty('sheetPromptSnapshot')
         expect(body.episode.storyboards[0].panels[0]).toMatchObject({
           videoPrompt: 'first video', videoUrl: 'legacy-video-1.mp4', videoMediaId: 'video-media-1',

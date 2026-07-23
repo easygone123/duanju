@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { VIRAL_MAX_ANALYSIS_FRAMES, VIRAL_MAX_GENERATED_PANELS } from './constants'
+import { audioTextForRange, parseViralAudioCues } from './audio-timeline'
 
 const shortText = z.string().min(1).max(200)
 const mediumText = z.string().min(1).max(2_000)
@@ -55,9 +56,15 @@ export type ViralAnalysisReportV1 = z.infer<typeof viralAnalysisReportV1Schema>
 const viralStoryboardPanelV1Schema = z
   .object({
     panelIndex: z.number().int().nonnegative(),
+    sourceShotIndex: z.number().int().nonnegative().default(0),
+    startMs: z.number().int().nonnegative().default(0),
+    endMs: z.number().int().positive().default(1),
     durationSeconds: z.number().finite().positive().max(180),
     shotType: shortText,
     cameraMove: shortText,
+    location: shortText.default('未指定场景'),
+    characters: z.array(shortText).max(20).default([]),
+    audioText: mediumText.nullable().default(null),
     description: mediumText,
     imagePrompt: mediumText,
     videoPrompt: mediumText,
@@ -89,6 +96,17 @@ const viralStoryboardGenerationV1Schema = z
           .strict(),
       )
       .max(maxCharacters),
+    locations: z
+      .array(
+        z
+          .object({
+            name: shortText,
+            description: mediumText,
+          })
+          .strict(),
+      )
+      .max(100)
+      .default([]),
     storyboards: z.array(viralStoryboardV1Schema).min(1).max(maxStoryboards),
   })
   .strict()
@@ -142,12 +160,19 @@ export function parseViralAnalysisReport(
   return report
 }
 
-export function parseViralStoryboardGeneration(value: unknown): ViralStoryboardGenerationV1 {
+export function parseViralStoryboardGeneration(
+  value: unknown,
+  timeline?: {
+    report: ViralAnalysisReportV1
+    transcriptText?: string | null
+  },
+): ViralStoryboardGenerationV1 {
   const parsedGeneration = viralStoryboardGenerationV1Schema.parse(value)
   // Array order is canonical. Models commonly continue panel numbering across
   // storyboard groups (or use one-based numbering), which should not make an
   // otherwise valid generation fail. Normalize these derived indexes before
   // persistence so every storyboard has stable zero-based local panel indexes.
+  let globalPanelIndex = 0
   const generation: ViralStoryboardGenerationV1 = {
     ...parsedGeneration,
     storyboards: parsedGeneration.storyboards.map((storyboard, storyboardIndex) => ({
@@ -156,6 +181,7 @@ export function parseViralStoryboardGeneration(value: unknown): ViralStoryboardG
       panels: storyboard.panels.map((panel, panelIndex) => ({
         ...panel,
         panelIndex,
+        sourceShotIndex: globalPanelIndex++,
       })),
     })),
   }
@@ -169,6 +195,32 @@ export function parseViralStoryboardGeneration(value: unknown): ViralStoryboardG
       ['storyboards'],
       `generated panel count must not exceed ${VIRAL_MAX_GENERATED_PANELS}`,
     )
+  }
+
+  if (timeline) {
+    const panels = generation.storyboards.flatMap((storyboard) => storyboard.panels)
+    if (panels.length !== timeline.report.shots.length) {
+      throwValidationIssue(
+        ['storyboards'],
+        'generated panels must map one-to-one to the source audio shot timeline',
+      )
+    }
+    const cues = parseViralAudioCues(timeline.transcriptText)
+    const seenShotIndexes = new Set<number>()
+    for (const [panelOrder, panel] of panels.entries()) {
+      const shot = timeline.report.shots[panel.sourceShotIndex]
+      if (!shot || seenShotIndexes.has(panel.sourceShotIndex) || panel.sourceShotIndex !== panelOrder) {
+        throwValidationIssue(
+          ['storyboards', panel.sourceShotIndex],
+          'sourceShotIndex values must be unique, contiguous, and follow source timeline order',
+        )
+      }
+      seenShotIndexes.add(panel.sourceShotIndex)
+      panel.startMs = shot.startMs
+      panel.endMs = shot.endMs
+      panel.durationSeconds = (shot.endMs - shot.startMs) / 1_000
+      panel.audioText = audioTextForRange(cues, shot.startMs, shot.endMs)
+    }
   }
 
   return generation

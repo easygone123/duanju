@@ -49,6 +49,7 @@ export interface VideoClip {
     id: string
     src: string                    // COS URL
     durationInFrames: number       // 播放时长
+    muted?: boolean                // 原声音轨单独保留时，静音生成视频自身音轨
 
     // 素材内裁剪 (可选)
     trim?: {

@@ -10,6 +10,7 @@ import {
   defaultCommandRunner,
   detectSceneTimestamps,
   extractEmbeddedSubtitles,
+  extractAnalysisAudio,
   extractFrame,
   probeVideo,
   type CommandRunner,
@@ -34,6 +35,7 @@ export interface PreprocessViralVideoResult {
   metadata: VideoMetadata
   shots: PreprocessedViralShot[]
   transcriptText: string | null
+  analysisAudioPath: string | null
 }
 
 export interface PreprocessViralVideoOptions {
@@ -187,5 +189,13 @@ export async function preprocessViralVideo({
     if (transcriptText !== null) break
   }
 
-  return { metadata, shots, transcriptText }
+  let analysisAudioPath: string | null = null
+  const audioStream = metadata.audioStreams[0]
+  if (!transcriptText && audioStream) {
+    const candidatePath = path.join(outputDirectory, 'analysis-audio.mp3')
+    await extractAnalysisAudio(sourcePath, candidatePath, audioStream.index, runner)
+    analysisAudioPath = candidatePath
+  }
+
+  return { metadata, shots, transcriptText, analysisAudioPath }
 }

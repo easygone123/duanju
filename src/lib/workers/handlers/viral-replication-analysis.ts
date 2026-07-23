@@ -8,9 +8,11 @@ import { pipeline } from 'node:stream/promises'
 
 import { DelayedError, type Job } from 'bullmq'
 
+import { getProviderKey } from '@/lib/api-config'
 import { safeParseJson } from '@/lib/json-repair'
 import { getCompletionContent } from '@/lib/llm/completion-parts'
 import { createScopedLogger } from '@/lib/logging/core'
+import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { stablePublicIdFromStorageKey } from '@/lib/media/hash'
 import {
   runModelGatewayTextCompletion,
@@ -30,7 +32,9 @@ import {
 } from '@/lib/viral-replication/preprocess'
 import {
   buildViralReportAggregationPrompt,
+  buildViralAudioTranscriptionPrompt,
   buildViralShotAnalysisPrompt,
+  parseViralAudioTranscription,
   parseViralShotAnalysisBatch,
   type ViralShotAnalysisBatch,
 } from '@/lib/viral-replication/prompts'
@@ -467,6 +471,13 @@ function videoMetadataForPrompt(metadata: Awaited<ReturnType<typeof preprocessVi
   }
 }
 
+function supportsInlineAudioTranscription(model: string): boolean {
+  const parsed = parseModelKeyStrict(model)
+  if (!parsed) return false
+  const providerKey = getProviderKey(parsed.provider).toLowerCase()
+  return providerKey === 'google' || providerKey === 'gemini-compatible'
+}
+
 function assertAggregatedTimeline(
   report: ViralAnalysisReportV1,
   batchResults: ViralShotAnalysisBatch[],
@@ -541,7 +552,42 @@ export function createViralReplicationAnalysisHandler(
       const sourceStream = await dependencies.getObjectStream(replication.sourceVideoMedia.storageKey)
       await pipeline(sourceStream as Readable, createWriteStream(sourcePath, { flags: 'wx' }))
       const preprocessed = await dependencies.preprocess({ sourcePath, outputDirectory })
-      await dependencies.reportProgress(job, 35, {
+      let transcriptText = preprocessed.transcriptText
+      if (
+        !transcriptText
+        && preprocessed.analysisAudioPath
+        && supportsInlineAudioTranscription(model)
+      ) {
+        await dependencies.reportProgress(job, 38, {
+          stage: 'viral_audio_transcription',
+          stageLabel: '识别原声音频内容',
+          displayMode: 'detail',
+        })
+        try {
+          const audioBytes = await fs.readFile(preprocessed.analysisAudioPath)
+          const transcription = await dependencies.runVision({
+            userId: job.data.userId,
+            model,
+            prompt: buildViralAudioTranscriptionPrompt({
+              locale: job.data.locale,
+              durationMs: preprocessed.metadata.durationMs,
+            }),
+            imageUrls: [`data:audio/mpeg;base64,${audioBytes.toString('base64')}`],
+            options: {
+              temperature: 0,
+              projectId: replication.projectId || undefined,
+              action: 'viral_audio_transcription',
+            },
+          })
+          transcriptText = parseViralAudioTranscription(
+            getCompletionContent(transcription),
+            preprocessed.metadata.durationMs,
+          )
+        } catch (error: unknown) {
+          dependencies.warn('Failed to transcribe viral source audio; continuing with visual timing', error)
+        }
+      }
+      await dependencies.reportProgress(job, 40, {
         stage: 'viral_preprocess', stageLabel: '参考视频预处理完成', displayMode: 'detail',
         frameCount: preprocessed.shots.length,
       })
@@ -575,7 +621,7 @@ export function createViralReplicationAnalysisHandler(
             brief: replication.brief,
             videoMetadata: videoMetadataForPrompt(preprocessed.metadata),
             shots,
-            subtitleContext: preprocessed.transcriptText,
+            subtitleContext: transcriptText,
           }),
           imageUrls,
           options: {
@@ -618,7 +664,7 @@ export function createViralReplicationAnalysisHandler(
         where: executionWhere(execution),
         data: {
           reportJson: report,
-          transcriptText: preprocessed.transcriptText,
+          transcriptText,
           durationMs: preprocessed.metadata.durationMs,
           status: VIRAL_REPLICATION_STATUS.REVIEW_READY,
           analysisExecutionToken: null,

@@ -165,6 +165,7 @@ const ClipRenderer: React.FC<ClipRendererProps> = ({
             <Video
                 src={clip.src}
                 startFrom={clip.trim?.from || 0}
+                volume={clip.muted ? 0 : 1}
                 style={{
                     width: '100%',
                     height: '100%',

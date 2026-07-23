@@ -27,6 +27,7 @@ export interface BerniniDirectorSegmentSpec {
 export interface BerniniDirectorSpec {
   kind: 'bernini-director'
   version: number
+  timelineData?: Record<string, unknown>
   videoModel?: string
   taskType: BerniniDirectorTaskType
   timelineMode: BerniniDirectorTimelineMode
@@ -106,6 +107,17 @@ function mediaIds(value: unknown, max = 5) {
   )).map((item) => item.trim()))].slice(0, max)
 }
 
+function timelineRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      return record(JSON.parse(value))
+    } catch {
+      return null
+    }
+  }
+  return record(value)
+}
+
 function taskType(value: unknown, fallback: BerniniDirectorTaskType = 'rv2v') {
   const key = string(value).split(/\s+[—–-]\s+/, 1)[0] as BerniniDirectorTaskType
   return BERNINI_DIRECTOR_TASK_TYPES.includes(key) ? key : fallback
@@ -149,10 +161,12 @@ export function parseBerniniDirectorSpec(value: unknown): BerniniDirectorSpec | 
   if (segments.length === 0) return null
   const sourceVideoMediaId = string(raw.sourceVideoMediaId)
   const globalReferenceVideoMediaId = string(raw.globalReferenceVideoMediaId)
+  const timelineData = timelineRecord(raw.timelineData)
   const timelineMode: BerniniDirectorTimelineMode = raw.timelineMode === 'video' ? 'video' : 'prompt_batch'
   return {
     kind: 'bernini-director',
     version: BERNINI_DIRECTOR_SPEC_VERSION,
+    ...(timelineData ? { timelineData: structuredClone(timelineData) } : {}),
     ...(string(raw.videoModel) ? { videoModel: string(raw.videoModel) } : {}),
     taskType: taskType(raw.taskType),
     timelineMode,
@@ -218,6 +232,35 @@ export function collectBerniniDirectorMediaOrders(spec: BerniniDirectorSpec): Be
     segment.referenceMediaIds?.forEach((id) => add(imageKeys, `media:${id}`))
     add(videoMediaIds, segment.referenceVideoMediaId)
   }
+  const timeline = timelineRecord(spec.timelineData)
+  const addImageRecord = (value: unknown) => {
+    const item = record(value)
+    const panelId = string(item?.sourcePanelId)
+    const mediaId = string(item?.sourceMediaId)
+    if (panelId) add(imageKeys, `panel:${panelId}`)
+    if (mediaId) add(imageKeys, `media:${mediaId}`)
+  }
+  const addVideoRecord = (value: unknown) => {
+    const mediaId = string(record(value)?.sourceMediaId)
+    if (mediaId) add(videoMediaIds, mediaId)
+  }
+  if (timeline) {
+    const global = record(timeline.global)
+    for (const item of Array.isArray(global?.refs) ? global.refs : []) addImageRecord(item)
+    addImageRecord(global?.genImage)
+    addVideoRecord(global?.referenceVideo)
+    addVideoRecord(timeline.video)
+    for (const item of Array.isArray(timeline.videoClips) ? timeline.videoClips : []) {
+      addVideoRecord(item)
+    }
+    for (const value of Array.isArray(timeline.segments) ? timeline.segments : []) {
+      const segment = record(value)
+      if (!segment) continue
+      for (const item of Array.isArray(segment.refs) ? segment.refs : []) addImageRecord(item)
+      addImageRecord(segment.genImage)
+      addVideoRecord(segment.referenceVideo)
+    }
+  }
   return { imageKeys, videoMediaIds }
 }
 
@@ -255,23 +298,50 @@ export function renderBerniniDirectorNode(input: {
     index,
     imageFile: imageByKey.get(`media:${id}`) || '',
     imageB64: '',
+    sourceMediaId: id,
   })
   const videoRecord = (id?: string) => id && videoById.get(id)
     ? { fileName: videoById.get(id), videoFile: videoById.get(id), subfolder: '', type: 'input' }
     : {}
+  const imageRecord = (value: unknown) => {
+    const item = record(value) || {}
+    const panelId = string(item.sourcePanelId)
+    const mediaId = string(item.sourceMediaId)
+    const path = panelId
+      ? imageByKey.get(`panel:${panelId}`)
+      : mediaId ? imageByKey.get(`media:${mediaId}`) : ''
+    return path ? { ...item, imageFile: path, imageB64: '' } : item
+  }
+  const mappedVideoRecord = (value: unknown) => {
+    const item = record(value) || {}
+    const mediaId = string(item.sourceMediaId)
+    return mediaId ? { ...item, ...videoRecord(mediaId) } : item
+  }
   const totalFrames = spec.segments.reduce((latest, segment) => (
     Math.max(latest, segment.startFrame + segment.frameCount)
   ), 1)
-  let base: Record<string, unknown> = {}
-  if (typeof input.baseTimelineData === 'string' && input.baseTimelineData.trim()) {
-    try {
-      const parsed = JSON.parse(input.baseTimelineData)
-      if (record(parsed)) base = parsed
-    } catch {
-      base = {}
-    }
+  let base: Record<string, unknown> = spec.timelineData
+    ? structuredClone(spec.timelineData)
+    : {}
+  if (!spec.timelineData && typeof input.baseTimelineData === 'string' && input.baseTimelineData.trim()) {
+    base = timelineRecord(input.baseTimelineData) || {}
   }
+  const baseGlobal = record(base.global) || {}
+  const baseVideo = record(base.video) || {}
+  const baseVideoClips = Array.isArray(base.videoClips)
+    ? base.videoClips.filter((item): item is Record<string, unknown> => !!record(item))
+    : []
+  const baseSegments = Array.isArray(base.segments)
+    ? base.segments.filter((item): item is Record<string, unknown> => !!record(item))
+    : []
+  const baseSegmentById = new Map(baseSegments.flatMap((segment) => (
+    typeof segment.id === 'string' ? [[segment.id, segment] as const] : []
+  )))
   const sourceVideo = videoRecord(spec.sourceVideoMediaId)
+  const sourceVideoWithIdentity = Object.keys(sourceVideo).length ? {
+    sourceMediaId: spec.sourceVideoMediaId,
+    ...sourceVideo,
+  } : {}
   const timeline = {
     ...base,
     version: BERNINI_DIRECTOR_SPEC_VERSION,
@@ -292,23 +362,43 @@ export function renderBerniniDirectorNode(input: {
       continuityEnabled: spec.continuityEnabled,
       continuityOverlapFrames: spec.continuityOverlapFrames,
     },
-    videoClips: Object.keys(sourceVideo).length ? [{ id: 'source', ...sourceVideo }] : [],
+    videoClips: baseVideoClips.length
+      ? baseVideoClips.map(mappedVideoRecord)
+      : Object.keys(sourceVideo).length ? [{
+          id: 'source',
+          ...sourceVideoWithIdentity,
+        }] : [],
     video: {
-      id: 'source', ...sourceVideo, frames: [], frameMap: [], deletedSourceRanges: [],
+      ...baseVideo,
+      id: typeof baseVideo.id === 'string' ? baseVideo.id : 'source',
+      ...sourceVideoWithIdentity,
+      frames: Array.isArray(baseVideo.frames) ? baseVideo.frames : [],
+      frameMap: Array.isArray(baseVideo.frameMap) ? baseVideo.frameMap : [],
+      deletedSourceRanges: Array.isArray(baseVideo.deletedSourceRanges)
+        ? baseVideo.deletedSourceRanges
+        : [],
     },
     global: {
+      ...baseGlobal,
       taskType: taskLabel(spec.taskType),
       prompt: spec.globalPrompt,
       refs: spec.globalReferenceMediaIds.map(reference).filter((item) => item.imageFile),
-      referenceVideo: videoRecord(spec.globalReferenceVideoMediaId),
+      referenceVideo: {
+        ...videoRecord(spec.globalReferenceVideoMediaId),
+        ...(spec.globalReferenceVideoMediaId
+          ? { sourceMediaId: spec.globalReferenceVideoMediaId }
+          : {}),
+      },
       continuousReference: spec.continuousReference,
-      genImage: { imageFile: '' },
+      genImage: imageRecord(baseGlobal.genImage),
     },
     segments: spec.segments.map((segment) => {
+      const baseSegment = baseSegmentById.get(segment.id) || {}
       const sourceKey = segment.sourcePanelId
         ? `panel:${segment.sourcePanelId}`
         : segment.sourceMediaId ? `media:${segment.sourceMediaId}` : ''
       return {
+        ...baseSegment,
         id: segment.id,
         start: segment.startFrame,
         length: segment.frameCount,
@@ -317,8 +407,18 @@ export function renderBerniniDirectorNode(input: {
         negativePrompt: segment.negativePrompt || '',
         taskType: segment.taskType ? taskLabel(segment.taskType) : '',
         refs: (segment.referenceMediaIds || []).map(reference).filter((item) => item.imageFile),
-        referenceVideo: videoRecord(segment.referenceVideoMediaId),
-        genImage: { imageFile: imageByKey.get(sourceKey) || '' },
+        referenceVideo: {
+          ...videoRecord(segment.referenceVideoMediaId),
+          ...(segment.referenceVideoMediaId
+            ? { sourceMediaId: segment.referenceVideoMediaId }
+            : {}),
+        },
+        genImage: {
+          ...imageRecord(baseSegment.genImage),
+          imageFile: imageByKey.get(sourceKey) || '',
+          ...(segment.sourcePanelId ? { sourcePanelId: segment.sourcePanelId } : {}),
+          ...(segment.sourceMediaId ? { sourceMediaId: segment.sourceMediaId } : {}),
+        },
       }
     }),
     gen: { defaultFrameCount: 81 },
@@ -358,4 +458,117 @@ export function renderBerniniDirectorNode(input: {
       llm_custom_template: spec.llmCustomTemplate,
     },
   }
+}
+
+function referencedMediaIds(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return mediaIds(value.map((item) => record(item)?.sourceMediaId))
+}
+
+function referencedVideoMediaId(value: unknown) {
+  return string(record(value)?.sourceMediaId)
+}
+
+export function updateBerniniDirectorSpecFromTimeline(input: {
+  base: BerniniDirectorSpec
+  timelineData: unknown
+  widgetValues?: Record<string, unknown>
+}): BerniniDirectorSpec {
+  const timeline = timelineRecord(input.timelineData)
+  if (!timeline) return input.base
+  const widgets = input.widgetValues || {}
+  const global = record(timeline.global) || {}
+  const output = record(timeline.output) || {}
+  const video = record(timeline.video) || {}
+  const clips = Array.isArray(timeline.videoClips)
+    ? timeline.videoClips.map(record).filter((item): item is Record<string, unknown> => !!item)
+    : []
+  const rawSegments = Array.isArray(timeline.segments) ? timeline.segments : []
+  const segments = rawSegments.flatMap((value, index) => {
+    const segment = record(value)
+    if (!segment) return []
+    const genImage = record(segment.genImage) || {}
+    const sourcePanelId = string(genImage.sourcePanelId || segment.sourcePanelId)
+    const sourceMediaId = string(genImage.sourceMediaId || segment.sourceMediaId)
+    const referenceMediaIds = referencedMediaIds(segment.refs)
+    const referenceVideoMediaId = referencedVideoMediaId(segment.referenceVideo)
+    return [{
+      id: string(segment.id, `segment-${index + 1}`),
+      startFrame: integer(segment.start, 0, 0, 100_000),
+      frameCount: integer(segment.frameCount ?? segment.length, 81, 1, 8192),
+      prompt: string(segment.prompt),
+      ...(string(segment.negativePrompt) ? { negativePrompt: string(segment.negativePrompt) } : {}),
+      ...(string(segment.taskType) ? { taskType: taskType(segment.taskType) } : {}),
+      ...(sourcePanelId ? { sourcePanelId } : {}),
+      ...(sourceMediaId ? { sourceMediaId } : {}),
+      ...(referenceMediaIds.length ? { referenceMediaIds } : {}),
+      ...(referenceVideoMediaId ? { referenceVideoMediaId } : {}),
+    }]
+  })
+  if (!segments.length) return input.base
+  const sourceVideoMediaId = string(video.sourceMediaId || clips[0]?.sourceMediaId)
+  const globalReferenceVideoMediaId = referencedVideoMediaId(global.referenceVideo)
+  const candidate: BerniniDirectorSpec = {
+    ...input.base,
+    kind: 'bernini-director',
+    version: BERNINI_DIRECTOR_SPEC_VERSION,
+    timelineData: structuredClone(timeline),
+    taskType: taskType(global.taskType ?? widgets.task_type, input.base.taskType),
+    timelineMode: timeline.timelineMode === 'video' ? 'video' : 'prompt_batch',
+    editMode: timeline.editMode === 'global' ? 'global' : 'segment',
+    globalPrompt: string(global.prompt ?? widgets.global_prompt, input.base.globalPrompt),
+    negativePrompt: string(widgets.negative_prompt, input.base.negativePrompt),
+    sourceVideoMediaId: sourceVideoMediaId || undefined,
+    globalReferenceMediaIds: referencedMediaIds(global.refs),
+    globalReferenceVideoMediaId: globalReferenceVideoMediaId || undefined,
+    continuousReference: boolean(global.continuousReference, input.base.continuousReference),
+    frameRate: number(timeline.frameRate ?? widgets.frame_rate, input.base.frameRate, 1, 240),
+    width: integer(output.width ?? timeline.width ?? widgets.width, input.base.width, 16, 8192),
+    height: integer(output.height ?? timeline.height ?? widgets.height, input.base.height, 16, 8192),
+    refMaxSize: integer(output.longEdge ?? timeline.refMaxSize ?? widgets.ref_max_size, input.base.refMaxSize, 16, 8192),
+    outputMode: output.mode === 'fixed' ? 'fixed' : 'long_edge',
+    maxExportFrames: integer(output.maxExportFrames, input.base.maxExportFrames, 0, 8192),
+    exportMode: output.exportMode === 'segments' ? 'segments' : 'all',
+    continuityEnabled: boolean(output.continuityEnabled, input.base.continuityEnabled),
+    continuityOverlapFrames: integer(
+      output.continuityOverlapFrames,
+      input.base.continuityOverlapFrames,
+      1,
+      81,
+    ),
+    runSelectEnabled: boolean(timeline.runSelectEnabled, input.base.runSelectEnabled),
+    runSelection: Array.isArray(timeline.runSelection)
+      ? timeline.runSelection.map((item) => integer(item, -1, -1, segments.length - 1)).filter((item) => item >= 0)
+      : [],
+    steps: integer(widgets.steps, input.base.steps, 1, 200),
+    splitStep: integer(widgets.split_step, input.base.splitStep, 1, 199),
+    sampler: string(widgets.sampler, input.base.sampler),
+    scheduler: string(widgets.scheduler, input.base.scheduler),
+    highNoiseCfg: number(widgets.high_noise_cfg, input.base.highNoiseCfg, 0, 30),
+    highNoiseSeed: integer(widgets.high_noise_seed, input.base.highNoiseSeed, 0, Number.MAX_SAFE_INTEGER),
+    lowNoiseCfg: number(widgets.low_noise_cfg, input.base.lowNoiseCfg, 0, 30),
+    lowNoiseSeed: integer(widgets.low_noise_seed, input.base.lowNoiseSeed, 0, Number.MAX_SAFE_INTEGER),
+    clearVramBetweenSegments: boolean(
+      widgets.clear_vram_between_segments,
+      input.base.clearVramBetweenSegments,
+    ),
+    exportSourceImages: boolean(widgets.export_source_images, input.base.exportSourceImages),
+    llmAutoEnhance: boolean(widgets.llm_auto_enhance, input.base.llmAutoEnhance),
+    llmApiFormat: widgets.llm_api_format === '智谱 GLM' || widgets.llm_api_format === 'OpenAI Compatible'
+      ? widgets.llm_api_format
+      : 'Ollama',
+    llmOpenaiCompatMode: widgets.llm_openai_compat_mode === 'llama-swap' ? 'llama-swap' : '标准',
+    llmUrl: string(widgets.llm_url, input.base.llmUrl),
+    llmApiKey: string(widgets.llm_api_key, input.base.llmApiKey),
+    llmModel: string(widgets.llm_model, input.base.llmModel),
+    llmOutputLanguage: widgets.llm_output_language === 'English' ? 'English' : '中文',
+    llmCharacterFeatureEnhance: boolean(
+      widgets.llm_character_feature_enhance,
+      input.base.llmCharacterFeatureEnhance,
+    ),
+    llmUnloadAfter: boolean(widgets.llm_unload_after, input.base.llmUnloadAfter),
+    llmCustomTemplate: string(widgets.llm_custom_template, input.base.llmCustomTemplate),
+    segments,
+  }
+  return parseBerniniDirectorSpec(candidate) || input.base
 }

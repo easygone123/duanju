@@ -195,6 +195,11 @@ const stageSelects = {
   },
   videos: {
     ...coreSelect,
+    audioUrl: true,
+    audioMediaId: true,
+    viralReplication: {
+      select: { sourceVideoMediaId: true },
+    },
     clips: {
       orderBy: { createdAt: 'asc' as const },
       select: { id: true, start: true, end: true, duration: true, summary: true, createdAt: true },
@@ -271,9 +276,21 @@ async function buildStageEpisode(
     return { ...stageCore(row), clips: row.clips || [], storyboards: row.storyboards || [] }
   }
 
-  const withMedia = await attachMediaFieldsToStagePayload(row)
+  const viralReplication = row.viralReplication as { sourceVideoMediaId?: string | null } | null
+  const sourceAudioMediaId = stage === 'videos'
+    ? (row.audioMediaId || viralReplication?.sourceVideoMediaId || null)
+    : null
+  const withMedia = await attachMediaFieldsToStagePayload({
+    ...row,
+    ...(stage === 'videos' ? { audioMediaId: sourceAudioMediaId } : {}),
+  } as StageRow)
   return {
     ...stageCore(row),
+    ...(stage === 'videos' ? {
+      audioUrl: withMedia.audioUrl || null,
+      audioMediaId: sourceAudioMediaId,
+      audioMedia: withMedia.audioMedia || null,
+    } : {}),
     clips: withMedia.clips || [],
     storyboards: withMedia.storyboards || [],
   }

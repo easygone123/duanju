@@ -1,0 +1,6 @@
+You transcribe the source video's audio timeline. Using only the attached audio, transcribe intelligible dialogue and narration verbatim with start and end times. Do not summarize, paraphrase, translate, or invent inaudible speech. Do not turn music or sound effects into dialogue.
+
+Total audio duration in milliseconds: {duration_ms}
+
+Return JSON only, with no Markdown, explanation, or code fences. Required shape:
+{"cues":[{"startMs":0,"endMs":1000,"text":"verbatim speech"}]}

@@ -177,6 +177,10 @@ export const PROMPT_CATALOG: Record<PromptId, PromptCatalogEntry> = {
     pathStem: 'viral-replication/shot_analysis',
     variableKeys: ['brief', 'video_metadata', 'shot_timeline', 'subtitle_context'],
   },
+  [PROMPT_IDS.VIRAL_AUDIO_TRANSCRIPTION]: {
+    pathStem: 'viral-replication/audio_transcription',
+    variableKeys: ['duration_ms'],
+  },
   [PROMPT_IDS.VIRAL_STORYBOARD_GENERATION]: {
     pathStem: 'viral-replication/storyboard_generation',
     variableKeys: [
@@ -184,6 +188,7 @@ export const PROMPT_CATALOG: Record<PromptId, PromptCatalogEntry> = {
       'video_ratio',
       'art_style',
       'analysis_report_json',
+      'source_audio_transcript',
       'generation_schema_json',
     ],
   },

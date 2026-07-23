@@ -23,12 +23,14 @@ type GenerationRecord = {
   userId: string
   projectId: string | null
   episodeId: string | null
+  sourceVideoMediaId: string | null
   status: string
   brief: string
   videoRatio: string
   artStyle: string
   analysisModelSnapshot: string | null
   durationMs: number | null
+  transcriptText: string | null
   reportJson: unknown
 }
 
@@ -50,6 +52,8 @@ export type ViralReplicationGenerationDependencies = {
     projectId: string
     episodeId: string
     generation: ViralStoryboardGenerationV1
+    transcriptText: string | null
+    sourceAudioMediaId: string | null
   }): Promise<void>
   reportProgress(
     job: Job<TaskJobData>,
@@ -93,12 +97,14 @@ export function createViralReplicationGenerationHandler(
           userId: true,
           projectId: true,
           episodeId: true,
+          sourceVideoMediaId: true,
           status: true,
           brief: true,
           videoRatio: true,
           artStyle: true,
           analysisModelSnapshot: true,
           durationMs: true,
+          transcriptText: true,
           reportJson: true,
         },
       })
@@ -128,6 +134,7 @@ export function createViralReplicationGenerationHandler(
             videoRatio: replication.videoRatio,
             artStyle: replication.artStyle,
             report,
+            transcriptText: replication.transcriptText,
           }),
         }],
         options: {
@@ -138,6 +145,10 @@ export function createViralReplicationGenerationHandler(
       })
       const generation = parseViralStoryboardGeneration(
         safeParseJson(getCompletionContent(completion)),
+        {
+          report,
+          transcriptText: replication.transcriptText,
+        },
       )
       await dependencies.reportProgress(job, 90, {
         stage: 'viral_storyboard_persistence',
@@ -150,6 +161,8 @@ export function createViralReplicationGenerationHandler(
         projectId: replication.projectId,
         episodeId: replication.episodeId,
         generation,
+        transcriptText: replication.transcriptText,
+        sourceAudioMediaId: replication.sourceVideoMediaId,
       })
       return { replicationId: replication.id }
     } catch (error: unknown) {

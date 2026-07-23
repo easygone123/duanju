@@ -4,6 +4,7 @@ import {
   collectBerniniDirectorMediaOrders,
   parseBerniniDirectorSpec,
   renderBerniniDirectorNode,
+  updateBerniniDirectorSpecFromTimeline,
 } from '@/lib/comfyui/bernini-director'
 import {
   augmentBerniniDirectorContract,
@@ -114,6 +115,113 @@ describe('Bernini Director workflow compatibility', () => {
       steps: 6,
       split_step: 3,
       llm_auto_enhance: true,
+    })
+  })
+
+  it('round-trips upstream timeline fields and every uploaded media identity', () => {
+    const base = parseBerniniDirectorSpec(rawSpec)!
+    const timeline = {
+      version: 4,
+      timelineMode: 'video',
+      editMode: 'global',
+      frameRate: 30,
+      customUpstreamField: { keep: true },
+      video: { sourceMediaId: 'video-a', frameMap: [0, 2, 4] },
+      videoClips: [
+        { id: 'clip-a', sourceMediaId: 'video-a', trimStart: 2 },
+        { id: 'clip-b', sourceMediaId: 'video-b', trimStart: 7 },
+      ],
+      global: {
+        taskType: 'rv2v — 参考素材改视频',
+        prompt: 'global changed',
+        refs: [{ index: 0, sourceMediaId: 'global-image' }],
+        genImage: { sourceMediaId: 'global-source-image' },
+        referenceVideo: { sourceMediaId: 'global-video' },
+      },
+      output: {
+        mode: 'fixed',
+        width: 960,
+        height: 544,
+        longEdge: 960,
+        exportMode: 'segments',
+        continuityEnabled: true,
+        continuityOverlapFrames: 11,
+      },
+      runSelectEnabled: true,
+      runSelection: [0],
+      segments: [{
+        id: 'original-segment',
+        start: 0,
+        length: 72,
+        prompt: 'segment changed',
+        upstreamOnly: 'preserved',
+        refs: [{ index: 0, sourceMediaId: 'segment-image' }],
+        genImage: { sourcePanelId: 'panel-source' },
+        referenceVideo: { sourceMediaId: 'segment-video' },
+      }],
+    }
+    const updated = updateBerniniDirectorSpecFromTimeline({
+      base,
+      timelineData: timeline,
+      widgetValues: { steps: 9, split_step: 4 },
+    })
+    expect(updated).toMatchObject({
+      sourceVideoMediaId: 'video-a',
+      globalReferenceMediaIds: ['global-image'],
+      globalReferenceVideoMediaId: 'global-video',
+      width: 960,
+      height: 544,
+      steps: 9,
+      splitStep: 4,
+      segments: [{
+        id: 'original-segment',
+        sourcePanelId: 'panel-source',
+        referenceMediaIds: ['segment-image'],
+        referenceVideoMediaId: 'segment-video',
+      }],
+    })
+    expect(updated.timelineData).toMatchObject({
+      customUpstreamField: { keep: true },
+      videoClips: [
+        { sourceMediaId: 'video-a', trimStart: 2 },
+        { sourceMediaId: 'video-b', trimStart: 7 },
+      ],
+      segments: [{ upstreamOnly: 'preserved' }],
+    })
+    expect(collectBerniniDirectorMediaOrders(updated)).toEqual({
+      imageKeys: [
+        'media:global-image',
+        'panel:panel-source',
+        'media:segment-image',
+        'media:global-source-image',
+      ],
+      videoMediaIds: ['video-a', 'global-video', 'segment-video', 'video-b'],
+    })
+    const rendered = renderBerniniDirectorNode({
+      spec: updated,
+      imageFiles: [
+        { name: 'global.webp', subfolder: '', type: 'input' },
+        { name: 'panel.webp', subfolder: '', type: 'input' },
+        { name: 'segment.webp', subfolder: '', type: 'input' },
+        { name: 'global-source.webp', subfolder: '', type: 'input' },
+      ],
+      videoFiles: [
+        { name: 'a.mp4', subfolder: '', type: 'input' },
+        { name: 'global.mp4', subfolder: '', type: 'input' },
+        { name: 'segment.mp4', subfolder: '', type: 'input' },
+        { name: 'b.mp4', subfolder: '', type: 'input' },
+      ],
+    })
+    const roundTrip = JSON.parse(rendered.timelineData)
+    expect(roundTrip.customUpstreamField).toEqual({ keep: true })
+    expect(roundTrip.videoClips).toEqual([
+      expect.objectContaining({ trimStart: 2, videoFile: 'a.mp4' }),
+      expect.objectContaining({ trimStart: 7, videoFile: 'b.mp4' }),
+    ])
+    expect(roundTrip.global.genImage.imageFile).toBe('global-source.webp')
+    expect(roundTrip.segments[0]).toMatchObject({
+      upstreamOnly: 'preserved',
+      genImage: { imageFile: 'panel.webp' },
     })
   })
 

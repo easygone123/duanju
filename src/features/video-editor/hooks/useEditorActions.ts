@@ -26,6 +26,7 @@ export interface PanelData {
     description?: string
     duration?: number
     hasEmbeddedDialogueAudio?: boolean
+    subtitleText?: string
 }
 
 export interface EditorVoiceLineData {
@@ -45,7 +46,11 @@ export interface EditorVoiceLineData {
 export function createProjectFromPanels(
     episodeId: string,
     panels: PanelData[],
-    voiceLines?: EditorVoiceLineData[]
+    voiceLines?: EditorVoiceLineData[],
+    options?: {
+        originalAudioUrl?: string | null
+        originalAudioDurationSeconds?: number | null
+    },
 ): VideoEditorProject {
     // 过滤出有视频的面板
     const videoPanels = panels.filter(p => p.videoUrl)
@@ -60,7 +65,7 @@ export function createProjectFromPanels(
             return voiceLine.matchedStoryboardId === panel.storyboardId
                 && voiceLine.matchedPanelIndex === panel.panelIndex
         }) || []
-        const subtitleText = matchedVoices
+        const subtitleText = panel.subtitleText?.trim() || matchedVoices
             .map((voiceLine) => voiceLine.content.trim())
             .filter(Boolean)
             .join('\n')
@@ -72,9 +77,10 @@ export function createProjectFromPanels(
         return {
             id: `clip_${panel.id || panel.storyboardId}_${panel.panelIndex ?? index}`,
             src: panel.videoUrl!,
+            muted: !!options?.originalAudioUrl,
             durationInFrames: Math.round((panel.duration || 3) * 30), // 默认 3 秒，30fps
             attachment: {
-                audio: attachedVoice?.audioUrl ? {
+                audio: !options?.originalAudioUrl && attachedVoice?.audioUrl ? {
                     src: attachedVoice.audioUrl,
                     volume: 1,
                     voiceLineId: attachedVoice.id
@@ -96,6 +102,14 @@ export function createProjectFromPanels(
         }
     })
 
+    const timelineDurationInFrames = timeline.reduce(
+        (total, clip) => total + clip.durationInFrames,
+        0,
+    )
+    const originalAudioDurationInFrames = options?.originalAudioDurationSeconds
+        ? Math.round(options.originalAudioDurationSeconds * 30)
+        : timelineDurationInFrames
+
     return {
         id: `editor_${episodeId}_${Date.now()}`,
         episodeId,
@@ -106,7 +120,13 @@ export function createProjectFromPanels(
             height: 1080
         },
         timeline,
-        bgmTrack: []
+        bgmTrack: options?.originalAudioUrl ? [{
+            id: 'source-original-audio',
+            src: options.originalAudioUrl,
+            startFrame: 0,
+            durationInFrames: Math.max(1, originalAudioDurationInFrames),
+            volume: 1,
+        }] : [],
     }
 }
 
@@ -134,6 +154,7 @@ export function refreshEditorProjectMedia(
         return {
             ...savedClip,
             src: currentClip.src,
+            muted: currentClip.muted,
             attachment: currentAudio || currentSubtitle || savedAudio || savedSubtitle ? {
                 audio: currentAudio ? {
                     ...currentAudio,
@@ -154,9 +175,19 @@ export function refreshEditorProjectMedia(
     const legacyAutoCut = !savedProject.autoCut
         && timeline.some((clip) => !!clip.metadata.autoCutReason)
 
+    const currentOriginalAudio = sourceProject.bgmTrack.find(
+        (track) => track.id === 'source-original-audio',
+    )
+    const savedNonOriginalTracks = savedProject.bgmTrack.filter(
+        (track) => track.id !== 'source-original-audio',
+    )
+
     return {
         ...savedProject,
         timeline,
+        bgmTrack: currentOriginalAudio
+            ? [currentOriginalAudio, ...savedNonOriginalTracks]
+            : savedProject.bgmTrack,
         autoCut: savedProject.autoCut || (legacyAutoCut ? {
             status: 'completed',
             completedAt: '',

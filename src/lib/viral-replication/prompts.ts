@@ -26,6 +26,14 @@ const shotBatchSchema = z.object({
 
 export type ViralShotAnalysisBatch = z.infer<typeof shotBatchSchema>
 
+const audioTranscriptSchema = z.object({
+  cues: z.array(z.object({
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().positive(),
+    text: z.string().min(1).max(2_000),
+  }).strict()).max(1_000),
+}).strict()
+
 export const MAX_VIRAL_TRANSCRIPT_PROMPT_CHARS = 50_000
 export const MAX_VIRAL_MODEL_PROMPT_CHARS = 100_000
 
@@ -89,14 +97,21 @@ export const VIRAL_GENERATION_SCHEMA_JSON = JSON.stringify({
   synopsis: 'string',
   novelText: 'string',
   characters: [{ name: 'string', description: 'string' }],
+  locations: [{ name: 'string', description: 'string' }],
   storyboards: [{
     sequence: 0,
     summary: 'string',
     panels: [{
       panelIndex: 0,
+      sourceShotIndex: 0,
+      startMs: 0,
+      endMs: 2000,
       durationSeconds: 2,
       shotType: 'string',
       cameraMove: 'string',
+      location: 'string',
+      characters: ['string'],
+      audioText: 'string|null',
       description: 'string',
       imagePrompt: 'string',
       videoPrompt: 'string',
@@ -104,6 +119,45 @@ export const VIRAL_GENERATION_SCHEMA_JSON = JSON.stringify({
     }],
   }],
 })
+
+export function buildViralAudioTranscriptionPrompt(input: {
+  locale: Locale
+  durationMs: number
+}): string {
+  return assertPromptLength(buildPrompt({
+    promptId: PROMPT_IDS.VIRAL_AUDIO_TRANSCRIPTION,
+    locale: input.locale,
+    variables: {
+      duration_ms: String(input.durationMs),
+    },
+  }))
+}
+
+function srtTimestamp(timestampMs: number): string {
+  const hours = Math.floor(timestampMs / 3_600_000)
+  const minutes = Math.floor((timestampMs % 3_600_000) / 60_000)
+  const seconds = Math.floor((timestampMs % 60_000) / 1_000)
+  const milliseconds = timestampMs % 1_000
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, '0'))
+    .join(':') + `,${String(milliseconds).padStart(3, '0')}`
+}
+
+export function parseViralAudioTranscription(
+  completionText: string,
+  durationMs: number,
+): string | null {
+  const parsed = audioTranscriptSchema.parse(safeParseJson(completionText))
+  const cues = parsed.cues
+    .filter((cue) => cue.startMs < cue.endMs && cue.endMs <= durationMs)
+    .sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs)
+  if (cues.length === 0) return null
+  return cues.map((cue, index) => [
+    String(index + 1),
+    `${srtTimestamp(cue.startMs)} --> ${srtTimestamp(cue.endMs)}`,
+    cue.text.trim(),
+  ].join('\n')).join('\n\n')
+}
 
 export function buildViralShotAnalysisPrompt(input: {
   locale: Locale
@@ -160,6 +214,7 @@ export function buildViralStoryboardGenerationPrompt(input: {
   videoRatio: string
   artStyle: string
   report: ViralAnalysisReportV1
+  transcriptText: string | null
 }): string {
   return assertPromptLength(buildPrompt({
     promptId: PROMPT_IDS.VIRAL_STORYBOARD_GENERATION,
@@ -169,6 +224,13 @@ export function buildViralStoryboardGenerationPrompt(input: {
       video_ratio: input.videoRatio,
       art_style: input.artStyle,
       analysis_report_json: delimitUntrusted('ANALYSIS_REPORT', input.report),
+      source_audio_transcript: delimitUntrusted(
+        'SOURCE_AUDIO_TRANSCRIPT',
+        truncateUntrustedText(
+          input.transcriptText || 'No embedded speech transcript is available. Keep the original audio timing and use visual analysis only.',
+          MAX_VIRAL_TRANSCRIPT_PROMPT_CHARS,
+        ),
+      ),
       generation_schema_json: VIRAL_GENERATION_SCHEMA_JSON,
     },
   }))
