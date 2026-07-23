@@ -207,13 +207,19 @@ function applyLtxDirectorTimeline(
 ) {
   const upload = uploads[binding.variable]
   if (!Array.isArray(value) || !Array.isArray(upload)
-    || upload.length !== value.length || !upload.every(isUploadedFile) || upload.length === 0) {
+    || upload.length !== value.length || !upload.every(isUploadedFile)) {
     throw bindingError(binding, `LTX Director images for "${binding.variable}" are missing or malformed.`)
   }
   const target = graph[binding.nodeId]
   const parsedSpec = parseLtxDirectorTimelineSpec(variables.prompt)
+  const mainVideoFiles = Array.isArray(uploads.directorMainVideos)
+    ? uploads.directorMainVideos.filter(isUploadedFile)
+    : []
   const motionFiles = Array.isArray(uploads.directorVideos)
     ? uploads.directorVideos.filter(isUploadedFile)
+    : []
+  const motionImageFiles = Array.isArray(uploads.directorMotionImages)
+    ? uploads.directorMotionImages.filter(isUploadedFile)
     : []
   const audioFiles = Array.isArray(uploads.directorAudios)
     ? uploads.directorAudios.filter(isUploadedFile)
@@ -221,14 +227,21 @@ function applyLtxDirectorTimeline(
   const retakeFiles = Array.isArray(uploads.directorRetakeVideos)
     ? uploads.directorRetakeVideos.filter(isUploadedFile)
     : []
-  if ((parsedSpec?.motionSegments?.length ?? 0) !== motionFiles.length
+  const expectedMainVideos = parsedSpec?.segments.filter((segment) => segment.type === 'video').length ?? 0
+  const expectedMotionVideos = parsedSpec?.motionSegments?.filter((segment) => segment.sourceType !== 'image').length ?? 0
+  const expectedMotionImages = parsedSpec?.motionSegments?.filter((segment) => segment.sourceType === 'image').length ?? 0
+  if (expectedMainVideos !== mainVideoFiles.length
+    || expectedMotionVideos !== motionFiles.length
+    || expectedMotionImages !== motionImageFiles.length
     || (parsedSpec?.audioSegments?.length ?? 0) !== audioFiles.length
     || (parsedSpec?.retakeVideoMediaId ? 1 : 0) !== retakeFiles.length) {
     throw bindingError(binding, 'LTX Director auxiliary timeline media are missing or malformed.')
   }
   const rendered = renderLtxDirectorTimeline({
     files: upload,
+    mainVideoFiles,
     motionFiles,
+    motionImageFiles,
     audioFiles,
     retakeFile: retakeFiles[0],
     promptValue: variables.prompt,

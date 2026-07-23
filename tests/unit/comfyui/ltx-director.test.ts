@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  createLtxDirectorTimelineExport,
   normalizeLtxDirectorGlobalPrompt,
   parseLtxDirectorTimelineSpec,
   renderLtxDirectorTimeline,
@@ -76,8 +77,12 @@ describe('LTX Director adapter', () => {
       bindings: [],
     })
     expect(contract.variableDefinitions).toContainEqual({
-      name: 'referenceImages', type: 'image_ref_list', required: true, maxItems: 8,
+      name: 'referenceImages', type: 'image_ref_list', required: false, defaultValue: [], maxItems: 64,
     })
+    expect(contract.variableDefinitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'directorMainVideos', type: 'video_ref_list' }),
+      expect.objectContaining({ name: 'directorMotionImages', type: 'image_ref_list' }),
+    ]))
     expect(contract.bindings).toContainEqual({
       nodeId: '10', inputPath: 'timeline_data', variable: 'referenceImages',
       valueType: 'image_ref_list', transform: 'ltx_director_timeline',
@@ -261,6 +266,118 @@ describe('LTX Director adapter', () => {
       audioSegments: [expect.objectContaining({
         id: 'audio', start: 0, length: 72, audioFile: 'wdc/voice.wav',
       })],
+    })
+  })
+
+  it('serializes text, main video, linked audio, and static IC-LoRA references like upstream LTX Director', () => {
+    const rendered = renderLtxDirectorTimeline({
+      promptValue: JSON.stringify({
+        version: 1,
+        fps: 24,
+        globalPrompt: 'same subject',
+        segments: [
+          { id: 'text', type: 'text', prompt: 'establish the room', startSeconds: 0, durationSeconds: 1 },
+          {
+            id: 'video', type: 'video', sourceMediaId: 'video-media', filename: 'clip.mp4',
+            prompt: 'continue the action', startSeconds: 1, durationSeconds: 2,
+            trimStartSeconds: 0.5, mediaDurationSeconds: 4, linkedAudio: true,
+          },
+        ],
+        motionSegments: [{
+          id: 'reference', sourceType: 'image', sourceMediaId: 'motion-image', filename: 'reference.png',
+          startSeconds: 0, durationSeconds: 3,
+        }],
+      }),
+      files: [],
+      mainVideoFiles: [{ name: 'clip.mp4', subfolder: 'wdc', type: 'input' }],
+      motionImageFiles: [{ name: 'reference.png', subfolder: 'wdc', type: 'input' }],
+    })
+    const timeline = JSON.parse(rendered.timelineData)
+    expect(timeline.segments).toEqual([
+      expect.objectContaining({ id: 'text', type: 'text', start: 0, length: 24 }),
+      expect.objectContaining({ id: 'video', type: 'video', imageFile: 'wdc/clip.mp4', trimStart: 12 }),
+    ])
+    expect(timeline.audioSegments).toContainEqual(expect.objectContaining({
+      id: 'video_audio', audioFile: 'wdc/clip.mp4', trimStart: 12,
+    }))
+    expect(timeline.motionSegments).toContainEqual(expect.objectContaining({
+      id: 'reference', isStaticImage: true, videoFile: 'wdc/reference.png',
+    }))
+    expect(rendered.localPrompts).toBe('establish the room|continue the action')
+    expect(rendered.guideStrength).toBe('1')
+    expect(rendered.useCustomAudio).toBe(true)
+  })
+
+  it('round-trips the portable upstream-shaped timeline without losing project media ownership', () => {
+    const spec = parseLtxDirectorTimelineSpec({
+      version: 1,
+      fps: 24,
+      globalPrompt: 'continuous performance',
+      resolutionPreset: '1080p',
+      aspectRatio: '9:16',
+      segments: [{
+        id: 'main-video', type: 'video', sourceMediaId: 'owned-video',
+        sourceUrl: '/media/video.mp4', filename: 'video.mp4', prompt: 'actor turns',
+        startSeconds: 1, durationSeconds: 2, trimStartSeconds: 0.5, linkedAudio: true,
+      }],
+      motionSegments: [{
+        id: 'motion-image', sourceType: 'image', sourceMediaId: 'owned-image',
+        sourceUrl: '/media/pose.png', filename: 'pose.png', startSeconds: 0, durationSeconds: 3,
+      }],
+    })
+    expect(spec).not.toBeNull()
+    const portable = createLtxDirectorTimelineExport(spec!)
+    expect(portable).toMatchObject({
+      version: 1,
+      settings: { frame_rate: 24, custom_width: 1080, custom_height: 1920 },
+      timeline: {
+        segments: [expect.objectContaining({ sourceMediaId: 'owned-video', start: 24, length: 48 })],
+        motionSegments: [expect.objectContaining({ sourceMediaId: 'owned-image', isStaticImage: true })],
+      },
+    })
+    expect(parseLtxDirectorTimelineSpec(portable)).toMatchObject({
+      globalPrompt: 'continuous performance',
+      segments: [expect.objectContaining({
+        id: 'main-video', type: 'video', sourceMediaId: 'owned-video',
+        startSeconds: 1, durationSeconds: 2, trimStartSeconds: 0.5,
+      })],
+      motionSegments: [expect.objectContaining({
+        id: 'motion-image', sourceType: 'image', sourceMediaId: 'owned-image',
+      })],
+    })
+  })
+
+  it('renders a retake-only timeline without requiring a main-track image', () => {
+    const rendered = renderLtxDirectorTimeline({
+      promptValue: JSON.stringify({
+        version: 1,
+        fps: 24,
+        globalPrompt: 'preserve the original video',
+        segments: [],
+        retakeEnabled: true,
+        retakeVideoMediaId: 'owned-retake',
+        retakeStartSeconds: 2,
+        retakeDurationSeconds: 3,
+        retakePrompt: 'replace the expression',
+        retakeStrength: 0.75,
+      }),
+      files: [],
+      retakeFile: { name: 'retake.mp4', subfolder: 'wdc', type: 'input' },
+    })
+    expect(rendered).toMatchObject({
+      startFrame: 0,
+      endFrame: 120,
+      durationFrames: 120,
+      localPrompts: 'preserve the original video|replace the expression',
+      segmentLengths: '48,72',
+      guideStrength: '0,0.75',
+    })
+    expect(JSON.parse(rendered.timelineData)).toMatchObject({
+      retakeMode: true,
+      retakeStart: 48,
+      retakeLength: 72,
+      retakeVideo: { imageFile: 'wdc/retake.mp4' },
+      segments: [],
     })
   })
 

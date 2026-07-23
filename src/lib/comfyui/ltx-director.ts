@@ -5,6 +5,8 @@ export const LTX_DIRECTOR_TIMELINE_VERSION = 1 as const
 
 export type LtxDirectorResolutionPreset = '480p' | '720p' | '1080p'
 export type LtxDirectorDisplayMode = 'seconds' | 'frames'
+export type LtxDirectorMainSegmentType = 'image' | 'video' | 'text'
+export type LtxDirectorMotionSourceType = 'image' | 'video'
 export type LtxDirectorResizeMethod =
   | 'maintain aspect ratio'
   | 'stretch to fit'
@@ -14,19 +16,26 @@ export type LtxDirectorResizeMethod =
 
 export interface LtxDirectorTimelineSegmentSpec {
   id?: string
+  type?: LtxDirectorMainSegmentType
   panelId?: string
   sourcePanelId?: string
   sourceMediaId?: string
   sourceImageUrl?: string
+  sourceUrl?: string
+  filename?: string
   prompt: string
   startSeconds?: number
   durationSeconds: number
+  trimStartSeconds?: number
+  mediaDurationSeconds?: number
+  linkedAudio?: boolean
   guideStrength?: number
   isEndFrame?: boolean
 }
 
 export interface LtxDirectorMotionSegmentSpec {
   id?: string
+  sourceType?: LtxDirectorMotionSourceType
   sourceMediaId: string
   sourceUrl?: string
   filename?: string
@@ -63,6 +72,8 @@ export interface LtxDirectorTimelineSpec {
   imageCompression?: number
   epsilon?: number
   showFilenames?: boolean
+  propHeight?: number
+  globalPropHeight?: number
   mainTrackEnabled?: boolean
   audioTrackEnabled?: boolean
   motionTrackEnabled?: boolean
@@ -106,6 +117,23 @@ export interface RenderedLtxDirectorTimeline {
   inpaintAudio: boolean
   useCustomMotion: boolean
   overrideAudio: boolean
+}
+
+interface LtxDirectorPortableExport {
+  version: 1
+  settings: Record<string, unknown>
+  global_prompt: string
+  retake_global_prompt: string
+  timeline: Record<string, unknown>
+  waoowaoo: LtxDirectorTimelineSpec
+}
+
+function mainSegmentType(value: unknown): LtxDirectorMainSegmentType {
+  return value === 'video' || value === 'text' ? value : 'image'
+}
+
+function motionSourceType(value: unknown): LtxDirectorMotionSourceType {
+  return value === 'image' ? 'image' : 'video'
 }
 
 function positiveNumber(value: unknown): value is number {
@@ -193,6 +221,113 @@ function boundedNumber(value: unknown, min: number, max: number) {
     : undefined
 }
 
+function convertUpstreamTimelineExport(raw: Record<string, unknown>) {
+  if (!raw.timeline || typeof raw.timeline !== 'object' || Array.isArray(raw.timeline)) return raw
+  const timeline = raw.timeline as Record<string, unknown>
+  const settings = raw.settings && typeof raw.settings === 'object' && !Array.isArray(raw.settings)
+    ? raw.settings as Record<string, unknown>
+    : {}
+  const fps = positiveNumber(settings.frame_rate) ? settings.frame_rate : 24
+  const fromFrame = (value: unknown) => nonNegativeNumber(value) ? value / fps : 0
+  const sourceSegments = Array.isArray(timeline.segments) ? timeline.segments : []
+  const sourceMotion = Array.isArray(timeline.motionSegments) ? timeline.motionSegments : []
+  const sourceAudio = Array.isArray(timeline.audioSegments) ? timeline.audioSegments : []
+  return {
+    version: LTX_DIRECTOR_TIMELINE_VERSION,
+    fps,
+    globalPrompt: typeof raw.global_prompt === 'string'
+      ? raw.global_prompt
+      : typeof timeline.global_prompt === 'string' ? timeline.global_prompt : '',
+    displayMode: settings.display_mode,
+    resizeMethod: settings.resize_method,
+    divisibleBy: settings.divisible_by,
+    imageCompression: settings.img_compression,
+    epsilon: settings.epsilon,
+    showFilenames: timeline.showFilenames,
+    propHeight: timeline.propHeight,
+    globalPropHeight: timeline.globalPropHeight,
+    mainTrackEnabled: timeline.mainTrackEnabled,
+    audioTrackEnabled: timeline.audioTrackEnabled,
+    motionTrackEnabled: timeline.motionTrackEnabled,
+    useCustomAudio: settings.use_custom_audio,
+    inpaintAudio: timeline.inpaint_audio ?? settings.inpaint_audio,
+    useCustomMotion: settings.use_custom_motion,
+    overrideAudio: timeline.overrideAudio ?? settings.override_audio,
+    retakeEnabled: timeline.retakeMode,
+    retakeVideoMediaId: timeline.retakeVideo && typeof timeline.retakeVideo === 'object'
+      ? (timeline.retakeVideo as Record<string, unknown>).sourceMediaId : undefined,
+    retakeVideoUrl: timeline.retakeVideo && typeof timeline.retakeVideo === 'object'
+      ? (timeline.retakeVideo as Record<string, unknown>).imageFile : undefined,
+    retakeStartSeconds: fromFrame(timeline.retakeStart),
+    retakeDurationSeconds: fromFrame(timeline.retakeLength),
+    retakePrompt: timeline.retakePrompt,
+    retakeStrength: timeline.retakeStrength,
+    rangeStartSeconds: fromFrame(timeline.normalStartFrame),
+    rangeEndSeconds: nonNegativeNumber(timeline.normalDurationFrames)
+      ? fromFrame(timeline.normalStartFrame) + fromFrame(timeline.normalDurationFrames)
+      : undefined,
+    segments: sourceSegments.flatMap((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+      const segment = item as Record<string, unknown>
+      const type = mainSegmentType(segment.type)
+      const sourceMediaId = typeof segment.sourceMediaId === 'string' ? segment.sourceMediaId : undefined
+      const sourcePanelId = typeof segment.sourcePanelId === 'string' ? segment.sourcePanelId : undefined
+      const hasOwnedSource = Boolean(sourceMediaId || sourcePanelId)
+      return [{
+        id: typeof segment.id === 'string' ? segment.id : `imported-${index + 1}`,
+        type: hasOwnedSource ? type : 'text',
+        ...(sourceMediaId ? { sourceMediaId } : {}),
+        ...(sourcePanelId ? { sourcePanelId } : {}),
+        ...(sourceMediaId && typeof segment.imageFile === 'string'
+          ? type === 'video' ? { sourceUrl: segment.imageFile } : { sourceImageUrl: segment.imageFile }
+          : {}),
+        ...(typeof segment.fileName === 'string' ? { filename: segment.fileName } : {}),
+        prompt: typeof segment.prompt === 'string' ? segment.prompt : '',
+        startSeconds: fromFrame(segment.start),
+        durationSeconds: Math.max(1 / fps, fromFrame(segment.length)),
+        trimStartSeconds: fromFrame(segment.trimStart),
+        mediaDurationSeconds: positiveNumber(segment.videoDurationFrames)
+          ? segment.videoDurationFrames / fps : undefined,
+        linkedAudio: typeof segment.linkedAudio === 'boolean' ? segment.linkedAudio : undefined,
+        guideStrength: boundedNumber(segment.guideStrength, 0, 2),
+        isEndFrame: segment.isEndFrame === true,
+      }]
+    }),
+    motionSegments: sourceMotion.flatMap((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+      const segment = item as Record<string, unknown>
+      if (typeof segment.sourceMediaId !== 'string') return []
+      return [{
+        id: typeof segment.id === 'string' ? segment.id : `imported-motion-${index + 1}`,
+        sourceType: segment.isStaticImage === true ? 'image' : 'video',
+        sourceMediaId: segment.sourceMediaId,
+        sourceUrl: typeof segment.videoFile === 'string' ? segment.videoFile : undefined,
+        filename: typeof segment.fileName === 'string' ? segment.fileName : undefined,
+        startSeconds: fromFrame(segment.start),
+        durationSeconds: Math.max(1 / fps, fromFrame(segment.length)),
+        trimStartSeconds: fromFrame(segment.trimStart),
+        videoStrength: boundedNumber(segment.videoStrength, 0, 2),
+        videoAttentionStrength: boundedNumber(segment.videoAttentionStrength, 0, 2),
+        resampleMode: typeof segment.resampleMode === 'string' ? segment.resampleMode : undefined,
+      }]
+    }),
+    audioSegments: sourceAudio.flatMap((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+      const segment = item as Record<string, unknown>
+      if (typeof segment.sourceMediaId !== 'string') return []
+      return [{
+        id: typeof segment.id === 'string' ? segment.id : `imported-audio-${index + 1}`,
+        sourceMediaId: segment.sourceMediaId,
+        sourceUrl: typeof segment.audioFile === 'string' ? segment.audioFile : undefined,
+        filename: typeof segment.fileName === 'string' ? segment.fileName : undefined,
+        startSeconds: fromFrame(segment.start),
+        durationSeconds: Math.max(1 / fps, fromFrame(segment.length)),
+        trimStartSeconds: fromFrame(segment.trimStart),
+      }]
+    }),
+  }
+}
+
 function parseMotionSegments(value: unknown): LtxDirectorMotionSegmentSpec[] {
   if (!Array.isArray(value)) return []
   return value.flatMap((item) => {
@@ -202,6 +337,7 @@ function parseMotionSegments(value: unknown): LtxDirectorMotionSegmentSpec[] {
       || !nonNegativeNumber(candidate.startSeconds) || !positiveNumber(candidate.durationSeconds)) return []
     return [{
       ...(typeof candidate.id === 'string' && candidate.id.trim() ? { id: candidate.id.trim() } : {}),
+      sourceType: motionSourceType(candidate.sourceType),
       sourceMediaId: candidate.sourceMediaId.trim(),
       ...(typeof candidate.sourceUrl === 'string' && candidate.sourceUrl.trim()
         ? { sourceUrl: candidate.sourceUrl.trim() } : {}),
@@ -276,9 +412,12 @@ export function resolveLtxDirectorAspectRatioFromDimensions(
 export function parseLtxDirectorTimelineSpec(value: unknown): LtxDirectorTimelineSpec | null {
   try {
     const unwrapped = unwrapDirectorConfig(value, 'ltx')
-    const parsed = typeof unwrapped === 'string'
+    const raw = typeof unwrapped === 'string'
       ? JSON.parse(unwrapped) as Record<string, unknown>
       : unwrapped as Record<string, unknown>
+    const parsed = raw?.waoowaoo && typeof raw.waoowaoo === 'object' && !Array.isArray(raw.waoowaoo)
+      ? raw.waoowaoo as Record<string, unknown>
+      : convertUpstreamTimelineExport(raw)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
     if (parsed.version !== LTX_DIRECTOR_TIMELINE_VERSION || !positiveNumber(parsed.fps)
       || typeof parsed.globalPrompt !== 'string' || !Array.isArray(parsed.segments)) return null
@@ -296,6 +435,7 @@ export function parseLtxDirectorTimelineSpec(value: unknown): LtxDirectorTimelin
         ...(typeof candidate.id === 'string' && candidate.id.trim()
           ? { id: candidate.id.trim() }
           : {}),
+        type: mainSegmentType(candidate.type),
         ...(typeof candidate.panelId === 'string' && candidate.panelId.trim()
           ? { panelId: candidate.panelId.trim() }
           : {}),
@@ -308,14 +448,25 @@ export function parseLtxDirectorTimelineSpec(value: unknown): LtxDirectorTimelin
         ...(typeof candidate.sourceImageUrl === 'string' && candidate.sourceImageUrl.trim()
           ? { sourceImageUrl: candidate.sourceImageUrl.trim() }
           : {}),
+        ...(typeof candidate.sourceUrl === 'string' && candidate.sourceUrl.trim()
+          ? { sourceUrl: candidate.sourceUrl.trim() }
+          : {}),
+        ...(typeof candidate.filename === 'string' && candidate.filename.trim()
+          ? { filename: candidate.filename.trim() }
+          : {}),
         prompt: cleanPrompt(candidate.prompt),
         ...(nonNegativeNumber(candidate.startSeconds) ? { startSeconds: candidate.startSeconds } : {}),
         durationSeconds: candidate.durationSeconds,
+        ...(nonNegativeNumber(candidate.trimStartSeconds)
+          ? { trimStartSeconds: candidate.trimStartSeconds } : {}),
+        ...(positiveNumber(candidate.mediaDurationSeconds)
+          ? { mediaDurationSeconds: candidate.mediaDurationSeconds } : {}),
+        ...(typeof candidate.linkedAudio === 'boolean' ? { linkedAudio: candidate.linkedAudio } : {}),
         ...(guideStrength !== undefined ? { guideStrength } : {}),
         ...(candidate.isEndFrame === true ? { isEndFrame: true } : {}),
       }]
     })
-    if (segments.length === 0) return null
+    if (segments.length === 0 && parsed.retakeEnabled !== true) return null
     const parsedResolutionPreset = resolutionPreset(parsed.resolutionPreset)
     const parsedDisplayMode = displayMode(parsed.displayMode)
     const parsedResizeMethod = resizeMethod(parsed.resizeMethod)
@@ -349,6 +500,8 @@ export function parseLtxDirectorTimelineSpec(value: unknown): LtxDirectorTimelin
       ...(parsedImageCompression !== undefined ? { imageCompression: parsedImageCompression } : {}),
       ...(parsedEpsilon !== undefined ? { epsilon: parsedEpsilon } : {}),
       ...(typeof parsed.showFilenames === 'boolean' ? { showFilenames: parsed.showFilenames } : {}),
+      ...(positiveNumber(parsed.propHeight) ? { propHeight: parsed.propHeight } : {}),
+      ...(positiveNumber(parsed.globalPropHeight) ? { globalPropHeight: parsed.globalPropHeight } : {}),
       ...(typeof parsed.mainTrackEnabled === 'boolean' ? { mainTrackEnabled: parsed.mainTrackEnabled } : {}),
       ...(typeof parsed.audioTrackEnabled === 'boolean' ? { audioTrackEnabled: parsed.audioTrackEnabled } : {}),
       ...(typeof parsed.motionTrackEnabled === 'boolean' ? { motionTrackEnabled: parsed.motionTrackEnabled } : {}),
@@ -377,6 +530,102 @@ export function parseLtxDirectorTimelineSpec(value: unknown): LtxDirectorTimelin
   }
 }
 
+export function createLtxDirectorTimelineExport(spec: LtxDirectorTimelineSpec): LtxDirectorPortableExport {
+  const fps = spec.fps
+  const toFrame = (seconds: number | undefined) => Math.max(0, Math.round((seconds ?? 0) * fps))
+  const timeline = {
+    mainTrackEnabled: spec.mainTrackEnabled !== false,
+    audioTrackEnabled: spec.audioTrackEnabled === true,
+    motionTrackEnabled: spec.motionTrackEnabled !== false,
+    propHeight: spec.propHeight ?? 90,
+    globalPropHeight: spec.globalPropHeight ?? 60,
+    showFilenames: spec.showFilenames !== false,
+    overrideAudio: spec.overrideAudio === true,
+    inpaint_audio: spec.inpaintAudio !== false,
+    global_prompt: spec.globalPrompt,
+    retake_global_prompt: spec.retakePrompt || spec.globalPrompt,
+    retakeMode: spec.retakeEnabled === true,
+    retakeStart: toFrame(spec.retakeStartSeconds),
+    retakeLength: toFrame(spec.retakeDurationSeconds),
+    retakePrompt: spec.retakePrompt ?? '',
+    retakeStrength: spec.retakeStrength ?? 1,
+    retakeVideo: spec.retakeVideoMediaId ? {
+      fileName: spec.retakeVideoMediaId,
+      imageFile: spec.retakeVideoUrl ?? '',
+      videoDurationFrames: toFrame(spec.retakeDurationSeconds),
+    } : null,
+    normalStartFrame: toFrame(spec.rangeStartSeconds),
+    normalDurationFrames: spec.rangeEndSeconds === undefined
+      ? toFrame(Math.max(0, ...spec.segments.map((segment) => (
+          (segment.startSeconds ?? 0) + segment.durationSeconds
+        ))))
+      : toFrame(spec.rangeEndSeconds - (spec.rangeStartSeconds ?? 0)),
+    segments: spec.segments.map((segment, index) => ({
+      id: segment.id || `waoowaoo-${index + 1}`,
+      type: segment.type ?? 'image',
+      start: toFrame(segment.startSeconds),
+      length: Math.max(1, toFrame(segment.durationSeconds)),
+      trimStart: toFrame(segment.trimStartSeconds),
+      videoDurationFrames: toFrame(segment.mediaDurationSeconds),
+      prompt: segment.prompt,
+      guideStrength: segment.guideStrength ?? 1,
+      isEndFrame: segment.isEndFrame === true,
+      fileName: segment.filename ?? '',
+      imageFile: segment.sourceUrl || segment.sourceImageUrl || '',
+      sourceMediaId: segment.sourceMediaId,
+      sourcePanelId: segment.sourcePanelId || segment.panelId,
+      linkedAudio: segment.linkedAudio,
+    })),
+    motionSegments: (spec.motionSegments ?? []).map((segment, index) => ({
+      id: segment.id || `waoowaoo-motion-${index + 1}`,
+      type: 'motion_video',
+      isStaticImage: segment.sourceType === 'image',
+      start: toFrame(segment.startSeconds),
+      length: Math.max(1, toFrame(segment.durationSeconds)),
+      trimStart: toFrame(segment.trimStartSeconds),
+      videoDurationFrames: Math.max(1, toFrame(segment.durationSeconds)),
+      videoFile: segment.sourceUrl ?? '',
+      fileName: segment.filename ?? '',
+      sourceMediaId: segment.sourceMediaId,
+      videoStrength: segment.videoStrength ?? 1,
+      videoAttentionStrength: segment.videoAttentionStrength ?? 0.65,
+      resampleMode: segment.resampleMode ?? 'nearest',
+    })),
+    audioSegments: (spec.audioSegments ?? []).map((segment, index) => ({
+      id: segment.id || `waoowaoo-audio-${index + 1}`,
+      type: 'audio',
+      start: toFrame(segment.startSeconds),
+      length: Math.max(1, toFrame(segment.durationSeconds)),
+      trimStart: toFrame(segment.trimStartSeconds),
+      audioDurationFrames: Math.max(1, toFrame(segment.durationSeconds)),
+      audioFile: segment.sourceUrl ?? '',
+      fileName: segment.filename ?? '',
+      sourceMediaId: segment.sourceMediaId,
+    })),
+  }
+  return {
+    version: 1,
+    settings: {
+      frame_rate: fps,
+      display_mode: spec.displayMode ?? 'seconds',
+      epsilon: spec.epsilon ?? 0.001,
+      custom_width: resolveLtxDirectorDimensions(spec.resolutionPreset, spec.aspectRatio).width,
+      custom_height: resolveLtxDirectorDimensions(spec.resolutionPreset, spec.aspectRatio).height,
+      resize_method: spec.resizeMethod ?? 'maintain aspect ratio',
+      divisible_by: spec.divisibleBy ?? 32,
+      img_compression: spec.imageCompression ?? 18,
+      use_custom_audio: spec.useCustomAudio === true,
+      use_custom_motion: spec.useCustomMotion !== false,
+      inpaint_audio: spec.inpaintAudio !== false,
+      override_audio: spec.overrideAudio === true,
+    },
+    global_prompt: spec.globalPrompt,
+    retake_global_prompt: spec.retakePrompt || spec.globalPrompt,
+    timeline,
+    waoowaoo: spec,
+  }
+}
+
 function uploadedImagePath(file: ComfyUploadedFile) {
   const subfolder = file.subfolder.replace(/^\/+|\/+$/g, '')
   if (!subfolder || file.name.startsWith(`${subfolder}/`)) return file.name
@@ -385,7 +634,9 @@ function uploadedImagePath(file: ComfyUploadedFile) {
 
 export function renderLtxDirectorTimeline(input: {
   files: ComfyUploadedFile[]
+  mainVideoFiles?: ComfyUploadedFile[]
   motionFiles?: ComfyUploadedFile[]
+  motionImageFiles?: ComfyUploadedFile[]
   audioFiles?: ComfyUploadedFile[]
   retakeFile?: ComfyUploadedFile
   promptValue: unknown
@@ -398,33 +649,51 @@ export function renderLtxDirectorTimeline(input: {
     ? input.fallbackDurationSeconds
     : 5
   const parsed = parseLtxDirectorTimelineSpec(input.promptValue)
-  const sourceSegments: LtxDirectorTimelineSegmentSpec[] = parsed?.segments.length === input.files.length
-    ? parsed.segments
+  const expectedImageCount = parsed?.segments.filter((segment) => (segment.type ?? 'image') === 'image').length
+  const expectedVideoCount = parsed?.segments.filter((segment) => segment.type === 'video').length
+  const mediaCountsMatch = parsed
+    ? expectedImageCount === input.files.length && expectedVideoCount === (input.mainVideoFiles?.length ?? 0)
+    : false
+  const sourceSegments: LtxDirectorTimelineSegmentSpec[] = mediaCountsMatch
+    ? parsed!.segments
     : input.files.map(() => ({
+      type: 'image',
       prompt: cleanPrompt(input.promptValue),
       durationSeconds: fallbackDuration / Math.max(1, input.files.length),
     }))
   const effectiveFps = parsed?.fps ?? fps
   let cursor = 0
-  const positioned = input.files.map((file, index) => {
-    const source = sourceSegments[index]!
+  let imageIndex = 0
+  let videoIndex = 0
+  const positioned = sourceSegments.map((source) => {
+    const type = source.type ?? 'image'
+    const file = type === 'image'
+      ? input.files[imageIndex++]
+      : type === 'video'
+        ? input.mainVideoFiles?.[videoIndex++]
+        : undefined
     const length = Math.max(1, Math.round(source.durationSeconds * effectiveFps))
     const requestedStart = source.startSeconds === undefined
       ? cursor
       : Math.max(0, Math.round(source.startSeconds * effectiveFps))
     const start = Math.max(cursor, requestedStart)
     cursor = start + length
-    return { file, source, length, start }
+    return { file, source, length, start, type }
   })
-  const segments = positioned.map(({ file, source, length, start }, index) => {
+  const segments = positioned.map(({ file, source, length, start, type }, index) => {
     const segment = {
-      id: `waoowaoo-${index + 1}`,
+      id: source.id || `waoowaoo-${index + 1}`,
       start,
       length,
       prompt: source.prompt,
-      type: 'image',
-      imageFile: uploadedImagePath(file),
-      ...(source.isEndFrame ? { isEndFrame: true } : {}),
+      type,
+      ...(file ? { imageFile: uploadedImagePath(file) } : {}),
+      ...(source.filename ? { fileName: source.filename } : {}),
+      ...(type === 'video' ? {
+        trimStart: Math.round((source.trimStartSeconds ?? 0) * effectiveFps),
+        videoDurationFrames: Math.max(1, Math.round((source.mediaDurationSeconds ?? source.durationSeconds) * effectiveFps)),
+      } : {}),
+      ...(source.isEndFrame && type === 'image' ? { isEndFrame: true } : {}),
     }
     return segment
   })
@@ -434,7 +703,10 @@ export function renderLtxDirectorTimeline(input: {
     latest,
     Math.round((segment.startSeconds + segment.durationSeconds) * effectiveFps),
   ), 0)
-  const fullDurationFrames = Math.max(1, cursor, auxiliaryEndFrame)
+  const requestedRetakeEndFrame = parsed?.retakeEnabled
+    ? Math.round(((parsed.retakeStartSeconds ?? 0) + (parsed.retakeDurationSeconds ?? fallbackDuration)) * effectiveFps)
+    : 0
+  const fullDurationFrames = Math.max(1, cursor, auxiliaryEndFrame, requestedRetakeEndFrame)
   const requestedStartFrame = parsed?.rangeStartSeconds === undefined
     ? 0
     : Math.round(parsed.rangeStartSeconds * effectiveFps)
@@ -472,7 +744,8 @@ export function renderLtxDirectorTimeline(input: {
   const effectiveResizeMethod = parsed?.resizeMethod ?? 'maintain aspect ratio'
   const effectiveDivisibleBy = parsed?.divisibleBy ?? 32
   const effectiveImageCompression = parsed?.imageCompression ?? 18
-  const useCustomAudio = parsed?.useCustomAudio ?? false
+  const hasLinkedMainAudio = positioned.some(({ source }) => source.type === 'video' && source.linkedAudio !== false)
+  const useCustomAudio = parsed?.useCustomAudio ?? (audioSegments.length > 0 || hasLinkedMainAudio)
   const inpaintAudio = parsed?.inpaintAudio ?? true
   const useCustomMotion = parsed?.useCustomMotion ?? true
   const overrideAudio = parsed?.overrideAudio ?? false
@@ -487,20 +760,55 @@ export function renderLtxDirectorTimeline(input: {
   } catch {
     baseTimeline = {}
   }
+  let motionVideoIndex = 0
+  let motionImageIndex = 0
+  const renderedMotionSegments = motionSegments.map((segment, index) => {
+    const isStaticImage = segment.sourceType === 'image'
+    const file = isStaticImage
+      ? input.motionImageFiles?.[motionImageIndex++]
+      : input.motionFiles?.[motionVideoIndex++]
+    return {
+      id: segment.id || `waoowaoo-motion-${index + 1}`,
+      type: 'motion_video',
+      isStaticImage,
+      start: Math.round(segment.startSeconds * effectiveFps),
+      length: Math.max(1, Math.round(segment.durationSeconds * effectiveFps)),
+      trimStart: Math.round((segment.trimStartSeconds ?? 0) * effectiveFps),
+      videoDurationFrames: Math.max(1, Math.round(segment.durationSeconds * effectiveFps)),
+      videoFile: file ? uploadedImagePath(file) : '',
+      fileName: segment.filename ?? file?.name ?? '',
+      videoStrength: segment.videoStrength ?? 1,
+      videoAttentionStrength: segment.videoAttentionStrength ?? 0.65,
+      resampleMode: segment.resampleMode ?? 'nearest',
+    }
+  })
+  const retakeMode = parsed?.retakeEnabled === true && Boolean(input.retakeFile)
+  const retakeStart = Math.round((parsed?.retakeStartSeconds ?? 0) * effectiveFps)
+  const retakeLength = Math.round((parsed?.retakeDurationSeconds ?? durationSeconds) * effectiveFps)
+  const retakeEnd = retakeStart + retakeLength
+  const retakeParts = retakeMode
+    ? [
+        { start: startFrame, end: Math.min(endFrame, retakeStart), prompt: parsed?.globalPrompt ?? '', strength: 0 },
+        { start: Math.max(startFrame, retakeStart), end: Math.min(endFrame, retakeEnd), prompt: parsed?.retakePrompt || 'video', strength: parsed?.retakeStrength ?? 1 },
+        { start: Math.max(startFrame, retakeEnd), end: endFrame, prompt: parsed?.globalPrompt ?? '', strength: 0 },
+      ].filter((part) => part.end > part.start)
+    : []
   return {
     timelineData: JSON.stringify({
       ...baseTimeline,
       mainTrackEnabled: parsed?.mainTrackEnabled ?? baseTimeline.mainTrackEnabled !== false,
       audioTrackEnabled: parsed?.audioTrackEnabled ?? baseTimeline.audioTrackEnabled === true,
       motionTrackEnabled: parsed?.motionTrackEnabled ?? baseTimeline.motionTrackEnabled !== false,
+      propHeight: parsed?.propHeight ?? baseTimeline.propHeight ?? 90,
+      globalPropHeight: parsed?.globalPropHeight ?? baseTimeline.globalPropHeight ?? 60,
       showFilenames: parsed?.showFilenames ?? baseTimeline.showFilenames !== false,
       overrideAudio,
       inpaint_audio: inpaintAudio,
       global_prompt: parsed?.globalPrompt ?? cleanPrompt(input.promptValue),
       retake_global_prompt: parsed?.retakePrompt || parsed?.globalPrompt || cleanPrompt(input.promptValue),
-      retakeMode: parsed?.retakeEnabled === true && Boolean(input.retakeFile),
-      retakeStart: Math.round((parsed?.retakeStartSeconds ?? 0) * effectiveFps),
-      retakeLength: Math.round((parsed?.retakeDurationSeconds ?? durationSeconds) * effectiveFps),
+      retakeMode,
+      retakeStart,
+      retakeLength,
       retakePrompt: parsed?.retakePrompt ?? '',
       retakeStrength: parsed?.retakeStrength ?? 1,
       retakeVideo: input.retakeFile ? {
@@ -510,20 +818,23 @@ export function renderLtxDirectorTimeline(input: {
       normalStartFrame: startFrame,
       normalDurationFrames: durationFrames,
       segments,
-      motionSegments: motionSegments.map((segment, index) => ({
-        id: segment.id || `waoowaoo-motion-${index + 1}`,
-        type: 'motion_video',
-        start: Math.round(segment.startSeconds * effectiveFps),
-        length: Math.max(1, Math.round(segment.durationSeconds * effectiveFps)),
-        trimStart: Math.round((segment.trimStartSeconds ?? 0) * effectiveFps),
-        videoDurationFrames: Math.max(1, Math.round(segment.durationSeconds * effectiveFps)),
-        videoFile: input.motionFiles?.[index] ? uploadedImagePath(input.motionFiles[index]!) : '',
-        fileName: segment.filename ?? input.motionFiles?.[index]?.name ?? '',
-        videoStrength: segment.videoStrength ?? 1,
-        videoAttentionStrength: segment.videoAttentionStrength ?? 0.65,
-        resampleMode: segment.resampleMode ?? 'nearest',
-      })),
-      audioSegments: audioSegments.map((segment, index) => ({
+      motionSegments: renderedMotionSegments,
+      audioSegments: [
+        ...positioned.flatMap(({ source, start, length, file }, index) => (
+          source.type === 'video' && source.linkedAudio !== false && file
+            ? [{
+                id: `${source.id || `waoowaoo-${index + 1}`}_audio`,
+                type: 'audio',
+                start,
+                length,
+                trimStart: Math.round((source.trimStartSeconds ?? 0) * effectiveFps),
+                audioDurationFrames: Math.max(1, Math.round((source.mediaDurationSeconds ?? source.durationSeconds) * effectiveFps)),
+                audioFile: uploadedImagePath(file),
+                fileName: source.filename ?? file.name,
+              }]
+            : []
+        )),
+        ...audioSegments.map((segment, index) => ({
         id: segment.id || `waoowaoo-audio-${index + 1}`,
         type: 'audio',
         start: Math.round(segment.startSeconds * effectiveFps),
@@ -532,11 +843,19 @@ export function renderLtxDirectorTimeline(input: {
         audioDurationFrames: Math.max(1, Math.round(segment.durationSeconds * effectiveFps)),
         audioFile: input.audioFiles?.[index] ? uploadedImagePath(input.audioFiles[index]!) : '',
         fileName: segment.filename ?? input.audioFiles?.[index]?.name ?? '',
-      })),
+        })),
+      ],
     }),
-    localPrompts: activeSegments.map(({ source }) => source.prompt).join('|'),
-    segmentLengths: activeLengths.join(','),
-    guideStrength: activeSegments.map(({ source }) => String(source.guideStrength ?? 1)).join(','),
+    localPrompts: retakeMode
+      ? retakeParts.map((part) => part.prompt).join('|')
+      : activeSegments.map(({ source }) => source.prompt).join('|'),
+    segmentLengths: retakeMode
+      ? retakeParts.map((part) => part.end - part.start).join(',')
+      : activeLengths.join(','),
+    guideStrength: retakeMode
+      ? retakeParts.map((part) => String(part.strength)).join(',')
+      : activeSegments.filter(({ type }) => type !== 'text')
+        .map(({ source }) => String(source.guideStrength ?? 1)).join(','),
     durationSeconds,
     durationFrames,
     startSecond: startFrame / effectiveFps,

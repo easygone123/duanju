@@ -72,11 +72,12 @@ async function normalizeTimelineSpec(input: {
   const allPanels = storyboard.episode.storyboards.flatMap((item) => item.panels)
   const panelsById = new Map(allPanels.map((panel) => [panel.id, panel]))
   const parsed = parseLtxDirectorTimelineSpec(input.value)
-  if (!parsed || parsed.segments.length === 0 || parsed.segments.length > 8 || parsed.fps > 240
-    || parsed.segments.some((segment) => segment.durationSeconds > 60)) {
+  if (!parsed || (parsed.segments.length === 0 && !parsed.retakeEnabled)
+    || parsed.segments.length > 64 || parsed.fps > 240
+    || parsed.segments.some((segment) => segment.durationSeconds > 600)) {
     throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_CONFIG_INVALID' })
   }
-  if ((parsed.motionSegments?.length ?? 0) > 8 || (parsed.audioSegments?.length ?? 0) > 8
+  if ((parsed.motionSegments?.length ?? 0) > 64 || (parsed.audioSegments?.length ?? 0) > 64
     || parsed.motionSegments?.some((segment) => segment.durationSeconds > 600)
     || parsed.audioSegments?.some((segment) => segment.durationSeconds > 600)
     || (parsed.retakeEnabled && (!parsed.retakeVideoMediaId || !parsed.retakeDurationSeconds))) {
@@ -99,12 +100,16 @@ async function normalizeTimelineSpec(input: {
     sequentialCursor = Math.max(sequentialCursor, startSeconds + segment.durationSeconds)
     const sourcePanelId = segment.sourcePanelId || segment.panelId
     if (sourcePanelId) {
+      if (segment.type !== 'image') {
+        throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SOURCE_INVALID' })
+      }
       const panel = panelsById.get(sourcePanelId)
       if (!panel?.imageUrl) {
         throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SOURCE_INVALID' })
       }
       return {
         id: segment.id || `segment-${index + 1}`,
+        type: 'image' as const,
         sourcePanelId,
         prompt: segment.prompt,
         startSeconds,
@@ -115,19 +120,37 @@ async function normalizeTimelineSpec(input: {
     }
     if (segment.sourceMediaId) {
       const media = mediaById.get(segment.sourceMediaId)
-      if (!media || !media.mimeType?.startsWith('image/')
+      const expectedMediaType = segment.type === 'video' ? 'video' : 'image'
+      if (!media || !media.mimeType?.startsWith(`${expectedMediaType}/`)
         || !isOwnedDirectorUploadStorageKey(media.storageKey, userId, projectId)) {
         throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SOURCE_INVALID' })
       }
       return {
         id: segment.id || `segment-${index + 1}`,
+        type: segment.type,
         sourceMediaId: media.id,
-        sourceImageUrl: `/m/${encodeURIComponent(media.publicId)}`,
+        ...(segment.type === 'video'
+          ? { sourceUrl: `/m/${encodeURIComponent(media.publicId)}` }
+          : { sourceImageUrl: `/m/${encodeURIComponent(media.publicId)}` }),
+        ...(segment.filename ? { filename: segment.filename } : {}),
         prompt: segment.prompt,
         startSeconds,
         durationSeconds: segment.durationSeconds,
         guideStrength: segment.guideStrength ?? 1,
+        ...(segment.trimStartSeconds !== undefined ? { trimStartSeconds: segment.trimStartSeconds } : {}),
+        ...(segment.mediaDurationSeconds !== undefined ? { mediaDurationSeconds: segment.mediaDurationSeconds } : {}),
+        ...(segment.linkedAudio !== undefined ? { linkedAudio: segment.linkedAudio } : {}),
         ...(segment.isEndFrame ? { isEndFrame: true } : {}),
+      }
+    }
+    if (segment.type === 'text') {
+      return {
+        id: segment.id || `segment-${index + 1}`,
+        type: 'text' as const,
+        prompt: segment.prompt,
+        startSeconds,
+        durationSeconds: segment.durationSeconds,
+        guideStrength: 0,
       }
     }
     throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SOURCE_REQUIRED' })
@@ -138,18 +161,19 @@ async function normalizeTimelineSpec(input: {
     timelineCursor = startSeconds + segment.durationSeconds
     return { ...segment, startSeconds }
   })
-  const normalizeUploadedTrack = <T extends { sourceMediaId: string }>(
+  const normalizeUploadedTrack = <T extends { sourceMediaId: string; sourceType?: 'image' | 'video' }>(
     segments: T[],
-    mediaType: 'video' | 'audio',
+    mediaType: 'video' | 'audio' | 'mixed',
   ) => segments.map((segment) => {
     const media = mediaById.get(segment.sourceMediaId)
-    if (!media || !media.mimeType?.startsWith(`${mediaType}/`)
+    const expectedType = mediaType === 'mixed' ? (segment.sourceType ?? 'video') : mediaType
+    if (!media || !media.mimeType?.startsWith(`${expectedType}/`)
       || !isOwnedDirectorUploadStorageKey(media.storageKey, userId, projectId)) {
       throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SOURCE_INVALID' })
     }
     return { ...segment, sourceUrl: `/m/${encodeURIComponent(media.publicId)}` }
   })
-  const motionSegments = normalizeUploadedTrack(parsed.motionSegments ?? [], 'video')
+  const motionSegments = normalizeUploadedTrack(parsed.motionSegments ?? [], 'mixed')
   const audioSegments = normalizeUploadedTrack(parsed.audioSegments ?? [], 'audio')
   let retakeVideoUrl: string | undefined
   if (parsed.retakeVideoMediaId) {
@@ -167,7 +191,7 @@ async function normalizeTimelineSpec(input: {
   if (new Set(positionedSegments.map((segment) => segment.id)).size !== positionedSegments.length) {
     throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SEGMENT_ID_DUPLICATE' })
   }
-  const firstSource = positionedSegments[0]
+  const firstSource = positionedSegments.find((segment) => segment.type !== 'text')
   const firstPanelId = firstSource && 'sourcePanelId' in firstSource
     ? firstSource.sourcePanelId
     : null

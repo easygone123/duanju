@@ -491,6 +491,7 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     const durationSeconds = positiveDuration(panel.durationOverride, panel.estimatedDuration, panel.duration)
     const segment = {
       id: `panel-${panel.id}`,
+      type: 'image' as const,
       sourcePanelId: panel.id,
       prompt: panel.videoPrompt?.trim() || panel.description?.trim() || panel.imagePrompt?.trim() || '',
       startSeconds: fallbackCursor,
@@ -501,7 +502,7 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     return segment
   })
   const timelineSegments: LtxDirectorTimelineSegmentSpec[] = savedTimeline?.segments ?? fallbackSegments
-  if (timelineSegments.length === 0 || timelineSegments.length > 8) {
+  if ((timelineSegments.length === 0 && !savedTimeline?.retakeEnabled) || timelineSegments.length > 64) {
     throw new Error('STORYBOARD_DIRECTOR_IMAGES_INVALID')
   }
   const sourcePanelIds = [...new Set(timelineSegments.flatMap((segment) => {
@@ -520,7 +521,7 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
   ])]
   const sourceMedia = await Promise.all(sourceMediaIds.map((mediaId) => getMediaObjectById(mediaId)))
   const sourceMediaById = new Map(sourceMedia.flatMap((media) => media ? [[media.id, media]] : []))
-  const sourceImages = timelineSegments.map((segment) => {
+  const sourceImages = timelineSegments.filter((segment) => (segment.type ?? 'image') === 'image').map((segment) => {
     const panelId = segment.sourcePanelId || segment.panelId
     if (panelId) {
       const panel = sourcePanelsById.get(panelId)
@@ -539,7 +540,7 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
   })
   const resolveDirectorMediaRefs = (
     ids: string[],
-    mediaType: 'video' | 'audio',
+    mediaType: 'image' | 'video' | 'audio',
   ) => ids.map((mediaId) => {
     const media = sourceMediaById.get(mediaId)
     if (!media?.storageKey || !media.mimeType?.startsWith(`${mediaType}/`)
@@ -553,8 +554,21 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     }
   })
   const directorVideos = resolveDirectorMediaRefs(
-    (savedTimeline?.motionSegments ?? []).map((segment) => segment.sourceMediaId),
+    (savedTimeline?.motionSegments ?? [])
+      .filter((segment) => segment.sourceType !== 'image')
+      .map((segment) => segment.sourceMediaId),
     'video',
+  )
+  const directorMainVideos = resolveDirectorMediaRefs(
+    timelineSegments.filter((segment) => segment.type === 'video')
+      .flatMap((segment) => segment.sourceMediaId ? [segment.sourceMediaId] : []),
+    'video',
+  )
+  const directorMotionImages = resolveDirectorMediaRefs(
+    (savedTimeline?.motionSegments ?? [])
+      .filter((segment) => segment.sourceType === 'image')
+      .map((segment) => segment.sourceMediaId),
+    'image',
   )
   const directorAudios = resolveDirectorMediaRefs(
     (savedTimeline?.audioSegments ?? []).map((segment) => segment.sourceMediaId),
@@ -579,10 +593,20 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     ...segment,
     guideStrength: segment.guideStrength ?? 1,
   }))
-  const totalDuration = segments.reduce((latest, segment) => Math.max(
+  const mainDuration = segments.reduce((latest, segment) => Math.max(
     latest,
     (segment.startSeconds ?? latest) + segment.durationSeconds,
   ), 0)
+  const totalDuration = [
+    ...(savedTimeline?.motionSegments ?? []),
+    ...(savedTimeline?.audioSegments ?? []),
+  ].reduce((latest, segment) => Math.max(
+    latest,
+    segment.startSeconds + segment.durationSeconds,
+  ), Math.max(
+    mainDuration,
+    (savedTimeline?.retakeStartSeconds ?? 0) + (savedTimeline?.retakeDurationSeconds ?? 0),
+  ))
   const generationDuration = savedTimeline?.rangeStartSeconds !== undefined
     && savedTimeline.rangeEndSeconds !== undefined
     ? savedTimeline.rangeEndSeconds - savedTimeline.rangeStartSeconds
@@ -608,11 +632,13 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     modelId,
     invocationKey: `${job.data.taskId}:storyboard:${storyboard.id}:ltx-director`,
     comfyWorkflowVersionId: workflowVersionId,
-    imageUrl: sourceImages[0]!,
+    imageUrl: sourceImages[0] || 'ltx-director',
     comfyReferenceImages: sourceImages,
     comfyReferenceImagesOnly: true,
     comfyVariables: {
       directorVideos,
+      directorMainVideos,
+      directorMotionImages,
       directorAudios,
       directorRetakeVideos,
     },

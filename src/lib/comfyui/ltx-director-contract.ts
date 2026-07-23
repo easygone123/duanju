@@ -28,17 +28,21 @@ export function augmentLtxDirectorContract(input: {
   )
   if (referenceDefinitionIndex < 0) {
     variableDefinitions.push({
-      name: 'referenceImages', type: 'image_ref_list', required: true, maxItems: 8,
+      name: 'referenceImages', type: 'image_ref_list', required: false, defaultValue: [], maxItems: 64,
     })
   } else {
     variableDefinitions[referenceDefinitionIndex] = {
-      name: 'referenceImages', type: 'image_ref_list', required: true,
-      maxItems: Math.max(8, variableDefinitions[referenceDefinitionIndex]?.maxItems ?? 0),
+      ...variableDefinitions[referenceDefinitionIndex],
+      name: 'referenceImages', type: 'image_ref_list', required: false,
+      defaultValue: variableDefinitions[referenceDefinitionIndex]?.defaultValue ?? [],
+      maxItems: Math.max(64, variableDefinitions[referenceDefinitionIndex]?.maxItems ?? 0),
     }
   }
   const supplementalDefinitions: ComfyVariableDefinition[] = [
-    { name: 'directorVideos', type: 'video_ref_list', required: false, defaultValue: [], maxItems: 8 },
-    { name: 'directorAudios', type: 'audio_ref_list', required: false, defaultValue: [], maxItems: 8 },
+    { name: 'directorMainVideos', type: 'video_ref_list', required: false, defaultValue: [], maxItems: 64 },
+    { name: 'directorVideos', type: 'video_ref_list', required: false, defaultValue: [], maxItems: 64 },
+    { name: 'directorMotionImages', type: 'image_ref_list', required: false, defaultValue: [], maxItems: 64 },
+    { name: 'directorAudios', type: 'audio_ref_list', required: false, defaultValue: [], maxItems: 64 },
     { name: 'directorRetakeVideos', type: 'video_ref_list', required: false, defaultValue: [], maxItems: 1 },
   ]
   for (const definition of supplementalDefinitions) {

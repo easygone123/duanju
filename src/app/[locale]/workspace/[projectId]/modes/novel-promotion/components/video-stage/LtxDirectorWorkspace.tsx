@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
@@ -23,6 +24,7 @@ import { GlassButton, GlassInput, GlassTextarea } from '@/components/ui/primitiv
 import { apiFetch } from '@/lib/api-fetch'
 import {
   LTX_DIRECTOR_TIMELINE_VERSION,
+  createLtxDirectorTimelineExport,
   normalizeLtxDirectorGlobalPrompt,
   parseLtxDirectorTimelineSpec,
   resolveLtxDirectorAspectRatioFromDimensions,
@@ -47,6 +49,13 @@ type AuxiliaryTrack = 'motion' | 'audio'
 interface SelectedAuxiliarySegment {
   track: AuxiliaryTrack
   id: string
+}
+
+interface DirectorContextMenuState {
+  x: number
+  y: number
+  segmentId?: string
+  timelineSeconds: number
 }
 
 interface LtxDirectorWorkspaceProps {
@@ -305,6 +314,7 @@ function DirectorStoryboardEditor({
   const t = useTranslations('video.director')
   const queryClient = useQueryClient()
   const uploadInputRef = useRef<HTMLInputElement>(null)
+  const mainVideoUploadInputRef = useRef<HTMLInputElement>(null)
   const motionUploadInputRef = useRef<HTMLInputElement>(null)
   const audioUploadInputRef = useRef<HTMLInputElement>(null)
   const retakeUploadInputRef = useRef<HTMLInputElement>(null)
@@ -312,17 +322,23 @@ function DirectorStoryboardEditor({
   const timelineScrollRef = useRef<HTMLDivElement>(null)
   const timelineTrackRef = useRef<HTMLDivElement>(null)
   const playbackFrameRef = useRef<number | null>(null)
+  const mainPreviewVideoRef = useRef<HTMLVideoElement>(null)
+  const audioPreviewRefs = useRef(new Map<string, HTMLAudioElement>())
   const undoStackRef = useRef<LtxDirectorTimelineSpec[]>([])
   const redoStackRef = useRef<LtxDirectorTimelineSpec[]>([])
   const previousSpecRef = useRef<LtxDirectorTimelineSpec | null>(null)
   const restoringHistoryRef = useRef(false)
   const gestureHistoryRef = useRef({ active: false, captured: false })
+  const copiedSegmentRef = useRef<LtxDirectorTimelineSegmentSpec | null>(null)
   const resizeGestureRef = useRef<{
     index: number
     segmentId?: string
     pointerId: number
+    edge: 'left' | 'right'
     originX: number
+    originStart: number
     originDuration: number
+    originTrimStart: number
   } | null>(null)
   const dragGestureRef = useRef<{
     segmentId: string
@@ -335,11 +351,18 @@ function DirectorStoryboardEditor({
     track: AuxiliaryTrack
     segmentId: string
     pointerId: number
-    mode: 'move' | 'resize'
+    mode: 'move' | 'resizeLeft' | 'resizeRight'
     originX: number
     originStart: number
     originDuration: number
     initialSegments: Array<LtxDirectorMotionSegmentSpec | LtxDirectorAudioSegmentSpec>
+  } | null>(null)
+  const retakeGestureRef = useRef<{
+    pointerId: number
+    mode: 'move' | 'left' | 'right'
+    originX: number
+    originStart: number
+    originDuration: number
   } | null>(null)
   const defaultSpec = useMemo(
     () => buildDefaultSpec(storyboard, clips, models[0]?.value || '', videoRatio),
@@ -362,6 +385,7 @@ function DirectorStoryboardEditor({
   const [spec, setSpec] = useState(defaultSpec)
   const [dirty, setDirty] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [selectedSegmentIds, setSelectedSegmentIds] = useState<string[]>([])
   const [selectedAuxiliary, setSelectedAuxiliary] = useState<SelectedAuxiliarySegment | null>(null)
   const [magneticFill, setMagneticFill] = useState(true)
   const [playheadSeconds, setPlayheadSeconds] = useState(0)
@@ -370,6 +394,9 @@ function DirectorStoryboardEditor({
   const [historyVersion, setHistoryVersion] = useState(0)
   const [timelineScale, setTimelineScale] = useState(TIMELINE_PX_PER_SECOND)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [contextMenu, setContextMenu] = useState<DirectorContextMenuState | null>(null)
+  const [audioWaveforms, setAudioWaveforms] = useState<Record<string, number[]>>({})
+  const [helpOpen, setHelpOpen] = useState(false)
   const firstSourceImageUrl = useMemo(() => {
     const first = spec.segments[0]
     if (!first) return null
@@ -393,6 +420,7 @@ function DirectorStoryboardEditor({
     if (!dirty) {
       setSpec(defaultSpec)
       setSelectedIndex((current) => Math.min(current, Math.max(0, defaultSpec.segments.length - 1)))
+      setSelectedSegmentIds([])
       setSelectedAuxiliary(null)
       undoStackRef.current = []
       redoStackRef.current = []
@@ -454,7 +482,10 @@ function DirectorStoryboardEditor({
     },
   })
   const uploadMutation = useMutation({
-    mutationFn: async ({ file, track }: { file: File; track: 'image' | 'motion' | 'audio' | 'retake' }) => {
+    mutationFn: async ({ file, track }: {
+      file: File
+      track: 'image' | 'mainVideo' | 'motion' | 'motionImage' | 'audio' | 'retake'
+    }) => {
       const durationSeconds = track === 'image' ? 3 : await readMediaDuration(file)
       const formData = new FormData()
       formData.set('file', file)
@@ -473,9 +504,38 @@ function DirectorStoryboardEditor({
       return { ...uploaded, track, durationSeconds }
     },
     onSuccess: (uploaded) => {
+      if (uploaded.track === 'mainVideo') {
+        const segment: LtxDirectorTimelineSegmentSpec = {
+          id: nextSegmentId(),
+          type: 'video',
+          sourceMediaId: uploaded.mediaId,
+          sourceUrl: uploaded.mediaUrl,
+          filename: uploaded.filename,
+          prompt: '',
+          startSeconds: playheadSeconds,
+          durationSeconds: uploaded.durationSeconds,
+          mediaDurationSeconds: uploaded.durationSeconds,
+          trimStartSeconds: 0,
+          linkedAudio: true,
+          guideStrength: 1,
+        }
+        const nextSegments = sortTimelineSegments([...spec.segments, segment])
+        setSpec((current) => ({
+          ...current,
+          audioTrackEnabled: true,
+          useCustomAudio: true,
+          segments: sortTimelineSegments([...current.segments, segment]),
+        }))
+        setSelectedIndex(Math.max(0, nextSegments.findIndex((item) => item.id === segment.id)))
+        setSelectedSegmentIds([segment.id!])
+        setSelectedAuxiliary(null)
+        setDirty(true)
+        return
+      }
       if (uploaded.track === 'motion') {
         const segment: LtxDirectorMotionSegmentSpec = {
           id: nextSegmentId(),
+          sourceType: 'video',
           sourceMediaId: uploaded.mediaId,
           sourceUrl: uploaded.mediaUrl,
           filename: uploaded.filename,
@@ -492,6 +552,33 @@ function DirectorStoryboardEditor({
           motionSegments: [...(current.motionSegments ?? []), segment]
             .sort((left, right) => left.startSeconds - right.startSeconds),
         }))
+        setSelectedAuxiliary({ track: 'motion', id: segment.id! })
+        setSelectedSegmentIds([])
+        setDirty(true)
+        return
+      }
+      if (uploaded.track === 'motionImage') {
+        const segment: LtxDirectorMotionSegmentSpec = {
+          id: nextSegmentId(),
+          sourceType: 'image',
+          sourceMediaId: uploaded.mediaId,
+          sourceUrl: uploaded.mediaUrl,
+          filename: uploaded.filename,
+          startSeconds: playheadSeconds,
+          durationSeconds: Math.max(1, totalDuration || 3),
+          videoStrength: 1,
+          videoAttentionStrength: 0.65,
+          resampleMode: 'nearest',
+        }
+        setSpec((current) => ({
+          ...current,
+          motionTrackEnabled: true,
+          useCustomMotion: true,
+          motionSegments: [...(current.motionSegments ?? []), segment]
+            .sort((left, right) => left.startSeconds - right.startSeconds),
+        }))
+        setSelectedAuxiliary({ track: 'motion', id: segment.id! })
+        setSelectedSegmentIds([])
         setDirty(true)
         return
       }
@@ -511,6 +598,8 @@ function DirectorStoryboardEditor({
           audioSegments: [...(current.audioSegments ?? []), segment]
             .sort((left, right) => left.startSeconds - right.startSeconds),
         }))
+        setSelectedAuxiliary({ track: 'audio', id: segment.id! })
+        setSelectedSegmentIds([])
         setDirty(true)
         return
       }
@@ -539,6 +628,7 @@ function DirectorStoryboardEditor({
     totalTimelineDuration(spec.segments),
     ...(spec.motionSegments ?? []).map((segment) => segment.startSeconds + segment.durationSeconds),
     ...(spec.audioSegments ?? []).map((segment) => segment.startSeconds + segment.durationSeconds),
+    (spec.retakeStartSeconds ?? 0) + (spec.retakeDurationSeconds ?? 0),
   )
   const rangeSelected = spec.rangeStartSeconds !== undefined && spec.rangeEndSeconds !== undefined
   const rangeStart = Math.min(totalDuration, Math.max(0, spec.rangeStartSeconds ?? 0))
@@ -550,6 +640,12 @@ function DirectorStoryboardEditor({
   const timelineWidth = timelineVisualDuration * timelineScale
   const rulerTicks = Array.from({ length: timelineVisualDuration + 1 }, (_, index) => index)
   const selectedSegment = spec.segments[selectedIndex] || null
+  const activeMainIndex = spec.segments.findIndex((segment, index) => {
+    const start = startOfSegment(spec.segments, index)
+    return playheadSeconds >= start && playheadSeconds < start + segment.durationSeconds
+  })
+  const activeMainSegment = activeMainIndex >= 0 ? spec.segments[activeMainIndex] : null
+  const activeMainSource = activeMainSegment ? resolveSegmentSource(activeMainSegment) : null
 
   useEffect(() => {
     setPlayheadSeconds((current) => Math.min(current, totalDuration))
@@ -578,6 +674,87 @@ function DirectorStoryboardEditor({
       playbackFrameRef.current = null
     }
   }, [loopPlayback, playing, totalDuration])
+
+  useEffect(() => {
+    const video = mainPreviewVideoRef.current
+    const retakePreview = spec.retakeEnabled && Boolean(spec.retakeVideoUrl)
+    if (!video || (!retakePreview && activeMainSegment?.type !== 'video')) return
+    const start = retakePreview ? 0 : activeMainIndex >= 0 ? startOfSegment(spec.segments, activeMainIndex) : 0
+    const targetTime = retakePreview
+      ? playheadSeconds
+      : Math.max(0, (activeMainSegment?.trimStartSeconds ?? 0) + playheadSeconds - start)
+    if (Math.abs(video.currentTime - targetTime) > 0.2) video.currentTime = targetTime
+    if (playing) void video.play().catch(() => undefined)
+    else video.pause()
+  }, [activeMainIndex, activeMainSegment, playheadSeconds, playing, spec.retakeEnabled, spec.retakeVideoUrl, spec.segments])
+
+  useEffect(() => {
+    const activeIds = new Set<string>()
+    const previewElements = audioPreviewRefs.current
+    for (const segment of spec.audioSegments ?? []) {
+      if (!segment.id) continue
+      const element = previewElements.get(segment.id)
+      if (!element) continue
+      const active = playheadSeconds >= segment.startSeconds
+        && playheadSeconds < segment.startSeconds + segment.durationSeconds
+      if (!active) {
+        element.pause()
+        continue
+      }
+      activeIds.add(segment.id)
+      const targetTime = Math.max(0, (segment.trimStartSeconds ?? 0) + playheadSeconds - segment.startSeconds)
+      if (Math.abs(element.currentTime - targetTime) > 0.2) element.currentTime = targetTime
+      if (playing) void element.play().catch(() => undefined)
+      else element.pause()
+    }
+    return () => {
+      if (playing) return
+      for (const [id, element] of previewElements) {
+        if (!activeIds.has(id)) element.pause()
+      }
+    }
+  }, [playheadSeconds, playing, spec.audioSegments])
+
+  useEffect(() => {
+    const pending = (spec.audioSegments ?? []).filter((segment) => (
+      segment.id && segment.sourceUrl && !audioWaveforms[segment.id]
+    ))
+    if (pending.length === 0 || typeof AudioContext === 'undefined') return
+    let canceled = false
+    const context = new AudioContext()
+    void Promise.all(pending.map(async (segment) => {
+      try {
+        const response = await fetch(segment.sourceUrl!)
+        if (!response.ok) throw new Error('audio preview unavailable')
+        const decoded = await context.decodeAudioData(await response.arrayBuffer())
+        const channel = decoded.getChannelData(0)
+        const bucketCount = 48
+        const bucketSize = Math.max(1, Math.floor(channel.length / bucketCount))
+        const peaks = Array.from({ length: bucketCount }, (_, index) => {
+          let peak = 0
+          const start = index * bucketSize
+          const end = Math.min(channel.length, start + bucketSize)
+          for (let cursor = start; cursor < end; cursor += 1) peak = Math.max(peak, Math.abs(channel[cursor] ?? 0))
+          return peak
+        })
+        return segment.id ? [segment.id, peaks] as const : null
+      } catch {
+        return segment.id ? [segment.id, []] as const : null
+      }
+    })).then((items) => {
+      if (canceled) return
+      setAudioWaveforms((current) => ({
+        ...current,
+        ...Object.fromEntries(items.filter((item): item is readonly [string, number[]] => Boolean(item))),
+      }))
+    }).catch(() => undefined).finally(() => {
+      if (context.state !== 'closed') void context.close().catch(() => undefined)
+    })
+    return () => {
+      canceled = true
+      void context.close().catch(() => undefined)
+    }
+  }, [audioWaveforms, spec.audioSegments])
 
   useEffect(() => {
     if (!rangeSelected) return
@@ -611,12 +788,16 @@ function DirectorStoryboardEditor({
     return null
   }
 
-  const ready = spec.segments.length > 0
-    && spec.segments.length <= 8
+  const ready = (spec.segments.length > 0 || Boolean(spec.retakeEnabled && spec.retakeVideoMediaId))
+    && spec.segments.length <= 64
     && Boolean(spec.videoModel)
     && (!rangeSelected || rangeEnd > rangeStart)
     && (!spec.retakeEnabled || Boolean(spec.retakeVideoMediaId && spec.retakeDurationSeconds))
-    && spec.segments.every((segment) => Boolean(resolveSegmentSource(segment)))
+    && spec.segments.every((segment) => (
+      segment.type === 'text'
+      || (segment.type === 'video' && Boolean(segment.sourceMediaId && segment.sourceUrl))
+      || Boolean(resolveSegmentSource(segment))
+    ))
   const error = saveMutation.error instanceof Error
     ? saveMutation.error.message
     : uploadMutation.error instanceof Error
@@ -671,7 +852,7 @@ function DirectorStoryboardEditor({
   }
 
   function appendSource(source?: DirectorSource, startSeconds = totalDuration) {
-    if (spec.segments.length >= 8) return
+    if (spec.segments.length >= 64) return
     const created = createSegment(source, Math.max(0, startSeconds))
     const segments = moveTimelineSegment(
       [...spec.segments, created],
@@ -715,6 +896,63 @@ function DirectorStoryboardEditor({
         : current.segments.filter((_, segmentIndex) => segmentIndex !== index),
     }))
     setSelectedIndex((current) => Math.max(0, Math.min(current, spec.segments.length - 2)))
+    setDirty(true)
+  }
+
+  function removeSelectedSegments() {
+    if (selectedSegmentIds.length === 0) {
+      if (selectedSegment) removeSegment(selectedIndex)
+      return
+    }
+    const selected = new Set(selectedSegmentIds)
+    setSpec((current) => {
+      const remaining = current.segments.filter((segment) => !segment.id || !selected.has(segment.id))
+      return { ...current, segments: magneticFill ? compactTimelineSegments(remaining) : remaining }
+    })
+    setSelectedSegmentIds([])
+    setSelectedIndex(0)
+    setDirty(true)
+  }
+
+  function selectMainSegment(index: number, additive = false) {
+    const segment = spec.segments[index]
+    if (!segment) return
+    setSelectedIndex(index)
+    setSelectedAuxiliary(null)
+    if (!segment.id) return
+    setSelectedSegmentIds((current) => {
+      if (!additive) return [segment.id!]
+      return current.includes(segment.id!)
+        ? current.filter((id) => id !== segment.id)
+        : [...current, segment.id!]
+    })
+  }
+
+  function markSelectedSegments() {
+    const selected = selectedSegmentIds.length > 0
+      ? spec.segments.filter((segment) => segment.id && selectedSegmentIds.includes(segment.id))
+      : selectedSegment ? [selectedSegment] : []
+    if (selected.length === 0) return
+    const starts = selected.map((segment) => startOfSegment(spec.segments, spec.segments.indexOf(segment)))
+    const ends = selected.map((segment, index) => starts[index]! + segment.durationSeconds)
+    selectRange(Math.min(...starts), Math.max(...ends))
+  }
+
+  function copySelectedSegment() {
+    if (!selectedSegment) return
+    copiedSegmentRef.current = structuredClone(selectedSegment)
+  }
+
+  function pasteSegmentAt(seconds: number, replaceId?: string) {
+    const copied = copiedSegmentRef.current
+    if (!copied) return
+    const created = { ...structuredClone(copied), id: nextSegmentId(), startSeconds: Math.max(0, seconds) }
+    setSpec((current) => {
+      const segments = replaceId
+        ? current.segments.map((segment) => segment.id === replaceId ? created : segment)
+        : [...current.segments, created]
+      return { ...current, segments: sortTimelineSegments(segments) }
+    })
     setDirty(true)
   }
 
@@ -794,6 +1032,7 @@ function DirectorStoryboardEditor({
       initialSegments: spec.segments.map((candidate) => ({ ...candidate })),
     }
     setSelectedIndex(index)
+    if (!selectedSegmentIds.includes(segment.id)) setSelectedSegmentIds([segment.id])
     setSelectedAuxiliary(null)
   }
 
@@ -812,13 +1051,25 @@ function DirectorStoryboardEditor({
     const absolutePointerSeconds = track
       ? Math.max(0, (event.clientX - track.left) / timelineScale)
       : rawStart
-    const segments = moveTimelineSegment(
-      gesture.initialSegments,
-      gesture.segmentId,
-      requestedStart,
-      absolutePointerSeconds,
-      magneticFill,
-    )
+    const movingIds = selectedSegmentIds.includes(gesture.segmentId) && selectedSegmentIds.length > 1
+      ? new Set(selectedSegmentIds)
+      : null
+    const segments = movingIds
+      ? sortTimelineSegments(gesture.initialSegments.map((segment, index) => (
+          segment.id && movingIds.has(segment.id)
+            ? {
+                ...segment,
+                startSeconds: Math.max(0, startOfSegment(gesture.initialSegments, index) + requestedStart - gesture.originStart),
+              }
+            : segment
+        )))
+      : moveTimelineSegment(
+          gesture.initialSegments,
+          gesture.segmentId,
+          requestedStart,
+          absolutePointerSeconds,
+          magneticFill,
+        )
     setSpec((current) => ({ ...current, segments }))
     const nextIndex = segments.findIndex((segment) => segment.id === gesture.segmentId)
     if (nextIndex >= 0) setSelectedIndex(nextIndex)
@@ -831,7 +1082,7 @@ function DirectorStoryboardEditor({
     gestureHistoryRef.current = { active: false, captured: false }
   }
 
-  function beginResize(event: ReactPointerEvent<HTMLDivElement>, index: number) {
+  function beginResize(event: ReactPointerEvent<HTMLDivElement>, index: number, edge: 'left' | 'right' = 'right') {
     event.preventDefault()
     event.stopPropagation()
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -840,23 +1091,35 @@ function DirectorStoryboardEditor({
       index,
       segmentId: spec.segments[index]?.id,
       pointerId: event.pointerId,
+      edge,
       originX: event.clientX,
+      originStart: startOfSegment(spec.segments, index),
       originDuration: spec.segments[index]?.durationSeconds ?? 0.5,
+      originTrimStart: spec.segments[index]?.trimStartSeconds ?? 0,
     }
   }
 
   function resizeSegment(event: ReactPointerEvent<HTMLDivElement>) {
     const gesture = resizeGestureRef.current
     if (!gesture || gesture.pointerId !== event.pointerId) return
-    const durationSeconds = Math.max(
-      0.5,
-      Math.round((gesture.originDuration + (event.clientX - gesture.originX) / timelineScale) * 10) / 10,
-    )
+    const deltaSeconds = Math.round(((event.clientX - gesture.originX) / timelineScale) * 10) / 10
+    const durationSeconds = Math.max(0.1, Math.round((gesture.originDuration
+      + (gesture.edge === 'right' ? deltaSeconds : -deltaSeconds)) * 10) / 10)
+    const effectiveDelta = gesture.edge === 'left' ? gesture.originDuration - durationSeconds : 0
     setSpec((current) => ({
       ...current,
-      segments: (magneticFill ? compactTimelineSegments : sortTimelineSegments)(current.segments.map((segment, index) => (
+      segments: sortTimelineSegments(current.segments.map((segment, index) => (
         (gesture.segmentId ? segment.id === gesture.segmentId : index === gesture.index)
-          ? { ...segment, durationSeconds }
+          ? {
+              ...segment,
+              durationSeconds,
+              ...(gesture.edge === 'left' ? {
+                startSeconds: Math.max(0, gesture.originStart + effectiveDelta),
+                ...(segment.type === 'video'
+                  ? { trimStartSeconds: Math.max(0, gesture.originTrimStart + effectiveDelta) }
+                  : {}),
+              } : {}),
+            }
           : segment
       ))),
     }))
@@ -970,7 +1233,7 @@ function DirectorStoryboardEditor({
     event: ReactPointerEvent<HTMLDivElement>,
     track: AuxiliaryTrack,
     index: number,
-    mode: 'move' | 'resize',
+    mode: 'move' | 'resizeLeft' | 'resizeRight',
   ) {
     if (event.button !== 0) return
     const segments = auxiliarySegments(track)
@@ -999,10 +1262,20 @@ function DirectorStoryboardEditor({
     const deltaSeconds = (event.clientX - gesture.originX) / timelineScale
     const segments = gesture.initialSegments.map((segment) => {
       if (segment.id !== gesture.segmentId) return segment
-      if (gesture.mode === 'resize') {
+      if (gesture.mode === 'resizeRight') {
         return {
           ...segment,
           durationSeconds: Math.max(0.1, Math.round((gesture.originDuration + deltaSeconds) * 10) / 10),
+        }
+      }
+      if (gesture.mode === 'resizeLeft') {
+        const durationSeconds = Math.max(0.1, Math.round((gesture.originDuration - deltaSeconds) * 10) / 10)
+        const effectiveDelta = gesture.originDuration - durationSeconds
+        return {
+          ...segment,
+          startSeconds: Math.max(0, gesture.originStart + effectiveDelta),
+          durationSeconds,
+          trimStartSeconds: Math.max(0, (segment.trimStartSeconds ?? 0) + effectiveDelta),
         }
       }
       return {
@@ -1021,6 +1294,46 @@ function DirectorStoryboardEditor({
   function endAuxiliaryGesture(event: ReactPointerEvent<HTMLDivElement>) {
     if (auxiliaryGestureRef.current?.pointerId !== event.pointerId) return
     auxiliaryGestureRef.current = null
+    gestureHistoryRef.current = { active: false, captured: false }
+  }
+
+  function beginRetakeGesture(event: ReactPointerEvent<HTMLDivElement>, mode: 'move' | 'left' | 'right') {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    gestureHistoryRef.current = { active: true, captured: false }
+    retakeGestureRef.current = {
+      pointerId: event.pointerId,
+      mode,
+      originX: event.clientX,
+      originStart: spec.retakeStartSeconds ?? 0,
+      originDuration: spec.retakeDurationSeconds ?? 1,
+    }
+  }
+
+  function updateRetakeGesture(event: ReactPointerEvent<HTMLDivElement>) {
+    const gesture = retakeGestureRef.current
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    const delta = Math.round(((event.clientX - gesture.originX) / timelineScale) * 100) / 100
+    if (gesture.mode === 'move') {
+      patchSpec({ retakeStartSeconds: Math.max(0, Math.min(totalDuration - gesture.originDuration, gesture.originStart + delta)) })
+      return
+    }
+    if (gesture.mode === 'left') {
+      const end = gesture.originStart + gesture.originDuration
+      const start = Math.max(0, Math.min(end - 0.1, gesture.originStart + delta))
+      patchSpec({ retakeStartSeconds: start, retakeDurationSeconds: end - start })
+      return
+    }
+    patchSpec({
+      retakeDurationSeconds: Math.max(0.1, Math.min(totalDuration - gesture.originStart, gesture.originDuration + delta)),
+    })
+  }
+
+  function endRetakeGesture(event: ReactPointerEvent<HTMLDivElement>) {
+    if (retakeGestureRef.current?.pointerId !== event.pointerId) return
+    retakeGestureRef.current = null
     gestureHistoryRef.current = { active: false, captured: false }
   }
 
@@ -1065,16 +1378,45 @@ function DirectorStoryboardEditor({
     setPlayheadSeconds(Math.max(0, Math.min(totalDuration, Math.round(value * 100) / 100)))
   }
 
-  function splitAtPlayhead() {
+  function splitAtPlayhead(atSeconds = playheadSeconds) {
+    if (selectedAuxiliary) {
+      const auxiliary = auxiliarySegments(selectedAuxiliary.track)
+      const splitIndex = auxiliary.findIndex((segment) => (
+        segment.id === selectedAuxiliary.id
+        && atSeconds > segment.startSeconds + 0.05
+        && atSeconds < segment.startSeconds + segment.durationSeconds - 0.05
+      ))
+      if (splitIndex >= 0) {
+        const segment = auxiliary[splitIndex]!
+        const leftDuration = atSeconds - segment.startSeconds
+        const rightDuration = segment.durationSeconds - leftDuration
+        const left = { ...segment, durationSeconds: leftDuration }
+        const right = {
+          ...segment,
+          id: nextSegmentId(),
+          startSeconds: atSeconds,
+          durationSeconds: rightDuration,
+          trimStartSeconds: (segment.trimStartSeconds ?? 0) + leftDuration,
+        }
+        patchAuxiliarySegments(selectedAuxiliary.track, [
+          ...auxiliary.slice(0, splitIndex),
+          left,
+          right,
+          ...auxiliary.slice(splitIndex + 1),
+        ])
+        setSelectedAuxiliary({ track: selectedAuxiliary.track, id: right.id! })
+        return
+      }
+    }
     const splitIndex = spec.segments.findIndex((segment, index) => {
       const start = startOfSegment(spec.segments, index)
-      return playheadSeconds > start + 0.1
-        && playheadSeconds < start + segment.durationSeconds - 0.1
+      return atSeconds > start + 0.1
+        && atSeconds < start + segment.durationSeconds - 0.1
     })
     if (splitIndex < 0) return
     const segment = spec.segments[splitIndex]!
     const start = startOfSegment(spec.segments, splitIndex)
-    const leftDuration = Math.round((playheadSeconds - start) * 10) / 10
+    const leftDuration = Math.round((atSeconds - start) * 10) / 10
     const rightDuration = Math.round((segment.durationSeconds - leftDuration) * 10) / 10
     const left = {
       ...segment,
@@ -1084,8 +1426,11 @@ function DirectorStoryboardEditor({
     const right = {
       ...segment,
       id: nextSegmentId(),
-      startSeconds: playheadSeconds,
+      startSeconds: atSeconds,
       durationSeconds: rightDuration,
+      ...(segment.type === 'video'
+        ? { trimStartSeconds: (segment.trimStartSeconds ?? 0) + leftDuration }
+        : {}),
     }
     const segments = [
       ...spec.segments.slice(0, splitIndex),
@@ -1100,7 +1445,7 @@ function DirectorStoryboardEditor({
   }
 
   function exportTimeline() {
-    const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify(createLtxDirectorTimelineExport(spec), null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
@@ -1140,7 +1485,7 @@ function DirectorStoryboardEditor({
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault()
       if (selectedAuxiliary) removeSelectedAuxiliary()
-      else if (selectedSegment) removeSegment(selectedIndex)
+      else removeSelectedSegments()
       return
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
@@ -1154,9 +1499,24 @@ function DirectorStoryboardEditor({
       redoTimeline()
       return
     }
-    if (event.key.toLowerCase() === 's') {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c') {
+      event.preventDefault()
+      copySelectedSegment()
+      return
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v') {
+      event.preventDefault()
+      pasteSegmentAt(playheadSeconds)
+      return
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') {
       event.preventDefault()
       splitAtPlayhead()
+      return
+    }
+    if (event.key.toLowerCase() === 's' && !(event.metaKey || event.ctrlKey)) {
+      event.preventDefault()
+      toggleMagneticFill()
       return
     }
     if (event.key.toLowerCase() === 'i') {
@@ -1169,6 +1529,11 @@ function DirectorStoryboardEditor({
       markRangeEnd()
       return
     }
+    if (event.key.toLowerCase() === 'x') {
+      event.preventDefault()
+      markSelectedSegments()
+      return
+    }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault()
       const direction = event.key === 'ArrowLeft' ? -1 : 1
@@ -1176,8 +1541,17 @@ function DirectorStoryboardEditor({
     }
   }
 
+  function handleTimelinePaste(event: ReactClipboardEvent<HTMLElement>) {
+    const target = event.target as HTMLElement
+    if (target.matches('input, textarea, select, [contenteditable="true"]')) return
+    const image = Array.from(event.clipboardData.files).find((file) => file.type.startsWith('image/'))
+    if (!image) return
+    event.preventDefault()
+    uploadMutation.mutate({ file: image, track: 'image' })
+  }
+
   return (
-    <section className="glass-surface overflow-hidden rounded-2xl outline-none" tabIndex={0} onKeyDown={handleTimelineKeyDown}>
+    <section className="glass-surface overflow-hidden rounded-2xl outline-none" tabIndex={0} onKeyDown={handleTimelineKeyDown} onPaste={handleTimelinePaste}>
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--glass-stroke-base)] p-4 md:p-5">
         <div>
           <h3 className="text-base font-semibold text-[var(--glass-text-primary)]">
@@ -1282,7 +1656,7 @@ function DirectorStoryboardEditor({
         <label className="space-y-1.5 text-xs text-[var(--glass-text-secondary)] md:col-span-3">
           <span>{t('globalPrompt')}</span>
           <GlassTextarea
-            rows={2}
+            rows={Math.max(2, Math.round((spec.globalPropHeight ?? 60) / 24))}
             value={spec.globalPrompt}
             placeholder={t('globalPromptPlaceholder')}
             onChange={(event) => patchSpec({ globalPrompt: event.target.value })}
@@ -1357,6 +1731,14 @@ function DirectorStoryboardEditor({
                   onChange={(event) => patchSpec({ epsilon: Math.min(1, Math.max(0.000001, Number(event.target.value) || 0.001)) })}
                 />
               </label>
+              <label className="space-y-1 text-xs text-[var(--glass-text-secondary)]">
+                <span>全局提示词高度</span>
+                <GlassInput type="number" min={48} max={360} step={8} value={spec.globalPropHeight ?? 60} onChange={(event) => patchSpec({ globalPropHeight: Math.min(360, Math.max(48, Number(event.target.value) || 60)) })} />
+              </label>
+              <label className="space-y-1 text-xs text-[var(--glass-text-secondary)]">
+                <span>片段提示词高度</span>
+                <GlassInput type="number" min={72} max={480} step={8} value={spec.propHeight ?? 90} onChange={(event) => patchSpec({ propHeight: Math.min(480, Math.max(72, Number(event.target.value) || 90)) })} />
+              </label>
               {([
                 ['mainTrackEnabled', 'mainTrack'],
                 ['audioTrackEnabled', 'audioTrack'],
@@ -1388,9 +1770,7 @@ function DirectorStoryboardEditor({
             <div className="text-xs font-semibold uppercase tracking-wide text-[var(--glass-text-secondary)]">
               {t('mediaPool')}
             </div>
-            <GlassButton size="sm" variant="ghost" loading={uploadMutation.isPending} onClick={() => uploadInputRef.current?.click()}>
-              {t('uploadImage')}
-            </GlassButton>
+            <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-[var(--glass-text-tertiary)]">LTX Director 2</span>
             <input
               ref={uploadInputRef}
               className="hidden"
@@ -1403,25 +1783,53 @@ function DirectorStoryboardEditor({
               }}
             />
           </div>
-          <div className="mt-2 grid grid-cols-3 gap-1">
+          <div className="mt-2 grid grid-cols-2 gap-1">
+            <GlassButton size="sm" variant="ghost" loading={uploadMutation.isPending} onClick={() => uploadInputRef.current?.click()}>
+              ＋ {t('uploadImage')}
+            </GlassButton>
+            <GlassButton size="sm" variant="ghost" disabled={uploadMutation.isPending} onClick={() => mainVideoUploadInputRef.current?.click()}>
+              ＋ 主轨视频
+            </GlassButton>
             <GlassButton size="sm" variant="ghost" disabled={uploadMutation.isPending} onClick={() => motionUploadInputRef.current?.click()}>
-              {t('uploadMotion')}
+              ＋ IC-LoRA
             </GlassButton>
             <GlassButton size="sm" variant="ghost" disabled={uploadMutation.isPending} onClick={() => audioUploadInputRef.current?.click()}>
-              {t('uploadAudio')}
+              ＋ {t('uploadAudio')}
             </GlassButton>
             <GlassButton size="sm" variant="ghost" disabled={uploadMutation.isPending} onClick={() => retakeUploadInputRef.current?.click()}>
-              {t('uploadRetake')}
+              ↻ {t('uploadRetake')}
             </GlassButton>
+            <GlassButton size="sm" variant="ghost" disabled={spec.segments.length >= 64} onClick={() => {
+              const created = createSegment(undefined, playheadSeconds)
+              created.type = 'text'
+              created.guideStrength = 0
+              setSpec((current) => ({ ...current, segments: sortTimelineSegments([...current.segments, created]) }))
+              setDirty(true)
+            }}>
+              ＋ 纯提示词
+            </GlassButton>
+            <input
+              ref={mainVideoUploadInputRef}
+              className="hidden"
+              type="file"
+              accept="video/*"
+              multiple
+              onChange={(event) => {
+                for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 64 - spec.segments.length))) {
+                  uploadMutation.mutate({ file, track: 'mainVideo' })
+                }
+                event.target.value = ''
+              }}
+            />
             <input
               ref={motionUploadInputRef}
               className="hidden"
               type="file"
-              accept="video/mp4,video/webm"
+              accept="image/*,video/*"
               multiple
               onChange={(event) => {
-                for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 8 - (spec.motionSegments?.length ?? 0)))) {
-                  uploadMutation.mutate({ file, track: 'motion' })
+                for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 64 - (spec.motionSegments?.length ?? 0)))) {
+                  uploadMutation.mutate({ file, track: file.type.startsWith('image/') ? 'motionImage' : 'motion' })
                 }
                 event.target.value = ''
               }}
@@ -1433,7 +1841,7 @@ function DirectorStoryboardEditor({
               accept="audio/wav,audio/mpeg,audio/ogg,audio/flac"
               multiple
               onChange={(event) => {
-                for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 8 - (spec.audioSegments?.length ?? 0)))) {
+                for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 64 - (spec.audioSegments?.length ?? 0)))) {
                   uploadMutation.mutate({ file, track: 'audio' })
                 }
                 event.target.value = ''
@@ -1491,6 +1899,71 @@ function DirectorStoryboardEditor({
         </aside>
 
         <main className="min-w-0 p-3 md:p-4">
+          <div className="mb-3 grid gap-3 rounded-xl border border-white/10 bg-[#111318] p-3 md:grid-cols-[minmax(280px,0.7fr)_minmax(280px,1fr)]">
+            <div className="relative aspect-video overflow-hidden rounded-lg bg-black shadow-inner">
+              {spec.retakeEnabled && spec.retakeVideoUrl ? (
+                <video
+                  ref={mainPreviewVideoRef}
+                  className="h-full w-full object-contain"
+                  src={spec.retakeVideoUrl}
+                  playsInline
+                  preload="auto"
+                />
+              ) : activeMainSegment?.type === 'video' && activeMainSegment.sourceUrl ? (
+                <video
+                  key={activeMainSegment.id}
+                  ref={mainPreviewVideoRef}
+                  className="h-full w-full object-contain"
+                  src={activeMainSegment.sourceUrl}
+                  muted={activeMainSegment.linkedAudio === false}
+                  playsInline
+                  preload="auto"
+                />
+              ) : activeMainSegment?.type === 'text' ? (
+                <div className="flex h-full items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-8 text-center text-sm leading-6 text-white/80">
+                  {activeMainSegment.prompt || 'Text to video'}
+                </div>
+              ) : activeMainSource ? (
+                <Image src={activeMainSource.imageUrl} alt="Timeline preview" fill sizes="720px" unoptimized className="object-contain" />
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-white/35">Timeline Preview</div>
+              )}
+              <div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 font-mono text-[10px] text-white/75">
+                {playheadSeconds.toFixed(2)}s · {Math.round(playheadSeconds * spec.fps)}f
+              </div>
+            </div>
+            <div className="flex min-h-0 flex-col">
+              <div className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.15em] text-white/45">
+                <span>{activeMainSegment ? `Segment ${activeMainIndex + 1}` : 'No segment'}</span>
+                <span>{activeMainSegment?.type?.toUpperCase() || 'IMAGE'}</span>
+              </div>
+              <GlassTextarea
+                rows={Math.max(4, Math.round((spec.propHeight ?? 90) / 20))}
+                value={activeMainSegment?.prompt ?? ''}
+                disabled={!activeMainSegment}
+                placeholder="Segment Prompt"
+                onChange={(event) => {
+                  if (activeMainIndex >= 0) patchSegment(activeMainIndex, { prompt: event.target.value })
+                }}
+              />
+              <div className="mt-2 text-[10px] leading-4 text-white/40">
+                播放头进入片段时同步预览画面与原视频音频；音频轨按时间位置同步播放。
+              </div>
+            </div>
+            {(spec.audioSegments ?? []).map((segment) => (
+              <audio
+                key={`preview-audio-${segment.id}`}
+                ref={(element) => {
+                  if (!segment.id) return
+                  if (element) audioPreviewRefs.current.set(segment.id, element)
+                  else audioPreviewRefs.current.delete(segment.id)
+                }}
+                className="hidden"
+                src={segment.sourceUrl}
+                preload="auto"
+              />
+            ))}
+          </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-sm font-semibold text-[var(--glass-text-primary)]">{t('timeline')}</div>
@@ -1521,7 +1994,27 @@ function DirectorStoryboardEditor({
               >
                 ↻ {t('loop')}
               </GlassButton>
-              <GlassButton size="sm" variant="ghost" disabled={spec.segments.length >= 8} onClick={splitAtPlayhead}>
+              <GlassButton
+                size="sm"
+                variant={spec.retakeEnabled ? 'primary' : 'ghost'}
+                onClick={() => {
+                  if (spec.retakeEnabled) patchSpec({ retakeEnabled: false })
+                  else if (spec.retakeVideoMediaId) patchSpec({ retakeEnabled: true })
+                  else retakeUploadInputRef.current?.click()
+                }}
+              >
+                ↻ Retake
+              </GlassButton>
+              <GlassButton size="sm" variant={spec.useCustomAudio ? 'primary' : 'ghost'} onClick={() => patchSpec({
+                useCustomAudio: !spec.useCustomAudio,
+                audioTrackEnabled: !spec.useCustomAudio ? true : spec.audioTrackEnabled,
+              })}>
+                Audio {spec.useCustomAudio ? 'ON' : 'OFF'}
+              </GlassButton>
+              <GlassButton size="sm" variant={spec.inpaintAudio !== false ? 'primary' : 'ghost'} disabled={!spec.useCustomAudio} onClick={() => patchSpec({ inpaintAudio: spec.inpaintAudio === false })}>
+                Inpaint {spec.inpaintAudio !== false ? 'ON' : 'OFF'}
+              </GlassButton>
+              <GlassButton size="sm" variant="ghost" disabled={spec.segments.length >= 64} onClick={() => splitAtPlayhead()}>
                 ✂ {t('splitAtPlayhead')}
               </GlassButton>
               <GlassButton
@@ -1532,7 +2025,7 @@ function DirectorStoryboardEditor({
               >
                 🧲 {t('magneticFill')}
               </GlassButton>
-              <GlassButton size="sm" variant="ghost" disabled={spec.segments.length >= 8} onClick={() => appendSource()}>
+              <GlassButton size="sm" variant="ghost" disabled={spec.segments.length >= 64} onClick={() => appendSource()}>
                 + {t('addShot')}
               </GlassButton>
             </div>
@@ -1607,6 +2100,7 @@ function DirectorStoryboardEditor({
                 />
               </label>
               <GlassButton size="sm" variant="ghost" onClick={fitTimeline}>{t('fitTimeline')}</GlassButton>
+              <GlassButton size="sm" variant="ghost" onClick={() => setHelpOpen(true)}>?</GlassButton>
             </div>
             <div
               ref={timelineScrollRef}
@@ -1620,6 +2114,16 @@ function DirectorStoryboardEditor({
                 minHeight: `${220
                   + (spec.motionTrackEnabled !== false ? 60 : 0)
                   + (spec.audioTrackEnabled === true ? 60 : 0)}px`,
+              }}
+              onContextMenu={(event) => {
+                if (event.target !== event.currentTarget) return
+                event.preventDefault()
+                const rect = event.currentTarget.getBoundingClientRect()
+                setContextMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  timelineSeconds: Math.max(0, (event.clientX - rect.left) / timelineScale),
+                })
               }}
             >
               <div className="absolute inset-x-0 top-0 h-7 border-b border-white/10 bg-black/20">
@@ -1657,14 +2161,45 @@ function DirectorStoryboardEditor({
               >
                 <div className="absolute -left-1.5 top-0 h-0 w-0 border-x-[6px] border-t-[8px] border-x-transparent border-t-red-400" />
               </div>
-              {spec.segments.map((segment, index) => {
+              {spec.retakeEnabled && spec.retakeVideoUrl ? (
+                <div className="absolute left-0 right-0 top-10 h-[156px] overflow-hidden rounded-xl border border-amber-400/35 bg-amber-950/20">
+                  <video className="h-full w-full object-cover opacity-55" src={spec.retakeVideoUrl} muted preload="metadata" />
+                  <div className="absolute inset-y-0 border-x-2 border-amber-300 bg-amber-300/15 shadow-[0_0_18px_rgba(252,211,77,0.18)]"
+                    style={{
+                      left: `${(spec.retakeStartSeconds ?? 0) * timelineScale}px`,
+                      width: `${Math.max(8, (spec.retakeDurationSeconds ?? 1) * timelineScale)}px`,
+                    }}
+                    onPointerDown={(event) => beginRetakeGesture(event, 'move')}
+                    onPointerMove={updateRetakeGesture}
+                    onPointerUp={endRetakeGesture}
+                    onPointerCancel={endRetakeGesture}
+                  >
+                    <div className="absolute left-2 top-2 rounded bg-amber-950/85 px-2 py-1 text-[10px] font-semibold text-amber-100">RETAKE</div>
+                    <div
+                      className="absolute inset-y-0 left-0 w-2 cursor-ew-resize bg-amber-200/35"
+                      onPointerDown={(event) => beginRetakeGesture(event, 'left')}
+                      onPointerMove={updateRetakeGesture}
+                      onPointerUp={endRetakeGesture}
+                      onPointerCancel={endRetakeGesture}
+                    />
+                    <div
+                      className="absolute inset-y-0 right-0 w-2 cursor-ew-resize bg-amber-200/35"
+                      onPointerDown={(event) => beginRetakeGesture(event, 'right')}
+                      onPointerMove={updateRetakeGesture}
+                      onPointerUp={endRetakeGesture}
+                      onPointerCancel={endRetakeGesture}
+                    />
+                  </div>
+                </div>
+              ) : spec.segments.map((segment, index) => {
                 const source = resolveSegmentSource(segment)
                 const start = startOfSegment(spec.segments, index)
+                const segmentType = segment.type ?? 'image'
                 return (
                   <div
                     key={segment.id || index}
                     className={`group absolute top-10 flex h-[156px] touch-none cursor-grab flex-col overflow-hidden rounded-xl border text-left shadow-lg transition active:cursor-grabbing ${
-                      selectedIndex === index
+                      (segment.id && selectedSegmentIds.includes(segment.id)) || selectedIndex === index
                         ? 'border-[var(--glass-accent-from)] ring-2 ring-[var(--glass-accent-from)]/20'
                         : 'border-[var(--glass-stroke-base)] hover:border-[var(--glass-stroke-strong)]'
                     } bg-[var(--glass-bg-surface)]`}
@@ -1672,9 +2207,16 @@ function DirectorStoryboardEditor({
                       left: `${start * timelineScale}px`,
                       width: `${Math.max(24, segment.durationSeconds * timelineScale)}px`,
                     }}
-                    onClick={() => {
-                      setSelectedIndex(index)
-                      setSelectedAuxiliary(null)
+                    onClick={(event) => selectMainSegment(index, event.metaKey || event.ctrlKey || event.shiftKey)}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      selectMainSegment(index, false)
+                      setContextMenu({
+                        x: event.clientX,
+                        y: event.clientY,
+                        segmentId: segment.id,
+                        timelineSeconds: start,
+                      })
                     }}
                     onPointerDown={(event) => beginSegmentDrag(event, index)}
                     onPointerMove={dragSegment}
@@ -1684,7 +2226,19 @@ function DirectorStoryboardEditor({
                     onDrop={(event) => dropOnSegment(event, index)}
                   >
                     <div className="relative h-[86px] w-full bg-black/70">
-                      {source ? (
+                      {segmentType === 'video' && segment.sourceUrl ? (
+                        <video
+                          className="h-full w-full object-cover"
+                          src={segment.sourceUrl}
+                          muted
+                          preload="metadata"
+                          draggable={false}
+                        />
+                      ) : segmentType === 'text' ? (
+                        <div className="flex h-full items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800 px-4 text-center text-xs text-white/75">
+                          {segment.prompt || 'Text to video'}
+                        </div>
+                      ) : source ? (
                         <Image src={source.imageUrl} alt={t('shot', { number: index + 1 })} fill sizes="240px" unoptimized draggable={false} className="object-cover" />
                       ) : (
                         <div className="flex h-full items-center justify-center px-4 text-center text-xs text-white/60">{t('dropImageHere')}</div>
@@ -1695,13 +2249,24 @@ function DirectorStoryboardEditor({
                     </div>
                     <div className="flex min-h-[68px] flex-1 flex-col p-2">
                       <div className="flex items-center justify-between gap-2 text-[11px]">
-                        <span className="font-semibold text-[var(--glass-text-primary)]">{t('shot', { number: index + 1 })}</span>
+                        <span className="font-semibold text-[var(--glass-text-primary)]">
+                          {segmentType === 'video' ? 'VIDEO' : segmentType === 'text' ? 'TEXT' : t('shot', { number: index + 1 })}
+                        </span>
                         <span className="text-[var(--glass-text-tertiary)]">{segment.durationSeconds.toFixed(1)}s</span>
                       </div>
                       <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--glass-text-secondary)]">
                         {segment.prompt || t('promptEmpty')}
                       </p>
                     </div>
+                    <div
+                      role="separator"
+                      aria-label="Trim segment start"
+                      className="absolute bottom-0 left-0 top-0 w-3 cursor-ew-resize border-r border-white/20 bg-white/5 opacity-0 transition group-hover:opacity-100"
+                      onPointerDown={(event) => beginResize(event, index, 'left')}
+                      onPointerMove={resizeSegment}
+                      onPointerUp={endResize}
+                      onPointerCancel={endResize}
+                    />
                     <div
                       role="separator"
                       aria-label={t('resizeShot')}
@@ -1751,9 +2316,18 @@ function DirectorStoryboardEditor({
                       </button>
                       <div
                         role="separator"
+                        aria-label="Trim motion start"
+                        className="absolute bottom-0 left-0 top-0 w-2 cursor-ew-resize border-r border-emerald-200/30 bg-white/5 opacity-0 group-hover:opacity-100"
+                        onPointerDown={(event) => beginAuxiliaryGesture(event, 'motion', index, 'resizeLeft')}
+                        onPointerMove={updateAuxiliaryGesture}
+                        onPointerUp={endAuxiliaryGesture}
+                        onPointerCancel={endAuxiliaryGesture}
+                      />
+                      <div
+                        role="separator"
                         aria-label={t('resizeMotion')}
                         className="absolute bottom-0 right-0 top-0 w-2 cursor-ew-resize border-l border-emerald-200/30 bg-white/5 opacity-0 group-hover:opacity-100"
-                        onPointerDown={(event) => beginAuxiliaryGesture(event, 'motion', index, 'resize')}
+                        onPointerDown={(event) => beginAuxiliaryGesture(event, 'motion', index, 'resizeRight')}
                         onPointerMove={updateAuxiliaryGesture}
                         onPointerUp={endAuxiliaryGesture}
                         onPointerCancel={endAuxiliaryGesture}
@@ -1792,7 +2366,12 @@ function DirectorStoryboardEditor({
                       onPointerUp={endAuxiliaryGesture}
                       onPointerCancel={endAuxiliaryGesture}
                     >
-                      <span className="min-w-0 flex-1 truncate">{spec.showFilenames === false ? t('audioClip') : segment.filename || t('audioClip')}</span>
+                      <div className="pointer-events-none absolute inset-1 flex items-center gap-px opacity-35">
+                        {(audioWaveforms[segment.id || '']?.length ? audioWaveforms[segment.id || ''] : Array.from({ length: 32 }, (_, itemIndex) => 0.2 + ((itemIndex * 17) % 9) / 12)).map((peak, peakIndex) => (
+                          <span key={peakIndex} className="min-w-px flex-1 rounded-full bg-violet-200" style={{ height: `${Math.max(8, peak * 100)}%` }} />
+                        ))}
+                      </div>
+                      <span className="relative z-10 min-w-0 flex-1 truncate rounded bg-black/35 px-1">{spec.showFilenames === false ? t('audioClip') : segment.filename || t('audioClip')}</span>
                       <button
                         type="button"
                         className="ml-1 text-violet-200/70 hover:text-white"
@@ -1806,9 +2385,18 @@ function DirectorStoryboardEditor({
                       </button>
                       <div
                         role="separator"
+                        aria-label="Trim audio start"
+                        className="absolute bottom-0 left-0 top-0 w-2 cursor-ew-resize border-r border-violet-200/30 bg-white/5 opacity-0 group-hover:opacity-100"
+                        onPointerDown={(event) => beginAuxiliaryGesture(event, 'audio', index, 'resizeLeft')}
+                        onPointerMove={updateAuxiliaryGesture}
+                        onPointerUp={endAuxiliaryGesture}
+                        onPointerCancel={endAuxiliaryGesture}
+                      />
+                      <div
+                        role="separator"
                         aria-label={t('resizeAudio')}
                         className="absolute bottom-0 right-0 top-0 w-2 cursor-ew-resize border-l border-violet-200/30 bg-white/5 opacity-0 group-hover:opacity-100"
-                        onPointerDown={(event) => beginAuxiliaryGesture(event, 'audio', index, 'resize')}
+                        onPointerDown={(event) => beginAuxiliaryGesture(event, 'audio', index, 'resizeRight')}
                         onPointerMove={updateAuxiliaryGesture}
                         onPointerUp={endAuxiliaryGesture}
                         onPointerCancel={endAuxiliaryGesture}
@@ -1947,7 +2535,11 @@ function DirectorStoryboardEditor({
                 <div>
                   <div className="text-sm font-semibold text-[var(--glass-text-primary)]">{t('inspectorTitle', { number: selectedIndex + 1 })}</div>
                   <div className="text-[11px] text-[var(--glass-text-tertiary)]">
-                    {resolveSegmentSource(selectedSegment)?.label || t('imageMissing')}
+                    {selectedSegment.type === 'video'
+                      ? selectedSegment.filename || 'Video segment'
+                      : selectedSegment.type === 'text'
+                        ? 'Text segment'
+                        : resolveSegmentSource(selectedSegment)?.label || t('imageMissing')}
                   </div>
                 </div>
                 <div className="flex gap-1">
@@ -1957,6 +2549,7 @@ function DirectorStoryboardEditor({
                 </div>
               </div>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {selectedSegment.type !== 'text' && (
                 <label className="space-y-1 text-xs text-[var(--glass-text-secondary)]">
                   <span>{t('startTime')}</span>
                   <GlassInput
@@ -1970,6 +2563,30 @@ function DirectorStoryboardEditor({
                     })}
                   />
                 </label>
+                )}
+                {selectedSegment.type === 'video' && (
+                  <>
+                    <label className="space-y-1 text-xs text-[var(--glass-text-secondary)]">
+                      <span>素材入点</span>
+                      <GlassInput
+                        type="number"
+                        min={0}
+                        max={selectedSegment.mediaDurationSeconds ?? 600}
+                        step={0.1}
+                        value={selectedSegment.trimStartSeconds ?? 0}
+                        onChange={(event) => patchSegment(selectedIndex, { trimStartSeconds: Math.max(0, Number(event.target.value) || 0) })}
+                      />
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-[var(--glass-text-secondary)]">
+                      <input
+                        type="checkbox"
+                        checked={selectedSegment.linkedAudio !== false}
+                        onChange={(event) => patchSegment(selectedIndex, { linkedAudio: event.target.checked })}
+                      />
+                      链接原视频音频
+                    </label>
+                  </>
+                )}
                 <label className="space-y-1 text-xs text-[var(--glass-text-secondary)]">
                   <span>{t('duration')}</span>
                   <GlassInput
@@ -1998,12 +2615,13 @@ function DirectorStoryboardEditor({
                 <label className="space-y-1 text-xs text-[var(--glass-text-secondary)] sm:col-span-2">
                   <span>{t('shotPrompt')}</span>
                   <GlassTextarea
-                    rows={5}
+                    rows={Math.max(3, Math.round((spec.propHeight ?? 90) / 24))}
                     value={selectedSegment.prompt}
                     placeholder={t('shotPromptPlaceholder')}
                     onChange={(event) => patchSegment(selectedIndex, { prompt: event.target.value })}
                   />
                 </label>
+                {selectedSegment.type !== 'text' && (
                 <label className="flex items-center gap-2 text-xs text-[var(--glass-text-secondary)] sm:col-span-2">
                   <input
                     type="checkbox"
@@ -2012,6 +2630,7 @@ function DirectorStoryboardEditor({
                   />
                   {t('endFrame')}
                 </label>
+                )}
               </div>
             </div>
           )}
@@ -2028,6 +2647,116 @@ function DirectorStoryboardEditor({
         <div className="border-t border-[var(--glass-stroke-base)] p-4 md:p-5">
           <div className="mb-2 text-xs font-medium text-[var(--glass-text-secondary)]">{t('preview')}</div>
           <video className="max-h-[560px] w-full rounded-xl bg-black" src={storyboard.directorVideoUrl} controls preload="metadata" />
+        </div>
+      )}
+      {contextMenu && (
+        <div className="fixed inset-0 z-[120]" onPointerDown={() => setContextMenu(null)}>
+          <div
+            className="fixed min-w-52 overflow-hidden rounded-xl border border-white/15 bg-[#17191f]/[0.98] p-1.5 text-xs text-white shadow-2xl backdrop-blur-xl"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {contextMenu.segmentId ? (
+              <>
+                <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
+                  copySelectedSegment()
+                  setContextMenu(null)
+                }}>复制片段 · ⌘C</button>
+                <button type="button" disabled={!copiedSegmentRef.current} className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10 disabled:opacity-35" onClick={() => {
+                  pasteSegmentAt(contextMenu.timelineSeconds)
+                  setContextMenu(null)
+                }}>在播放头粘贴 · ⌘V</button>
+                <button type="button" disabled={!copiedSegmentRef.current} className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10 disabled:opacity-35" onClick={() => {
+                  pasteSegmentAt(contextMenu.timelineSeconds, contextMenu.segmentId)
+                  setContextMenu(null)
+                }}>粘贴并替换</button>
+                <div className="my-1 border-t border-white/10" />
+                <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
+                  if (selectedSegment) void navigator.clipboard.writeText(selectedSegment.prompt)
+                  setContextMenu(null)
+                }}>复制提示词</button>
+                <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
+                  void navigator.clipboard.readText().then((prompt) => {
+                    if (selectedSegment) patchSegment(selectedIndex, { prompt })
+                  }).catch(() => undefined)
+                  setContextMenu(null)
+                }}>粘贴提示词</button>
+                <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
+                  setPlayhead(contextMenu.timelineSeconds)
+                  splitAtPlayhead(contextMenu.timelineSeconds)
+                  setContextMenu(null)
+                }}>在播放头分割 · S</button>
+                {selectedSegment?.type === 'image' && (
+                  <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
+                    patchSegment(selectedIndex, { isEndFrame: !selectedSegment.isEndFrame })
+                    setContextMenu(null)
+                  }}>{selectedSegment.isEndFrame ? '取消尾帧' : '转换为尾帧'}</button>
+                )}
+                {selectedSegment?.type === 'video' && selectedSegment.linkedAudio !== false && (
+                  <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
+                    patchSegment(selectedIndex, { linkedAudio: false })
+                    setContextMenu(null)
+                  }}>取消链接音频</button>
+                )}
+                <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
+                  markSelectedSegments()
+                  setContextMenu(null)
+                }}>标记所选区间 · X</button>
+                <div className="my-1 border-t border-white/10" />
+                <button type="button" className="block w-full rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/15" onClick={() => {
+                  removeSelectedSegments()
+                  setContextMenu(null)
+                }}>删除</button>
+              </>
+            ) : (
+              <>
+                <button type="button" disabled={!copiedSegmentRef.current} className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10 disabled:opacity-35" onClick={() => {
+                  pasteSegmentAt(contextMenu.timelineSeconds)
+                  setContextMenu(null)
+                }}>粘贴片段</button>
+                <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
+                  const created = createSegment(undefined, contextMenu.timelineSeconds)
+                  created.type = 'text'
+                  created.guideStrength = 0
+                  setSpec((current) => ({ ...current, segments: sortTimelineSegments([...current.segments, created]) }))
+                  setDirty(true)
+                  setContextMenu(null)
+                }}>＋ 纯提示词片段</button>
+                <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
+                  setPlayhead(contextMenu.timelineSeconds)
+                  uploadInputRef.current?.click()
+                  setContextMenu(null)
+                }}>＋ 图片片段</button>
+                <button type="button" className="block w-full rounded-lg px-3 py-2 text-left hover:bg-white/10" onClick={() => {
+                  setPlayhead(contextMenu.timelineSeconds)
+                  mainVideoUploadInputRef.current?.click()
+                  setContextMenu(null)
+                }}>＋ 视频片段</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      {helpOpen && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/65 p-6 backdrop-blur-sm" onPointerDown={() => setHelpOpen(false)}>
+          <div className="w-full max-w-2xl rounded-2xl border border-white/15 bg-[#17191f] p-5 text-sm text-white shadow-2xl" onPointerDown={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h4 className="text-base font-semibold">LTX Director 快捷键</h4>
+              <button type="button" className="rounded-lg px-2 py-1 text-white/60 hover:bg-white/10 hover:text-white" onClick={() => setHelpOpen(false)}>×</button>
+            </div>
+            <div className="mt-4 grid gap-x-6 gap-y-2 text-xs sm:grid-cols-2">
+              {[
+                ['Space', '播放 / 暂停'], ['⌘/Ctrl+B', '在播放头分割'], ['S', '开关吸附'], ['I / O', '设置生成入点 / 出点'],
+                ['X', '标记当前选择'], ['⌘/Ctrl+C', '复制片段'], ['⌘/Ctrl+V', '在播放头粘贴片段'],
+                ['Delete', '删除选择'], ['⌘/Ctrl+Z', '撤销'], ['⌘/Ctrl+Shift+Z', '重做'],
+                ['Shift/⌘ 点击', '多选片段'], ['拖动片段边缘', '裁切素材'], ['右键', '片段与空白区菜单'],
+              ].map(([key, label]) => (
+                <div key={key} className="flex items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2">
+                  <span className="font-mono text-white/85">{key}</span><span className="text-white/50">{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </section>
