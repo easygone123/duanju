@@ -182,6 +182,8 @@ function buildDefaultSpec(
       videoModel: saved.videoModel || defaultModel,
       aspectRatio: saved.aspectRatio || videoRatio,
       resolutionPreset: saved.resolutionPreset || '720p',
+      audioTrackEnabled: saved.audioTrackEnabled ?? true,
+      motionTrackEnabled: saved.motionTrackEnabled ?? true,
       segments: [...savedSegments, ...missingPanelSegments],
     }
   }
@@ -197,6 +199,8 @@ function buildDefaultSpec(
     videoModel: defaultModel,
     aspectRatio: videoRatio,
     resolutionPreset: '720p',
+    audioTrackEnabled: true,
+    motionTrackEnabled: true,
     segments: panels.map((panel) => {
       const durationSeconds = panelDuration(panel)
       const segment = {
@@ -1548,6 +1552,8 @@ function DirectorStoryboardEditor({
       videoModel: imported.videoModel || spec.videoModel,
       aspectRatio: imported.aspectRatio || spec.aspectRatio || videoRatio,
       resolutionPreset: imported.resolutionPreset || resolutionPreset,
+      audioTrackEnabled: imported.audioTrackEnabled ?? true,
+      motionTrackEnabled: imported.motionTrackEnabled ?? true,
       segments,
     })
     setSelectedIndex(0)
@@ -1846,6 +1852,65 @@ function DirectorStoryboardEditor({
         </div>
       </div>
 
+      <div className="hidden" aria-hidden="true">
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept="image/*"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) uploadMutation.mutate({ file, track: 'image' })
+            event.target.value = ''
+          }}
+        />
+        <input
+          ref={mainVideoUploadInputRef}
+          type="file"
+          accept="video/*,.avi,.m4v,.mkv,.mov,.mp4,.webm"
+          multiple
+          onChange={(event) => {
+            for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 64 - spec.segments.length))) {
+              uploadMutation.mutate({ file, track: 'mainVideo' })
+            }
+            event.target.value = ''
+          }}
+        />
+        <input
+          ref={motionUploadInputRef}
+          type="file"
+          accept="image/*,video/*,.avi,.m4v,.mkv,.mov,.mp4,.webm"
+          multiple
+          onChange={(event) => {
+            for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 64 - (spec.motionSegments?.length ?? 0)))) {
+              uploadMutation.mutate({ file, track: isImageFile(file) ? 'motionImage' : 'motion' })
+            }
+            event.target.value = ''
+          }}
+        />
+        <input
+          ref={audioUploadInputRef}
+          type="file"
+          accept="audio/*,.aac,.flac,.m4a,.mp3,.ogg,.wav,.webm"
+          multiple
+          onChange={(event) => {
+            for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 64 - (spec.audioSegments?.length ?? 0)))) {
+              uploadMutation.mutate({ file, track: 'audio' })
+            }
+            event.target.value = ''
+          }}
+        />
+        <input
+          ref={retakeUploadInputRef}
+          type="file"
+          accept="video/*,.avi,.m4v,.mkv,.mov,.mp4,.webm"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) uploadMutation.mutate({ file, track: 'retake' })
+            event.target.value = ''
+          }}
+        />
+      </div>
+
       <div className="flex flex-wrap items-center gap-1.5 border-b border-white/10 bg-[#24262b] px-3 py-2 text-xs text-white/85">
         <button
           type="button"
@@ -1949,89 +2014,6 @@ function DirectorStoryboardEditor({
               {t('mediaPool')}
             </div>
             <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-[var(--glass-text-tertiary)]">LTX Director 2</span>
-            <input
-              ref={uploadInputRef}
-              className="hidden"
-              type="file"
-              accept="image/*"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file) uploadMutation.mutate({ file, track: 'image' })
-                event.target.value = ''
-              }}
-            />
-          </div>
-          <div className="hidden">
-            <GlassButton size="sm" variant="ghost" loading={uploadMutation.isPending} onClick={() => uploadInputRef.current?.click()}>
-              ＋ {t('uploadImage')}
-            </GlassButton>
-            <GlassButton size="sm" variant="ghost" disabled={uploadMutation.isPending} onClick={() => mainVideoUploadInputRef.current?.click()}>
-              ＋ 主轨视频
-            </GlassButton>
-            <GlassButton size="sm" variant="ghost" disabled={uploadMutation.isPending} onClick={() => motionUploadInputRef.current?.click()}>
-              ＋ IC-LoRA
-            </GlassButton>
-            <GlassButton size="sm" variant="ghost" disabled={uploadMutation.isPending} onClick={() => audioUploadInputRef.current?.click()}>
-              ＋ {t('uploadAudio')}
-            </GlassButton>
-            <GlassButton size="sm" variant="ghost" disabled={uploadMutation.isPending} onClick={() => retakeUploadInputRef.current?.click()}>
-              ↻ {t('uploadRetake')}
-            </GlassButton>
-            <GlassButton size="sm" variant="ghost" disabled={spec.segments.length >= 64} onClick={() => {
-              addTextSegment()
-            }}>
-              ＋ 纯提示词
-            </GlassButton>
-            <input
-              ref={mainVideoUploadInputRef}
-              className="hidden"
-              type="file"
-              accept="video/*"
-              multiple
-              onChange={(event) => {
-                for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 64 - spec.segments.length))) {
-                  uploadMutation.mutate({ file, track: 'mainVideo' })
-                }
-                event.target.value = ''
-              }}
-            />
-            <input
-              ref={motionUploadInputRef}
-              className="hidden"
-              type="file"
-              accept="image/*,video/*"
-              multiple
-              onChange={(event) => {
-                for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 64 - (spec.motionSegments?.length ?? 0)))) {
-                  uploadMutation.mutate({ file, track: isImageFile(file) ? 'motionImage' : 'motion' })
-                }
-                event.target.value = ''
-              }}
-            />
-            <input
-              ref={audioUploadInputRef}
-              className="hidden"
-              type="file"
-              accept="audio/*,.aac,.flac,.m4a,.mp3,.ogg,.wav,.webm"
-              multiple
-              onChange={(event) => {
-                for (const file of Array.from(event.target.files ?? []).slice(0, Math.max(0, 64 - (spec.audioSegments?.length ?? 0)))) {
-                  uploadMutation.mutate({ file, track: 'audio' })
-                }
-                event.target.value = ''
-              }}
-            />
-            <input
-              ref={retakeUploadInputRef}
-              className="hidden"
-              type="file"
-              accept="video/*,.avi,.m4v,.mkv,.mov,.mp4,.webm"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file) uploadMutation.mutate({ file, track: 'retake' })
-                event.target.value = ''
-              }}
-            />
           </div>
           <p className="mt-1 text-[11px] leading-4 text-[var(--glass-text-tertiary)]">{t('dragHint')}</p>
 
@@ -2456,8 +2438,16 @@ function DirectorStoryboardEditor({
               {spec.motionTrackEnabled !== false && (
                 <>
                   <div className="absolute left-0 right-0 top-[202px] h-[52px] border-y border-emerald-400/15 bg-emerald-400/5" />
-                  <div className="pointer-events-none absolute left-1 top-[205px] z-10 rounded bg-black/70 px-1 text-[9px] text-emerald-300">
-                    {t('motionTrack')}
+                  <div className="absolute left-1 top-[205px] z-30 flex items-center gap-1 rounded bg-black/80 px-1.5 py-0.5 text-[9px] text-emerald-300">
+                    <span>{t('motionTrack')}</span>
+                    <button
+                      type="button"
+                      className="rounded bg-emerald-400/20 px-1 text-emerald-100 hover:bg-emerald-400/40"
+                      title="添加 IC‑LoRA 图片或视频"
+                      onClick={() => motionUploadInputRef.current?.click()}
+                    >
+                      ＋
+                    </button>
                   </div>
                   {(spec.motionSegments ?? []).map((segment, index) => (
                     <div
@@ -2517,10 +2507,18 @@ function DirectorStoryboardEditor({
                     style={{ top: `${spec.motionTrackEnabled !== false ? 262 : 202}px` }}
                   />
                   <div
-                    className="pointer-events-none absolute left-1 z-10 rounded bg-black/70 px-1 text-[9px] text-violet-300"
+                    className="absolute left-1 z-30 flex items-center gap-1 rounded bg-black/80 px-1.5 py-0.5 text-[9px] text-violet-300"
                     style={{ top: `${spec.motionTrackEnabled !== false ? 265 : 205}px` }}
                   >
-                    {t('audioTrack')}
+                    <span>{t('audioTrack')}</span>
+                    <button
+                      type="button"
+                      className="rounded bg-violet-400/20 px-1 text-violet-100 hover:bg-violet-400/40"
+                      title="添加音频"
+                      onClick={() => audioUploadInputRef.current?.click()}
+                    >
+                      ＋
+                    </button>
                   </div>
                   {(spec.audioSegments ?? []).map((segment, index) => (
                     <div
