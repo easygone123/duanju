@@ -19,6 +19,7 @@ import {
   releaseComfyRequestLease,
 } from './lease'
 import { resolveOwnedComfyMedia } from './media-ownership'
+import { isComfyPromptAbsenceConclusive } from './reconciliation-timing'
 import {
   claimComfySubmissionFenceWithStore,
   persistComfyOutputReceiptWithStore,
@@ -350,7 +351,10 @@ export async function createProductionReconciliationDependencies(
     }, { promptId, status: { notIn: ['completed', 'failed', 'canceled'] } }),
     releaseLease: async (input) => await reconciliationFence()
       && await releaseComfyRequestLease({ ...input, ttlMs: 1 }),
-    isAbsenceConclusive: async () => Date.now() - bundle.updatedAt.getTime() >= limits.executionTimeoutMs,
+    isAbsenceConclusive: async () => isComfyPromptAbsenceConclusive(
+      bundle,
+      limits.executionTimeoutMs,
+    ),
     persistRecoveredState: ({ promptId, status, outputs, errorCode }) => updateOwned({
       status, ...timestampFor(status), ...(outputs ? { outputRefs: outputs } : {}),
       ...(errorCode ? { errorCode } : {}),
