@@ -264,6 +264,23 @@ describe('ComfyClient contract', () => {
     controller.abort()
   })
 
+  it('maps the execution_success terminal event emitted by newer ComfyUI versions', async () => {
+    const controller = new AbortController()
+    const iterator = client().watchPrompt('prompt-1', 'client-1', controller.signal)[Symbol.asyncIterator]()
+    const event = iterator.next()
+    await server.waitForSocket()
+    server.send({
+      type: 'execution_success',
+      data: { prompt_id: 'prompt-1', timestamp: 1_784_776_224_276 },
+    })
+
+    await expect(event).resolves.toEqual({
+      done: false,
+      value: { type: 'execution_success', promptId: 'prompt-1' },
+    })
+    controller.abort()
+  })
+
   it('omits delayed-watch free text and preserves only canonical structural diagnostics', async () => {
     const comfy = client({ type: 'bearer', token: 'ws-auth-secret' })
     await comfy.submitPrompt({

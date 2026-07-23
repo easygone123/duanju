@@ -220,6 +220,7 @@ function mapExecutionEvent(
     }
   }
   if (type === 'execution_start') return { type: 'execution_start', promptId: publicPromptId }
+  if (type === 'execution_success') return { type: 'execution_success', promptId: publicPromptId }
   if (type === 'executing') {
     if (data.node === null) {
       return { type: 'executing', promptId: publicPromptId, nodeId: null }
@@ -268,6 +269,7 @@ function isKnownEventType(value: string): boolean {
   return [
     'status',
     'execution_start',
+    'execution_success',
     'executing',
     'progress',
     'executed',

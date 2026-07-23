@@ -35,7 +35,10 @@ export function extractComfyOutputs(
   return extracted
 }
 
-const VIDEO_OUTPUT_FIELD_ALIASES = ['gifs', 'videos', 'files'] as const
+// ComfyUI output nodes are not consistent about the history field used for
+// encoded video files. Newer SaveVideo builds return MP4 descriptors under
+// `images`, while VideoHelperSuite and other nodes use gifs/videos/files.
+const VIDEO_OUTPUT_FIELD_ALIASES = ['gifs', 'videos', 'files', 'images'] as const
 
 function resolveOutputValue(nodeOutput: unknown, binding: ComfyOutputBinding): unknown {
   const declared = getPath(nodeOutput, binding.fieldPath)

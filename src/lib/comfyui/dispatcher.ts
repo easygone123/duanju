@@ -437,7 +437,8 @@ async function consumePromptEvents(
         dependencies.observation?.increment('reconciliation', { outcome: 'history_probe_failed' })
       }
     }
-    if (event.type === 'executing' && event.nodeId === null) {
+    if (event.type === 'execution_success'
+      || (event.type === 'executing' && event.nodeId === null)) {
       break
     }
   }

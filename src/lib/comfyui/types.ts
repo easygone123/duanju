@@ -243,6 +243,7 @@ export interface ComfyGenerationResultRefs {
 export type ComfyExecutionEvent =
   | { type: 'status'; queueRemaining?: number }
   | { type: 'execution_start'; promptId: string }
+  | { type: 'execution_success'; promptId: string }
   | { type: 'executing'; promptId: string; nodeId: string | null }
   | { type: 'progress'; promptId: string; nodeId?: string; value: number; max: number }
   | { type: 'executed'; promptId: string; nodeId: string }

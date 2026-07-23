@@ -398,6 +398,18 @@ describe('ComfyUI dispatcher contract', () => {
     expect(deps.client.getHistory).toHaveBeenCalledWith('prompt-1')
   })
 
+  it('collects history immediately after the execution_success terminal event', async () => {
+    const deps = dependencies({
+      client: { ...dependencies().client, watchPrompt: async function* () {
+        yield { type: 'execution_success' as const, promptId: 'prompt-1' }
+      } },
+    })
+
+    await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({ outcome: 'completed' })
+    expect(deps.client.getHistory).toHaveBeenCalledWith('prompt-1')
+    expect(deps.persistCompletedOutputs).toHaveBeenCalledOnce()
+  })
+
   it('recovers completed history when WebSocket missed the terminal event but stays open', async () => {
     let releaseSocket!: () => void
     const socketGate = new Promise<void>((resolve) => { releaseSocket = resolve })
