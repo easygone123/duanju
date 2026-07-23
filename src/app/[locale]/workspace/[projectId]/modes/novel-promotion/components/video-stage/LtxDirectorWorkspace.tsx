@@ -39,6 +39,9 @@ import { checkApiResponse } from '@/lib/error-handler'
 import { invalidateEpisodeStageQueries } from '@/lib/query/episode-stage-cache'
 import { useStoryboardTaskPresentation } from '@/lib/query/hooks/useTaskPresentation'
 import { queryKeys } from '@/lib/query/keys'
+import LtxDirectorOriginalHost, {
+  type LtxDirectorOriginalSource,
+} from './LtxDirectorOriginalHost'
 
 const SOURCE_DRAG_TYPE = 'application/x-waoowaoo-director-source'
 const TIMELINE_PX_PER_SECOND = 64
@@ -334,7 +337,7 @@ export function buildEpisodeDirectorStoryboard(storyboards: Storyboard[]): Story
   }
 }
 
-function DirectorStoryboardEditor({
+export function DirectorStoryboardEditor({
   projectId,
   episodeId,
   storyboard,
@@ -2931,6 +2934,236 @@ function DirectorStoryboardEditor({
   )
 }
 
+function OriginalDirectorStoryboardEditor({
+  projectId,
+  episodeId,
+  storyboard,
+  clips,
+  models,
+  allStoryboards,
+  videoRatio,
+}: {
+  projectId: string
+  episodeId: string
+  storyboard: Storyboard
+  clips: Clip[]
+  models: VideoModelOption[]
+  allStoryboards: Storyboard[]
+  videoRatio: string
+}) {
+  const t = useTranslations('video.director')
+  const queryClient = useQueryClient()
+  const defaultSpec = useMemo(
+    () => buildDefaultSpec(storyboard, clips, models[0]?.value || '', videoRatio),
+    [clips, models, storyboard, videoRatio],
+  )
+  const sources = useMemo<LtxDirectorOriginalSource[]>(() => (
+    storyboardSources(allStoryboards, Math.max(0, allStoryboards.length - 1)).map((source) => ({
+      panelId: source.sourcePanelId,
+      mediaId: source.sourceMediaId,
+      url: source.imageUrl,
+      filename: `${source.label.replace(/[^\p{L}\p{N}._-]+/gu, '_')}.webp`,
+      mimeType: 'image/webp',
+    }))
+  ), [allStoryboards])
+  const [spec, setSpec] = useState(defaultSpec)
+  const [dirty, setDirty] = useState(false)
+  const [hostReady, setHostReady] = useState(false)
+  const [hostError, setHostError] = useState<string | null>(null)
+  const [hostRevision, setHostRevision] = useState(0)
+  const hostReadyRef = useRef(false)
+  const taskTargets = useMemo(() => [{
+    key: `storyboard-director:${storyboard.id}`,
+    targetType: 'NovelPromotionStoryboard',
+    targetId: storyboard.id,
+    types: ['storyboard_director_video'],
+    resource: 'video' as const,
+    hasOutput: Boolean(storyboard.directorVideoUrl),
+  }], [storyboard.directorVideoUrl, storyboard.id])
+  const taskPresentation = useStoryboardTaskPresentation(projectId, taskTargets)
+  const taskState = taskPresentation.getTaskState(`storyboard-director:${storyboard.id}`)
+  const taskRunning = taskState?.phase === 'queued' || taskState?.phase === 'processing'
+  const ready = Boolean(spec.videoModel && spec.segments.length > 0 && !hostError)
+
+  useEffect(() => {
+    if (dirty) return
+    setSpec(defaultSpec)
+  }, [defaultSpec, dirty])
+
+  const saveMutation = useMutation({
+    mutationFn: async (generate: boolean) => {
+      const response = await apiFetch(`/api/novel-promotion/${projectId}/storyboard-director`, {
+        method: generate ? 'POST' : 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          storyboardId: storyboard.id,
+          videoModel: spec.videoModel,
+          timelineSpec: spec,
+        }),
+      })
+      await checkApiResponse(response)
+      return response.json()
+    },
+    onSettled: async (_data, error) => {
+      await invalidateEpisodeStageQueries(queryClient, projectId, episodeId)
+      await queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(projectId), exact: false })
+      if (!error) setDirty(false)
+    },
+  })
+  const mutationError = saveMutation.error instanceof Error ? saveMutation.error.message : null
+  const totalDuration = Math.max(
+    0,
+    ...spec.segments.map((segment) => (segment.startSeconds || 0) + segment.durationSeconds),
+  )
+
+  return (
+    <section className="glass-surface overflow-hidden rounded-2xl bg-[#303136] text-white">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 p-4 md:p-5">
+        <div>
+          <h3 className="text-base font-semibold">WhatDreamsCost · LTX Director</h3>
+          <p className="mt-1 text-xs text-white/55">
+            原版时间线 · {spec.segments.length} 个主轨片段 · {totalDuration.toFixed(1)} 秒
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <GlassButton
+            size="sm"
+            variant="ghost"
+            disabled={saveMutation.isPending || taskRunning}
+            onClick={() => {
+              hostReadyRef.current = false
+              setHostReady(false)
+              setHostError(null)
+              setSpec(buildDefaultSpec(
+                { ...storyboard, directorConfigJson: null },
+                clips,
+                models[0]?.value || '',
+                videoRatio,
+              ))
+              setDirty(true)
+              setHostRevision((current) => current + 1)
+            }}
+          >
+            {t('reset')}
+          </GlassButton>
+          <GlassButton
+            size="sm"
+            disabled={!ready || !hostReady || !dirty || saveMutation.isPending || taskRunning}
+            loading={saveMutation.isPending && saveMutation.variables === false}
+            onClick={() => saveMutation.mutate(false)}
+          >
+            {t('save')}
+          </GlassButton>
+          <GlassButton
+            size="sm"
+            variant="primary"
+            disabled={!ready || !hostReady || saveMutation.isPending || taskRunning}
+            loading={taskRunning || (saveMutation.isPending && saveMutation.variables === true)}
+            onClick={() => saveMutation.mutate(true)}
+          >
+            {taskRunning ? t('generating') : t('generate')}
+          </GlassButton>
+        </div>
+      </header>
+
+      <div className="grid gap-3 border-b border-white/10 p-4 md:grid-cols-[minmax(0,1fr)_140px_140px] md:p-5">
+        <label className="space-y-1.5 text-xs text-white/65">
+          <span>{t('model')}</span>
+          <select
+            className="glass-input-base h-9 w-full rounded-lg px-3 text-sm"
+            value={spec.videoModel || ''}
+            onChange={(event) => {
+              setSpec((current) => ({ ...current, videoModel: event.target.value }))
+              setDirty(true)
+            }}
+          >
+            <option value="">{t('selectModel')}</option>
+            {models.map((model) => (
+              <option key={model.value} value={model.value} disabled={model.disabled}>
+                {model.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1.5 text-xs text-white/65">
+          <span>分辨率</span>
+          <select
+            className="glass-input-base h-9 w-full rounded-lg px-3 text-sm"
+            value={spec.resolutionPreset || '720p'}
+            onChange={(event) => {
+              setSpec((current) => ({
+                ...current,
+                resolutionPreset: event.target.value as LtxDirectorResolutionPreset,
+              }))
+              setDirty(true)
+            }}
+          >
+            <option value="480p">480p</option>
+            <option value="720p">720p</option>
+            <option value="1080p">1080p</option>
+          </select>
+        </label>
+        <label className="space-y-1.5 text-xs text-white/65">
+          <span>画面方向</span>
+          <select
+            className="glass-input-base h-9 w-full rounded-lg px-3 text-sm"
+            value={spec.aspectRatio || videoRatio}
+            onChange={(event) => {
+              setSpec((current) => ({ ...current, aspectRatio: event.target.value }))
+              setDirty(true)
+            }}
+          >
+            <option value="16:9">横屏 16:9</option>
+            <option value="9:16">竖屏 9:16</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="p-3 md:p-4">
+        <LtxDirectorOriginalHost
+          key={`${storyboard.id}:${hostRevision}`}
+          projectId={projectId}
+          spec={spec}
+          sources={sources}
+          onChange={(next) => {
+            setSpec(next)
+            if (hostReadyRef.current) setDirty(true)
+          }}
+          onReady={() => {
+            hostReadyRef.current = true
+            setHostReady(true)
+          }}
+          onError={(error) => {
+            setHostError(error.message)
+            setHostReady(false)
+          }}
+        />
+      </div>
+
+      {!hostReady && !hostError && (
+        <p className="mx-4 mb-3 text-xs text-white/55">正在加载原版 LTX Director…</p>
+      )}
+      {models.length === 0 && (
+        <p className="mx-4 mb-3 text-xs text-[var(--glass-text-danger)]">{t('modelRequired')}</p>
+      )}
+      {(hostError || mutationError) && (
+        <p className="mx-4 mb-3 text-xs text-[var(--glass-text-danger)]">{hostError || mutationError}</p>
+      )}
+      {storyboard.directorVideoUrl && (
+        <div className="border-t border-white/10 p-4 md:p-5">
+          <div className="mb-2 text-xs font-medium text-white/65">{t('preview')}</div>
+          <video
+            className="max-h-[560px] w-full rounded-xl bg-black"
+            src={storyboard.directorVideoUrl}
+            controls
+            preload="metadata"
+          />
+        </div>
+      )}
+    </section>
+  )
+}
+
 export default function LtxDirectorWorkspace({
   projectId,
   episodeId,
@@ -2954,17 +3187,15 @@ export default function LtxDirectorWorkspace({
       <div className="glass-surface-soft rounded-xl p-4">
         <h2 className="text-base font-semibold text-[var(--glass-text-primary)]">LTX Director</h2>
         <p className="mt-1 text-sm text-[var(--glass-text-tertiary)]">
-          {t('description')} · 整集单一时间线 · {storyboards.length} 组分镜
+          {t('description')} · WhatDreamsCost 原版界面 · 整集单一时间线 · {storyboards.length} 组分镜
         </p>
       </div>
       {episodeStoryboard && (
-        <DirectorStoryboardEditor
+        <OriginalDirectorStoryboardEditor
           key={episodeStoryboard.id}
           projectId={projectId}
           episodeId={episodeId}
           storyboard={episodeStoryboard}
-          storyboardIndex={Math.max(0, storyboards.length - 1)}
-          displayNumber={1}
           clips={clips}
           models={directorModels}
           allStoryboards={storyboards}
