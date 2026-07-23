@@ -177,7 +177,39 @@ describe('parseViralAnalysisReport', () => {
   })
 
   it('accepts a valid versioned report', () => {
-    expect(parseViralAnalysisReport(validReport(), 4_000)).toEqual(validReport())
+    const parsed = parseViralAnalysisReport(validReport(), 4_000)
+    expect(parsed.sourceStory).toBeNull()
+    expect(parsed.shots).toEqual(validReport().shots.map((shot) => ({
+      ...shot,
+      visibleCharacters: [],
+      speaker: null,
+      location: null,
+      props: [],
+      dialogueIntent: null,
+      plotBeat: null,
+      causalLink: null,
+      analysisConfidence: 1,
+      needsVisualReview: false,
+    })))
+  })
+
+  it('accepts a complete factual source story and rejects incomplete beat coverage', () => {
+    const report = {
+      ...validReport(),
+      sourceStory: {
+        summary: 'A creator presents a package and reveals its transformation.',
+        premise: 'An unopened package creates curiosity.',
+        characterRelations: ['The creator addresses the audience.'],
+        storyBeats: [
+          { shotIndexes: [0], beat: 'The package arrives.', cause: null, effect: 'Curiosity builds.' },
+          { shotIndexes: [1], beat: 'The transformed object is revealed.', cause: 'The package is opened.', effect: 'The setup pays off.' },
+        ],
+      },
+    }
+    expect(parseViralAnalysisReport(report, 4_000).sourceStory).toEqual(report.sourceStory)
+
+    report.sourceStory.storyBeats = [report.sourceStory.storyBeats[0]]
+    expect(() => parseViralAnalysisReport(report, 4_000)).toThrow(/cover every shot/i)
   })
 
   it('rejects reports without shots', () => {
@@ -303,6 +335,55 @@ describe('parseViralStoryboardGeneration', () => {
 
     const parsed = parseViralStoryboardGeneration(generation)
     expect(parsed.storyboards[1].panels.map((panel) => panel.panelIndex)).toEqual([0, 1])
+  })
+
+  it('derives dialogue text, timing, and episode text from the authoritative source transcript', () => {
+    const generation = validGeneration()
+    generation.novelText = '模型擅自改写的台词'
+    const modelGeneration = {
+      ...generation,
+      storyboards: [{
+        ...generation.storyboards[0],
+        panels: [
+          {
+            ...generation.storyboards[0].panels[0],
+            audioText: '模型错误台词',
+          },
+          {
+            ...generation.storyboards[0].panels[0],
+            panelIndex: 1,
+            sourceShotIndex: 1,
+            audioText: '模型错误台词二',
+          },
+        ],
+      }],
+    }
+    const transcriptText = [
+      '1',
+      '00:00:00,100 --> 00:00:01,200',
+      '第一句原声',
+      '',
+      '2',
+      '00:00:02,000 --> 00:00:03,500',
+      '第二句原声',
+    ].join('\n')
+
+    const parsed = parseViralStoryboardGeneration(modelGeneration, {
+      report: parseViralAnalysisReport(validReport(), 4_000),
+      transcriptText,
+    })
+    const panels = parsed.storyboards[0].panels
+
+    expect(parsed.novelText).toBe('第一句原声\n第二句原声')
+    expect(panels.map((panel) => ({
+      startMs: panel.startMs,
+      endMs: panel.endMs,
+      durationSeconds: panel.durationSeconds,
+      audioText: panel.audioText,
+    }))).toEqual([
+      { startMs: 0, endMs: 1_500, durationSeconds: 1.5, audioText: '第一句原声' },
+      { startMs: 1_500, endMs: 4_000, durationSeconds: 2.5, audioText: '第二句原声' },
+    ])
   })
 
   it('accepts exactly 72 generated panels across storyboards', () => {

@@ -18,6 +18,15 @@ const analyzedShotSchema = z.object({
   transition: z.string().min(1).max(200),
   subtitleSummary: z.string().min(1).max(2_000).nullable(),
   narrativeFunction: z.string().min(1).max(2_000),
+  visibleCharacters: z.array(z.string().min(1).max(200)).max(24),
+  speaker: z.string().min(1).max(200).nullable(),
+  location: z.string().min(1).max(200).nullable(),
+  props: z.array(z.string().min(1).max(200)).max(24),
+  dialogueIntent: z.string().min(1).max(2_000).nullable(),
+  plotBeat: z.string().min(1).max(2_000).nullable(),
+  causalLink: z.string().min(1).max(2_000).nullable(),
+  analysisConfidence: z.number().finite().min(0).max(1),
+  needsVisualReview: z.boolean(),
 }).strict()
 
 const shotBatchSchema = z.object({
@@ -69,6 +78,17 @@ export const VIRAL_REPORT_SCHEMA_JSON = JSON.stringify({
     pacing: 'string',
     emotionalArc: 'string',
   },
+  sourceStory: {
+    summary: 'string',
+    premise: 'string',
+    characterRelations: ['string'],
+    storyBeats: [{
+      shotIndexes: [0],
+      beat: 'string',
+      cause: 'string|null',
+      effect: 'string|null',
+    }],
+  },
   styleFingerprint: {
     composition: ['string'],
     lighting: ['string'],
@@ -87,6 +107,15 @@ export const VIRAL_REPORT_SCHEMA_JSON = JSON.stringify({
     transition: 'string',
     subtitleSummary: 'string|null',
     narrativeFunction: 'string',
+    visibleCharacters: ['string'],
+    speaker: 'string|null',
+    location: 'string|null',
+    props: ['string'],
+    dialogueIntent: 'string|null',
+    plotBeat: 'string|null',
+    causalLink: 'string|null',
+    analysisConfidence: 0.85,
+    needsVisualReview: false,
   }],
   originalAdaptationAdvice: ['string'],
 })
@@ -165,6 +194,7 @@ export function buildViralShotAnalysisPrompt(input: {
   videoMetadata: Record<string, unknown>
   shots: PreprocessedViralShot[]
   subtitleContext: string | null
+  previousShotContext?: ViralShotAnalysisBatch['shots'][number] | null
 }): string {
   const subtitleContext = truncateUntrustedText(
     input.subtitleContext || 'None',
@@ -182,7 +212,33 @@ export function buildViralShotAnalysisPrompt(input: {
         endMs: shot.endMs,
         representativeMs: shot.representativeMs,
       }))),
+      previous_shot_context: delimitUntrusted(
+        'PREVIOUS_SHOT_CONTEXT',
+        input.previousShotContext ?? null,
+      ),
       subtitle_context: delimitUntrusted('SUBTITLE_CONTEXT', subtitleContext),
+    },
+  }))
+}
+
+export function buildViralShotReviewPrompt(input: {
+  locale: Locale
+  videoMetadata: Record<string, unknown>
+  shots: Array<{
+    shotIndex: number
+    startMs: number
+    endMs: number
+    frameTimestampsMs: number[]
+    transcriptText: string | null
+    initialAnalysis: ViralShotAnalysisBatch['shots'][number]
+  }>
+}): string {
+  return assertPromptLength(buildPrompt({
+    promptId: PROMPT_IDS.VIRAL_SHOT_REVIEW,
+    locale: input.locale,
+    variables: {
+      video_metadata: JSON.stringify(input.videoMetadata),
+      review_shots: delimitUntrusted('REVIEW_SHOTS', input.shots),
     },
   }))
 }

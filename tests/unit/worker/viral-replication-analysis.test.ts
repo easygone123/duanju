@@ -17,7 +17,32 @@ function completion(text: string) {
   }
 }
 
-function shot(shotIndex: number, startMs = shotIndex * 1_000, endMs = (shotIndex + 1) * 1_000) {
+function shot(
+  shotIndex: number,
+  startMs = shotIndex * 1_000,
+  endMs = (shotIndex + 1) * 1_000,
+): {
+  shotIndex: number
+  startMs: number
+  endMs: number
+  shotType: string
+  cameraAngle: string
+  cameraMove: string
+  composition: string
+  actionBeat: string
+  transition: string
+  subtitleSummary: string | null
+  narrativeFunction: string
+  visibleCharacters: string[]
+  speaker: string | null
+  location: string | null
+  props: string[]
+  dialogueIntent: string | null
+  plotBeat: string | null
+  causalLink: string | null
+  analysisConfidence: number
+  needsVisualReview: boolean
+} {
   return {
     shotIndex,
     startMs,
@@ -30,6 +55,15 @@ function shot(shotIndex: number, startMs = shotIndex * 1_000, endMs = (shotIndex
     transition: 'cut',
     subtitleSummary: null,
     narrativeFunction: `beat ${shotIndex}`,
+    visibleCharacters: [`character ${shotIndex}`],
+    speaker: `character ${shotIndex}`,
+    location: `location ${shotIndex}`,
+    props: [],
+    dialogueIntent: null,
+    plotBeat: `plot beat ${shotIndex}`,
+    causalLink: shotIndex === 0 ? null : `follows shot ${shotIndex - 1}`,
+    analysisConfidence: 0.95,
+    needsVisualReview: false,
   }
 }
 
@@ -41,6 +75,17 @@ function report(shots: ReturnType<typeof shot>[]) {
       coreAppeal: 'appeal',
       pacing: 'fast',
       emotionalArc: 'rise',
+    },
+    sourceStory: {
+      summary: 'A character encounters and resolves a problem.',
+      premise: 'A routine moment becomes unexpected.',
+      characterRelations: ['character 0 interacts with character 1'],
+      storyBeats: shots.map((item) => ({
+        shotIndexes: [item.shotIndex],
+        beat: item.plotBeat || item.actionBeat,
+        cause: item.causalLink,
+        effect: null,
+      })),
     },
     styleFingerprint: {
       composition: ['centered'],
@@ -56,7 +101,13 @@ function report(shots: ReturnType<typeof shot>[]) {
 type HarnessOptions = {
   frameCount?: number
   visionText?: (batchIndex: number, shotIndexes: number[]) => string
+  reviewText?: string | ((reviewCallIndex: number, imageCount: number) => string)
   aggregateText?: string
+  transcriptText?: string | null
+  includeAnalysisAudio?: boolean
+  audioTranscriptionText?: string
+  audioTranscriptionError?: Error
+  analysisModelSnapshot?: string
   sourceVideoMediaId?: string
   mediaCreateError?: Error
   frameCreateError?: Error
@@ -115,7 +166,7 @@ async function createHarness(options: HarnessOptions = {}) {
     analysisExecutionTaskId: null,
     analysisExecutionToken: options.initialExecutionToken ?? null,
     analysisExecutionExpiresAt: options.initialExecutionExpiresAt ?? null,
-    analysisModelSnapshot: 'provider::pinned-analysis-model',
+    analysisModelSnapshot: options.analysisModelSnapshot ?? 'provider::pinned-analysis-model',
     sourceVideoMediaId,
     sourceVideoMedia: { id: sourceVideoMediaId, storageKey: 'source/video.mp4' },
   }
@@ -128,6 +179,7 @@ async function createHarness(options: HarnessOptions = {}) {
   const textCalls: Array<Record<string, unknown>> = []
   let nextMedia = 1
   let nextAnalyzedShot = 0
+  let nextReviewCall = 0
   let nextExecutionToken = 0
   if (options.existingFrameMedia) {
     frameMedia.push({
@@ -240,6 +292,14 @@ async function createHarness(options: HarnessOptions = {}) {
         framePath,
       })
     }
+    const includeAnalysisAudio = options.includeAnalysisAudio === true
+    const analysisAudioPath = includeAnalysisAudio
+      ? path.join(outputDirectory, 'analysis-audio.mp3')
+      : null
+    if (analysisAudioPath) await fs.writeFile(analysisAudioPath, Buffer.from('analysis-audio'))
+    const transcriptText = Object.hasOwn(options, 'transcriptText')
+      ? options.transcriptText ?? null
+      : '00:00:01.000 --> 00:00:02.000\nEmbedded subtitle context'
     return {
       metadata: {
         durationMs: frameCount * 1_000,
@@ -247,17 +307,60 @@ async function createHarness(options: HarnessOptions = {}) {
         height: 1920,
         videoStreamIndex: 0,
         container: 'mp4',
+        audioStreams: includeAnalysisAudio ? [{ index: 1, codecName: 'aac' }] : [],
         subtitleStreams: [],
       },
       shots,
-      transcriptText: '00:00:01.000 --> 00:00:02.000\nEmbedded subtitle context',
+      transcriptText,
+      analysisAudioPath,
     }
+  })
+  const extractReviewFrames = vi.fn(async ({
+    outputDirectory,
+    shots,
+  }: {
+    outputDirectory: string
+    shots: Array<{ shotIndex: number; startMs: number; endMs: number }>
+  }) => {
+    const reviewFrames = []
+    for (const candidate of shots) {
+      for (const [position, timestampMs] of [
+        ['opening', candidate.startMs + 200],
+        ['closing', candidate.endMs - 200],
+      ] as const) {
+        const framePath = path.join(
+          outputDirectory,
+          `review-${candidate.shotIndex}-${position}.jpg`,
+        )
+        await fs.writeFile(framePath, Buffer.from(`review-${candidate.shotIndex}-${position}`))
+        reviewFrames.push({
+          shotIndex: candidate.shotIndex,
+          position,
+          timestampMs,
+          framePath,
+        })
+      }
+    }
+    return reviewFrames
   })
   const uploadObject = vi.fn(async (_body: Buffer, key: string) => key)
   const runVision = vi.fn(async (input: Record<string, unknown>) => {
     visionCalls.push(input)
+    const imageUrls = input.imageUrls as string[]
+    if (imageUrls[0]?.startsWith('data:audio/')) {
+      if (options.audioTranscriptionError) throw options.audioTranscriptionError
+      return completion(options.audioTranscriptionText ?? JSON.stringify({ cues: [] }))
+    }
+    const action = (input.options as { action?: string } | undefined)?.action
+    if (action === 'viral_shot_review') {
+      if (!options.reviewText) throw new Error('Unexpected adaptive review call')
+      const text = typeof options.reviewText === 'function'
+        ? options.reviewText(nextReviewCall++, imageUrls.length)
+        : options.reviewText
+      return completion(text)
+    }
     await options.onVision?.(replication)
-    const imageCount = (input.imageUrls as string[]).length
+    const imageCount = imageUrls.length
     const firstShotIndex = nextAnalyzedShot % frameCount
     const shotIndexes = Array.from({ length: imageCount }, (_, index) => firstShotIndex + index)
     nextAnalyzedShot += imageCount
@@ -293,6 +396,7 @@ async function createHarness(options: HarnessOptions = {}) {
     prisma: prisma as never,
     getObjectStream,
     preprocess: preprocess as never,
+    extractReviewFrames: extractReviewFrames as never,
     uploadObject,
     deleteObject,
     readFrame,
@@ -325,7 +429,7 @@ async function createHarness(options: HarnessOptions = {}) {
       userId: 'user-1',
       payload: {
         sourceVideoMediaId,
-        analysisModelSnapshot: 'provider::pinned-analysis-model',
+        analysisModelSnapshot: options.analysisModelSnapshot ?? 'provider::pinned-analysis-model',
       },
     },
     queueName: 'viral',
@@ -343,6 +447,7 @@ async function createHarness(options: HarnessOptions = {}) {
     replication,
     prisma,
     preprocess,
+    extractReviewFrames,
     getObjectStream,
     uploadObject,
     deleteObject,
@@ -386,7 +491,9 @@ describe('viral replication analysis handler', () => {
     expect(harness.visionCalls.flatMap((call) => call.imageUrls as string[])).toEqual(
       Array.from({ length: 12 }, (_, index) => `data:image/jpeg;base64,${Buffer.from(`jpeg-${index}`).toString('base64')}`),
     )
-    expect(harness.visionCalls[0]?.prompt).toContain('Embedded subtitle context')
+    expect((harness.visionCalls[0]?.prompt as string).match(/Embedded subtitle context/g)).toHaveLength(2)
+    expect((harness.visionCalls[1]?.prompt as string).match(/Embedded subtitle context/g)).toHaveLength(1)
+    expect(harness.visionCalls[1]?.prompt).toContain('plot beat 9')
     expect(harness.visionCalls[0]?.prompt).toContain('"representativeMs":500')
     expect(harness.progress.some(({ payload }) => payload?.stage === 'viral_preprocess')).toBe(true)
     expect(harness.progress.some(({ payload }) => payload?.stage === 'viral_vision_analysis')).toBe(true)
@@ -424,6 +531,171 @@ describe('viral replication analysis handler', () => {
     })
   })
 
+  it('requires audio transcription and deterministically overlays transcript cues onto every shot', async () => {
+    const harness = await createHarness({
+      frameCount: 3,
+      transcriptText: null,
+      includeAnalysisAudio: true,
+      analysisModelSnapshot: 'google::gemini-audio',
+      audioTranscriptionText: JSON.stringify({
+        cues: [
+          { startMs: 100, endMs: 900, text: '第一句原声' },
+          { startMs: 1_100, endMs: 2_700, text: '跨镜头原声' },
+        ],
+      }),
+      aggregateText: JSON.stringify(report([
+        { ...shot(0), subtitleSummary: '模型改写一' },
+        { ...shot(1), subtitleSummary: '模型改写二' },
+        { ...shot(2), subtitleSummary: '模型改写三' },
+      ])),
+    })
+    roots.push(harness.root)
+
+    await harness.handler(harness.job as never)
+
+    expect(harness.visionCalls[0]?.imageUrls).toEqual([
+      `data:audio/mpeg;base64,${Buffer.from('analysis-audio').toString('base64')}`,
+    ])
+    const completed = harness.updates.find((update) => update.status === 'review_ready')
+    expect(completed?.transcriptText).toContain('第一句原声')
+    expect((completed?.reportJson as ReturnType<typeof report>).shots.map((item) => item.subtitleSummary)).toEqual([
+      '第一句原声',
+      '跨镜头原声',
+      '跨镜头原声',
+    ])
+  })
+
+  it('reviews only low-confidence shots with representative, opening, and closing frames', async () => {
+    const initialShots = [
+      shot(0),
+      {
+        ...shot(1),
+        speaker: null,
+        plotBeat: null,
+        analysisConfidence: 0.4,
+        needsVisualReview: true,
+      },
+      shot(2),
+    ]
+    const reviewedShot = {
+      ...shot(1),
+      speaker: 'customer',
+      dialogueIntent: 'asks why the offer changed',
+      plotBeat: 'the customer questions the changed offer',
+      causalLink: 'responds to the offer shown in the previous shot',
+      analysisConfidence: 0.93,
+      needsVisualReview: false,
+    }
+    const harness = await createHarness({
+      frameCount: 3,
+      transcriptText: [
+        '1',
+        '00:00:01,100 --> 00:00:01,900',
+        '为什么优惠变了',
+      ].join('\n'),
+      visionText: () => JSON.stringify({ shots: initialShots }),
+      reviewText: JSON.stringify({ shots: [reviewedShot] }),
+      aggregateText: JSON.stringify(report(initialShots)),
+    })
+    roots.push(harness.root)
+
+    await harness.handler(harness.job as never)
+
+    expect(harness.extractReviewFrames).toHaveBeenCalledOnce()
+    expect(harness.extractReviewFrames.mock.calls[0]?.[0].shots.map(
+      (candidate: { shotIndex: number }) => candidate.shotIndex,
+    )).toEqual([1])
+    const reviewCall = harness.visionCalls.find(
+      (call) => (call.options as { action?: string }).action === 'viral_shot_review',
+    )
+    expect(reviewCall?.imageUrls).toEqual([
+      `data:image/jpeg;base64,${Buffer.from('review-1-opening').toString('base64')}`,
+      `data:image/jpeg;base64,${Buffer.from('jpeg-1').toString('base64')}`,
+      `data:image/jpeg;base64,${Buffer.from('review-1-closing').toString('base64')}`,
+    ])
+    expect(reviewCall?.prompt).toContain('"frameTimestampsMs":[1200,1500,1800]')
+    const completed = harness.updates.find((update) => update.status === 'review_ready')
+    const completedReport = completed?.reportJson as ReturnType<typeof report>
+    expect(completedReport.shots[1]).toMatchObject({
+      speaker: 'customer',
+      subtitleSummary: '为什么优惠变了',
+      plotBeat: 'the customer questions the changed offer',
+      analysisConfidence: 0.93,
+      needsVisualReview: false,
+    })
+    expect(harness.textCalls[0]?.messages).toEqual([
+      expect.objectContaining({
+        content: expect.stringContaining('the customer questions the changed offer'),
+      }),
+    ])
+    expect(harness.progress.some(({ payload }) => payload?.stage === 'viral_plot_review')).toBe(true)
+  })
+
+  it('caps adaptive review at twelve lowest-confidence shots and batches at four shots', async () => {
+    const initialShots = Array.from({ length: 15 }, (_, index) => ({
+      ...shot(index),
+      analysisConfidence: index / 100,
+      needsVisualReview: true,
+    }))
+    const harness = await createHarness({
+      frameCount: 15,
+      transcriptText: null,
+      visionText: (_batchIndex, shotIndexes) => JSON.stringify({
+        shots: shotIndexes.map((index) => initialShots[index]),
+      }),
+      reviewText: (reviewCallIndex) => JSON.stringify({
+        shots: Array.from({ length: 4 }, (_, batchIndex) => ({
+          ...shot(reviewCallIndex * 4 + batchIndex),
+          analysisConfidence: 0.9,
+          needsVisualReview: false,
+        })),
+      }),
+      aggregateText: JSON.stringify(report(initialShots)),
+    })
+    roots.push(harness.root)
+
+    await harness.handler(harness.job as never)
+
+    const reviewedCandidates = harness.extractReviewFrames.mock.calls[0]?.[0].shots
+    expect(reviewedCandidates).toHaveLength(12)
+    expect(reviewedCandidates.map(
+      (candidate: { shotIndex: number }) => candidate.shotIndex,
+    )).toEqual(Array.from({ length: 12 }, (_, index) => index))
+    const reviewCalls = harness.visionCalls.filter(
+      (call) => (call.options as { action?: string }).action === 'viral_shot_review',
+    )
+    expect(reviewCalls).toHaveLength(3)
+    expect(reviewCalls.map((call) => (call.imageUrls as string[]).length)).toEqual([12, 12, 12])
+  })
+
+  it('fails explicitly instead of continuing with visual subtitle summaries when audio transcription fails', async () => {
+    const harness = await createHarness({
+      frameCount: 3,
+      transcriptText: null,
+      includeAnalysisAudio: true,
+      analysisModelSnapshot: 'google::gemini-audio',
+      audioTranscriptionError: new Error('provider audio request failed'),
+    })
+    roots.push(harness.root)
+
+    await expect(harness.handler(harness.job as never)).rejects.toThrow(
+      'VIRAL_AUDIO_TRANSCRIPTION_FAILED',
+    )
+
+    expect(harness.runText).not.toHaveBeenCalled()
+    expect(harness.updates.filter((update) => update.status === 'failed')).toEqual([{
+      status: 'failed',
+      errorMessage: 'VIRAL_AUDIO_TRANSCRIPTION_FAILED',
+      analysisExecutionTaskId: null,
+      analysisExecutionToken: null,
+      analysisExecutionExpiresAt: null,
+    }])
+    expect(harness.warn).toHaveBeenCalledWith(
+      'Failed to transcribe viral source audio',
+      expect.objectContaining({ message: 'provider audio request failed' }),
+    )
+  })
+
   it('marks only the replication failed and rethrows invalid model JSON without fallback', async () => {
     const harness = await createHarness({ frameCount: 3, visionText: () => 'not-json' })
     roots.push(harness.root)
@@ -434,6 +706,7 @@ describe('viral replication analysis handler', () => {
     expect(harness.runText).not.toHaveBeenCalled()
     expect(harness.updates.filter((update) => update.status === 'failed')).toEqual([{
       status: 'failed',
+      errorMessage: 'VIRAL_ANALYSIS_FAILED',
       analysisExecutionTaskId: null,
       analysisExecutionToken: null,
       analysisExecutionExpiresAt: null,

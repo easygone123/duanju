@@ -25,6 +25,11 @@
     "coreAppeal": "核心吸引力",
     "pacing": "节奏",
     "emotionalArc": "情绪曲线",
+    "sourceStory": "原剧情识别",
+    "storySummary": "剧情概要",
+    "premise": "故事前提",
+    "characterRelations": "人物关系",
+    "storyBeats": "剧情节点",
     "styleFingerprint": "风格指纹",
     "composition": "构图",
     "lighting": "光线",
@@ -38,10 +43,18 @@
     "transition": "转场",
     "subtitleSummary": "字幕摘要",
     "narrativeFunction": "叙事作用",
+    "visibleCharacters": "出场角色",
+    "speaker": "说话人",
+    "location": "场景",
+    "props": "道具",
+    "dialogueIntent": "台词意图",
+    "plotBeat": "剧情事件",
+    "causalLink": "前后因果",
+    "analysisConfidence": "剧情置信度",
     "noSubtitle": "无可识别字幕",
     "advice": "原创改编建议"
   },
-  "audioSubtitleNotice": "提示：如果视频只有纯音频对白且没有字幕，当前分析可能无法完整捕捉对白内容。",
+  "audioSubtitleNotice": "原声台词按时间轴匹配；置信度不足的剧情镜头会自动补充画面复核。",
   "brief": {
     "label": "原创创作要求",
     "help": "保留有效的叙事结构和镜头规律，明确写出需要替换的人物、情节、场景与表达。"
@@ -55,6 +68,8 @@
   },
   "errors": {
     "generic": "任务暂时未能完成，请重试。",
+    "analysis": "视频分析失败，请重试。若持续失败，请检查分析模型连接。",
+    "audioTranscription": "原视频台词提取失败，请重试。系统不会使用不完整字幕继续生成。",
     "storyboardGeneration": "原创分镜生成失败，请重试。重试时会保留分析结果，不会重新分析视频。",
     "invalidReport": "分析报告格式无效，请重试分析。",
     "projectMismatch": "该分析任务不属于当前项目。"

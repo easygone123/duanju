@@ -175,7 +175,17 @@ export const PROMPT_CATALOG: Record<PromptId, PromptCatalogEntry> = {
   },
   [PROMPT_IDS.VIRAL_SHOT_ANALYSIS]: {
     pathStem: 'viral-replication/shot_analysis',
-    variableKeys: ['brief', 'video_metadata', 'shot_timeline', 'subtitle_context'],
+    variableKeys: [
+      'brief',
+      'video_metadata',
+      'shot_timeline',
+      'previous_shot_context',
+      'subtitle_context',
+    ],
+  },
+  [PROMPT_IDS.VIRAL_SHOT_REVIEW]: {
+    pathStem: 'viral-replication/shot_review',
+    variableKeys: ['video_metadata', 'review_shots'],
   },
   [PROMPT_IDS.VIRAL_AUDIO_TRANSCRIPTION]: {
     pathStem: 'viral-replication/audio_transcription',

@@ -92,6 +92,7 @@ const STAGE_LABELS: Record<string, string> = {
   llm_proxy_persist: 'progress.stage.llmProxyPersist',
   viral_preprocess: 'progress.stage.viralPreprocess',
   viral_shot_analysis: 'progress.stage.viralShotAnalysis',
+  viral_plot_review: 'progress.stage.viralPlotReview',
   viral_report_aggregation: 'progress.stage.viralReportAggregation',
   viral_storyboard_generation: 'progress.stage.viralStoryboardGeneration',
   viral_persistence: 'progress.stage.viralPersistence',

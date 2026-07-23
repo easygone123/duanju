@@ -12,7 +12,11 @@ import {
   useViralReplication,
 } from '@/lib/query/hooks/useViralReplication'
 import type { SSEEvent } from '@/lib/task/types'
-import { VIRAL_STORYBOARD_GENERATION_FAILED } from '@/lib/viral-replication/constants'
+import {
+  VIRAL_ANALYSIS_FAILED,
+  VIRAL_AUDIO_TRANSCRIPTION_FAILED,
+  VIRAL_STORYBOARD_GENERATION_FAILED,
+} from '@/lib/viral-replication/constants'
 import {
   parseViralAnalysisReportForView,
   resolveViralReplicationViewState,
@@ -55,7 +59,11 @@ export default function ViralReplicationPage({
   const projectMatches = resolvedProjectId === projectId
   const failureMessage = replication?.errorMessage === VIRAL_STORYBOARD_GENERATION_FAILED
     ? t('errors.storyboardGeneration')
-    : t('errors.generic')
+    : replication?.errorMessage === VIRAL_AUDIO_TRANSCRIPTION_FAILED
+      ? t('errors.audioTranscription')
+      : replication?.errorMessage === VIRAL_ANALYSIS_FAILED
+        ? t('errors.analysis')
+        : t('errors.generic')
 
   useEffect(() => {
     if (typeof replicationBrief === 'string') setBrief(replicationBrief)

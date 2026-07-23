@@ -153,6 +153,9 @@ describe('viral analysis watchdog reconciliation', () => {
       shotIndex: 0, startMs: 0, endMs: 1_000, shotType: 'medium', cameraAngle: 'eye level',
       cameraMove: 'static', composition: 'centered', actionBeat: 'reveal', transition: 'cut',
       subtitleSummary: null, narrativeFunction: 'hook',
+      visibleCharacters: ['presenter'], speaker: 'presenter', location: 'studio', props: [],
+      dialogueIntent: null, plotBeat: 'the presenter reveals the subject', causalLink: null,
+      analysisConfidence: 0.95, needsVisualReview: false,
     }
     const completion = (content: string) => ({
       id: 'completion', object: 'chat.completion', created: 0, model: 'provider::model',
@@ -173,6 +176,17 @@ describe('viral analysis watchdog reconciliation', () => {
       runText: async () => completion(JSON.stringify({
         schemaVersion: 1,
         overview: { hook: 'hook', coreAppeal: 'appeal', pacing: 'fast', emotionalArc: 'rise' },
+        sourceStory: {
+          summary: 'A presenter reveals a subject.',
+          premise: 'The presenter prepares a reveal.',
+          characterRelations: ['The presenter addresses the audience.'],
+          storyBeats: [{
+            shotIndexes: [0],
+            beat: 'The presenter reveals the subject.',
+            cause: null,
+            effect: null,
+          }],
+        },
         styleFingerprint: { composition: ['centered'], lighting: ['soft'], color: ['warm'], editing: ['cut'] },
         shots: [analyzedShot],
         originalAdaptationAdvice: ['Create original content.'],

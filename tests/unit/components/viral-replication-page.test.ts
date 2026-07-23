@@ -35,6 +35,17 @@ const report = {
     pacing: 'Fast opening, measured payoff',
     emotionalArc: 'Tension to relief',
   },
+  sourceStory: {
+    summary: 'A visitor returns and opens a long-awaited door.',
+    premise: 'Someone waits for a visitor to return.',
+    characterRelations: ['The visitor and host know each other.'],
+    storyBeats: [{
+      shotIndexes: [0],
+      beat: 'The visitor returns and the door opens.',
+      cause: 'The host has been waiting.',
+      effect: 'Their reunion begins.',
+    }],
+  },
   styleFingerprint: {
     composition: ['centered close-ups'],
     lighting: ['high contrast'],
@@ -53,6 +64,15 @@ const report = {
     transition: 'cut',
     subtitleSummary: 'You came back.',
     narrativeFunction: 'hook',
+    visibleCharacters: ['visitor', 'host'],
+    speaker: 'host',
+    location: 'front doorway',
+    props: ['door'],
+    dialogueIntent: 'recognizes the returning visitor',
+    plotBeat: 'the host opens the door to the returning visitor',
+    causalLink: null,
+    analysisConfidence: 0.94,
+    needsVisualReview: false,
   }],
   originalAdaptationAdvice: ['Keep the conflict, replace the setting.'],
 }
@@ -106,6 +126,11 @@ describe('ViralReplicationPage', () => {
       'Immediate conflict', 'A satisfying reversal', 'Fast opening, measured payoff',
       'Tension to relief', 'centered close-ups', 'close-up', 'eye-level', 'static',
       'hero opens the door', 'cut', 'You came back.', 'hook',
+      'A visitor returns and opens a long-awaited door.',
+      'Someone waits for a visitor to return.',
+      'The visitor and host know each other.',
+      'the host opens the door to the returning visitor',
+      '94%',
       'Keep the conflict, replace the setting.',
     ]) expect(view.getByText(text)).toBeTruthy()
     expect(view.getByText('audioSubtitleNotice')).toBeTruthy()
@@ -146,6 +171,18 @@ describe('ViralReplicationPage', () => {
       projectId: 'project-1', replicationId: 'rep-1',
     }))
     expect(view.getByText('errors.storyboardGeneration')).toBeTruthy()
+
+    state.detail = detail('failed', { errorMessage: 'VIRAL_AUDIO_TRANSCRIPTION_FAILED' })
+    view.rerender(createElement(ViralReplicationPage, {
+      projectId: 'project-1', replicationId: 'rep-1',
+    }))
+    expect(view.getByText('errors.audioTranscription')).toBeTruthy()
+
+    state.detail = detail('failed', { errorMessage: 'VIRAL_ANALYSIS_FAILED' })
+    view.rerender(createElement(ViralReplicationPage, {
+      projectId: 'project-1', replicationId: 'rep-1',
+    }))
+    expect(view.getByText('errors.analysis')).toBeTruthy()
   })
 
   it('rejects project ownership mismatch and navigates a completed result exactly once', async () => {

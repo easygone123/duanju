@@ -132,6 +132,7 @@
     "llmProxyPersist": "保存 LLM 结果",
     "viralPreprocess": "预处理源视频",
     "viralShotAnalysis": "分析视频镜头",
+    "viralPlotReview": "复核低置信度剧情镜头",
     "viralReportAggregation": "汇总分析报告",
     "viralStoryboardGeneration": "生成复刻分镜",
     "viralPersistence": "保存爆款复刻结果"

@@ -132,6 +132,7 @@
     "llmProxyPersist": "Persist LLM result",
     "viralPreprocess": "Preprocess source video",
     "viralShotAnalysis": "Analyze video shots",
+    "viralPlotReview": "Review low-confidence story shots",
     "viralReportAggregation": "Aggregate analysis report",
     "viralStoryboardGeneration": "Generate replication storyboard",
     "viralPersistence": "Persist viral replication result"

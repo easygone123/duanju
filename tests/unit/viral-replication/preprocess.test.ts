@@ -11,6 +11,7 @@ import {
 import {
   VIRAL_FALLBACK_SHOT_INTERVAL_MS,
   buildAnalysisBatches,
+  buildReviewFrameTimestamps,
   buildShotRanges,
   preprocessViralVideo,
 } from '@/lib/viral-replication/preprocess'
@@ -205,6 +206,22 @@ describe('shot planning', () => {
 
     expect(batches.map((batch) => batch.length)).toEqual([10, 10, 10, 10, 10, 10, 10, 3])
     expect(batches.flat()).toEqual(values)
+  })
+
+  it('samples opening and closing review frames only for shots long enough to add evidence', () => {
+    expect(buildReviewFrameTimestamps({
+      startMs: 1_000,
+      endMs: 2_000,
+      representativeMs: 1_500,
+    })).toEqual([
+      { position: 'opening', timestampMs: 1_200 },
+      { position: 'closing', timestampMs: 1_800 },
+    ])
+    expect(buildReviewFrameTimestamps({
+      startMs: 1_000,
+      endMs: 1_150,
+      representativeMs: 1_075,
+    })).toEqual([])
   })
 })
 

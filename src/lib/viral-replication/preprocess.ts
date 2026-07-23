@@ -31,6 +31,13 @@ export interface PreprocessedViralShot extends ViralShotRange {
   framePath: string
 }
 
+export interface ViralReviewFrame {
+  shotIndex: number
+  position: 'opening' | 'closing'
+  timestampMs: number
+  framePath: string
+}
+
 export interface PreprocessViralVideoResult {
   metadata: VideoMetadata
   shots: PreprocessedViralShot[]
@@ -41,6 +48,14 @@ export interface PreprocessViralVideoResult {
 export interface PreprocessViralVideoOptions {
   sourcePath: string
   outputDirectory: string
+  runner?: CommandRunner
+}
+
+export interface ExtractViralReviewFramesOptions {
+  sourcePath: string
+  outputDirectory: string
+  videoStreamIndex: number
+  shots: PreprocessedViralShot[]
   runner?: CommandRunner
 }
 
@@ -116,6 +131,65 @@ export function buildAnalysisBatches<T>(items: readonly T[]): T[][] {
 
 function frameFilename(shotIndex: number): string {
   return `shot-${shotIndex.toString().padStart(3, '0')}.jpg`
+}
+
+function reviewFrameFilename(shotIndex: number, position: ViralReviewFrame['position']): string {
+  return `review-${shotIndex.toString().padStart(3, '0')}-${position}.jpg`
+}
+
+export function buildReviewFrameTimestamps(
+  shot: Pick<PreprocessedViralShot, 'startMs' | 'endMs' | 'representativeMs'>,
+): Array<{ position: ViralReviewFrame['position']; timestampMs: number }> {
+  const durationMs = shot.endMs - shot.startMs
+  if (durationMs < 200) return []
+  const insetMs = Math.max(1, Math.floor(durationMs * 0.2))
+  const openingMs = shot.startMs + insetMs
+  const closingMs = shot.endMs - insetMs
+  const candidates: Array<{
+    position: ViralReviewFrame['position']
+    timestampMs: number
+  }> = [
+    { position: 'opening', timestampMs: openingMs },
+    { position: 'closing', timestampMs: closingMs },
+  ]
+  return candidates.filter(({ timestampMs }) => timestampMs !== shot.representativeMs)
+}
+
+export async function extractViralReviewFrames({
+  sourcePath,
+  outputDirectory,
+  videoStreamIndex,
+  shots,
+  runner = defaultCommandRunner,
+}: ExtractViralReviewFramesOptions): Promise<ViralReviewFrame[]> {
+  validateAbsolutePath(sourcePath, 'sourcePath')
+  validateAbsolutePath(outputDirectory, 'outputDirectory')
+  if (!Number.isSafeInteger(videoStreamIndex) || videoStreamIndex < 0) {
+    throw new TypeError('videoStreamIndex must be a non-negative safe integer')
+  }
+
+  const frames: ViralReviewFrame[] = []
+  for (const shot of shots) {
+    for (const candidate of buildReviewFrameTimestamps(shot)) {
+      const framePath = path.join(
+        outputDirectory,
+        reviewFrameFilename(shot.shotIndex, candidate.position),
+      )
+      await extractFrame(
+        sourcePath,
+        framePath,
+        candidate.timestampMs,
+        videoStreamIndex,
+        runner,
+      )
+      frames.push({
+        shotIndex: shot.shotIndex,
+        ...candidate,
+        framePath,
+      })
+    }
+  }
+  return frames
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {

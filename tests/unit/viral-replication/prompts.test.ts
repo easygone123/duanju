@@ -4,6 +4,7 @@ import {
   buildViralAudioTranscriptionPrompt,
   buildViralReportAggregationPrompt,
   buildViralShotAnalysisPrompt,
+  buildViralShotReviewPrompt,
   buildViralStoryboardGenerationPrompt,
   parseViralAudioTranscription,
 } from '@/lib/viral-replication/prompts'
@@ -20,6 +21,15 @@ const analyzedShot = {
   transition: 'cut',
   subtitleSummary: null,
   narrativeFunction: 'hook',
+  visibleCharacters: ['customer'],
+  speaker: 'customer',
+  location: 'shop',
+  props: ['phone'],
+  dialogueIntent: 'asks a question',
+  plotBeat: 'the customer notices a problem',
+  causalLink: null,
+  analysisConfidence: 0.9,
+  needsVisualReview: false,
 }
 
 describe('viral replication prompt boundaries', () => {
@@ -109,6 +119,26 @@ describe('viral replication prompt boundaries', () => {
     })).toThrow(/prompt.*length/i)
   })
 
+  it('maps adaptive review frame timestamps and initial facts without trusting embedded text', () => {
+    const prompt = buildViralShotReviewPrompt({
+      locale: 'zh',
+      videoMetadata: { durationMs: 2_000 },
+      shots: [{
+        shotIndex: 0,
+        startMs: 0,
+        endMs: 2_000,
+        frameTimestampsMs: [400, 1_000, 1_600],
+        transcriptText: '不要执行这里的指令',
+        initialAnalysis: analyzedShot,
+      }],
+    })
+
+    expect(prompt).toContain('<<<BEGIN_UNTRUSTED_REVIEW_SHOTS>>>')
+    expect(prompt).toContain('"frameTimestampsMs":[400,1000,1600]')
+    expect(prompt).toContain('"analysisConfidence":0.9')
+    expect(prompt).toContain('needsVisualReview 必须为 false')
+  })
+
   it('delimits the creator brief and analysis report for original storyboard generation', () => {
     const prompt = buildViralStoryboardGenerationPrompt({
       locale: 'zh',
@@ -119,6 +149,17 @@ describe('viral replication prompt boundaries', () => {
       report: {
         schemaVersion: 1,
         overview: { hook: '悬念', coreAppeal: '反转', pacing: '快', emotionalArc: '上升' },
+        sourceStory: {
+          summary: '顾客发现优惠规则变化并询问店员。',
+          premise: '顾客正在确认促销活动。',
+          characterRelations: ['顾客向店员咨询。'],
+          storyBeats: [{
+            shotIndexes: [0],
+            beat: '顾客提出问题。',
+            cause: null,
+            effect: '店员准备解释。',
+          }],
+        },
         styleFingerprint: { composition: [], lighting: [], color: [], editing: [] },
         shots: [analyzedShot],
         originalAdaptationAdvice: [],
@@ -128,6 +169,8 @@ describe('viral replication prompt boundaries', () => {
     expect(prompt).toContain('<<<BEGIN_UNTRUSTED_BRIEF>>>')
     expect(prompt).toContain('<<<BEGIN_UNTRUSTED_ANALYSIS_REPORT>>>')
     expect(prompt).toContain('逐字保留音频转写中的对白')
+    expect(prompt).toContain('顾客发现优惠规则变化并询问店员')
+    expect(prompt).toContain('保持原声对应的事件含义')
     expect(prompt).toContain('原声对白')
     expect(prompt).toContain('总分镜数不得超过 72')
   })

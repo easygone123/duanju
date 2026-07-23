@@ -7,9 +7,30 @@ const shortText = z.string().min(1).max(200)
 const mediumText = z.string().min(1).max(2_000)
 const longText = z.string().min(1).max(100_000)
 const fingerprintValues = z.array(shortText).max(24)
+const plotTextValues = z.array(shortText).max(24)
 const maxCharacters = 100
 const maxStoryboards = 24
 const maxPanelsPerStoryboard = 24
+
+const viralSourceStoryV1Schema = z
+  .object({
+    summary: mediumText,
+    premise: mediumText,
+    characterRelations: z.array(mediumText).max(50),
+    storyBeats: z
+      .array(
+        z
+          .object({
+            shotIndexes: z.array(z.number().int().nonnegative()).min(1).max(24),
+            beat: mediumText,
+            cause: mediumText.nullable(),
+            effect: mediumText.nullable(),
+          })
+          .strict(),
+      )
+      .max(VIRAL_MAX_ANALYSIS_FRAMES),
+  })
+  .strict()
 
 const viralAnalysisShotV1Schema = z
   .object({
@@ -24,6 +45,15 @@ const viralAnalysisShotV1Schema = z
     transition: shortText,
     subtitleSummary: mediumText.nullable(),
     narrativeFunction: mediumText,
+    visibleCharacters: plotTextValues.default([]),
+    speaker: shortText.nullable().default(null),
+    location: shortText.nullable().default(null),
+    props: plotTextValues.default([]),
+    dialogueIntent: mediumText.nullable().default(null),
+    plotBeat: mediumText.nullable().default(null),
+    causalLink: mediumText.nullable().default(null),
+    analysisConfidence: z.number().finite().min(0).max(1).default(1),
+    needsVisualReview: z.boolean().default(false),
   })
   .strict()
 
@@ -38,6 +68,7 @@ const viralAnalysisReportV1Schema = z
         emotionalArc: mediumText,
       })
       .strict(),
+    sourceStory: viralSourceStoryV1Schema.nullable().default(null),
     styleFingerprint: z
       .object({
         composition: fingerprintValues,
@@ -156,6 +187,18 @@ export function parseViralAnalysisReport(
       )
     }
   })
+  if (report.sourceStory) {
+    const coveredShotIndexes = report.sourceStory.storyBeats.flatMap((beat) => beat.shotIndexes)
+    if (
+      coveredShotIndexes.length !== report.shots.length
+      || coveredShotIndexes.some((shotIndex, index) => shotIndex !== index)
+    ) {
+      throwValidationIssue(
+        ['sourceStory', 'storyBeats'],
+        'sourceStory.storyBeats must cover every shot exactly once in timeline order',
+      )
+    }
+  }
 
   return report
 }
@@ -206,6 +249,9 @@ export function parseViralStoryboardGeneration(
       )
     }
     const cues = parseViralAudioCues(timeline.transcriptText)
+    if (cues.length > 0) {
+      generation.novelText = cues.map((cue) => cue.text).join('\n')
+    }
     const seenShotIndexes = new Set<number>()
     for (const [panelOrder, panel] of panels.entries()) {
       const shot = timeline.report.shots[panel.sourceShotIndex]

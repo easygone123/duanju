@@ -237,6 +237,15 @@ describe('chain contract - viral replication submission', () => {
       transition: 'cut',
       subtitleSummary: null,
       narrativeFunction: `function ${shot.shotIndex}`,
+      visibleCharacters: [`character ${shot.shotIndex}`],
+      speaker: `character ${shot.shotIndex}`,
+      location: `location ${shot.shotIndex}`,
+      props: [],
+      dialogueIntent: null,
+      plotBeat: `plot beat ${shot.shotIndex}`,
+      causalLink: shot.shotIndex === 0 ? null : `follows shot ${shot.shotIndex - 1}`,
+      analysisConfidence: 0.95,
+      needsVisualReview: false,
     }))
     const completion = (text: string) => ({
       id: 'deterministic',
@@ -320,6 +329,17 @@ describe('chain contract - viral replication submission', () => {
               coreAppeal: 'Visual transformation',
               pacing: 'Three even beats',
               emotionalArc: 'Curiosity to payoff',
+            },
+            sourceStory: {
+              summary: 'A deterministic three-shot source story.',
+              premise: 'A character encounters a visual transformation.',
+              characterRelations: ['The character addresses the audience.'],
+              storyBeats: analyzedShots.map((shot) => ({
+                shotIndexes: [shot.shotIndex],
+                beat: shot.plotBeat,
+                cause: shot.causalLink,
+                effect: null,
+              })),
             },
             styleFingerprint: {
               composition: ['centered'],

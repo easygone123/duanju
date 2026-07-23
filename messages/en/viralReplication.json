@@ -25,6 +25,11 @@
     "coreAppeal": "Core appeal",
     "pacing": "Pacing",
     "emotionalArc": "Emotional arc",
+    "sourceStory": "Source story",
+    "storySummary": "Story summary",
+    "premise": "Premise",
+    "characterRelations": "Character relationships",
+    "storyBeats": "Story beats",
     "styleFingerprint": "Style fingerprint",
     "composition": "Composition",
     "lighting": "Lighting",
@@ -38,10 +43,18 @@
     "transition": "Transition",
     "subtitleSummary": "Subtitle summary",
     "narrativeFunction": "Narrative function",
+    "visibleCharacters": "Visible characters",
+    "speaker": "Speaker",
+    "location": "Location",
+    "props": "Props",
+    "dialogueIntent": "Dialogue intent",
+    "plotBeat": "Plot event",
+    "causalLink": "Causal link",
+    "analysisConfidence": "Story confidence",
     "noSubtitle": "No recognizable subtitles",
     "advice": "Original adaptation advice"
   },
-  "audioSubtitleNotice": "Note: dialogue delivered only as audio may not be fully captured when the video has no subtitles.",
+  "audioSubtitleNotice": "Source dialogue is aligned by time; low-confidence story shots receive adaptive visual review.",
   "brief": {
     "label": "Original creation brief",
     "help": "Keep effective narrative and shot patterns while specifying the characters, plot, setting, and expression to replace."
@@ -55,6 +68,8 @@
   },
   "errors": {
     "generic": "The task could not be completed. Please retry.",
+    "analysis": "Video analysis failed. Retry, and check the analysis model connection if the problem continues.",
+    "audioTranscription": "Source dialogue transcription failed. Retry; generation will not continue with incomplete subtitles.",
     "storyboardGeneration": "Original storyboard generation failed. Retry will keep the analysis result instead of analyzing the video again.",
     "invalidReport": "The analysis report is invalid. Please retry the analysis.",
     "projectMismatch": "This analysis task does not belong to the current project."

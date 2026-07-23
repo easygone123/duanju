@@ -48,7 +48,7 @@ describe('viral replication view state', () => {
   })
 
   it('returns report data only after the V1 parser accepts it', () => {
-    expect(parseViralAnalysisReportForView(validReport, 1_000)).toEqual(validReport)
+    expect(parseViralAnalysisReportForView(validReport, 1_000)).toMatchObject(validReport)
     expect(parseViralAnalysisReportForView({ ...validReport, schemaVersion: 2 }, 1_000)).toBeNull()
     expect(parseViralAnalysisReportForView(validReport, null)).toBeNull()
   })

@@ -22,18 +22,29 @@ import { prisma } from '@/lib/prisma'
 import { deleteObject, getObjectStream, uploadObject } from '@/lib/storage'
 import { touchTaskHeartbeat } from '@/lib/task/service'
 import type { TaskJobData } from '@/lib/task/types'
-import { VIRAL_REPLICATION_STATUS } from '@/lib/viral-replication/constants'
+import {
+  VIRAL_ADAPTIVE_REVIEW_BATCH_SIZE,
+  VIRAL_ADAPTIVE_REVIEW_CONFIDENCE_THRESHOLD,
+  VIRAL_ANALYSIS_FAILED,
+  VIRAL_AUDIO_TRANSCRIPTION_FAILED,
+  VIRAL_MAX_ADAPTIVE_REVIEW_SHOTS,
+  VIRAL_REPLICATION_STATUS,
+} from '@/lib/viral-replication/constants'
 import { parseViralAnalysisReport, type ViralAnalysisReportV1 } from '@/lib/viral-replication/contracts'
 import { MAX_FRAME_JPEG_BYTES } from '@/lib/viral-replication/ffmpeg'
+import { audioTextForRange, parseViralAudioCues } from '@/lib/viral-replication/audio-timeline'
 import {
   buildAnalysisBatches,
+  extractViralReviewFrames,
   preprocessViralVideo,
   type PreprocessedViralShot,
+  type ViralReviewFrame,
 } from '@/lib/viral-replication/preprocess'
 import {
   buildViralReportAggregationPrompt,
   buildViralAudioTranscriptionPrompt,
   buildViralShotAnalysisPrompt,
+  buildViralShotReviewPrompt,
   parseViralAudioTranscription,
   parseViralShotAnalysisBatch,
   type ViralShotAnalysisBatch,
@@ -99,6 +110,7 @@ export type ViralReplicationAnalysisDependencies = {
   prisma: AnalysisPrisma
   getObjectStream(storageKey: string): Promise<NodeJS.ReadableStream>
   preprocess: typeof preprocessViralVideo
+  extractReviewFrames?: typeof extractViralReviewFrames
   readFrame(framePath: string): Promise<Buffer>
   uploadObject(body: Buffer, key: string, maxRetries?: number, contentType?: string): Promise<string>
   deleteObject(storageKey: string): Promise<void>
@@ -117,6 +129,7 @@ const defaultDependencies: ViralReplicationAnalysisDependencies = {
   prisma: prisma as unknown as AnalysisPrisma,
   getObjectStream,
   preprocess: preprocessViralVideo,
+  extractReviewFrames: extractViralReviewFrames,
   readFrame: fs.readFile,
   uploadObject,
   deleteObject,
@@ -135,6 +148,15 @@ export class ViralAnalysisSupersededError extends Error {
   constructor(message = 'Viral analysis execution was superseded') {
     super(message)
     this.name = 'ViralAnalysisSupersededError'
+  }
+}
+
+export class ViralAudioTranscriptionError extends Error {
+  readonly code = VIRAL_AUDIO_TRANSCRIPTION_FAILED
+
+  constructor(message = VIRAL_AUDIO_TRANSCRIPTION_FAILED, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'ViralAudioTranscriptionError'
   }
 }
 
@@ -313,12 +335,16 @@ async function extendExecutionLease(
 async function markFailed(
   dependencies: ViralReplicationAnalysisDependencies,
   execution: Parameters<typeof executionWhere>[0],
+  error: unknown,
 ): Promise<void> {
   try {
     await dependencies.prisma.viralReplication.updateMany({
       where: executionWhere(execution),
       data: {
         status: VIRAL_REPLICATION_STATUS.FAILED,
+        errorMessage: error instanceof ViralAudioTranscriptionError
+          ? VIRAL_AUDIO_TRANSCRIPTION_FAILED
+          : VIRAL_ANALYSIS_FAILED,
         analysisExecutionTaskId: null,
         analysisExecutionToken: null,
         analysisExecutionExpiresAt: null,
@@ -478,6 +504,72 @@ function supportsInlineAudioTranscription(model: string): boolean {
   return providerKey === 'google' || providerKey === 'gemini-compatible'
 }
 
+function applyTranscriptToShots<T extends {
+  startMs: number
+  endMs: number
+  subtitleSummary: string | null
+}>(shots: T[], transcriptText: string | null): T[] {
+  const cues = parseViralAudioCues(transcriptText)
+  for (const shot of shots) {
+    shot.subtitleSummary = audioTextForRange(cues, shot.startMs, shot.endMs)
+  }
+  return shots
+}
+
+function transcriptContextForShots(
+  transcriptText: string | null,
+  shots: Array<Pick<PreprocessedViralShot, 'startMs' | 'endMs'>>,
+): string | null {
+  const firstShot = shots[0]
+  const lastShot = shots.at(-1)
+  if (!firstShot || !lastShot) return null
+  const cues = parseViralAudioCues(transcriptText).filter(
+    (cue) => cue.startMs < lastShot.endMs && cue.endMs > firstShot.startMs,
+  )
+  return cues.length > 0 ? JSON.stringify({ cues }) : null
+}
+
+function selectShotsForAdaptiveReview(
+  batchResults: ViralShotAnalysisBatch[],
+): ViralShotAnalysisBatch['shots'] {
+  return batchResults
+    .flatMap((batch) => batch.shots)
+    .filter((shot) =>
+      shot.needsVisualReview
+      || shot.analysisConfidence < VIRAL_ADAPTIVE_REVIEW_CONFIDENCE_THRESHOLD
+      || (shot.subtitleSummary !== null && shot.speaker === null),
+    )
+    .sort((left, right) => {
+      if (left.needsVisualReview !== right.needsVisualReview) {
+        return left.needsVisualReview ? -1 : 1
+      }
+      return left.analysisConfidence - right.analysisConfidence || left.shotIndex - right.shotIndex
+    })
+    .slice(0, VIRAL_MAX_ADAPTIVE_REVIEW_SHOTS)
+}
+
+function replaceReviewedShots(
+  batchResults: ViralShotAnalysisBatch[],
+  reviewedShots: ViralShotAnalysisBatch['shots'],
+): void {
+  const replacements = new Map(reviewedShots.map((shot) => [shot.shotIndex, shot]))
+  for (const batch of batchResults) {
+    batch.shots = batch.shots.map((shot) => replacements.get(shot.shotIndex) ?? shot)
+  }
+}
+
+function framesForReviewShot(
+  shot: PreprocessedViralShot,
+  supplementalFrames: ViralReviewFrame[],
+): Array<{ timestampMs: number; framePath: string }> {
+  return [
+    { timestampMs: shot.representativeMs, framePath: shot.framePath },
+    ...supplementalFrames
+      .filter((frame) => frame.shotIndex === shot.shotIndex)
+      .map((frame) => ({ timestampMs: frame.timestampMs, framePath: frame.framePath })),
+  ].sort((left, right) => left.timestampMs - right.timestampMs)
+}
+
 function assertAggregatedTimeline(
   report: ViralAnalysisReportV1,
   batchResults: ViralShotAnalysisBatch[],
@@ -553,11 +645,10 @@ export function createViralReplicationAnalysisHandler(
       await pipeline(sourceStream as Readable, createWriteStream(sourcePath, { flags: 'wx' }))
       const preprocessed = await dependencies.preprocess({ sourcePath, outputDirectory })
       let transcriptText = preprocessed.transcriptText
-      if (
-        !transcriptText
-        && preprocessed.analysisAudioPath
-        && supportsInlineAudioTranscription(model)
-      ) {
+      if (!transcriptText && preprocessed.analysisAudioPath) {
+        if (!supportsInlineAudioTranscription(model)) {
+          throw new ViralAudioTranscriptionError()
+        }
         await dependencies.reportProgress(job, 38, {
           stage: 'viral_audio_transcription',
           stageLabel: '识别原声音频内容',
@@ -584,7 +675,11 @@ export function createViralReplicationAnalysisHandler(
             preprocessed.metadata.durationMs,
           )
         } catch (error: unknown) {
-          dependencies.warn('Failed to transcribe viral source audio; continuing with visual timing', error)
+          dependencies.warn('Failed to transcribe viral source audio', error)
+          throw new ViralAudioTranscriptionError(
+            VIRAL_AUDIO_TRANSCRIPTION_FAILED,
+            { cause: error },
+          )
         }
       }
       await dependencies.reportProgress(job, 40, {
@@ -621,7 +716,8 @@ export function createViralReplicationAnalysisHandler(
             brief: replication.brief,
             videoMetadata: videoMetadataForPrompt(preprocessed.metadata),
             shots,
-            subtitleContext: transcriptText,
+            previousShotContext: batchResults.at(-1)?.shots.at(-1) ?? null,
+            subtitleContext: transcriptContextForShots(transcriptText, shots),
           }),
           imageUrls,
           options: {
@@ -630,7 +726,101 @@ export function createViralReplicationAnalysisHandler(
             action: 'viral_shot_analysis',
           },
         })
-        batchResults.push(parseViralShotAnalysisBatch(getCompletionContent(completion), shots))
+        const batch = parseViralShotAnalysisBatch(getCompletionContent(completion), shots)
+        applyTranscriptToShots(batch.shots, transcriptText)
+        batchResults.push(batch)
+      }
+
+      const adaptiveCandidates = selectShotsForAdaptiveReview(batchResults)
+      if (adaptiveCandidates.length > 0) {
+        await dependencies.reportProgress(job, 81, {
+          stage: 'viral_plot_review',
+          stageLabel: '复核低置信度剧情镜头',
+          displayMode: 'detail',
+          reviewShotCount: adaptiveCandidates.length,
+        })
+        await extendExecutionLease(dependencies.prisma, dependencies, execution)
+        const candidateShots = adaptiveCandidates.map((candidate) => {
+          const shot = preprocessed.shots[candidate.shotIndex]
+          if (!shot || shot.shotIndex !== candidate.shotIndex) {
+            throw new Error(`Adaptive viral review shot ${candidate.shotIndex} is missing`)
+          }
+          return shot
+        })
+        const supplementalFrames = await (
+          dependencies.extractReviewFrames ?? extractViralReviewFrames
+        )({
+          sourcePath,
+          outputDirectory,
+          videoStreamIndex: preprocessed.metadata.videoStreamIndex,
+          shots: candidateShots,
+        })
+        const reviewedShots: ViralShotAnalysisBatch['shots'] = []
+        for (
+          let reviewOffset = 0;
+          reviewOffset < candidateShots.length;
+          reviewOffset += VIRAL_ADAPTIVE_REVIEW_BATCH_SIZE
+        ) {
+          await extendExecutionLease(dependencies.prisma, dependencies, execution)
+          const shotBatch = candidateShots.slice(
+            reviewOffset,
+            reviewOffset + VIRAL_ADAPTIVE_REVIEW_BATCH_SIZE,
+          )
+          const reviewInputs = shotBatch.map((shot) => {
+            const initialAnalysis = adaptiveCandidates.find(
+              (candidate) => candidate.shotIndex === shot.shotIndex,
+            )
+            if (!initialAnalysis) {
+              throw new Error(`Adaptive viral review analysis ${shot.shotIndex} is missing`)
+            }
+            const frames = framesForReviewShot(shot, supplementalFrames)
+            return {
+              shot,
+              frames,
+              initialAnalysis,
+            }
+          })
+          const imageUrls = await Promise.all(reviewInputs.flatMap(({ frames }) =>
+            frames.map(async (frame) => {
+              const bytes = await dependencies.readFrame(frame.framePath)
+              assertFrameSize(bytes)
+              return `data:image/jpeg;base64,${bytes.toString('base64')}`
+            }),
+          ))
+          const completion = await dependencies.runVision({
+            userId: job.data.userId,
+            model,
+            prompt: buildViralShotReviewPrompt({
+              locale: job.data.locale,
+              videoMetadata: videoMetadataForPrompt(preprocessed.metadata),
+              shots: reviewInputs.map(({ shot, frames, initialAnalysis }) => ({
+                shotIndex: shot.shotIndex,
+                startMs: shot.startMs,
+                endMs: shot.endMs,
+                frameTimestampsMs: frames.map((frame) => frame.timestampMs),
+                transcriptText: audioTextForRange(
+                  parseViralAudioCues(transcriptText),
+                  shot.startMs,
+                  shot.endMs,
+                ),
+                initialAnalysis,
+              })),
+            }),
+            imageUrls,
+            options: {
+              temperature: 0,
+              projectId: replication.projectId || undefined,
+              action: 'viral_shot_review',
+            },
+          })
+          const reviewed = parseViralShotAnalysisBatch(
+            getCompletionContent(completion),
+            shotBatch,
+          )
+          applyTranscriptToShots(reviewed.shots, transcriptText)
+          reviewedShots.push(...reviewed.shots)
+        }
+        replaceReviewedShots(batchResults, reviewedShots)
       }
 
       await dependencies.reportProgress(job, 85, {
@@ -659,7 +849,12 @@ export function createViralReplicationAnalysisHandler(
         safeParseJson(getCompletionContent(aggregation)),
         preprocessed.metadata.durationMs,
       )
+      if (!report.sourceStory) {
+        throw new Error('Aggregated viral report is missing factual source story analysis')
+      }
       assertAggregatedTimeline(report, batchResults)
+      report.shots = batchResults.flatMap((batch) => batch.shots)
+      applyTranscriptToShots(report.shots, transcriptText)
       const updated = await dependencies.prisma.viralReplication.updateMany({
         where: executionWhere(execution),
         data: {
@@ -680,7 +875,7 @@ export function createViralReplicationAnalysisHandler(
       const delayed = error instanceof DelayedError
         || (error instanceof Error && error.name === 'DelayedError')
       if (execution && !delayed && !(error instanceof ViralAnalysisSupersededError)) {
-        await markFailed(dependencies, execution)
+        await markFailed(dependencies, execution, error)
       }
       throw error
     } finally {

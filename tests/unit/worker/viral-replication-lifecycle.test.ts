@@ -41,6 +41,9 @@ function analyzedShot() {
     shotIndex: 0, startMs: 0, endMs: 1_000, shotType: 'medium', cameraAngle: 'eye level',
     cameraMove: 'static', composition: 'centered', actionBeat: 'product reveal', transition: 'cut',
     subtitleSummary: null, narrativeFunction: 'hook',
+    visibleCharacters: ['presenter'], speaker: 'presenter', location: 'studio', props: ['product'],
+    dialogueIntent: null, plotBeat: 'the presenter reveals the product', causalLink: null,
+    analysisConfidence: 0.95, needsVisualReview: false,
   }
 }
 
@@ -48,6 +51,17 @@ function report() {
   return {
     schemaVersion: 1,
     overview: { hook: 'hook', coreAppeal: 'appeal', pacing: 'fast', emotionalArc: 'rise' },
+    sourceStory: {
+      summary: 'A presenter reveals a product.',
+      premise: 'The audience waits for a product reveal.',
+      characterRelations: ['The presenter addresses the audience.'],
+      storyBeats: [{
+        shotIndexes: [0],
+        beat: 'The presenter reveals the product.',
+        cause: null,
+        effect: null,
+      }],
+    },
     styleFingerprint: { composition: ['centered'], lighting: ['soft'], color: ['warm'], editing: ['cut'] },
     shots: [analyzedShot()],
     originalAdaptationAdvice: ['Create original content.'],

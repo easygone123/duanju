@@ -186,6 +186,15 @@ describe('system - viral replication runtime acceptance', () => {
             transition: 'cut',
             subtitleSummary: null,
             narrativeFunction: `beat ${shot.shotIndex}`,
+            visibleCharacters: [`character ${shot.shotIndex}`],
+            speaker: `character ${shot.shotIndex}`,
+            location: `location ${shot.shotIndex}`,
+            props: [],
+            dialogueIntent: null,
+            plotBeat: `original plot beat ${shot.shotIndex}`,
+            causalLink: shot.shotIndex === 0 ? null : `follows shot ${shot.shotIndex - 1}`,
+            analysisConfidence: 0.95,
+            needsVisualReview: false,
           }))
           return result
         },
@@ -207,6 +216,17 @@ describe('system - viral replication runtime acceptance', () => {
             coreAppeal: 'Escalation and release',
             pacing: 'Three clear beats',
             emotionalArc: 'Concern to relief',
+          },
+          sourceStory: {
+            summary: 'A complete three-beat source story.',
+            premise: 'A character encounters an unexpected event.',
+            characterRelations: ['The characters react to one another.'],
+            storyBeats: analyzedShots.map((shot) => ({
+              shotIndexes: [shot.shotIndex],
+              beat: shot.actionBeat,
+              cause: shot.causalLink,
+              effect: null,
+            })),
           },
           styleFingerprint: {
             composition: ['centered subjects'],
