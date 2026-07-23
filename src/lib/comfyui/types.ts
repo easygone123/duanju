@@ -120,7 +120,7 @@ export interface ComfyMediaRef {
 
 export type ComfyVariableValue = string | number | boolean | ComfyMediaRef | ComfyMediaRef[]
 
-export const COMFY_REFERENCE_UPLOAD_LIMIT = 8
+export const COMFY_REFERENCE_UPLOAD_LIMIT = 64
 
 export type ComfyMissingValuePolicy = 'preserve_original'
 
@@ -141,6 +141,7 @@ export type ComfyBindingTransform =
   | 'filename_at'
   | 'bernini_image_slots'
   | 'ltx_director_timeline'
+  | 'bernini_director_timeline'
 
 export type ComfyNumericUnit = 'seconds' | 'frames' | 'fps'
 

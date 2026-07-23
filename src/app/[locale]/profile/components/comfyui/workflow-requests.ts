@@ -32,11 +32,15 @@ const CANONICAL_INPUTS = new Set([
   'prompt', 'negativePrompt', 'width', 'height', 'seed', 'sourceImage',
   'referenceImages', 'duration', 'fps', 'firstFrame', 'lastFrame', 'sourceVideo',
 ])
-const VARIABLE_TYPES = new Set(['string', 'number', 'boolean', 'image_ref', 'image_ref_list', 'video_ref'])
+const VARIABLE_TYPES = new Set([
+  'string', 'number', 'boolean', 'image_ref', 'image_ref_list',
+  'video_ref', 'video_ref_list', 'audio_ref', 'audio_ref_list',
+])
 const MAPPING_CONFIDENCE = new Set(['high', 'ambiguous', 'preserve_original', 'blocking'])
 const BINDING_TRANSFORMS = new Set([
   'filename', 'image_ref', 'filename_list', 'filename_at', 'bernini_image_slots',
   'ltx_director_timeline',
+  'bernini_director_timeline',
 ])
 const CANONICAL_VALUE_TYPES: Record<CanonicalWorkflowInput, ComfyVariableType> = {
   prompt: 'string',
@@ -237,8 +241,12 @@ function isConsistentWorkflowAnalysis(
         && (proposal.inputPath === 'global_prompt'
           || (proposal.transform === 'ltx_director_timeline'
             && proposal.inputPath === 'timeline_data')))
+      || (targetClass === 'ComfyBerniniDirector'
+        && proposal.transform === 'bernini_director_timeline'
+        && proposal.inputPath === 'timeline_data')
     const expectedRequired = meta.requiredInputs.includes(proposal.canonicalName)
       || proposal.transform === 'ltx_director_timeline'
+      || proposal.transform === 'bernini_director_timeline'
     if (!Object.hasOwn(analysis.graph, proposal.nodeId)
       || !isSafeDottedPath(proposal.inputPath)
       || (!allowsSynthesizedInput

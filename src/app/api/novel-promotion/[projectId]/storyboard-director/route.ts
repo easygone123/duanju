@@ -10,6 +10,7 @@ import {
   type LtxDirectorTimelineSpec,
 } from '@/lib/comfyui/ltx-director'
 import { hasLtxDirectorNode } from '@/lib/comfyui/ltx-director-contract'
+import { mergeDirectorConfig } from '@/lib/comfyui/director-config-envelope'
 import { isExecutableOwnedWorkflow } from '@/lib/comfyui/workflow-model-option'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { isOwnedDirectorUploadStorageKey } from '@/lib/novel-promotion/director-media'
@@ -36,6 +37,7 @@ async function loadOwnedStoryboard(projectId: string, userId: string, storyboard
       id: true,
       episodeId: true,
       directorVideoMediaId: true,
+      directorConfigJson: true,
       episode: {
         select: {
           novelPromotionProject: { select: { videoRatio: true } },
@@ -278,9 +280,12 @@ export const PUT = apiHandler(async (
   const savedSpec = { ...timelineSpec, videoModel: model }
   await prisma.novelPromotionStoryboard.update({
     where: { id: storyboard.id },
-    data: { directorConfigJson: JSON.stringify(savedSpec) },
+    data: { directorConfigJson: mergeDirectorConfig(storyboard.directorConfigJson, 'ltx', savedSpec) },
   })
-  return NextResponse.json({ storyboardId: storyboard.id, directorConfigJson: JSON.stringify(savedSpec) })
+  return NextResponse.json({
+    storyboardId: storyboard.id,
+    directorConfigJson: mergeDirectorConfig(storyboard.directorConfigJson, 'ltx', savedSpec),
+  })
 })
 
 export const POST = apiHandler(async (
@@ -307,7 +312,7 @@ export const POST = apiHandler(async (
     requestedModel: body?.videoModel ?? timelineSpec.videoModel,
   })
   const savedSpec = { ...timelineSpec, videoModel: model }
-  const savedConfigJson = JSON.stringify(savedSpec)
+  const savedConfigJson = mergeDirectorConfig(storyboard.directorConfigJson, 'ltx', savedSpec)
   const savedStoryboard = await prisma.novelPromotionStoryboard.update({
     where: { id: storyboard.id },
     data: { directorConfigJson: savedConfigJson },

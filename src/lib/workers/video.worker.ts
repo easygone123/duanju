@@ -21,6 +21,10 @@ import {
   parseLtxDirectorTimelineSpec,
   type LtxDirectorTimelineSegmentSpec,
 } from '@/lib/comfyui/ltx-director'
+import {
+  collectBerniniDirectorMediaOrders,
+  parseBerniniDirectorSpec,
+} from '@/lib/comfyui/bernini-director'
 import { normalizeToBase64ForGeneration } from '@/lib/media/outbound-image'
 import { resolveBuiltinCapabilitiesByModelKey } from '@/lib/model-capabilities/lookup'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
@@ -394,6 +398,87 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     : undefined
   if (parseModelKeyStrict(modelId)?.provider !== 'comfyui' || !workflowVersionId) {
     throw new Error('STORYBOARD_DIRECTOR_MODEL_INVALID')
+  }
+  const berniniSpec = parseBerniniDirectorSpec(payload.directorSpec)
+    ?? parseBerniniDirectorSpec(storyboard.directorConfigJson)
+  if (payload.directorEngine === 'bernini' || berniniSpec) {
+    if (!berniniSpec) throw new Error('BERNINI_DIRECTOR_CONFIG_INVALID')
+    const orders = collectBerniniDirectorMediaOrders(berniniSpec)
+    const panelById = new Map(storyboard.panels.map((panel) => [panel.id, panel]))
+    const imageMediaIds = orders.imageKeys.map((key) => {
+      if (key.startsWith('media:')) return key.slice(6)
+      const panel = panelById.get(key.slice(6))
+      if (!panel?.imageMediaId) throw new Error('BERNINI_DIRECTOR_SOURCE_INVALID')
+      return panel.imageMediaId
+    })
+    const allMediaIds = [...new Set([...imageMediaIds, ...orders.videoMediaIds])]
+    const media = await Promise.all(allMediaIds.map((id) => getMediaObjectById(id)))
+    const mediaById = new Map(media.flatMap((item) => item ? [[item.id, item]] : []))
+    const toRef = (id: string, kind: 'image' | 'video') => {
+      const item = mediaById.get(id)
+      if (!item?.storageKey || !item.mimeType?.startsWith(`${kind}/`)) {
+        throw new Error(`BERNINI_DIRECTOR_${kind.toUpperCase()}_INVALID`)
+      }
+      return {
+        storageKey: item.storageKey,
+        mimeType: item.mimeType,
+        filename: item.storageKey.split('/').pop(),
+      }
+    }
+    const referenceImages = imageMediaIds.map((id) => toRef(id, 'image'))
+    const berniniVideos = orders.videoMediaIds.map((id) => {
+      const item = mediaById.get(id)
+      if (!item?.storageKey
+        || !isOwnedDirectorUploadStorageKey(item.storageKey, job.data.userId, job.data.projectId)) {
+        throw new Error('BERNINI_DIRECTOR_VIDEO_INVALID')
+      }
+      return toRef(id, 'video')
+    })
+    const totalFrames = berniniSpec.segments.reduce((latest, segment) => (
+      Math.max(latest, segment.startFrame + segment.frameCount)
+    ), 1)
+    const selectedFrames = berniniSpec.runSelectEnabled
+      ? berniniSpec.segments.reduce((sum, segment, index) => (
+        berniniSpec.runSelection.includes(index) ? sum + segment.frameCount : sum
+      ), 0)
+      : totalFrames
+    await reportTaskProgress(job, 15, {
+      stage: 'build_bernini_director_timeline',
+      storyboardId: storyboard.id,
+      segmentCount: berniniSpec.segments.length,
+    })
+    const source = await resolveVideoSourceFromGeneration(job, {
+      userId: job.data.userId,
+      modelId,
+      invocationKey: `${job.data.taskId}:storyboard:${storyboard.id}:bernini-director`,
+      comfyWorkflowVersionId: workflowVersionId,
+      imageUrl: storyboard.panels.find((panel) => panel.imageUrl)?.imageUrl || 'bernini-director',
+      comfyReferenceImagesOnly: true,
+      comfyVariables: {
+        referenceImages,
+        berniniVideos,
+      },
+      options: {
+        prompt: JSON.stringify(berniniSpec),
+        duration: selectedFrames / berniniSpec.frameRate,
+        fps: berniniSpec.frameRate,
+        aspectRatio: storyboard.episode.novelPromotionProject.videoRatio,
+      },
+      pollProgress: { start: 25, end: 92 },
+    })
+    const storageKey = source.storageKey
+      ?? await uploadVideoSourceToCos(source.url, 'bernini-director', storyboard.id, source.downloadHeaders)
+    const videoMedia = await ensureMediaObjectFromStorageKey(storageKey)
+    await assertTaskActive(job, 'persist_bernini_director_video')
+    await prisma.novelPromotionStoryboard.update({
+      where: { id: storyboard.id },
+      data: { directorVideoUrl: storageKey, directorVideoMediaId: videoMedia.id },
+    })
+    return {
+      storyboardId: storyboard.id,
+      directorVideoUrl: videoMedia.url,
+      directorVideoMediaId: videoMedia.id,
+    }
   }
   const savedTimeline = parseLtxDirectorTimelineSpec(payload.timelineSpec)
     ?? parseLtxDirectorTimelineSpec(storyboard.directorConfigJson)

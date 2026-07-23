@@ -27,6 +27,7 @@ import { extractComfyOutputs } from './workflow-output'
 import { renderComfyWorkflow } from './workflow-renderer'
 import type { ComfyAcceptedPromptResult, ComfySubmissionFenceResult } from './submission'
 import { augmentLtxDirectorContract } from './ltx-director-contract'
+import { augmentBerniniDirectorContract } from './bernini-director-contract'
 
 export {
   claimComfySubmissionFenceWithStore,
@@ -188,11 +189,11 @@ export async function dispatchComfyRequest(
     }
 
     await mustOwn(dependencies.transition({ ...owner, from: request.status, to: 'uploading' }))
-    const runtimeContract = augmentLtxDirectorContract({
+    const runtimeContract = augmentBerniniDirectorContract(augmentLtxDirectorContract({
       graph: context.version.graph ?? {},
       variableDefinitions: context.version.variableDefinitions ?? [],
       bindings: context.version.bindings ?? [],
-    })
+    }))
     const uploads = await prepareComfyMediaUploads({
       userId: request.userId,
       projectId: request.projectId ?? 'unknown',

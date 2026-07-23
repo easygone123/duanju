@@ -1,6 +1,7 @@
 import { composeModelKey } from '@/lib/model-config-contract'
 import type { ComfyWorkflowPurpose } from './types'
 import { hasLtxDirectorNode } from './ltx-director-contract'
+import { hasBerniniDirectorNode } from './bernini-director-contract'
 
 export interface ComfyWorkflowModelInput {
   id: string
@@ -40,6 +41,9 @@ export function buildComfyWorkflowModelOption(workflow: ComfyWorkflowModelInput)
   const ltxDirector = workflow.mediaType === 'video'
     && purpose === 'generation'
     && hasLtxDirectorNode(workflow.currentVersion.apiFormatJson)
+  const berniniDirector = workflow.mediaType === 'video'
+    && purpose === 'generation'
+    && hasBerniniDirectorNode(workflow.currentVersion.apiFormatJson)
   return {
     value: composeModelKey('comfyui', workflow.id),
     label: workflow.name,
@@ -48,7 +52,12 @@ export function buildComfyWorkflowModelOption(workflow: ComfyWorkflowModelInput)
     workflowPurpose: purpose,
     workflowVersionId: workflow.currentVersion.id,
     ...(firstLastFrame ? { capabilities: { video: { firstlastframe: true } } } : {}),
-    ...(ltxDirector ? { workflowFeatures: { ltxDirector: true } } : {}),
+    ...(ltxDirector || berniniDirector ? {
+      workflowFeatures: {
+        ...(ltxDirector ? { ltxDirector: true } : {}),
+        ...(berniniDirector ? { berniniDirector: true } : {}),
+      },
+    } : {}),
   }
 }
 

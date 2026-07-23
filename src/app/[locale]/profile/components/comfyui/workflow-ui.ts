@@ -190,6 +190,7 @@ export function confirmWorkflowAnalysis(
     const isReferenceList = canonicalName === 'referenceImages'
     const isBerniniSlots = proposal.transform === 'bernini_image_slots'
     const isLtxDirectorTimeline = proposal.transform === 'ltx_director_timeline'
+    const isBerniniDirectorTimeline = proposal.transform === 'bernini_director_timeline'
     const valueType = isReferenceList ? 'image_ref_list' : proposal.valueType
     const existing = definitions.get(canonicalName)
     const required = requiredByCanonical.get(canonicalName) ?? false
@@ -206,7 +207,7 @@ export function confirmWorkflowAnalysis(
       name: canonicalName,
       type: valueType,
       required,
-      ...(!required && isBerniniSlots
+      ...(!required && (isBerniniSlots || isBerniniDirectorTimeline)
         ? { defaultValue: [] }
         : !required ? { missingValuePolicy: 'preserve_original' as const } : {}),
       ...(isReferenceList ? { maxItems: referenceCapacity } : {}),
@@ -221,6 +222,8 @@ export function confirmWorkflowAnalysis(
           ? { transform: 'bernini_image_slots' as const }
           : isLtxDirectorTimeline
             ? { transform: 'ltx_director_timeline' as const }
+            : isBerniniDirectorTimeline
+              ? { transform: 'bernini_director_timeline' as const }
           : {
             transform: proposal.transform === 'filename_list' ? 'filename_list' : 'filename_at',
             ...(proposal.transform === 'filename_list' ? {} : { valueIndex: referenceIndex }),
@@ -229,7 +232,7 @@ export function confirmWorkflowAnalysis(
       ...(proposal.numericTransform
         ? { numericTransform: structuredClone(proposal.numericTransform) }
         : {}),
-      ...(!required && !isBerniniSlots
+      ...(!required && !isBerniniSlots && !isBerniniDirectorTimeline
         ? { missingValuePolicy: 'preserve_original' as const }
         : {}),
     })
@@ -240,6 +243,16 @@ export function confirmWorkflowAnalysis(
     definitions.set('fps', {
       name: 'fps', type: 'number', required: false,
       defaultValue: binding.numericTransform.fps!.fallback,
+    })
+  }
+
+  if (bindings.some((binding) => binding.transform === 'bernini_director_timeline')) {
+    if (!definitions.has('prompt')) {
+      definitions.set('prompt', { name: 'prompt', type: 'string', required: true })
+    }
+    definitions.set('berniniVideos', {
+      name: 'berniniVideos', type: 'video_ref_list', required: false,
+      defaultValue: [], maxItems: 16,
     })
   }
 

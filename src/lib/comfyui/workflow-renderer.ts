@@ -16,6 +16,7 @@ import type {
   RenderWorkflowInput,
 } from './types'
 import { parseLtxDirectorTimelineSpec, renderLtxDirectorTimeline } from './ltx-director'
+import { parseBerniniDirectorSpec, renderBerniniDirectorNode } from './bernini-director'
 
 const WHOLE_PLACEHOLDER = /^\$\{([^{}]+)\}$/
 const EMBEDDED_PLACEHOLDER = /\$\{([^{}]+)\}/g
@@ -73,6 +74,10 @@ export function renderComfyWorkflow(input: RenderWorkflowInput): ComfyApiWorkflo
         applyLtxDirectorTimeline(rendered, binding, value, variables, input.uploads)
         continue
       }
+      if (binding.transform === 'bernini_director_timeline') {
+        applyBerniniDirectorTimeline(rendered, binding, value, variables, input.uploads)
+        continue
+      }
       const transformed = transformBindingValue(
         binding,
         value,
@@ -125,7 +130,7 @@ function assertSafeBinding(graph: ComfyApiWorkflow, binding: ComfyInputBinding):
     binding.transform !== undefined
     && ![
       'filename', 'image_ref', 'filename_list', 'filename_at', 'bernini_image_slots',
-      'ltx_director_timeline',
+      'ltx_director_timeline', 'bernini_director_timeline',
     ].includes(binding.transform)
   ) {
     throw bindingError(binding, `Unsupported transform "${String(binding.transform)}".`)
@@ -141,6 +146,55 @@ function assertSafeBinding(graph: ComfyApiWorkflow, binding: ComfyInputBinding):
       binding,
       'LTX Director timeline requires an LTXDirector.timeline_data binding.',
     )
+  }
+  if (binding.transform === 'bernini_director_timeline'
+    && (graph[binding.nodeId].class_type !== 'ComfyBerniniDirector'
+      || binding.inputPath !== 'timeline_data')) {
+    throw bindingError(
+      binding,
+      'Bernini Director timeline requires a ComfyBerniniDirector.timeline_data binding.',
+    )
+  }
+}
+
+function applyBerniniDirectorTimeline(
+  graph: ComfyApiWorkflow,
+  binding: ComfyInputBinding,
+  value: ComfyVariableValue,
+  variables: Record<string, ComfyVariableValue | undefined>,
+  uploads: RenderWorkflowInput['uploads'],
+) {
+  if (!Array.isArray(value)) {
+    throw bindingError(binding, `Bernini Director images for "${binding.variable}" are malformed.`)
+  }
+  const imageUpload = uploads[binding.variable]
+  const imageFiles = Array.isArray(imageUpload) ? imageUpload.filter(isUploadedFile) : []
+  const videoUpload = uploads.berniniVideos
+  const videoFiles = Array.isArray(videoUpload) ? videoUpload.filter(isUploadedFile) : []
+  if (imageFiles.length !== value.length) {
+    throw bindingError(binding, 'Bernini Director image uploads are missing or malformed.')
+  }
+  const spec = parseBerniniDirectorSpec(variables.prompt)
+  if (!spec) {
+    if (typeof variables.prompt === 'string' && Object.hasOwn(graph[binding.nodeId].inputs, 'global_prompt')) {
+      graph[binding.nodeId].inputs.global_prompt = variables.prompt
+    }
+    return
+  }
+  try {
+    const rendered = renderBerniniDirectorNode({
+      spec,
+      imageFiles,
+      videoFiles,
+      baseTimelineData: graph[binding.nodeId].inputs.timeline_data,
+    })
+    const target = graph[binding.nodeId]
+    target.inputs.timeline_data = rendered.timelineData
+    for (const [name, nextValue] of Object.entries(rendered.inputs)) {
+      if (Object.hasOwn(target.inputs, name)) target.inputs[name] = nextValue
+    }
+  } catch {
+    throw bindingError(binding, 'Bernini Director media uploads do not match the timeline.')
   }
 }
 

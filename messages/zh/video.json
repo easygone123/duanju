@@ -242,6 +242,7 @@
   "director": {
     "modePanels": "逐镜生成",
     "modeDirector": "LTX Director",
+    "modeBerniniDirector": "Bernini Director",
     "description": "导演台支持拖拽素材、自由编排镜头和横向时间线。可上传图片，也可把上一组末帧直接作为当前组首帧。",
     "groupTitle": "第 {number} 组时间线",
     "groupMeta": "{count} 个镜头 · 总时长 {duration} 秒",
@@ -342,6 +343,42 @@
     "generateRange": "重新生成所选区间",
     "generating": "生成中…",
     "preview": "本组生成结果"
+  },
+  "berniniDirector": {
+    "title": "Bernini Director 导演台",
+    "description": "兼容 ComfyUI_Bernini_Director 的视频编辑、批量生成、参考素材和采样设置。",
+    "noStoryboard": "当前没有可编辑的分镜组。", "group": "第 {index} 组",
+    "selectModel": "选择 Bernini Director 工作流",
+    "noModel": "没有可用工作流。请先上传、测试并发布包含 ComfyBerniniDirector 节点的视频工作流。",
+    "modelRequired": "请先选择 Bernini Director 工作流。",
+    "taskType": "任务类型", "editMode": "编辑模式", "globalMode": "全局统一", "segmentMode": "逐段设置",
+    "fps": "帧率 FPS", "resolution": "分辨率", "globalPrompt": "全局提示词", "negativePrompt": "全局负面提示词",
+    "sourceVideo": "源视频", "uploadVideo": "上传视频", "replace": "替换", "notSelected": "尚未选择",
+    "sourceVideoHint": "当前任务必须上传源视频。", "globalReferences": "全局参考图（image0–image4）",
+    "addReferences": "添加参考图（{count}/5）", "referenceHint": "当前任务建议至少添加一张参考图，并在提示词中写 image0。",
+    "referenceVideo": "参考视频", "continuousReference": "参考视频按各分段起点连续取帧",
+    "timeline": "Bernini 时间线", "addSegment": "添加分段", "equalSplit": "等分 {count} 段", "compact": "自动补齐空隙",
+    "selectRun": "只运行勾选分段", "segment": "分段 {index}", "startFrame": "开始帧", "frameCount": "帧数",
+    "inheritTask": "继承全局任务", "remove": "删除", "noPanelSource": "不使用分镜图片", "panel": "分镜 {index}",
+    "uploadSourceImage": "上传源图", "sourceImageHint": "当前任务的每个分段都需要源图。",
+    "segmentPrompt": "本分段提示词；可用 image0、image1 引用图片",
+    "segmentNegative": "本分段负面提示词（留空继承全局）", "segmentReferences": "分段参考图",
+    "segmentReferenceVideo": "分段参考视频", "samplingAndOutput": "采样与输出设置", "promptEnhancer": "LLM 提示词增强",
+    "width": "宽度", "height": "高度", "refMaxSize": "参考素材长边", "outputMode": "输出尺寸模式",
+    "exportMode": "导出模式", "maxExportFrames": "最多导出帧数（0=全部）", "continuity": "开启跨分段连续性引导",
+    "overlapFrames": "连续性重叠帧", "clearVram": "分段之间清理显存", "exportSource": "同时输出源画面",
+    "autoEnhance": "每次生成前自动增强提示词", "language": "输出语言", "characterEnhance": "增强参考人物特征",
+    "unloadAfter": "增强后卸载 LLM", "customTemplate": "自定义增强模板",
+    "mediaTokenHint": "参考图在提示词中使用 image0–image4。", "save": "保存配置", "saving": "保存中…",
+    "generate": "保存并生成", "submitting": "提交中…", "saved": "配置已保存。",
+    "submitted": "已提交 Bernini Director 任务。", "uploadFailed": "素材上传失败。",
+    "requestFailed": "Bernini Director 请求失败。", "result": "Bernini Director 生成结果",
+    "tasks": {
+      "default": "默认通用", "t2i": "文生图", "t2v": "文生视频", "i2i": "图生图",
+      "r2i": "参考主体生图", "i2v": "图生视频", "v2v": "视频转视频", "r2v": "参考主体生视频",
+      "vi2v": "内容延展改视频", "rv2v": "参考素材改视频", "ads2v": "广告植入视频",
+      "vrc2v": "主体位置动作微调", "mv2v": "全参数精细化改视频"
+    }
   },
   "errors": {
     "unknownError": "未知错误"

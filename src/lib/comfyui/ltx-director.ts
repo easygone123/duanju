@@ -1,4 +1,5 @@
 import type { ComfyUploadedFile } from './types'
+import { unwrapDirectorConfig } from './director-config-envelope'
 
 export const LTX_DIRECTOR_TIMELINE_VERSION = 1 as const
 
@@ -274,9 +275,10 @@ export function resolveLtxDirectorAspectRatioFromDimensions(
 
 export function parseLtxDirectorTimelineSpec(value: unknown): LtxDirectorTimelineSpec | null {
   try {
-    const parsed = typeof value === 'string'
-      ? JSON.parse(value) as Record<string, unknown>
-      : value as Record<string, unknown>
+    const unwrapped = unwrapDirectorConfig(value, 'ltx')
+    const parsed = typeof unwrapped === 'string'
+      ? JSON.parse(unwrapped) as Record<string, unknown>
+      : unwrapped as Record<string, unknown>
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
     if (parsed.version !== LTX_DIRECTOR_TIMELINE_VERSION || !positiveNumber(parsed.fps)
       || typeof parsed.globalPrompt !== 'string' || !Array.isArray(parsed.segments)) return null

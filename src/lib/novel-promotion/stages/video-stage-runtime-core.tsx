@@ -23,6 +23,7 @@ import { CombinedPreviewPanel } from '@/app/[locale]/workspace/[projectId]/modes
 import VideoTimelinePanel from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/VideoTimelinePanel'
 import VideoRenderPanel from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/VideoRenderPanel'
 import LtxDirectorWorkspace from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/LtxDirectorWorkspace'
+import BerniniDirectorWorkspace from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video-stage/BerniniDirectorWorkspace'
 import type { VideoStageShellProps } from './video-stage-runtime/types'
 import {
   type EffectiveVideoCapabilityDefinition,
@@ -84,7 +85,7 @@ export function useVideoStageRuntime({
   onEnterEditor,
 }: VideoStageShellProps) {
   const t = useTranslations('video')
-  const [workspaceMode, setWorkspaceMode] = useState<'panels' | 'director'>('panels')
+  const [workspaceMode, setWorkspaceMode] = useState<'panels' | 'director' | 'berniniDirector'>('panels')
 
   const {
     panelVideoPreference,
@@ -574,6 +575,13 @@ export function useVideoStageRuntime({
         </button>
         <button
           type="button"
+          className={`glass-btn-base h-9 rounded-lg px-4 text-sm ${workspaceMode === 'berniniDirector' ? 'glass-btn-primary' : 'glass-btn-ghost'}`}
+          onClick={() => setWorkspaceMode('berniniDirector')}
+        >
+          {t('director.modeBerniniDirector')}
+        </button>
+        <button
+          type="button"
           className="glass-btn-base glass-btn-ghost ml-auto h-9 rounded-lg px-4 text-sm"
           onClick={onBack}
         >
@@ -657,8 +665,17 @@ export function useVideoStageRuntime({
         updateLocalPrompt={updateLocalPrompt}
         savePrompt={savePrompt}
         />
-      </> : (
+      </> : workspaceMode === 'director' ? (
         <LtxDirectorWorkspace
+          projectId={projectId}
+          episodeId={episodeId}
+          storyboards={sortedStoryboards}
+          clips={clips}
+          videoModels={allVideoModelOptions}
+          videoRatio={videoRatio}
+        />
+      ) : (
+        <BerniniDirectorWorkspace
           projectId={projectId}
           episodeId={episodeId}
           storyboards={sortedStoryboards}

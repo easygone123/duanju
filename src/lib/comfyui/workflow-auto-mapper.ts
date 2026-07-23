@@ -314,6 +314,8 @@ function inferMediaProposals(
   const proposals: WorkflowMappingProposal[] = []
   const ltxDirector = findLtxDirectorTimelineFamilies(graph)
   proposals.push(...ltxDirector.proposals)
+  const berniniDirector = findBerniniDirectorTimelineFamilies(graph)
+  proposals.push(...berniniDirector.proposals)
   const bernini = findBerniniReferenceFamilies(graph, requiredInputs)
   proposals.push(...bernini.proposals)
   const referenceCandidates: Array<{
@@ -327,7 +329,8 @@ function inferMediaProposals(
 
   const nodes = Object.entries(graph).sort(([left], [right]) => compareNodeIds(left, right))
   for (const [nodeId, node] of nodes) {
-    if (node.class_type === 'BerniniStudio' || bernini.consumedLoaderNodeIds.has(nodeId)) continue
+    if (node.class_type === 'BerniniStudio' || node.class_type === 'ComfyBerniniDirector'
+      || bernini.consumedLoaderNodeIds.has(nodeId)) continue
     const title = nodeTitle(node)
     const imageInput = findImageLoaderInput(node)
     if (imageInput) {
@@ -378,7 +381,11 @@ function inferMediaProposals(
     })
   }
 
-  let referenceCapacity = Math.max(ltxDirector.referenceCapacity, bernini.referenceCapacity)
+  let referenceCapacity = Math.max(
+    ltxDirector.referenceCapacity,
+    berniniDirector.referenceCapacity,
+    bernini.referenceCapacity,
+  )
   for (const candidate of referenceCandidates) {
     const listCapacity = candidate.listCapacity
     proposals.push({
@@ -400,6 +407,31 @@ function inferMediaProposals(
   }
 
   return { proposals, referenceCapacity }
+}
+
+function findBerniniDirectorTimelineFamilies(graph: ComfyApiWorkflow): {
+  proposals: WorkflowMappingProposal[]
+  referenceCapacity: number
+} {
+  const proposals: WorkflowMappingProposal[] = []
+  for (const [nodeId, node] of Object.entries(graph)) {
+    if (node.class_type !== 'ComfyBerniniDirector'
+      || !Object.hasOwn(node.inputs, 'timeline_data')) continue
+    proposals.push({
+      id: `${nodeId}:timeline_data:referenceImages`,
+      canonicalName: 'referenceImages',
+      nodeId,
+      inputPath: 'timeline_data',
+      valueType: 'image_ref_list',
+      transform: 'bernini_director_timeline',
+      confidence: 'high',
+      reasonCode: 'COMFY_MAPPING_BERNINI_DIRECTOR_TIMELINE',
+      required: false,
+      referenceIndex: 0,
+      ...(nodeTitle(node) ? { nodeTitle: nodeTitle(node) } : {}),
+    })
+  }
+  return { proposals, referenceCapacity: proposals.length > 0 ? 64 : 0 }
 }
 
 function findLtxDirectorTimelineFamilies(graph: ComfyApiWorkflow): {

@@ -9,6 +9,7 @@ import WorkflowNumericTransformEditor from './WorkflowNumericTransformEditor'
 // Base media transforms remain ['filename', 'image_ref', 'filename_list', 'bernini_image_slots'].
 const TRANSFORMS = [
   'filename', 'image_ref', 'filename_list', 'bernini_image_slots', 'ltx_director_timeline',
+  'bernini_director_timeline',
 ] as const
 
 interface Props {

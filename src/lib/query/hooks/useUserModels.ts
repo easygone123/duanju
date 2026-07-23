@@ -17,7 +17,7 @@ export interface UserModelOption {
     videoPricingTiers?: VideoPricingTier[]
     workflowPurpose?: ComfyWorkflowPurpose
     workflowVersionId?: string
-    workflowFeatures?: { ltxDirector?: boolean }
+    workflowFeatures?: { ltxDirector?: boolean; berniniDirector?: boolean }
 }
 
 export interface UserModelsPayload {
