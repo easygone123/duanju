@@ -75,6 +75,29 @@ export function serializeViralAudioCues(
   ].join('\n')).join('\n\n')
 }
 
+export function offsetViralAudioTranscript(
+  transcriptText: string | null | undefined,
+  offsetMs: number,
+  segmentDurationMs: number,
+): string | null {
+  if (
+    !Number.isSafeInteger(offsetMs)
+    || offsetMs < 0
+    || !Number.isSafeInteger(segmentDurationMs)
+    || segmentDurationMs <= 0
+  ) {
+    throw new TypeError('Audio transcript offset and duration must be valid milliseconds')
+  }
+  const cues = parseViralAudioCues(transcriptText)
+    .filter((cue) => cue.startMs < segmentDurationMs)
+    .map((cue) => ({
+      ...cue,
+      startMs: cue.startMs + offsetMs,
+      endMs: Math.min(cue.endMs, segmentDurationMs) + offsetMs,
+    }))
+  return serializeViralAudioCues(cues, offsetMs + segmentDurationMs)
+}
+
 /**
  * FFmpeg emits embedded text subtitles as SRT. Parse only timestamped blocks so
  * model-generated visuals can follow the original audio without allowing an LLM

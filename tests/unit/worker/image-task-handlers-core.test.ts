@@ -189,6 +189,7 @@ describe('worker image-task-handlers-core', () => {
     expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
+        preferComfyStorageKey: true,
         options: expect.objectContaining({
           aspectRatio: '16:9',
           resolution: '2048x1152',

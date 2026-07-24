@@ -108,6 +108,7 @@ type HarnessOptions = {
   analysisAudioSegments?: Array<{ startMs: number; endMs: number }>
   audioTranscriptionText?: string | ((callIndex: number) => string)
   audioTranscriptionError?: Error
+  externalAsrTranscript?: string | null
   analysisModelSnapshot?: string
   sourceVideoMediaId?: string
   mediaCreateError?: Error
@@ -386,6 +387,11 @@ async function createHarness(options: HarnessOptions = {}) {
     textCalls.push(input)
     return completion(options.aggregateText ?? JSON.stringify(report(Array.from({ length: frameCount }, (_, index) => shot(index)))))
   })
+  const transcribeAudio = vi.fn(async () => (
+    Object.hasOwn(options, 'externalAsrTranscript')
+      ? { configured: true as const, transcriptText: options.externalAsrTranscript ?? null }
+      : { configured: false as const }
+  ))
   const getObjectStream = vi.fn(async () => {
     await options.sourceGate
     return Readable.from(Buffer.from('source-video'))
@@ -415,6 +421,7 @@ async function createHarness(options: HarnessOptions = {}) {
     readFrame,
     runVision: runVision as never,
     runText: runText as never,
+    transcribeAudio,
     reportProgress: vi.fn(async (_job, value, payload) => {
       progress.push({ value, payload })
     }),
@@ -469,6 +476,7 @@ async function createHarness(options: HarnessOptions = {}) {
     maxActiveFrameReads: () => maxActiveFrameReads,
     runVision,
     runText,
+    transcribeAudio,
     frameMedia,
     frames,
     updates,
@@ -576,6 +584,30 @@ describe('viral replication analysis handler', () => {
       '跨镜头原声',
       '跨镜头原声',
     ])
+  })
+
+  it('uses configured external ASR even when the analysis model cannot accept inline audio', async () => {
+    const harness = await createHarness({
+      frameCount: 3,
+      transcriptText: null,
+      includeAnalysisAudio: true,
+      analysisModelSnapshot: 'provider::text-and-vision-only',
+      externalAsrTranscript: [
+        '1',
+        '00:00:00,100 --> 00:00:00,900',
+        '独立 ASR 原声',
+      ].join('\n'),
+    })
+    roots.push(harness.root)
+
+    await harness.handler(harness.job as never)
+
+    expect(harness.transcribeAudio).toHaveBeenCalledOnce()
+    expect(harness.visionCalls.some(
+      (call) => (call.imageUrls as string[])[0]?.startsWith('data:audio/'),
+    )).toBe(false)
+    const completed = harness.updates.find((update) => update.status === 'review_ready')
+    expect(completed?.transcriptText).toContain('独立 ASR 原声')
   })
 
   it('keeps embedded subtitles primary and transcribes only declared missing audio segments', async () => {

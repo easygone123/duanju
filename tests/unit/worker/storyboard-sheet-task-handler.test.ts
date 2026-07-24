@@ -606,7 +606,9 @@ describe('six-grid sheet and panel execution', () => {
     expect(generationMock.getBytes).toHaveBeenCalledWith('owned/crop-2.png')
     expect(generationMock.normalize).not.toHaveBeenCalled()
     expect(generationMock.resolve).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      comfyWorkflowVersionId: 'version-old', comfySourceImage: 'owned/crop-2.png',
+      comfyWorkflowVersionId: 'version-old',
+      comfySourceImage: 'owned/crop-2.png',
+      preferComfyStorageKey: true,
     }))
     expect(JSON.stringify(generationMock.resolve.mock.calls)).not.toContain('attacker.invalid')
   })

@@ -79,6 +79,7 @@ describe('viral replication streamed upload with real database', () => {
         brief: '原创方向',
         videoRatio: '16:9',
         artStyle: 'japanese-anime',
+        storyboardGenerationMode: 'six_grid',
         status: 'uploading',
       },
     })
@@ -159,7 +160,10 @@ describe('viral replication streamed upload with real database', () => {
         id: result.projectId,
         name: '爆款复刻-20260715-080910',
         novelPromotionData: {
-          analysisModel: 'openai::analysis-v1', videoRatio: '16:9', artStyle: 'japanese-anime',
+          analysisModel: 'openai::analysis-v1',
+          videoRatio: '16:9',
+          artStyle: 'japanese-anime',
+          storyboardGenerationMode: 'six_grid',
           episodes: [{ id: result.episodeId, episodeNumber: 1, name: '第 1 集' }],
         },
       },

@@ -417,7 +417,7 @@ describe('preprocessViralVideo', () => {
     expect(result.analysisAudioSegments).toEqual([])
   })
 
-  it('extracts bounded audio segments only for material gaps in the preferred embedded track', async () => {
+  it('extracts subtitle gaps in auto mode and the complete track in full-audio mode', async () => {
     const audioCommands: string[][] = []
     const runner: CommandRunner = async (binary, args) => {
       if (binary === 'ffprobe') {
@@ -473,6 +473,27 @@ describe('preprocessViralVideo', () => {
       ['5.000', '30.000'],
       ['35.000', '10.000'],
       ['50.000', '10.000'],
+    ])
+
+    audioCommands.length = 0
+    const fullAudioResult = await preprocessViralVideo({
+      sourcePath,
+      outputDirectory,
+      runner,
+      transcriptionMode: 'full_audio',
+    })
+    expect(fullAudioResult.analysisAudioSegments.map(
+      ({ startMs, endMs }) => ({ startMs, endMs }),
+    )).toEqual([
+      { startMs: 0, endMs: 30_000 },
+      { startMs: 30_000, endMs: 60_000 },
+    ])
+    expect(audioCommands.map((args) => [
+      args[args.indexOf('-ss') + 1],
+      args[args.indexOf('-t') + 1],
+    ])).toEqual([
+      ['0.000', '30.000'],
+      ['30.000', '30.000'],
     ])
   })
 

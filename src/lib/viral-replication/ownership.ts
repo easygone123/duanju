@@ -6,6 +6,8 @@ export const viralReplicationDetailSelect = {
   brief: true,
   videoRatio: true,
   artStyle: true,
+  storyboardGenerationMode: true,
+  transcriptionMode: true,
   status: true,
   reportJson: true,
   reportVersion: true,

@@ -2,9 +2,11 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { isErrorResponse, requireUserAuth } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { ASPECT_RATIO_CONFIGS, isArtStyleValue } from '@/lib/constants'
+import { isStoryboardGenerationMode } from '@/lib/novel-promotion/six-grid/contracts'
 import { createViralReplication } from '@/lib/viral-replication/service'
 import { readJsonObject } from '@/lib/viral-replication/request-json'
 import { getViralReplicationRuntimeHealth } from '@/lib/viral-replication/runtime-health'
+import { isViralTranscriptionMode } from '@/lib/viral-replication/transcription-mode'
 
 export const GET = apiHandler(async () => {
   const auth = await requireUserAuth()
@@ -34,12 +36,27 @@ export const POST = apiHandler(async (request: NextRequest) => {
   if (!isArtStyleValue(body.artStyle)) {
     throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_ART_STYLE_INVALID', field: 'artStyle' })
   }
+  if (!isStoryboardGenerationMode(body.storyboardGenerationMode)) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'VIRAL_STORYBOARD_GENERATION_MODE_INVALID',
+      field: 'storyboardGenerationMode',
+    })
+  }
+  const transcriptionMode = body.transcriptionMode ?? 'auto'
+  if (!isViralTranscriptionMode(transcriptionMode)) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'VIRAL_TRANSCRIPTION_MODE_INVALID',
+      field: 'transcriptionMode',
+    })
+  }
 
   const replication = await createViralReplication({
     userId: auth.session.user.id,
     brief,
     videoRatio: body.videoRatio,
     artStyle: body.artStyle,
+    storyboardGenerationMode: body.storyboardGenerationMode,
+    transcriptionMode,
   })
   return NextResponse.json({ replication }, { status: 201 })
 })

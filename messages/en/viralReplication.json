@@ -1,16 +1,16 @@
 {
   "eyebrow": "Viral Replication",
-  "title": "Video analysis and original adaptation",
+  "title": "Source-story analysis and visual redraw",
   "states": {
     "loading": "Loading the analysis task…",
     "uploading": "Receiving video",
     "uploadingValidation": "After upload, the video is checked for format and integrity before content analysis begins.",
-    "completed": "Original script and production assets generated",
+    "completed": "Source-story script and production assets generated",
     "redirecting": "Opening script and production asset review…"
   },
   "progress": {
     "analyzing": "Analyzing the reference video",
-    "generating": "Generating original storyboards",
+    "generating": "Generating visual-redraw storyboards from the source story",
     "stages": {
       "upload": "Validate video",
       "probe": "Read media details",
@@ -53,17 +53,17 @@
     "causalLink": "Causal link",
     "analysisConfidence": "Story confidence",
     "noSubtitle": "No recognizable subtitles",
-    "advice": "Original adaptation advice"
+    "advice": "Visual redraw guidance"
   },
-  "audioSubtitleNotice": "Embedded subtitles are preferred; source audio fills only material gaps, then visible burned-in captions are used as a final fallback.",
+  "audioSubtitleNotice": "Verbatim subtitles reconstruct the source story without rewriting. Depending on the selected mode, the system transcribes missing ranges or the complete audio track.",
   "brief": {
-    "label": "Original creation brief",
-    "help": "Keep effective narrative and shot patterns while specifying the characters, plot, setting, and expression to replace."
+    "label": "Visual redraw requirements",
+    "help": "Specify only visual style, character appearance, and location design. Source dialogue, plot, functional relationships, and event order remain unchanged."
   },
   "actions": {
     "save": "Save brief",
     "saving": "Saving…",
-    "generate": "Generate original storyboards",
+    "generate": "Generate source-story storyboards",
     "starting": "Starting…",
     "retry": "Retry"
   },
@@ -71,7 +71,7 @@
     "generic": "The task could not be completed. Please retry.",
     "analysis": "Video analysis failed. Retry, and check the analysis model connection if the problem continues.",
     "audioTranscription": "Source dialogue transcription failed. Retry; generation will not continue with incomplete subtitles.",
-    "storyboardGeneration": "Original storyboard generation failed. Retry will keep the analysis result instead of analyzing the video again.",
+    "storyboardGeneration": "Source-story visual redraw failed. Retry will keep the analysis result instead of analyzing the video again.",
     "invalidReport": "The analysis report is invalid. Please retry the analysis.",
     "projectMismatch": "This analysis task does not belong to the current project."
   }

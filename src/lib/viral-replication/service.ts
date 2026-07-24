@@ -5,6 +5,8 @@ import { Prisma } from '@prisma/client'
 import type { Locale } from '@/i18n/routing'
 import { ApiError } from '@/lib/api-errors'
 import { stablePublicIdFromStorageKey } from '@/lib/media/hash'
+import type { StoryboardGenerationMode } from '@/lib/novel-promotion/six-grid/contracts'
+import type { ViralTranscriptionMode } from './transcription-mode'
 import { prisma } from '@/lib/prisma'
 import { deleteObject, uploadObjectStream } from '@/lib/storage'
 import { submitTask } from '@/lib/task/submitter'
@@ -76,14 +78,19 @@ export async function createViralReplication(input: {
   brief: string
   videoRatio: string
   artStyle: string
+  storyboardGenerationMode: StoryboardGenerationMode
+  transcriptionMode?: ViralTranscriptionMode
 }) {
   return prisma.viralReplication.create({
     data: {
       ...input,
+      transcriptionMode: input.transcriptionMode ?? 'auto',
       status: VIRAL_REPLICATION_STATUS.UPLOADING,
     },
     select: {
-      id: true, brief: true, videoRatio: true, artStyle: true, status: true, createdAt: true, updatedAt: true,
+      id: true, brief: true, videoRatio: true, artStyle: true, storyboardGenerationMode: true,
+      transcriptionMode: true,
+      status: true, createdAt: true, updatedAt: true,
     },
   })
 }
@@ -483,6 +490,7 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
           videoResolution: transactionPreference.videoResolution,
           imageResolution: transactionPreference.imageResolution,
           artStyle: replication.artStyle,
+          storyboardGenerationMode: replication.storyboardGenerationMode,
           ttsRate: transactionPreference.ttsRate,
         },
       })

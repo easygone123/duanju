@@ -10,18 +10,34 @@
   "viralReplication": {
     "trigger": "Viral Remix",
     "unavailable": "Viral Remix is unavailable because the video runtime is not installed",
-    "title": "Upload a reference and create an original storyboard",
-    "subtitle": "AI transfers pacing, composition, and camera methods without copying characters, plot, or dialogue",
+    "title": "Upload a reference, reconstruct its story, and redraw the storyboard",
+    "subtitle": "AI reconstructs the source story from subtitles and visuals, retains the original audio, and redesigns only appearances, locations, and shot imagery",
     "close": "Close",
     "videoLabel": "Reference video",
     "chooseVideo": "Choose or drop a video",
     "videoHint": "MP4 or MOV, 5 seconds to 3 minutes, up to 500 MB",
     "formatError": "Only MP4 and MOV videos are supported",
     "sizeError": "The video must not exceed 500 MB",
-    "briefLabel": "Original direction",
-    "briefPlaceholder": "For example: keep the fast reversals but create a new workplace story",
+    "briefLabel": "Visual redraw direction",
+    "briefPlaceholder": "For example: keep the source story unchanged and redraw it as a realistic workplace drama",
     "ratioLabel": "Aspect ratio",
     "styleLabel": "Visual style",
+    "storyboardModeLabel": "Storyboard generation",
+    "storyboardModePlaceholder": "Choose a storyboard mode",
+    "storyboardModes": {
+      "individual": "Generate individually",
+      "four_grid": "2×2 four-grid",
+      "six_grid": "3×2 six-grid"
+    },
+    "transcriptionModeLabel": "Transcript source",
+    "transcriptionModes": {
+      "auto": "Automatic (embedded first)",
+      "fullAudio": "Transcribe full audio"
+    },
+    "transcriptionModeHints": {
+      "auto": "Reads embedded subtitles and transcribes only missing ranges for faster analysis.",
+      "full_audio": "Transcribes the complete audio track in chunks and merges it with embedded subtitles."
+    },
     "styles": {
       "american-comic": "Comic",
       "chinese-comic": "Chinese animation",

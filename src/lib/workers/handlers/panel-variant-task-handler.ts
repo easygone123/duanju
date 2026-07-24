@@ -274,6 +274,7 @@ export async function handlePanelVariantTask(job: Job<TaskJobData>) {
     invocationKey: `${job.data.taskId}:panel-variant:${newPanel.id}`,
     prompt,
     comfyReferenceImages: refs,
+    preferComfyStorageKey: true,
     options: {
       referenceImages: normalizedRefs,
       aspectRatio,

@@ -346,6 +346,7 @@ export async function handleModifyAssetImageTask(job: Job<TaskJobData>) {
       invocationKey: `${job.data.taskId}:panel:${panel.id}:modify`,
       prompt,
       comfyReferenceImages: [panel.imageUrl, ...extraReferenceInputs],
+      preferComfyStorageKey: true,
       options: {
         referenceImages: uniqueReferences,
         aspectRatio,

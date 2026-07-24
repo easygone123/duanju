@@ -69,7 +69,7 @@ describe('api contract - viral replication routes', () => {
       .toEqual({ available: false })
     const response = await POST(buildMockRequest({
       path: '/api/viral-replications', method: 'POST',
-      body: { brief: '方向', videoRatio: '9:16', artStyle: 'realistic' },
+      body: { brief: '方向', videoRatio: '9:16', artStyle: 'realistic', storyboardGenerationMode: 'four_grid' },
     }), context)
     expect(response.status).toBe(400)
     expect(await response.json()).toMatchObject({
@@ -82,7 +82,8 @@ describe('api contract - viral replication routes', () => {
     authState.authenticated = false
     const { POST } = await import('@/app/api/viral-replications/route')
     const response = await POST(buildMockRequest({
-      path: '/api/viral-replications', method: 'POST', body: { brief: '方向', videoRatio: '9:16', artStyle: 'realistic' },
+      path: '/api/viral-replications', method: 'POST',
+      body: { brief: '方向', videoRatio: '9:16', artStyle: 'realistic', storyboardGenerationMode: 'four_grid' },
     }), { params: Promise.resolve({}) })
     expect(response.status).toBe(401)
     expect(serviceMock.createViralReplication).not.toHaveBeenCalled()
@@ -125,9 +126,17 @@ describe('api contract - viral replication routes', () => {
   })
 
   it.each([
-    [{ brief: '', videoRatio: '9:16', artStyle: 'realistic' }, 'brief'],
-    [{ brief: '方向', videoRatio: 'bad', artStyle: 'realistic' }, 'videoRatio'],
-    [{ brief: '方向', videoRatio: '9:16', artStyle: 'unknown' }, 'artStyle'],
+    [{ brief: '', videoRatio: '9:16', artStyle: 'realistic', storyboardGenerationMode: 'four_grid' }, 'brief'],
+    [{ brief: '方向', videoRatio: 'bad', artStyle: 'realistic', storyboardGenerationMode: 'four_grid' }, 'videoRatio'],
+    [{ brief: '方向', videoRatio: '9:16', artStyle: 'unknown', storyboardGenerationMode: 'four_grid' }, 'artStyle'],
+    [{ brief: '方向', videoRatio: '9:16', artStyle: 'realistic', storyboardGenerationMode: 'unknown' }, 'storyboardGenerationMode'],
+    [{
+      brief: '方向',
+      videoRatio: '9:16',
+      artStyle: 'realistic',
+      storyboardGenerationMode: 'four_grid',
+      transcriptionMode: 'unknown',
+    }, 'transcriptionMode'],
   ])('rejects invalid POST payload %o', async (body, field) => {
     const { POST } = await import('@/app/api/viral-replications/route')
     const response = await POST(buildMockRequest({ path: '/api/viral-replications', method: 'POST', body }), {
@@ -157,11 +166,22 @@ describe('api contract - viral replication routes', () => {
     const { POST } = await import('@/app/api/viral-replications/route')
     const response = await POST(buildMockRequest({
       path: '/api/viral-replications', method: 'POST',
-      body: { brief: ' 复刻节奏，不复制人物 ', videoRatio: '9:16', artStyle: 'realistic', locale: 'zh' },
+      body: {
+        brief: ' 复刻节奏，不复制人物 ',
+        videoRatio: '9:16',
+        artStyle: 'realistic',
+        storyboardGenerationMode: 'six_grid',
+        locale: 'zh',
+      },
     }), { params: Promise.resolve({}) })
     expect(response.status).toBe(201)
     expect(serviceMock.createViralReplication).toHaveBeenCalledWith({
-      userId: 'user-1', brief: '复刻节奏，不复制人物', videoRatio: '9:16', artStyle: 'realistic',
+      userId: 'user-1',
+      brief: '复刻节奏，不复制人物',
+      videoRatio: '9:16',
+      artStyle: 'realistic',
+      storyboardGenerationMode: 'six_grid',
+      transcriptionMode: 'auto',
     })
     expect(await response.json()).toMatchObject({ replication: { id: 'rep-1', status: 'uploading' } })
   })

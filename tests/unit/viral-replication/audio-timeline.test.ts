@@ -5,6 +5,7 @@ import {
   chunkViralAudioRanges,
   findViralTranscriptGaps,
   mergeViralAudioTranscripts,
+  offsetViralAudioTranscript,
   parseViralAudioCues,
 } from '@/lib/viral-replication/audio-timeline'
 
@@ -94,5 +95,16 @@ describe('viral source audio timeline', () => {
     expect(merged).toContain('内嵌字幕')
     expect(merged).toContain('音频补齐文字')
     expect(merged).not.toContain('音频冲突文字')
+  })
+
+  it('offsets timestamps returned by an external ASR segment', () => {
+    const shifted = offsetViralAudioTranscript([
+      '1',
+      '00:00:00,250 --> 00:00:01,500',
+      '分段识别结果',
+    ].join('\n'), 30_000, 10_000)
+
+    expect(shifted).toContain('00:00:30,250 --> 00:00:31,500')
+    expect(shifted).toContain('分段识别结果')
   })
 })

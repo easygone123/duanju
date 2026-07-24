@@ -1076,6 +1076,8 @@ model ViralReplication {
   brief                      String                  @db.Text
   videoRatio                 String
   artStyle                   String
+  storyboardGenerationMode   String                  @default("four_grid")
+  transcriptionMode          String                  @default("auto")
   status                     String                  @default("uploading")
   uploadLockToken            String?
   uploadLockExpiresAt        DateTime?

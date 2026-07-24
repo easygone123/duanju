@@ -289,7 +289,8 @@ export async function handleStoryboardPanelUpscaleTask(job: Job<TaskJobData>) {
     invocationKey: `${job.data.taskId}:${lineage}`, comfyWorkflowVersionId: snapshot.workflowVersionId, prompt: snapshot.promptSnapshot,
     options: { ...snapshot.optionsSnapshot, referenceImages: references.remote },
     comfySourceImage: panel.imageMedia.storageKey || undefined,
-    allowTaskExternalIdResume: !snapshot.modelSnapshot.startsWith('comfyui::') })
+    allowTaskExternalIdResume: !snapshot.modelSnapshot.startsWith('comfyui::'),
+    preferComfyStorageKey: true })
   await assertTaskActive(job, 'six_grid_panel_upscale_after_provider')
   await assertTaskActive(job, 'six_grid_panel_upscale_before_upload')
   const key = await uploadImageSourceToCos(generated, 'storyboard-panel-upscale', panel.id)

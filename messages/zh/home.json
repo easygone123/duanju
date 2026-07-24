@@ -10,18 +10,34 @@
   "viralReplication": {
     "trigger": "爆款复刻",
     "unavailable": "视频运行环境未安装，爆款复刻暂不可用",
-    "title": "上传参考视频，生成原创分镜",
-    "subtitle": "AI 只提取节奏、构图和镜头方法，不复制人物、剧情或对白",
+    "title": "上传参考视频，识别原剧情并重绘分镜",
+    "subtitle": "AI 从字幕和画面还原原剧情，保留原声音轨，只重新设计人物外观、场景与镜头画面",
     "close": "关闭",
     "videoLabel": "参考视频",
     "chooseVideo": "选择或拖入视频",
     "videoHint": "支持 MP4、MOV，5 秒至 3 分钟，最大 500 MB",
     "formatError": "仅支持 MP4 或 MOV 视频",
     "sizeError": "视频不能超过 500 MB",
-    "briefLabel": "原创方向",
-    "briefPlaceholder": "例如：保留快节奏反转，但改成全新的都市职场故事",
+    "briefLabel": "视觉重绘方向",
+    "briefPlaceholder": "例如：原剧情不变，人物和场景改为写实都市职场风格",
     "ratioLabel": "画面比例",
     "styleLabel": "画面风格",
+    "storyboardModeLabel": "分镜生成方式",
+    "storyboardModePlaceholder": "请选择分镜生成方式",
+    "storyboardModes": {
+      "individual": "逐张生成",
+      "four_grid": "2×2 四宫格",
+      "six_grid": "3×2 六宫格"
+    },
+    "transcriptionModeLabel": "字幕提取方式",
+    "transcriptionModes": {
+      "auto": "自动（内嵌字幕优先）",
+      "fullAudio": "完整音频转字幕"
+    },
+    "transcriptionModeHints": {
+      "auto": "读取内嵌字幕，只对缺失时间段进行音频识别，速度更快。",
+      "full_audio": "分段识别整条音轨并与内嵌字幕合并，适合字幕缺失或不完整的视频。"
+    },
     "styles": {
       "american-comic": "漫画风",
       "chinese-comic": "精致国漫",

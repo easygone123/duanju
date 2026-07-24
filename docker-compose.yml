@@ -104,6 +104,10 @@ services:
       QUEUE_CONCURRENCY_VOICE: "20"
       QUEUE_CONCURRENCY_TEXT: "50"
       QUEUE_CONCURRENCY_VIRAL_REPLICATION: "2"
+      # 可选独立 ASR（OpenAI-compatible audio/transcriptions）
+      VIRAL_ASR_BASE_URL: "${VIRAL_ASR_BASE_URL:-}"
+      VIRAL_ASR_API_KEY: "${VIRAL_ASR_API_KEY:-}"
+      VIRAL_ASR_MODEL: "${VIRAL_ASR_MODEL:-}"
       # ComfyUI（默认启用 trusted；仍阻止云凭证端点和危险重定向）
       COMFYUI_ENABLED: "${COMFYUI_ENABLED:-true}"
       COMFYUI_NETWORK_MODE: "${COMFYUI_NETWORK_MODE:-trusted}"

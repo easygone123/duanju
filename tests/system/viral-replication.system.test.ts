@@ -124,6 +124,7 @@ describe('system - viral replication runtime acceptance', () => {
         brief: 'Create an original rescue story with the same fast escalation',
         videoRatio: '9:16',
         artStyle: 'realistic',
+        storyboardGenerationMode: 'six_grid',
       })
       expect(created).toMatchObject({ status: 'uploading' })
       expect(await prisma.viralReplication.findUnique({ where: { id: created.id } }))

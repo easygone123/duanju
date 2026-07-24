@@ -150,12 +150,14 @@ export default function ViralAnalysisReport({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] p-6">
-        <h2 className="mb-3 text-lg font-semibold text-[var(--glass-text-primary)]">{t('report.advice')}</h2>
-        <ul className="space-y-2 text-sm leading-6 text-[var(--glass-text-secondary)]">
-          {report.originalAdaptationAdvice.map((advice) => <li key={advice}>• <span>{advice}</span></li>)}
-        </ul>
-      </section>
+      {report.originalAdaptationAdvice.length > 0 ? (
+        <section className="rounded-2xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface)] p-6">
+          <h2 className="mb-3 text-lg font-semibold text-[var(--glass-text-primary)]">{t('report.advice')}</h2>
+          <ul className="space-y-2 text-sm leading-6 text-[var(--glass-text-secondary)]">
+            {report.originalAdaptationAdvice.map((advice) => <li key={advice}>• <span>{advice}</span></li>)}
+          </ul>
+        </section>
+      ) : null}
     </div>
   )
 }

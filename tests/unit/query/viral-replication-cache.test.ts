@@ -10,6 +10,7 @@ describe('viral replication query cache', () => {
       brief: '原创方向',
       videoRatio: '9:16',
       artStyle: 'realistic',
+      storyboardGenerationMode: 'six_grid' as const,
       status: 'review_ready' as const,
       reportJson: { schemaVersion: 1 },
       project: { id: 'project-1', name: '爆款复刻项目' },
@@ -32,6 +33,7 @@ describe('viral replication query cache', () => {
       brief: '原创方向',
       videoRatio: '9:16',
       artStyle: 'realistic',
+      storyboardGenerationMode: 'six_grid',
     })
   })
 })

@@ -24,7 +24,7 @@ describe('viral analysis execution lease schema', () => {
       'utf8',
     )
 
-    expect(schema).toContain('analysisExecutionTaskId String?')
+    expect(schema).toMatch(/analysisExecutionTaskId\s+String\?/)
     expect(schema).toContain('@@index([analysisExecutionTaskId])')
     expect(migration).toContain('analysisExecutionTaskId')
     expect(migration).toContain('viral_replications_analysisExecutionTaskId_idx')

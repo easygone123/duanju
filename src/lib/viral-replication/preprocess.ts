@@ -24,6 +24,7 @@ import {
   type ViralAudioRange,
 } from './audio-timeline'
 import { validateViralVideoMetadata } from './upload-validation'
+import type { ViralTranscriptionMode } from './transcription-mode'
 
 export const VIRAL_FALLBACK_SHOT_INTERVAL_MS = 3_000
 
@@ -62,6 +63,7 @@ export interface PreprocessViralVideoOptions {
   sourcePath: string
   outputDirectory: string
   runner?: CommandRunner
+  transcriptionMode?: ViralTranscriptionMode
 }
 
 export interface ExtractViralReviewFramesOptions {
@@ -239,6 +241,7 @@ export async function preprocessViralVideo({
   sourcePath,
   outputDirectory,
   runner = defaultCommandRunner,
+  transcriptionMode = 'auto',
 }: PreprocessViralVideoOptions): Promise<PreprocessViralVideoResult> {
   validateAbsolutePath(sourcePath, 'sourcePath')
   validateAbsolutePath(outputDirectory, 'outputDirectory')
@@ -306,7 +309,9 @@ export async function preprocessViralVideo({
   const analysisAudioSegments: ViralAnalysisAudioSegment[] = []
   const audioStream = metadata.audioStreams[0]
   if (audioStream) {
-    const uncoveredRanges = findViralTranscriptGaps(transcriptText, metadata.durationMs)
+    const uncoveredRanges = transcriptionMode === 'full_audio'
+      ? [{ startMs: 0, endMs: metadata.durationMs }]
+      : findViralTranscriptGaps(transcriptText, metadata.durationMs)
     const audioRanges = chunkViralAudioRanges(uncoveredRanges)
     for (const [segmentIndex, range] of audioRanges.entries()) {
       const audioPath = path.join(outputDirectory, audioSegmentFilename(segmentIndex))

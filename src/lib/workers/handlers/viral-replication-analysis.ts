@@ -38,6 +38,10 @@ import {
   parseViralAudioCues,
 } from '@/lib/viral-replication/audio-timeline'
 import {
+  transcribeViralAudioWithConfiguredAsr,
+  type ViralAsrResult,
+} from '@/lib/viral-replication/asr'
+import {
   buildAnalysisBatches,
   extractViralReviewFrames,
   preprocessViralVideo,
@@ -53,6 +57,7 @@ import {
   parseViralShotAnalysisBatch,
   type ViralShotAnalysisBatch,
 } from '@/lib/viral-replication/prompts'
+import type { ViralTranscriptionMode } from '@/lib/viral-replication/transcription-mode'
 import { reportTaskProgress } from '@/lib/workers/shared'
 
 const ANALYSIS_EXECUTION_LEASE_MS = 15 * 60 * 1_000
@@ -62,7 +67,7 @@ type ReplicationRecord = {
   id: string
   userId: string
   projectId: string | null
-  brief: string
+  transcriptionMode: ViralTranscriptionMode
   status: string
   sourceVideoMediaId: string | null
   analysisModelSnapshot: string | null
@@ -120,6 +125,11 @@ export type ViralReplicationAnalysisDependencies = {
   deleteObject(storageKey: string): Promise<void>
   runVision(input: Parameters<typeof runModelGatewayVisionCompletion>[0]): Promise<VisionCompletion>
   runText(input: Parameters<typeof runModelGatewayTextCompletion>[0]): Promise<TextCompletion>
+  transcribeAudio?(input: {
+    audioBytes: Buffer
+    durationMs: number
+    offsetMs: number
+  }): Promise<ViralAsrResult>
   reportProgress(job: Job<TaskJobData>, progress: number, payload?: Record<string, unknown>): Promise<unknown>
   touchTaskHeartbeat(taskId: string): Promise<boolean>
   makeTempDirectory(): Promise<string>
@@ -139,6 +149,7 @@ const defaultDependencies: ViralReplicationAnalysisDependencies = {
   deleteObject,
   runVision: runModelGatewayVisionCompletion,
   runText: runModelGatewayTextCompletion,
+  transcribeAudio: transcribeViralAudioWithConfiguredAsr,
   reportProgress: reportTaskProgress,
   touchTaskHeartbeat,
   makeTempDirectory: async () => await fs.mkdtemp(path.join(os.tmpdir(), 'viral-analysis-')),
@@ -649,7 +660,7 @@ export function createViralReplicationAnalysisHandler(
           id: true,
           userId: true,
           projectId: true,
-          brief: true,
+          transcriptionMode: true,
           status: true,
           sourceVideoMediaId: true,
           analysisModelSnapshot: true,
@@ -671,13 +682,14 @@ export function createViralReplicationAnalysisHandler(
       })
       const sourceStream = await dependencies.getObjectStream(replication.sourceVideoMedia.storageKey)
       await pipeline(sourceStream as Readable, createWriteStream(sourcePath, { flags: 'wx' }))
-      const preprocessed = await dependencies.preprocess({ sourcePath, outputDirectory })
+      const preprocessed = await dependencies.preprocess({
+        sourcePath,
+        outputDirectory,
+        transcriptionMode: replication.transcriptionMode,
+      })
       let transcriptText = preprocessed.transcriptText
       const audioSegments = preprocessedAudioSegments(preprocessed)
       if (audioSegments.length > 0) {
-        if (!supportsInlineAudioTranscription(model)) {
-          throw new ViralAudioTranscriptionError()
-        }
         await dependencies.reportProgress(job, 38, {
           stage: 'viral_audio_transcription',
           stageLabel: '识别原声音频内容',
@@ -688,6 +700,19 @@ export function createViralReplicationAnalysisHandler(
           for (const segment of audioSegments) {
             const audioBytes = await fs.readFile(segment.audioPath)
             const segmentDurationMs = segment.endMs - segment.startMs
+            const dedicatedAsr = await (dependencies.transcribeAudio
+              ?? transcribeViralAudioWithConfiguredAsr)({
+              audioBytes,
+              durationMs: segmentDurationMs,
+              offsetMs: segment.startMs,
+            })
+            if (dedicatedAsr.configured) {
+              supplementalTranscripts.push(dedicatedAsr.transcriptText)
+              continue
+            }
+            if (!supportsInlineAudioTranscription(model)) {
+              throw new Error('VIRAL_AUDIO_TRANSCRIPTION_MODEL_UNSUPPORTED')
+            }
             const transcription = await dependencies.runVision({
               userId: job.data.userId,
               model,
@@ -755,7 +780,6 @@ export function createViralReplicationAnalysisHandler(
           model,
           prompt: buildViralShotAnalysisPrompt({
             locale: job.data.locale,
-            brief: replication.brief,
             videoMetadata: videoMetadataForPrompt(preprocessed.metadata),
             shots,
             previousShotContext: batchResults.at(-1)?.shots.at(-1) ?? null,
@@ -876,7 +900,6 @@ export function createViralReplicationAnalysisHandler(
           role: 'user',
           content: buildViralReportAggregationPrompt({
             locale: job.data.locale,
-            brief: replication.brief,
             durationMs: preprocessed.metadata.durationMs,
             batchResults,
           }),

@@ -1,4 +1,6 @@
 import { apiFetch, getPageLocale } from '@/lib/api-fetch'
+import type { StoryboardGenerationMode } from '@/lib/novel-promotion/six-grid/contracts'
+import type { ViralTranscriptionMode } from '@/lib/viral-replication/transcription-mode'
 
 export type ViralReplicationClientStatus =
   | 'uploading'
@@ -13,6 +15,8 @@ export type ViralReplicationDetail = {
   brief: string
   videoRatio: string
   artStyle: string
+  storyboardGenerationMode: StoryboardGenerationMode
+  transcriptionMode?: ViralTranscriptionMode
   status: ViralReplicationClientStatus
   reportJson?: unknown
   reportVersion?: number
@@ -88,6 +92,8 @@ export function createViralReplicationSession(input: {
   brief: string
   videoRatio: string
   artStyle: string
+  storyboardGenerationMode: StoryboardGenerationMode
+  transcriptionMode: ViralTranscriptionMode
 }): Promise<ViralReplicationDetail> {
   return requestReplication('/api/viral-replications', {
     method: 'POST',

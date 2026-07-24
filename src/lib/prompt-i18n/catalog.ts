@@ -171,12 +171,11 @@ export const PROMPT_CATALOG: Record<PromptId, PromptCatalogEntry> = {
   },
   [PROMPT_IDS.VIRAL_REPORT_AGGREGATION]: {
     pathStem: 'viral-replication/report_aggregation',
-    variableKeys: ['brief', 'duration_ms', 'batch_results_json', 'report_schema_json'],
+    variableKeys: ['duration_ms', 'batch_results_json', 'report_schema_json'],
   },
   [PROMPT_IDS.VIRAL_SHOT_ANALYSIS]: {
     pathStem: 'viral-replication/shot_analysis',
     variableKeys: [
-      'brief',
       'video_metadata',
       'shot_timeline',
       'previous_shot_context',

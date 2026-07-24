@@ -181,7 +181,6 @@ export function parseViralAudioTranscription(
 
 export function buildViralShotAnalysisPrompt(input: {
   locale: Locale
-  brief: string
   videoMetadata: Record<string, unknown>
   shots: PreprocessedViralShot[]
   subtitleContext: string | null
@@ -195,7 +194,6 @@ export function buildViralShotAnalysisPrompt(input: {
     promptId: PROMPT_IDS.VIRAL_SHOT_ANALYSIS,
     locale: input.locale,
     variables: {
-      brief: delimitUntrusted('BRIEF', input.brief),
       video_metadata: JSON.stringify(input.videoMetadata),
       shot_timeline: JSON.stringify(input.shots.map((shot) => ({
         shotIndex: shot.shotIndex,
@@ -236,7 +234,6 @@ export function buildViralShotReviewPrompt(input: {
 
 export function buildViralReportAggregationPrompt(input: {
   locale: Locale
-  brief: string
   durationMs: number
   batchResults: ViralShotAnalysisBatch[]
 }): string {
@@ -244,7 +241,6 @@ export function buildViralReportAggregationPrompt(input: {
     promptId: PROMPT_IDS.VIRAL_REPORT_AGGREGATION,
     locale: input.locale,
     variables: {
-      brief: delimitUntrusted('BRIEF', input.brief),
       duration_ms: String(input.durationMs),
       batch_results_json: delimitUntrusted(
         'BATCH_RESULTS',

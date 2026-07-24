@@ -143,6 +143,7 @@ describe('worker panel-variant-task-handler behavior', () => {
       expect.objectContaining({
         modelId: 'storyboard-model-1',
         prompt: 'panel-variant-prompt',
+        preferComfyStorageKey: true,
         options: expect.objectContaining({
           aspectRatio: '16:9',
           referenceImages: [

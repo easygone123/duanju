@@ -1,16 +1,16 @@
 {
   "eyebrow": "爆款复刻",
-  "title": "视频分析与原创改编",
+  "title": "原视频剧情识别与视觉重绘",
   "states": {
     "loading": "正在加载分析任务…",
     "uploading": "正在接收视频",
     "uploadingValidation": "视频上传完成后会先进行格式与完整性校验，再开始内容分析。",
-    "completed": "原创剧本与剧中资产已生成",
+    "completed": "原剧情剧本与剧中资产已生成",
     "redirecting": "正在进入剧本与剧中资产确认页面…"
   },
   "progress": {
     "analyzing": "正在分析参考视频",
-    "generating": "正在生成原创分镜",
+    "generating": "正在按原剧情生成重绘分镜",
     "stages": {
       "upload": "校验视频",
       "probe": "读取媒体信息",
@@ -53,17 +53,17 @@
     "causalLink": "前后因果",
     "analysisConfidence": "剧情置信度",
     "noSubtitle": "无可识别字幕",
-    "advice": "原创改编建议"
+    "advice": "视觉重绘建议"
   },
-  "audioSubtitleNotice": "优先使用内嵌字幕，仅对明显缺口进行原声音频识别；仍无文字时才读取画面烧录字幕。",
+  "audioSubtitleNotice": "字幕原文直接用于还原原剧情，不会在分析阶段改写；根据创建任务时的选择，系统会识别缺失音频或完整音轨。",
   "brief": {
-    "label": "原创创作要求",
-    "help": "保留有效的叙事结构和镜头规律，明确写出需要替换的人物、情节、场景与表达。"
+    "label": "视觉重绘要求",
+    "help": "只指定画面风格、角色外观和场景视觉；系统会保留原字幕、原剧情、人物功能关系和事件顺序。"
   },
   "actions": {
     "save": "保存要求",
     "saving": "保存中…",
-    "generate": "生成原创分镜",
+    "generate": "按原剧情生成分镜",
     "starting": "正在启动…",
     "retry": "重试"
   },
@@ -71,7 +71,7 @@
     "generic": "任务暂时未能完成，请重试。",
     "analysis": "视频分析失败，请重试。若持续失败，请检查分析模型连接。",
     "audioTranscription": "原视频台词提取失败，请重试。系统不会使用不完整字幕继续生成。",
-    "storyboardGeneration": "原创分镜生成失败，请重试。重试时会保留分析结果，不会重新分析视频。",
+    "storyboardGeneration": "原剧情重绘分镜生成失败，请重试。重试时会保留分析结果，不会重新分析视频。",
     "invalidReport": "分析报告格式无效，请重试分析。",
     "projectMismatch": "该分析任务不属于当前项目。"
   }

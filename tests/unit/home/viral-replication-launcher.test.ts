@@ -67,7 +67,7 @@ describe('viral replication homepage launcher', () => {
     expect(client.createViralReplicationSession).not.toHaveBeenCalled()
   })
 
-  it('uses defaults, renders upload progress, and navigates to the replication page', async () => {
+  it('requires a storyboard mode, renders upload progress, and navigates to the replication page', async () => {
     let resolveUpload!: (value: { id: string; status: string; projectId: string }) => void
     client.uploadViralReplicationVideo.mockImplementation(async (
       _id: string,
@@ -81,11 +81,19 @@ describe('viral replication homepage launcher', () => {
     fireEvent.change(view.getByLabelText('briefLabel'), { target: { value: '原创都市反转故事' } })
     const file = new File(['video'], 'source.mov', { type: 'video/quicktime' })
     fireEvent.change(view.getByLabelText('videoLabel'), { target: { files: [file] } })
-    fireEvent.click(view.getByRole('button', { name: 'start' }))
+    const start = view.getByRole('button', { name: 'start' }) as HTMLButtonElement
+    expect(start.disabled).toBe(true)
+    fireEvent.change(view.getByLabelText('storyboardModeLabel'), { target: { value: 'six_grid' } })
+    fireEvent.change(view.getByLabelText('transcriptionModeLabel'), {
+      target: { value: 'full_audio' },
+    })
+    fireEvent.click(start)
 
     await waitFor(() => expect(client.uploadViralReplicationVideo).toHaveBeenCalled())
     expect(client.createViralReplicationSession).toHaveBeenCalledWith({
       brief: '原创都市反转故事', videoRatio: '9:16', artStyle: 'realistic',
+      storyboardGenerationMode: 'six_grid',
+      transcriptionMode: 'full_audio',
     })
     expect(view.getByTestId('viral-upload-progress').textContent).toContain('42%')
 
@@ -102,6 +110,7 @@ describe('viral replication homepage launcher', () => {
     fireEvent.change(view.getByLabelText('videoLabel'), {
       target: { files: [new File(['video'], 'source.mp4')] },
     })
+    fireEvent.change(view.getByLabelText('storyboardModeLabel'), { target: { value: 'individual' } })
     fireEvent.click(view.getByRole('button', { name: 'start' }))
 
     await waitFor(() => expect(view.getByText('uploadErrors.analysisModelRequired')).toBeTruthy())

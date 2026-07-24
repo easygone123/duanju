@@ -7,6 +7,8 @@ import { AppIcon } from '@/components/ui/icons'
 import ViralReplicationUploadField from '@/components/viral-replication/ViralReplicationUploadField'
 import { ART_STYLES, VIDEO_RATIOS } from '@/lib/constants'
 import { useRouter } from '@/i18n/navigation'
+import type { StoryboardGenerationMode } from '@/lib/novel-promotion/six-grid/contracts'
+import type { ViralTranscriptionMode } from '@/lib/viral-replication/transcription-mode'
 import {
   createViralReplicationSession,
   getViralReplicationAvailability,
@@ -50,6 +52,8 @@ export default function ViralReplicationLauncher() {
   const [brief, setBrief] = useState('')
   const [videoRatio, setVideoRatio] = useState('9:16')
   const [artStyle, setArtStyle] = useState('realistic')
+  const [storyboardGenerationMode, setStoryboardGenerationMode] = useState<StoryboardGenerationMode | ''>('')
+  const [transcriptionMode, setTranscriptionMode] = useState<ViralTranscriptionMode>('auto')
   const [progress, setProgress] = useState(0)
   const [submitting, setSubmitting] = useState(false)
   const [validationError, setValidationError] = useState<'formatError' | 'sizeError' | null>(null)
@@ -73,6 +77,8 @@ export default function ViralReplicationLauncher() {
     setBrief('')
     setVideoRatio('9:16')
     setArtStyle('realistic')
+    setStoryboardGenerationMode('')
+    setTranscriptionMode('auto')
     setProgress(0)
     setSubmitting(false)
     setValidationError(null)
@@ -99,7 +105,7 @@ export default function ViralReplicationLauncher() {
 
   const submit = async () => {
     const normalizedBrief = brief.trim()
-    if (!file || !normalizedBrief || submitting) return
+    if (!file || !normalizedBrief || !storyboardGenerationMode || submitting) return
     setSubmitting(true)
     setSubmitErrorKey(null)
     setProgress(0)
@@ -110,6 +116,8 @@ export default function ViralReplicationLauncher() {
         brief: normalizedBrief,
         videoRatio,
         artStyle,
+        storyboardGenerationMode,
+        transcriptionMode,
       })
       const uploaded = await uploadViralReplicationVideo(session.id, file, {
         signal: controller.signal,
@@ -192,6 +200,49 @@ export default function ViralReplicationLauncher() {
                 </label>
               </div>
 
+              <label
+                htmlFor="viral-storyboard-mode"
+                className="block text-sm text-[var(--glass-text-secondary)]"
+              >
+                <span className="mb-2 block">{t('storyboardModeLabel')}</span>
+                <select
+                  id="viral-storyboard-mode"
+                  value={storyboardGenerationMode}
+                  disabled={submitting}
+                  onChange={(event) => {
+                    setStoryboardGenerationMode(event.target.value as StoryboardGenerationMode | '')
+                    setSubmitErrorKey(null)
+                  }}
+                  className="glass-input-base w-full px-3 py-2"
+                >
+                  <option value="" disabled>{t('storyboardModePlaceholder')}</option>
+                  <option value="individual">{t('storyboardModes.individual')}</option>
+                  <option value="four_grid">{t('storyboardModes.four_grid')}</option>
+                  <option value="six_grid">{t('storyboardModes.six_grid')}</option>
+                </select>
+              </label>
+
+              <label
+                htmlFor="viral-transcription-mode"
+                className="block text-sm text-[var(--glass-text-secondary)]"
+              >
+                <span className="mb-2 block">{t('transcriptionModeLabel')}</span>
+                <select
+                  id="viral-transcription-mode"
+                  aria-label={t('transcriptionModeLabel')}
+                  value={transcriptionMode}
+                  disabled={submitting}
+                  onChange={(event) => setTranscriptionMode(event.target.value as ViralTranscriptionMode)}
+                  className="glass-input-base w-full px-3 py-2"
+                >
+                  <option value="auto">{t('transcriptionModes.auto')}</option>
+                  <option value="full_audio">{t('transcriptionModes.fullAudio')}</option>
+                </select>
+                <span className="mt-1 block text-xs text-[var(--glass-text-tertiary)]">
+                  {t(`transcriptionModeHints.${transcriptionMode}`)}
+                </span>
+              </label>
+
               {submitting ? (
                 <div data-testid="viral-upload-progress" className="text-sm text-[var(--glass-text-secondary)]">
                   {t('uploadProgress')} {progress}%
@@ -211,7 +262,7 @@ export default function ViralReplicationLauncher() {
                 <button type="button" disabled={submitting} onClick={close} className="glass-btn-base glass-btn-secondary px-4 py-2 text-sm">{t('cancel')}</button>
                 <button
                   type="button"
-                  disabled={!file || !brief.trim() || !!validationError || submitting}
+                  disabled={!file || !brief.trim() || !storyboardGenerationMode || !!validationError || submitting}
                   onClick={() => void submit()}
                   className="glass-btn-base glass-btn-primary px-5 py-2 text-sm disabled:opacity-50"
                 >

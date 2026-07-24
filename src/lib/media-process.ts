@@ -26,11 +26,23 @@ function resolveContentType(ext: string): string {
   return MIME_BY_EXT[ext] || 'application/octet-stream'
 }
 
+export function isComfyStoredOutputKey(source: string): boolean {
+  return source.startsWith('comfyui/')
+    && source.length > 'comfyui/'.length
+    && !source.includes('..')
+    && !source.includes('\\')
+}
+
 /**
  * 处理媒体结果：下载 -> 上传 COS，返回 COS key。
  */
 export async function processMediaResult(options: ProcessMediaOptions): Promise<string> {
   const { source, type, keyPrefix, targetId, downloadHeaders } = options
+  // The ComfyUI dispatcher has already downloaded, validated, and persisted
+  // these outputs. Re-fetching their public signed URL is both redundant and
+  // fails in Docker when MINIO_PUBLIC_ENDPOINT is not reachable from the worker.
+  if (typeof source === 'string' && isComfyStoredOutputKey(source)) return source
+
   const ext = type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : 'jpg'
   const key = generateUniqueKey(`${keyPrefix}-${targetId}`, ext)
   const contentType = resolveContentType(ext)
