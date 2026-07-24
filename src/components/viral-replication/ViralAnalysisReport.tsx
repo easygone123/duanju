@@ -22,7 +22,13 @@ function FingerprintList({ title, values }: { title: string; values: string[] })
   )
 }
 
-export default function ViralAnalysisReport({ report }: { report: ViralAnalysisReportV1 }) {
+export default function ViralAnalysisReport({
+  report,
+  transcriptText,
+}: {
+  report: ViralAnalysisReportV1
+  transcriptText?: string | null
+}) {
   const t = useTranslations('viralReplication')
   const overviewEntries = [
     ['report.hook', report.overview.hook],
@@ -97,6 +103,16 @@ export default function ViralAnalysisReport({ report }: { report: ViralAnalysisR
           <h2 className="text-lg font-semibold text-[var(--glass-text-primary)]">{t('report.timeline')}</h2>
           <p className="mt-1 text-sm text-[var(--glass-text-tertiary)]">{t('audioSubtitleNotice')}</p>
         </div>
+        {transcriptText?.trim() ? (
+          <details className="mb-4 rounded-xl border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-[var(--glass-text-primary)]">
+              {t('report.fullTranscript')}
+            </summary>
+            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-sm leading-6 text-[var(--glass-text-secondary)]">
+              {transcriptText}
+            </pre>
+          </details>
+        ) : null}
         <div className="space-y-4">
           {report.shots.map((shot) => (
             <article key={shot.shotIndex} className="rounded-xl border border-[var(--glass-stroke-base)] p-4">

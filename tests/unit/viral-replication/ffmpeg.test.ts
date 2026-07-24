@@ -16,6 +16,7 @@ import {
   defaultCommandRunner,
   detectSceneTimestamps,
   detectSceneTimestampsFromProcess,
+  extractAnalysisAudioSegment,
   extractEmbeddedSubtitles,
   extractFrame,
   probeVideo,
@@ -638,12 +639,37 @@ describe('FFmpeg command boundary', () => {
     }])
   })
 
+  it('extracts a bounded audio segment with exact millisecond offsets', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'viral-audio-segment-test-'))
+    const outputPath = path.join(tempRoot, 'segment.mp3')
+    const calls: string[][] = []
+    const runner: CommandRunner = async (_binary, args) => {
+      calls.push(args)
+      await fs.writeFile(args.at(-1)!, 'audio')
+      return { stdout: '', stderr: '' }
+    }
+
+    try {
+      await extractAnalysisAudioSegment(sourcePath, outputPath, 1, 5_250, 12_750, runner)
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toEqual(expect.arrayContaining([
+        '-ss', '5.250',
+        '-t', '7.500',
+        '-map', '0:1',
+      ]))
+      await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('audio')
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
   it.each([
     ['relative source path', () => probeVideo('relative.mp4', async () => ({ stdout: '', stderr: '' }))],
     ['NUL output path', () => extractFrame(sourcePath, '/tmp/bad\0.jpg', 0, 0, async () => ({ stdout: '', stderr: '' }))],
     ['negative frame timestamp', () => extractFrame(sourcePath, '/tmp/shot.jpg', -1, 0, async () => ({ stdout: '', stderr: '' }))],
     ['fractional video index', () => extractFrame(sourcePath, '/tmp/shot.jpg', 0, 1.5, async () => ({ stdout: '', stderr: '' }))],
     ['fractional subtitle index', () => extractEmbeddedSubtitles(sourcePath, 1.5, async () => ({ stdout: '', stderr: '' }))],
+    ['empty audio segment', () => extractAnalysisAudioSegment(sourcePath, '/tmp/audio.mp3', 1, 1_000, 1_000, async () => ({ stdout: '', stderr: '' }))],
   ])('rejects an unsafe %s before invoking a command', async (_label, operation) => {
     await expect(operation()).rejects.toThrow(/invalid|absolute|non-negative/i)
   })

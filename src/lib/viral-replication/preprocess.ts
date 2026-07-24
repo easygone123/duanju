@@ -10,12 +10,19 @@ import {
   defaultCommandRunner,
   detectSceneTimestamps,
   extractEmbeddedSubtitles,
-  extractAnalysisAudio,
+  extractAnalysisAudioSegment,
   extractFrame,
   probeVideo,
   type CommandRunner,
   type VideoMetadata,
 } from './ffmpeg'
+import {
+  chunkViralAudioRanges,
+  findViralTranscriptGaps,
+  parseViralAudioCues,
+  scoreViralTranscript,
+  type ViralAudioRange,
+} from './audio-timeline'
 import { validateViralVideoMetadata } from './upload-validation'
 
 export const VIRAL_FALLBACK_SHOT_INTERVAL_MS = 3_000
@@ -42,7 +49,13 @@ export interface PreprocessViralVideoResult {
   metadata: VideoMetadata
   shots: PreprocessedViralShot[]
   transcriptText: string | null
+  analysisAudioSegments: ViralAnalysisAudioSegment[]
+  /** @deprecated Kept for older worker fixtures; production uses segments. */
   analysisAudioPath: string | null
+}
+
+export interface ViralAnalysisAudioSegment extends ViralAudioRange {
+  audioPath: string
 }
 
 export interface PreprocessViralVideoOptions {
@@ -131,6 +144,26 @@ export function buildAnalysisBatches<T>(items: readonly T[]): T[][] {
 
 function frameFilename(shotIndex: number): string {
   return `shot-${shotIndex.toString().padStart(3, '0')}.jpg`
+}
+
+function audioSegmentFilename(segmentIndex: number): string {
+  return `analysis-audio-${segmentIndex.toString().padStart(3, '0')}.mp3`
+}
+
+function compareTranscriptCandidates(
+  left: { transcriptText: string; preferredOrder: number },
+  right: { transcriptText: string; preferredOrder: number },
+): number {
+  const leftScore = scoreViralTranscript(left.transcriptText)
+  const rightScore = scoreViralTranscript(right.transcriptText)
+  return (
+    rightScore.spanMs - leftScore.spanMs
+    || rightScore.coveredMs - leftScore.coveredMs
+    || rightScore.cueCount - leftScore.cueCount
+    || rightScore.lastCueMs - leftScore.lastCueMs
+    || rightScore.textChars - leftScore.textChars
+    || left.preferredOrder - right.preferredOrder
+  )
 }
 
 function reviewFrameFilename(shotIndex: number, position: ViralReviewFrame['position']): string {
@@ -252,24 +285,48 @@ export async function preprocessViralVideo({
       if (leftHasLanguage !== rightHasLanguage) return leftHasLanguage ? -1 : 1
       return left.index - right.index
     })
-  let transcriptText: string | null = null
-  for (const subtitle of textSubtitles) {
+  const transcriptCandidates: Array<{
+    transcriptText: string
+    preferredOrder: number
+  }> = []
+  for (const [preferredOrder, subtitle] of textSubtitles.entries()) {
     try {
-      transcriptText = await extractEmbeddedSubtitles(sourcePath, subtitle.index, runner)
+      const transcriptText = await extractEmbeddedSubtitles(sourcePath, subtitle.index, runner)
+      if (transcriptText && parseViralAudioCues(transcriptText).length > 0) {
+        transcriptCandidates.push({ transcriptText, preferredOrder })
+      }
     } catch (error: unknown) {
       if (error instanceof FfmpegBoundaryError && error.code === 'COMMAND_FAILED') continue
       throw error
     }
-    if (transcriptText !== null) break
   }
+  transcriptCandidates.sort(compareTranscriptCandidates)
+  const transcriptText = transcriptCandidates[0]?.transcriptText ?? null
 
-  let analysisAudioPath: string | null = null
+  const analysisAudioSegments: ViralAnalysisAudioSegment[] = []
   const audioStream = metadata.audioStreams[0]
-  if (!transcriptText && audioStream) {
-    const candidatePath = path.join(outputDirectory, 'analysis-audio.mp3')
-    await extractAnalysisAudio(sourcePath, candidatePath, audioStream.index, runner)
-    analysisAudioPath = candidatePath
+  if (audioStream) {
+    const uncoveredRanges = findViralTranscriptGaps(transcriptText, metadata.durationMs)
+    const audioRanges = chunkViralAudioRanges(uncoveredRanges)
+    for (const [segmentIndex, range] of audioRanges.entries()) {
+      const audioPath = path.join(outputDirectory, audioSegmentFilename(segmentIndex))
+      await extractAnalysisAudioSegment(
+        sourcePath,
+        audioPath,
+        audioStream.index,
+        range.startMs,
+        range.endMs,
+        runner,
+      )
+      analysisAudioSegments.push({ ...range, audioPath })
+    }
   }
 
-  return { metadata, shots, transcriptText, analysisAudioPath }
+  return {
+    metadata,
+    shots,
+    transcriptText,
+    analysisAudioSegments,
+    analysisAudioPath: null,
+  }
 }

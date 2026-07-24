@@ -105,7 +105,8 @@ type HarnessOptions = {
   aggregateText?: string
   transcriptText?: string | null
   includeAnalysisAudio?: boolean
-  audioTranscriptionText?: string
+  analysisAudioSegments?: Array<{ startMs: number; endMs: number }>
+  audioTranscriptionText?: string | ((callIndex: number) => string)
   audioTranscriptionError?: Error
   analysisModelSnapshot?: string
   sourceVideoMediaId?: string
@@ -180,6 +181,7 @@ async function createHarness(options: HarnessOptions = {}) {
   let nextMedia = 1
   let nextAnalyzedShot = 0
   let nextReviewCall = 0
+  let nextAudioTranscriptionCall = 0
   let nextExecutionToken = 0
   if (options.existingFrameMedia) {
     frameMedia.push({
@@ -297,6 +299,13 @@ async function createHarness(options: HarnessOptions = {}) {
       ? path.join(outputDirectory, 'analysis-audio.mp3')
       : null
     if (analysisAudioPath) await fs.writeFile(analysisAudioPath, Buffer.from('analysis-audio'))
+    const analysisAudioSegments = await Promise.all(
+      (options.analysisAudioSegments ?? []).map(async (segment, segmentIndex) => {
+        const audioPath = path.join(outputDirectory, `analysis-audio-${segmentIndex}.mp3`)
+        await fs.writeFile(audioPath, Buffer.from(`analysis-audio-${segmentIndex}`))
+        return { ...segment, audioPath }
+      }),
+    )
     const transcriptText = Object.hasOwn(options, 'transcriptText')
       ? options.transcriptText ?? null
       : '00:00:01.000 --> 00:00:02.000\nEmbedded subtitle context'
@@ -312,6 +321,7 @@ async function createHarness(options: HarnessOptions = {}) {
       },
       shots,
       transcriptText,
+      analysisAudioSegments,
       analysisAudioPath,
     }
   })
@@ -349,7 +359,10 @@ async function createHarness(options: HarnessOptions = {}) {
     const imageUrls = input.imageUrls as string[]
     if (imageUrls[0]?.startsWith('data:audio/')) {
       if (options.audioTranscriptionError) throw options.audioTranscriptionError
-      return completion(options.audioTranscriptionText ?? JSON.stringify({ cues: [] }))
+      const text = typeof options.audioTranscriptionText === 'function'
+        ? options.audioTranscriptionText(nextAudioTranscriptionCall++)
+        : options.audioTranscriptionText
+      return completion(text ?? JSON.stringify({ cues: [] }))
     }
     const action = (input.options as { action?: string } | undefined)?.action
     if (action === 'viral_shot_review') {
@@ -491,8 +504,8 @@ describe('viral replication analysis handler', () => {
     expect(harness.visionCalls.flatMap((call) => call.imageUrls as string[])).toEqual(
       Array.from({ length: 12 }, (_, index) => `data:image/jpeg;base64,${Buffer.from(`jpeg-${index}`).toString('base64')}`),
     )
-    expect((harness.visionCalls[0]?.prompt as string).match(/Embedded subtitle context/g)).toHaveLength(2)
-    expect((harness.visionCalls[1]?.prompt as string).match(/Embedded subtitle context/g)).toHaveLength(1)
+    expect((harness.visionCalls[0]?.prompt as string).match(/Embedded subtitle context/g)).toHaveLength(1)
+    expect(harness.visionCalls[1]?.prompt).not.toContain('Embedded subtitle context')
     expect(harness.visionCalls[1]?.prompt).toContain('plot beat 9')
     expect(harness.visionCalls[0]?.prompt).toContain('"representativeMs":500')
     expect(harness.progress.some(({ payload }) => payload?.stage === 'viral_preprocess')).toBe(true)
@@ -563,6 +576,39 @@ describe('viral replication analysis handler', () => {
       '跨镜头原声',
       '跨镜头原声',
     ])
+  })
+
+  it('keeps embedded subtitles primary and transcribes only declared missing audio segments', async () => {
+    const harness = await createHarness({
+      frameCount: 12,
+      transcriptText: [
+        '1',
+        '00:00:00,000 --> 00:00:04,000',
+        '内嵌字幕',
+      ].join('\n'),
+      analysisAudioSegments: [{ startMs: 6_000, endMs: 10_000 }],
+      analysisModelSnapshot: 'google::gemini-audio',
+      audioTranscriptionText: JSON.stringify({
+        cues: [
+          { startMs: 0, endMs: 2_000, text: '音频补齐字幕' },
+        ],
+      }),
+    })
+    roots.push(harness.root)
+
+    await harness.handler(harness.job as never)
+
+    const audioCalls = harness.visionCalls.filter(
+      (call) => (call.options as { action?: string }).action === 'viral_audio_transcription',
+    )
+    expect(audioCalls).toHaveLength(1)
+    expect(audioCalls[0]?.imageUrls).toEqual([
+      `data:audio/mpeg;base64,${Buffer.from('analysis-audio-0').toString('base64')}`,
+    ])
+    const completed = harness.updates.find((update) => update.status === 'review_ready')
+    expect(completed?.transcriptText).toContain('内嵌字幕')
+    expect(completed?.transcriptText).toContain('00:00:06,000 --> 00:00:08,000')
+    expect(completed?.transcriptText).toContain('音频补齐字幕')
   })
 
   it('reviews only low-confidence shots with representative, opening, and closing frames', async () => {

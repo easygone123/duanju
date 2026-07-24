@@ -46,6 +46,7 @@ interface FakeSubtitleStream {
 interface FakeProbeOptions {
   containerDuration?: string
   videoDuration?: string
+  hasAudio?: boolean
   subtitleStreams?: FakeSubtitleStream[]
 }
 
@@ -69,6 +70,13 @@ function fakeProbePayload(input?: string | FakeProbeOptions): string {
         height: 180,
         disposition: { attached_pic: 0, default: 1 },
       },
+      ...(options.hasAudio ? [{
+        index: 1,
+        codec_type: 'audio',
+        codec_name: 'aac',
+        channels: 2,
+        sample_rate: '48000',
+      }] : []),
       ...(options.subtitleStreams ?? []).map((subtitle) => ({
         index: subtitle.index,
         codec_type: 'subtitle',
@@ -360,15 +368,113 @@ describe('preprocessViralVideo', () => {
           }
           return { stdout: '   \n', stderr: '' }
         }
-        return { stdout: '  second track transcript  \n', stderr: '' }
+        return {
+          stdout: '1\n00:00:00,000 --> 00:00:01,000\nsecond track transcript\n',
+          stderr: '',
+        }
       }
 
       const result = await preprocessViralVideo({ sourcePath, outputDirectory, runner })
 
-      expect(result.transcriptText).toBe('second track transcript')
+      expect(result.transcriptText).toContain('second track transcript')
       expect(subtitleMaps).toEqual(['0:2', '0:3'])
     },
   )
+
+  it('checks every usable text track and prefers the one with fuller timeline coverage', async () => {
+    const subtitleMaps: string[] = []
+    const runner: CommandRunner = async (binary, args) => {
+      if (binary === 'ffprobe') {
+        return {
+          stdout: fakeProbePayload({
+            subtitleStreams: [
+              { index: 2, codecName: 'mov_text', isDefault: true },
+              { index: 3, codecName: 'subrip', language: 'zho' },
+            ],
+          }),
+          stderr: '',
+        }
+      }
+      if (args.some((arg) => arg.includes('showinfo'))) {
+        return { stdout: '', stderr: 'pts_time:5\npts_time:10' }
+      }
+      if (args.includes('-frames:v')) {
+        await fs.writeFile(args.at(-1)!, 'frame')
+        return { stdout: '', stderr: '' }
+      }
+      const map = args[args.indexOf('-map') + 1]
+      subtitleMaps.push(map)
+      return map === '0:2'
+        ? { stdout: '1\n00:00:00,000 --> 00:00:01,000\npartial\n', stderr: '' }
+        : { stdout: '1\n00:00:00,000 --> 00:00:14,000\nfull timeline\n', stderr: '' }
+    }
+
+    const result = await preprocessViralVideo({ sourcePath, outputDirectory, runner })
+
+    expect(subtitleMaps).toEqual(['0:2', '0:3'])
+    expect(result.transcriptText).toContain('full timeline')
+    expect(result.transcriptText).not.toContain('partial')
+    expect(result.analysisAudioSegments).toEqual([])
+  })
+
+  it('extracts bounded audio segments only for material gaps in the preferred embedded track', async () => {
+    const audioCommands: string[][] = []
+    const runner: CommandRunner = async (binary, args) => {
+      if (binary === 'ffprobe') {
+        return {
+          stdout: fakeProbePayload({
+            containerDuration: '60',
+            videoDuration: '60',
+            hasAudio: true,
+            subtitleStreams: [
+              { index: 2, codecName: 'mov_text', isDefault: true },
+            ],
+          }),
+          stderr: '',
+        }
+      }
+      if (args.some((arg) => arg.includes('showinfo'))) {
+        return { stdout: '', stderr: 'pts_time:20\npts_time:40' }
+      }
+      if (args.includes('-frames:v')) {
+        await fs.writeFile(args.at(-1)!, 'frame')
+        return { stdout: '', stderr: '' }
+      }
+      if (args.includes('-f') && args.includes('srt')) {
+        return {
+          stdout: [
+            '1',
+            '00:00:00,000 --> 00:00:05,000',
+            '开头字幕',
+            '',
+            '2',
+            '00:00:45,000 --> 00:00:50,000',
+            '后段字幕',
+          ].join('\n'),
+          stderr: '',
+        }
+      }
+      audioCommands.push(args)
+      await fs.writeFile(args.at(-1)!, 'audio segment')
+      return { stdout: '', stderr: '' }
+    }
+
+    const result = await preprocessViralVideo({ sourcePath, outputDirectory, runner })
+
+    expect(result.analysisAudioSegments.map(({ startMs, endMs }) => ({ startMs, endMs }))).toEqual([
+      { startMs: 5_000, endMs: 35_000 },
+      { startMs: 35_000, endMs: 45_000 },
+      { startMs: 50_000, endMs: 60_000 },
+    ])
+    expect(audioCommands.map((args) => [
+      args[args.indexOf('-ss') + 1],
+      args[args.indexOf('-t') + 1],
+    ])).toEqual([
+      ['5.000', '30.000'],
+      ['35.000', '10.000'],
+      ['50.000', '10.000'],
+    ])
+  })
 
   it('returns null when all text subtitles fail while preserving verified frames', async () => {
     const subtitleMaps: string[] = []

@@ -16,6 +16,7 @@ export type ViralReplicationDetail = {
   status: ViralReplicationClientStatus
   reportJson?: unknown
   reportVersion?: number
+  transcriptText?: string | null
   errorMessage?: string | null
   durationMs?: number | null
   confirmedAt?: string | null

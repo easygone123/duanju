@@ -9,6 +9,7 @@ export const viralReplicationDetailSelect = {
   status: true,
   reportJson: true,
   reportVersion: true,
+  transcriptText: true,
   errorMessage: true,
   durationMs: true,
   confirmedAt: true,

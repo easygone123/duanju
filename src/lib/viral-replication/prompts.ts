@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { Locale } from '@/i18n/routing'
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompt-i18n'
 import { safeParseJson } from '@/lib/json-repair'
+import { serializeViralAudioCues } from './audio-timeline'
 import type { PreprocessedViralShot } from './preprocess'
 import type { ViralAnalysisReportV1 } from './contracts'
 
@@ -162,30 +163,20 @@ export function buildViralAudioTranscriptionPrompt(input: {
   }))
 }
 
-function srtTimestamp(timestampMs: number): string {
-  const hours = Math.floor(timestampMs / 3_600_000)
-  const minutes = Math.floor((timestampMs % 3_600_000) / 60_000)
-  const seconds = Math.floor((timestampMs % 60_000) / 1_000)
-  const milliseconds = timestampMs % 1_000
-  return [hours, minutes, seconds]
-    .map((value) => String(value).padStart(2, '0'))
-    .join(':') + `,${String(milliseconds).padStart(3, '0')}`
-}
-
 export function parseViralAudioTranscription(
   completionText: string,
   durationMs: number,
+  offsetMs = 0,
 ): string | null {
   const parsed = audioTranscriptSchema.parse(safeParseJson(completionText))
   const cues = parsed.cues
-    .filter((cue) => cue.startMs < cue.endMs && cue.endMs <= durationMs)
-    .sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs)
-  if (cues.length === 0) return null
-  return cues.map((cue, index) => [
-    String(index + 1),
-    `${srtTimestamp(cue.startMs)} --> ${srtTimestamp(cue.endMs)}`,
-    cue.text.trim(),
-  ].join('\n')).join('\n\n')
+    .filter((cue) => cue.startMs < cue.endMs && cue.startMs < durationMs)
+    .map((cue) => ({
+      ...cue,
+      startMs: cue.startMs + offsetMs,
+      endMs: Math.min(cue.endMs, durationMs) + offsetMs,
+    }))
+  return serializeViralAudioCues(cues, durationMs + offsetMs)
 }
 
 export function buildViralShotAnalysisPrompt(input: {

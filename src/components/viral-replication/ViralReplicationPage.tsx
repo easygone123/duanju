@@ -142,7 +142,12 @@ export default function ViralReplicationPage({
           {viewState.kind === 'generating' ? (
             <ViralReplicationProgress status="generating" progress={progress} />
           ) : null}
-          {parsedReport ? <ViralAnalysisReport report={parsedReport} /> : <ErrorCard message={t('errors.invalidReport')} />}
+          {parsedReport ? (
+            <ViralAnalysisReport
+              report={parsedReport}
+              transcriptText={replication.transcriptText}
+            />
+          ) : <ErrorCard message={t('errors.invalidReport')} />}
           <ViralBriefEditor
             value={brief}
             disabled={!viewState.editable}

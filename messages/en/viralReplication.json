@@ -36,6 +36,7 @@
     "color": "Color",
     "editing": "Editing",
     "timeline": "Shot timeline",
+    "fullTranscript": "View full subtitle timeline",
     "shotType": "Shot type",
     "cameraAngle": "Camera angle",
     "cameraMove": "Camera move",
@@ -54,7 +55,7 @@
     "noSubtitle": "No recognizable subtitles",
     "advice": "Original adaptation advice"
   },
-  "audioSubtitleNotice": "Source dialogue is aligned by time; low-confidence story shots receive adaptive visual review.",
+  "audioSubtitleNotice": "Embedded subtitles are preferred; source audio fills only material gaps, then visible burned-in captions are used as a final fallback.",
   "brief": {
     "label": "Original creation brief",
     "help": "Keep effective narrative and shot patterns while specifying the characters, plot, setting, and expression to replace."

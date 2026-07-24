@@ -719,6 +719,59 @@ export async function extractAnalysisAudio(
   audioStreamIndex: number,
   runner: CommandRunner = defaultCommandRunner,
 ): Promise<void> {
+  return await extractAnalysisAudioRange({
+    sourcePath,
+    outputPath,
+    audioStreamIndex,
+    runner,
+  })
+}
+
+export async function extractAnalysisAudioSegment(
+  sourcePath: string,
+  outputPath: string,
+  audioStreamIndex: number,
+  startMs: number,
+  endMs: number,
+  runner: CommandRunner = defaultCommandRunner,
+): Promise<void> {
+  if (
+    !Number.isSafeInteger(startMs)
+    || !Number.isSafeInteger(endMs)
+    || startMs < 0
+    || startMs >= endMs
+  ) {
+    throw new FfmpegBoundaryError(
+      'INVALID_COMMAND_INPUT',
+      'invalid audio segment: expected a non-empty millisecond range',
+    )
+  }
+  return await extractAnalysisAudioRange({
+    sourcePath,
+    outputPath,
+    audioStreamIndex,
+    startMs,
+    endMs,
+    runner,
+  })
+}
+
+async function extractAnalysisAudioRange(input: {
+  sourcePath: string
+  outputPath: string
+  audioStreamIndex: number
+  startMs?: number
+  endMs?: number
+  runner: CommandRunner
+}): Promise<void> {
+  const {
+    sourcePath,
+    outputPath,
+    audioStreamIndex,
+    startMs,
+    endMs,
+    runner,
+  } = input
   assertAbsolutePath(sourcePath, 'sourcePath')
   assertAbsolutePath(outputPath, 'outputPath')
   assertStreamIndexValue(audioStreamIndex, 'audio stream index')
@@ -729,8 +782,15 @@ export async function extractAnalysisAudio(
   )
   let published = false
   try {
+    const rangeArgs = startMs === undefined || endMs === undefined
+      ? []
+      : [
+          '-ss', (startMs / 1_000).toFixed(3),
+          '-t', ((endMs - startMs) / 1_000).toFixed(3),
+        ]
     await runner('ffmpeg', [
       '-hide_banner', '-nostdin', '-loglevel', 'error', '-y',
+      ...rangeArgs,
       '-i', sourcePath,
       '-map', `0:${audioStreamIndex}`,
       '-vn', '-sn',

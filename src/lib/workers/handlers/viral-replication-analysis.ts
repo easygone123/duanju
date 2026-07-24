@@ -32,7 +32,11 @@ import {
 } from '@/lib/viral-replication/constants'
 import { parseViralAnalysisReport, type ViralAnalysisReportV1 } from '@/lib/viral-replication/contracts'
 import { MAX_FRAME_JPEG_BYTES } from '@/lib/viral-replication/ffmpeg'
-import { audioTextForRange, parseViralAudioCues } from '@/lib/viral-replication/audio-timeline'
+import {
+  audioTextForRange,
+  mergeViralAudioTranscripts,
+  parseViralAudioCues,
+} from '@/lib/viral-replication/audio-timeline'
 import {
   buildAnalysisBatches,
   extractViralReviewFrames,
@@ -511,9 +515,33 @@ function applyTranscriptToShots<T extends {
 }>(shots: T[], transcriptText: string | null): T[] {
   const cues = parseViralAudioCues(transcriptText)
   for (const shot of shots) {
-    shot.subtitleSummary = audioTextForRange(cues, shot.startMs, shot.endMs)
+    const timelineText = audioTextForRange(cues, shot.startMs, shot.endMs)
+    if (timelineText !== null) shot.subtitleSummary = timelineText
   }
   return shots
+}
+
+function preprocessedAudioSegments(
+  preprocessed: Awaited<ReturnType<typeof preprocessViralVideo>>,
+): Array<{ startMs: number; endMs: number; audioPath: string }> {
+  if (
+    Array.isArray(preprocessed.analysisAudioSegments)
+    && preprocessed.analysisAudioSegments.length > 0
+  ) {
+    return preprocessed.analysisAudioSegments
+  }
+  if (preprocessed.analysisAudioPath) {
+    return [{
+      startMs: 0,
+      endMs: preprocessed.metadata.durationMs,
+      audioPath: preprocessed.analysisAudioPath,
+    }]
+  }
+  return []
+}
+
+function completionStoppedEarly(completion: VisionCompletion): boolean {
+  return completion.choices.some((choice) => choice.finish_reason === 'length')
 }
 
 function transcriptContextForShots(
@@ -645,7 +673,8 @@ export function createViralReplicationAnalysisHandler(
       await pipeline(sourceStream as Readable, createWriteStream(sourcePath, { flags: 'wx' }))
       const preprocessed = await dependencies.preprocess({ sourcePath, outputDirectory })
       let transcriptText = preprocessed.transcriptText
-      if (!transcriptText && preprocessed.analysisAudioPath) {
+      const audioSegments = preprocessedAudioSegments(preprocessed)
+      if (audioSegments.length > 0) {
         if (!supportsInlineAudioTranscription(model)) {
           throw new ViralAudioTranscriptionError()
         }
@@ -655,25 +684,38 @@ export function createViralReplicationAnalysisHandler(
           displayMode: 'detail',
         })
         try {
-          const audioBytes = await fs.readFile(preprocessed.analysisAudioPath)
-          const transcription = await dependencies.runVision({
-            userId: job.data.userId,
-            model,
-            prompt: buildViralAudioTranscriptionPrompt({
-              locale: job.data.locale,
-              durationMs: preprocessed.metadata.durationMs,
-            }),
-            imageUrls: [`data:audio/mpeg;base64,${audioBytes.toString('base64')}`],
-            options: {
-              temperature: 0,
-              projectId: replication.projectId || undefined,
-              action: 'viral_audio_transcription',
-            },
+          const supplementalTranscripts: Array<string | null> = []
+          for (const segment of audioSegments) {
+            const audioBytes = await fs.readFile(segment.audioPath)
+            const segmentDurationMs = segment.endMs - segment.startMs
+            const transcription = await dependencies.runVision({
+              userId: job.data.userId,
+              model,
+              prompt: buildViralAudioTranscriptionPrompt({
+                locale: job.data.locale,
+                durationMs: segmentDurationMs,
+              }),
+              imageUrls: [`data:audio/mpeg;base64,${audioBytes.toString('base64')}`],
+              options: {
+                temperature: 0,
+                projectId: replication.projectId || undefined,
+                action: 'viral_audio_transcription',
+              },
+            })
+            if (completionStoppedEarly(transcription)) {
+              throw new Error('Audio transcription response stopped before the segment completed')
+            }
+            supplementalTranscripts.push(parseViralAudioTranscription(
+              getCompletionContent(transcription),
+              segmentDurationMs,
+              segment.startMs,
+            ))
+          }
+          transcriptText = mergeViralAudioTranscripts({
+            primaryTranscript: transcriptText,
+            supplementalTranscripts,
+            durationMs: preprocessed.metadata.durationMs,
           })
-          transcriptText = parseViralAudioTranscription(
-            getCompletionContent(transcription),
-            preprocessed.metadata.durationMs,
-          )
         } catch (error: unknown) {
           dependencies.warn('Failed to transcribe viral source audio', error)
           throw new ViralAudioTranscriptionError(

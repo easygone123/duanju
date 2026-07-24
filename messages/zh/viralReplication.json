@@ -36,6 +36,7 @@
     "color": "色彩",
     "editing": "剪辑",
     "timeline": "镜头时间线",
+    "fullTranscript": "查看完整字幕时间轴",
     "shotType": "景别",
     "cameraAngle": "机位角度",
     "cameraMove": "运镜",
@@ -54,7 +55,7 @@
     "noSubtitle": "无可识别字幕",
     "advice": "原创改编建议"
   },
-  "audioSubtitleNotice": "原声台词按时间轴匹配；置信度不足的剧情镜头会自动补充画面复核。",
+  "audioSubtitleNotice": "优先使用内嵌字幕，仅对明显缺口进行原声音频识别；仍无文字时才读取画面烧录字幕。",
   "brief": {
     "label": "原创创作要求",
     "help": "保留有效的叙事结构和镜头规律，明确写出需要替换的人物、情节、场景与表达。"
