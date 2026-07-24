@@ -12,6 +12,7 @@ import {
   type AvailablePanelVideoModel,
   type VideoModelReason,
 } from '@/lib/novel-promotion/video/panel-video-submission'
+import { supportsReferenceSubject } from '@/lib/model-capabilities/video-model-options'
 
 interface UsePanelVideoModelParams {
   defaultVideoModel: string
@@ -87,6 +88,7 @@ export function usePanelVideoModel({
     : defaultVideoModel || ''
   const [selectedModel, setSelectedModelState] = useState(automaticModel)
   const [hasExplicitSelection, setHasExplicitSelection] = useState(false)
+  const [referenceSubjectMode, setReferenceSubjectMode] = useState(false)
   const [durationOverride, setDurationOverrideState] = useState<number | null>(panel.durationOverride ?? null)
   const [durationOverrideDirty, setDurationOverrideDirty] = useState(false)
   const [includeDialogueInVideoPrompt, setIncludeDialogueInVideoPromptState] = useState(
@@ -99,6 +101,9 @@ export function usePanelVideoModel({
   )
   const videoModelOptions = useMemo(() => userVideoModels ?? [], [userVideoModels])
   const selectedOption = videoModelOptions.find((option) => option.value === selectedModel)
+  const selectedModelSupportsReferenceSubject = selectedOption
+    ? supportsReferenceSubject(selectedOption)
+    : false
   const pricingTiers = useMemo(
     () => projectVideoPricingTiersByFixedSelections({
       tiers: selectedOption?.videoPricingTiers ?? [],
@@ -130,6 +135,12 @@ export function usePanelVideoModel({
     if (videoModelOptions.some((option) => option.value === selectedModel)) return
     if (!panel.hasDialogue || !dialogueVideoModel) setSelectedModelState(videoModelOptions[0]?.value || '')
   }, [dialogueVideoModel, panel.hasDialogue, selectedModel, videoModelOptions])
+
+  useEffect(() => {
+    if (!selectedModelSupportsReferenceSubject && referenceSubjectMode) {
+      setReferenceSubjectMode(false)
+    }
+  }, [referenceSubjectMode, selectedModelSupportsReferenceSubject])
 
   const capabilityDefinitions = useMemo(
     () => resolveEffectiveVideoCapabilityDefinitions({
@@ -316,6 +327,9 @@ export function usePanelVideoModel({
   return {
     selectedModel,
     setSelectedModel,
+    referenceSubjectMode,
+    setReferenceSubjectMode,
+    selectedModelSupportsReferenceSubject,
     generationOptions,
     capabilityFields,
     setCapabilityValue,

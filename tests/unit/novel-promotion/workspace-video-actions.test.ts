@@ -103,4 +103,29 @@ describe('useWorkspaceVideoActions', () => {
 
     await expect(actions.handleGenerateVideo('storyboard-1', 0, 'veo-3.1')).resolves.toBe(true)
   })
+
+  it('forwards reference-subject mode to the video mutation', async () => {
+    generateVideoMutateAsyncMock.mockResolvedValueOnce({ async: true })
+    const actions = useWorkspaceVideoActions({
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      t: (key: string) => key,
+    })
+
+    await actions.handleGenerateVideo(
+      'storyboard-1',
+      0,
+      'comfyui::reference-video',
+      undefined,
+      { duration: 5 },
+      'panel-1',
+      { referenceSubject: true },
+    )
+
+    expect(generateVideoMutateAsyncMock).toHaveBeenCalledWith(expect.objectContaining({
+      panelId: 'panel-1',
+      videoModel: 'comfyui::reference-video',
+      referenceSubject: true,
+    }))
+  })
 })

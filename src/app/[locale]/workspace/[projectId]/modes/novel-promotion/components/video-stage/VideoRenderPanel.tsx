@@ -46,6 +46,7 @@ interface VideoRenderPanelProps {
       explicitVideoModel?: string
       durationOverride?: number | null
       expectedPanelUpdatedAt?: string
+      referenceSubject?: boolean
     },
   ) => Promise<boolean>
   onUpdatePanelVideoModel: (storyboardId: string, panelIndex: number, model: string) => Promise<void>

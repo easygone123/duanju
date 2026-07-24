@@ -146,6 +146,58 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     }))
   })
 
+  it('accepts reference-subject mode only for a published referenceImages contract', async () => {
+    comfyVersionFindFirstMock.mockResolvedValueOnce({
+      id: 'video-version-1',
+      contentHash: 'video-content-hash',
+      variableDefinitions: [
+        { name: 'duration', type: 'number', required: true, options: [5, 10] },
+        { name: 'referenceImages', type: 'image_ref_list', required: true, maxItems: 1 },
+      ],
+      bindingSpec: [{
+        nodeId: '2',
+        inputPath: 'image',
+        variable: 'referenceImages',
+        valueType: 'image_ref_list',
+        transform: 'filename_at',
+        valueIndex: 0,
+      }],
+    })
+
+    const response = await POST(request({
+      videoModel: 'comfyui::wf-reference-video',
+      explicitVideoModel: 'comfyui::wf-reference-video',
+      referenceSubject: true,
+      generationOptions: { duration: 5 },
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(200)
+    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
+      payload: expect.objectContaining({
+        videoModel: 'comfyui::wf-reference-video',
+        referenceSubject: true,
+        generationOptions: expect.objectContaining({
+          duration: 5,
+          generationMode: 'reference_subject',
+        }),
+        comfyWorkflowVersionId: 'video-version-1',
+      }),
+    }))
+  })
+
+  it('rejects reference-subject mode when referenceImages is not bound', async () => {
+    const response = await POST(request({
+      videoModel: 'comfyui::wf-video',
+      explicitVideoModel: 'comfyui::wf-video',
+      referenceSubject: true,
+      generationOptions: { duration: 5 },
+    }), { params: Promise.resolve({ projectId: 'project-1' }) })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ code: 'REFERENCE_SUBJECT_MODEL_UNSUPPORTED' })
+    expect(submitTaskMock).not.toHaveBeenCalled()
+  })
+
   it('uses the persisted manual last frame instead of forged client coordinates', async () => {
     panelFindFirstMock
       .mockResolvedValueOnce({

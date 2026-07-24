@@ -75,7 +75,41 @@ describe('user model query cache', () => {
     }
 
     expect(buildComfyWorkflowModelOption(workflow).capabilities).toEqual({
-      video: { firstlastframe: true },
+      video: {
+        generationModeOptions: ['normal', 'firstlastframe'],
+        firstlastframe: true,
+      },
+    })
+    expect(buildComfyWorkflowModelOption({
+      ...workflow,
+      currentVersion: {
+        ...workflow.currentVersion,
+        bindingSpec: workflow.currentVersion.bindingSpec.slice(0, 1),
+      },
+    }).capabilities).toBeUndefined()
+  })
+
+  it('advertises reference-subject mode only when referenceImages is declared and bound', () => {
+    const workflow = {
+      id: 'wf-reference-subject', name: 'Reference subject', mediaType: 'video',
+      currentVersion: {
+        id: 'version-reference-subject', purpose: 'generation',
+        variableDefinitions: [
+          { name: 'prompt', type: 'string', required: true },
+          { name: 'referenceImages', type: 'image_ref_list', required: true, maxItems: 1 },
+        ],
+        bindingSpec: [
+          { nodeId: '1', inputPath: 'text', variable: 'prompt', valueType: 'string' },
+          {
+            nodeId: '2', inputPath: 'image', variable: 'referenceImages',
+            valueType: 'image_ref_list', transform: 'filename_at', valueIndex: 0,
+          },
+        ],
+      },
+    }
+
+    expect(buildComfyWorkflowModelOption(workflow).capabilities).toEqual({
+      video: { generationModeOptions: ['normal', 'reference_subject'] },
     })
     expect(buildComfyWorkflowModelOption({
       ...workflow,

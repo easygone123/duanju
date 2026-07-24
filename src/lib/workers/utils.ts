@@ -678,7 +678,7 @@ export async function resolveVideoSourceFromGeneration(
       aspectRatio?: string
       generateAudio?: boolean
       lastFrameImageUrl?: string
-      generationMode?: 'normal' | 'firstlastframe'
+      generationMode?: 'normal' | 'firstlastframe' | 'reference_subject'
       [key: string]: string | number | boolean | undefined
     }
     pollProgress?: { start?: number; end?: number }
@@ -734,6 +734,7 @@ export async function resolveVideoSourceFromGeneration(
   if (
     params.options?.generationMode === 'normal'
     || params.options?.generationMode === 'firstlastframe'
+    || params.options?.generationMode === 'reference_subject'
   ) {
     runtimeSelections.generationMode = params.options.generationMode
   }

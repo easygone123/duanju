@@ -165,7 +165,11 @@ function buildImageTaskInfo(taskType: TaskType, payload: AnyPayload): TaskBillin
 
 function buildVideoTaskInfo(taskType: TaskType, payload: AnyPayload): TaskBillingInfo | null {
   const firstLastFramePayload = toRecord(payload?.firstLastFrame)
-  const generationMode = Object.keys(firstLastFramePayload).length > 0 ? 'firstlastframe' : 'normal'
+  const generationMode = Object.keys(firstLastFramePayload).length > 0
+    ? 'firstlastframe'
+    : payload?.referenceSubject === true
+      ? 'reference_subject'
+      : 'normal'
   const model = resolveVideoGenerationModel(payload)
   if (!model) return null
   if (isComfyModelKey(model)) return comfySkippedBilling()

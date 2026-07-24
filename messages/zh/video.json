@@ -1,4 +1,8 @@
 {
+  "referenceSubject": {
+    "title": "参考主体文生视频",
+    "hint": "将当前分镜图作为主体参考传入工作流，不锁定为视频首帧。工作流中的图片输入必须映射为 referenceImages。"
+  },
   "panelCard": {
     "play": "播放",
     "pause": "暂停",

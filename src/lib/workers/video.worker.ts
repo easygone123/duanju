@@ -47,7 +47,7 @@ import {
 type AnyObj = Record<string, unknown>
 type VideoOptionValue = string | number | boolean
 type VideoOptionMap = Record<string, VideoOptionValue>
-type VideoGenerationMode = 'normal' | 'firstlastframe'
+type VideoGenerationMode = 'normal' | 'firstlastframe' | 'reference_subject'
 type PanelRecord = NonNullable<Awaited<ReturnType<typeof prisma.novelPromotionPanel.findUnique>>>
 
 function toDurationMs(value: number | null | undefined): number | undefined {
@@ -207,6 +207,10 @@ async function generateVideoForPanel(
     typeof payload.firstLastFrame === 'object' && payload.firstLastFrame !== null
       ? (payload.firstLastFrame as AnyObj)
       : null
+  const referenceSubject = payload.referenceSubject === true
+  if (firstLastFramePayload && referenceSubject) {
+    throw new Error('VIDEO_GENERATION_MODE_CONFLICT')
+  }
   let firstFramePanel = panel
   if (
     firstLastFramePayload
@@ -236,6 +240,9 @@ async function generateVideoForPanel(
 
   const model = modelId
   const isComfyModel = parseModelKeyStrict(model)?.provider === 'comfyui'
+  if (referenceSubject && !isComfyModel) {
+    throw new Error(`REFERENCE_SUBJECT_MODEL_UNSUPPORTED: ${model}`)
+  }
   let sourceImageInput = firstFramePanel.imageUrl
   if (!isComfyModel) {
     const sourceImageUrl = toSignedUrlIfCos(firstFramePanel.imageUrl, 3600)
@@ -247,7 +254,11 @@ async function generateVideoForPanel(
 
   let lastFrameImageBase64: string | undefined
   let lastFrameStorageValue: string | undefined
-  const generationMode: VideoGenerationMode = firstLastFramePayload ? 'firstlastframe' : 'normal'
+  const generationMode: VideoGenerationMode = firstLastFramePayload
+    ? 'firstlastframe'
+    : referenceSubject
+      ? 'reference_subject'
+      : 'normal'
   const requestedGenerateAudio = typeof generationOptions.generateAudio === 'boolean'
     ? generationOptions.generateAudio
     : undefined
@@ -284,7 +295,12 @@ async function generateVideoForPanel(
       ? payload.comfyWorkflowVersionId
       : undefined,
     imageUrl: sourceImageInput,
-    comfyFirstFrameSource: firstFramePanel.imageUrl,
+    ...(referenceSubject ? {
+      comfyReferenceImages: [firstFramePanel.imageUrl],
+      comfyReferenceImagesOnly: true,
+    } : {
+      comfyFirstFrameSource: firstFramePanel.imageUrl,
+    }),
     comfyLastFrameSource: lastFrameStorageValue,
     options: {
       prompt,

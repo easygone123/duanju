@@ -1,7 +1,10 @@
 import { ApiError } from '@/lib/api-errors'
 import { resolveComfyDurationContract } from '@/lib/comfyui/duration-contract'
 import type { ComfyInputBinding, ComfyVariableDefinition } from '@/lib/comfyui/types'
-import { supportsComfyFirstLastFrameContract } from '@/lib/comfyui/workflow-model-option'
+import {
+  supportsComfyFirstLastFrameContract,
+  supportsComfyReferenceSubjectContract,
+} from '@/lib/comfyui/workflow-model-option'
 import {
   applyTrustedComfyVersionSnapshot,
   getProjectModelConfig,
@@ -181,6 +184,7 @@ async function loadAvailableVideoModel(input: {
   trustedComfyWorkflowVersionId?: string | null
   runtimeFps?: number
   requireFirstLastFrame?: boolean
+  requireReferenceSubject?: boolean
 }): Promise<AvailablePanelVideoModel> {
   const parsed = parseModelKeyStrict(input.modelKey)
   if (!parsed) throw new ApiError('INVALID_PARAMS', { code: VIDEO_MODEL_INVALID })
@@ -220,6 +224,17 @@ async function loadAvailableVideoModel(input: {
     throw new ApiError('INVALID_PARAMS', {
       code: 'FIRSTLASTFRAME_MODEL_UNSUPPORTED',
       field: 'firstLastFrame.flModel',
+    })
+  }
+  const supportsReferenceSubject = parsed.provider === 'comfyui'
+    && supportsComfyReferenceSubjectContract(
+      comfyVersion?.variableDefinitions,
+      comfyVersion?.bindingSpec,
+    )
+  if (input.requireReferenceSubject && !supportsReferenceSubject) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'REFERENCE_SUBJECT_MODEL_UNSUPPORTED',
+      field: 'referenceSubject',
     })
   }
   const duration = durationContractFor(
@@ -453,6 +468,13 @@ export async function resolveAuthoritativePanelPayload(input: {
   const runtimeSelections = toRuntimeSelections(input.body.generationOptions)
   const isBatch = input.routingMode === 'batch'
   const firstLast = !isBatch && isRecord(input.body.firstLastFrame) ? input.body.firstLastFrame : null
+  const referenceSubject = !isBatch && input.body.referenceSubject === true
+  if (firstLast && referenceSubject) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'VIDEO_GENERATION_MODE_CONFLICT',
+      field: 'referenceSubject',
+    })
+  }
   const explicitTrustedFirstLastFrame = firstLast
     ? await resolveTrustedFirstLastFrame(firstLast, panel, input.projectId, input.userId)
     : null
@@ -481,6 +503,7 @@ export async function resolveAuthoritativePanelPayload(input: {
       trustedComfyWorkflowVersionId: projectDefaultComfyWorkflowVersionId,
       runtimeFps: positiveNumber(runtimeSelections.fps) ? runtimeSelections.fps : undefined,
       requireFirstLastFrame: Boolean(explicitTrustedFirstLastFrame),
+      requireReferenceSubject: referenceSubject,
     })]
   } catch (error) {
     if (!explicitModel && automaticDialogueModel) {
@@ -534,6 +557,7 @@ export async function resolveAuthoritativePanelPayload(input: {
   delete payload.effectiveDuration
   delete payload.comfyWorkflowVersionId
   delete payload.firstLastFrame
+  delete payload.referenceSubject
   if (trustedFirstLastFrame) {
     payload.firstLastFrame = {
       flModel: trustedFirstLastFrame.flModel,
@@ -541,13 +565,22 @@ export async function resolveAuthoritativePanelPayload(input: {
       sourcePanelId: trustedFirstLastFrame.sourcePanelId,
     }
   }
+  if (referenceSubject) payload.referenceSubject = true
   payload.videoModel = submission.selectedModel
   payload.videoModelReason = submission.modelReason
   payload.videoPrompt = submission.submittedPrompt
   payload.requestedDuration = submission.requestedDuration
   payload.effectiveDuration = submission.effectiveDuration
   payload.durationSource = submission.durationSource
-  payload.generationOptions = { ...runtimeSelections, duration: submission.effectiveDuration }
+  payload.generationOptions = {
+    ...runtimeSelections,
+    duration: submission.effectiveDuration,
+    generationMode: trustedFirstLastFrame
+      ? 'firstlastframe'
+      : referenceSubject
+        ? 'reference_subject'
+        : 'normal',
+  }
   applyTrustedComfyVersionSnapshot(payload, submission.snapshot.comfyWorkflowVersionId)
   payload.comfyModelSnapshotVersion = 1
   return payload

@@ -15,7 +15,7 @@ export interface VideoModelOption {
   workflowFeatures?: { ltxDirector?: boolean; berniniDirector?: boolean }
 }
 
-export type VideoGenerationMode = 'normal' | 'firstlastframe'
+export type VideoGenerationMode = 'normal' | 'firstlastframe' | 'reference_subject'
 
 export interface TextPanel {
   panel_number: number

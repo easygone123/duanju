@@ -38,6 +38,12 @@ export function buildComfyWorkflowModelOption(workflow: ComfyWorkflowModelInput)
       workflow.currentVersion.variableDefinitions,
       workflow.currentVersion.bindingSpec,
     )
+  const referenceSubject = workflow.mediaType === 'video'
+    && purpose === 'generation'
+    && supportsComfyReferenceSubjectContract(
+      workflow.currentVersion.variableDefinitions,
+      workflow.currentVersion.bindingSpec,
+    )
   const ltxDirector = workflow.mediaType === 'video'
     && purpose === 'generation'
     && hasLtxDirectorNode(workflow.currentVersion.apiFormatJson)
@@ -51,7 +57,18 @@ export function buildComfyWorkflowModelOption(workflow: ComfyWorkflowModelInput)
     providerName: 'ComfyUI',
     workflowPurpose: purpose,
     workflowVersionId: workflow.currentVersion.id,
-    ...(firstLastFrame ? { capabilities: { video: { firstlastframe: true } } } : {}),
+    ...(firstLastFrame || referenceSubject ? {
+      capabilities: {
+        video: {
+          generationModeOptions: [
+            'normal',
+            ...(referenceSubject ? ['reference_subject'] : []),
+            ...(firstLastFrame ? ['firstlastframe'] : []),
+          ],
+          ...(firstLastFrame ? { firstlastframe: true } : {}),
+        },
+      },
+    } : {}),
     ...(ltxDirector || berniniDirector ? {
       workflowFeatures: {
         ...(ltxDirector ? { ltxDirector: true } : {}),
@@ -118,6 +135,23 @@ export function supportsComfyFirstLastFrameContract(
   }
 
   return isBoundImageVariable(firstFrameVariable) && isBoundImageVariable(lastFrameVariable)
+}
+
+export function supportsComfyReferenceSubjectContract(
+  rawDefinitions: unknown,
+  rawBindings: unknown,
+): boolean {
+  const definitions = records(rawDefinitions)
+  const bindings = records(rawBindings)
+  const hasReferenceDefinition = definitions.some((definition) => (
+    definition.name === 'referenceImages'
+    && (definition.type === 'image_ref_list' || definition.type === 'image_ref')
+  ))
+  const hasReferenceBinding = bindings.some((binding) => (
+    binding.variable === 'referenceImages'
+    && (binding.valueType === 'image_ref_list' || binding.valueType === 'image_ref')
+  ))
+  return hasReferenceDefinition && hasReferenceBinding
 }
 
 export function isExecutableOwnedWorkflow(workflow: ExecutableComfyWorkflowInput, userId: string) {

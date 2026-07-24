@@ -1,4 +1,8 @@
 {
+  "referenceSubject": {
+    "title": "Reference-subject text-to-video",
+    "hint": "Send the current storyboard image as a subject reference without locking it as the first frame. Map the workflow image input to referenceImages."
+  },
   "panelCard": {
     "play": "Play",
     "pause": "Pause",

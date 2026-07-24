@@ -413,6 +413,47 @@ describe('worker video processor behavior', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('VIDEO_PANEL: reference-subject mode sends the panel image only as referenceImages', async () => {
+    const processor = workerState.processor
+    await processor!(buildJob({
+      type: TASK_TYPE.VIDEO_PANEL,
+      payload: {
+        videoModel: 'comfyui::wf-reference-video',
+        videoPrompt: 'KEEP THE SUBJECT IDENTITY',
+        referenceSubject: true,
+        generationOptions: { duration: 5, generationMode: 'reference_subject' },
+      },
+    }))
+
+    expect(utilsMock.resolveVideoSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        modelId: 'comfyui::wf-reference-video',
+        imageUrl: 'cos/panel-image.png',
+        comfyReferenceImages: ['cos/panel-image.png'],
+        comfyReferenceImagesOnly: true,
+        options: expect.objectContaining({
+          prompt: 'KEEP THE SUBJECT IDENTITY',
+          generationMode: 'reference_subject',
+        }),
+      }),
+    )
+    expect(utilsMock.resolveVideoSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.not.objectContaining({
+        comfyFirstFrameSource: expect.anything(),
+      }),
+    )
+    expect(prismaMock.novelPromotionPanel.update).toHaveBeenCalledWith({
+      where: { id: 'panel-1' },
+      data: {
+        videoUrl: 'cos/lip-sync/video.mp4',
+        videoMediaId: 'media:cos/lip-sync/video.mp4',
+        videoGenerationMode: 'reference_subject',
+      },
+    })
+  })
+
   it('VIDEO_PANEL: reuses the durable ComfyUI output instead of downloading a container-inaccessible signed URL', async () => {
     utilsMock.resolveVideoSourceFromGeneration.mockResolvedValueOnce({
       url: 'http://localhost:19000/signed-result.mp4',

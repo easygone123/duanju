@@ -3,6 +3,7 @@ import {
   filterNormalVideoModelOptions,
   isFirstLastFrameOnlyModel,
   supportsFirstLastFrame,
+  supportsReferenceSubject,
 } from '@/lib/model-capabilities/video-model-options'
 import type { VideoModelOption } from '@/lib/novel-promotion/stages/video-stage-runtime/types'
 
@@ -42,6 +43,15 @@ describe('video model options partition', () => {
       value: 'p::custom-no-capability',
       label: 'custom-no-capability',
     },
+    {
+      value: 'comfyui::reference-subject',
+      label: 'reference-subject',
+      capabilities: {
+        video: {
+          generationModeOptions: ['normal', 'reference_subject'],
+        },
+      },
+    },
   ]
 
   it('detects firstlastframe support and firstlastframe-only capability', () => {
@@ -49,6 +59,8 @@ describe('video model options partition', () => {
     expect(supportsFirstLastFrame(models[1])).toBe(true)
     expect(supportsFirstLastFrame(models[2])).toBe(true)
     expect(supportsFirstLastFrame(models[3])).toBe(false)
+    expect(supportsReferenceSubject(models[3])).toBe(false)
+    expect(supportsReferenceSubject(models[4])).toBe(true)
 
     expect(isFirstLastFrameOnlyModel(models[0])).toBe(false)
     expect(isFirstLastFrameOnlyModel(models[1])).toBe(true)
@@ -62,6 +74,7 @@ describe('video model options partition', () => {
       'p::normal',
       'p::both',
       'p::custom-no-capability',
+      'comfyui::reference-subject',
     ])
   })
 })

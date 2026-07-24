@@ -14,6 +14,10 @@ export function supportsFirstLastFrame(model: VideoModelCapabilityCarrier): bool
   return model.capabilities?.video?.firstlastframe === true
 }
 
+export function supportsReferenceSubject(model: VideoModelCapabilityCarrier): boolean {
+  return readGenerationModeOptions(model).includes('reference_subject')
+}
+
 export function isFirstLastFrameOnlyModel(model: VideoModelCapabilityCarrier): boolean {
   const generationModeOptions = readGenerationModeOptions(model)
   if (generationModeOptions.length === 0) return false

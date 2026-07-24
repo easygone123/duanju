@@ -30,7 +30,7 @@ export interface StoryboardPanel {
     voiceUrl: string | null
     voiceMedia?: MediaRef | null
     videoUrl: string | null
-    videoGenerationMode?: 'normal' | 'firstlastframe' | null
+    videoGenerationMode?: 'normal' | 'firstlastframe' | 'reference_subject' | null
     videoMedia?: MediaRef | null
     imageTaskRunning?: boolean
     videoTaskRunning?: boolean
@@ -172,6 +172,7 @@ export function useGenerateVideo(projectId: string | null, episodeId: string | n
             explicitVideoModel?: string
             durationOverride?: number | null
             expectedPanelUpdatedAt?: string
+            referenceSubject?: boolean
         }) => {
             if (!projectId) throw new Error('Project ID is required')
 
@@ -191,6 +192,7 @@ export function useGenerateVideo(projectId: string | null, episodeId: string | n
                 explicitVideoModel?: string
                 durationOverride?: number | null
                 expectedPanelUpdatedAt?: string
+                referenceSubject?: boolean
                 useProjectRouting: true
             } = {
                 storyboardId: params.storyboardId,
@@ -208,6 +210,7 @@ export function useGenerateVideo(projectId: string | null, episodeId: string | n
                 requestBody.generationOptions = params.generationOptions
             }
             if (params.explicitVideoModel) requestBody.explicitVideoModel = params.explicitVideoModel
+            if (params.referenceSubject === true) requestBody.referenceSubject = true
             if (Object.prototype.hasOwnProperty.call(params, 'durationOverride')) {
                 requestBody.durationOverride = params.durationOverride ?? null
                 requestBody.expectedPanelUpdatedAt = params.expectedPanelUpdatedAt

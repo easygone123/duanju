@@ -35,8 +35,9 @@ function toVideoRuntimeSelections(value: unknown): Record<string, CapabilityValu
   return selections
 }
 
-function resolveVideoGenerationMode(payload: unknown): 'normal' | 'firstlastframe' {
+function resolveVideoGenerationMode(payload: unknown): 'normal' | 'firstlastframe' | 'reference_subject' {
   if (!isRecord(payload)) return 'normal'
+  if (payload.referenceSubject === true) return 'reference_subject'
   return isRecord(payload.firstLastFrame) ? 'firstlastframe' : 'normal'
 }
 

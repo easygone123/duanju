@@ -319,6 +319,25 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
               )
             })() : (
               <>
+                {videoModel.selectedModelSupportsReferenceSubject && (
+                  <label className="mb-2 flex items-start gap-2 rounded-lg border border-[var(--glass-stroke-base)] bg-[var(--glass-bg-muted)] p-2 text-xs">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={videoModel.referenceSubjectMode}
+                      disabled={taskStatus.isVideoTaskRunning}
+                      onChange={(event) => videoModel.setReferenceSubjectMode(event.target.checked)}
+                    />
+                    <span>
+                      <span className="block font-medium text-[var(--glass-text-secondary)]">
+                        {t('referenceSubject.title')}
+                      </span>
+                      <span className="text-[var(--glass-text-tertiary)]">
+                        {t('referenceSubject.hint')}
+                      </span>
+                    </span>
+                  </label>
+                )}
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() =>
@@ -335,6 +354,7 @@ export default function VideoPanelCardBody({ runtime }: VideoPanelCardBodyProps)
                             durationOverride: videoModel.durationOverride,
                             expectedPanelUpdatedAt: panel.updatedAt,
                           } : {}),
+                          ...(videoModel.referenceSubjectMode ? { referenceSubject: true } : {}),
                         },
                       )}
                     disabled={

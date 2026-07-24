@@ -55,6 +55,7 @@ export function useWorkspaceVideoActions({
       explicitVideoModel?: string
       durationOverride?: number | null
       expectedPanelUpdatedAt?: string
+      referenceSubject?: boolean
     },
   ) => {
     const normalizedVideoModel = typeof videoModel === 'string' ? videoModel.trim() : ''
@@ -82,6 +83,7 @@ export function useWorkspaceVideoActions({
         videoModel: normalizedVideoModel,
         firstLastFrame: sanitizedFirstLastFrame,
         generationOptions,
+        referenceSubject: submissionMeta?.referenceSubject === true,
         ...submissionMeta,
       })
       return true

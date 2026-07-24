@@ -357,6 +357,7 @@ export function useVideoStageRuntime({
       explicitVideoModel?: string
       durationOverride?: number | null
       expectedPanelUpdatedAt?: string
+      referenceSubject?: boolean
     },
   ) => {
     if (isSubmittingVideoBatch) return false
