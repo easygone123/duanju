@@ -37,7 +37,7 @@ import { handleAssetHubAIModifyTask } from './handlers/asset-hub-ai-modify'
 import { handleReferenceToCharacterTask } from './handlers/reference-to-character'
 import { handleShotAITask } from './handlers/shot-ai-tasks'
 import { handleCharacterProfileTask } from './handlers/character-profile'
-import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/voice-lines/orphaning'
 import { estimateStoryboardPanelDuration } from '@/lib/novel-promotion/six-grid/duration'
 
 function readAssetKind(value: Record<string, unknown>): string {

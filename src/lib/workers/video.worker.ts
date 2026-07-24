@@ -704,7 +704,7 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
       userId: job.data.userId,
     }),
   })
-  if (!voiceLine || !voiceLine.enabled || !voiceLine.audioUrl) {
+  if (!voiceLine || !voiceLine.audioUrl) {
     throw new Error('Voice line or audioUrl not found')
   }
   const voiceLineAudioUrl = voiceLine.audioUrl
@@ -735,7 +735,6 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
         projectId: job.data.projectId,
         userId: job.data.userId,
       }),
-      lineType: voiceLine.lineType,
       audioUrl: voiceLineAudioUrl,
     },
     select: { id: true },
@@ -773,7 +772,6 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
           panel,
           projectId: job.data.projectId,
           userId: job.data.userId,
-          lineType: voiceLine.lineType,
           audioUrl: voiceLineAudioUrl,
         }),
       },

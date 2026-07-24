@@ -13,9 +13,6 @@ import type { VideoPricingTier } from '@/lib/model-pricing/video-tier'
 export interface VoiceLine {
   id: string
   lineIndex: number
-  lineType: 'dialogue' | 'narration'
-  enabled: boolean
-  sourceKey: string | null
   speaker: string
   content: string
   audioUrl: string | null

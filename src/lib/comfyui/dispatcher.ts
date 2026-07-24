@@ -409,40 +409,108 @@ async function consumePromptEvents(
   dependencies: ComfyDispatcherDependencies,
   signal: AbortSignal,
 ) {
-  for await (const event of client.watchPrompt(promptId, clientId, signal)) {
-    if (event.type === 'execution_error') {
-      throw new ComfyError(
-        COMFY_ERROR_CODE.EXECUTION_FAILED,
-        event.nodeId
-          ? `ComfyUI execution failed at node ${event.nodeId}`
-          : 'ComfyUI execution failed',
-        { details: event.nodeId ? { nodeId: event.nodeId } : undefined },
-      )
-    }
-    if (event.type === 'progress') {
-      await mustOwn(dependencies.persistProgress({
-        ...owner, promptId, event, value: event.value, max: event.max,
-      }))
-    } else if (event.type === 'executing' || event.type === 'executed') {
-      await mustOwn(dependencies.persistProgress({ ...owner, promptId, event }))
-    }
-    if (event.type === 'status') {
-      try {
-        const history = await client.getHistory(promptId)
-        if (hasHistoryEntry(history, promptId) || Object.hasOwn(history, 'outputs')) return history
-        const queue = await client.getQueue()
-        if (!queueContainsPrompt(queue.running, promptId)
-          && !queueContainsPrompt(queue.pending, promptId)) return undefined
-      } catch {
-        dependencies.observation?.increment('reconciliation', { outcome: 'history_probe_failed' })
+  const watcherController = new AbortController()
+  const abortWatcher = () => watcherController.abort(signal.reason)
+  if (signal.aborted) abortWatcher()
+  else signal.addEventListener('abort', abortWatcher, { once: true })
+  const iterator = client.watchPrompt(
+    promptId,
+    clientId,
+    watcherController.signal,
+  )[Symbol.asyncIterator]()
+  let nextEvent = iterator.next()
+  try {
+    while (!signal.aborted) {
+      const probeTimer = createHistoryProbeTimer(signal)
+      const next = await Promise.race([
+        nextEvent.then((result) => ({ kind: 'event' as const, result })),
+        probeTimer.promise.then(() => ({ kind: 'probe' as const })),
+      ]).finally(() => probeTimer.cancel())
+      if (next.kind === 'probe') {
+        const history = await probeCompletedHistory(client, promptId, dependencies)
+        if (history !== null) return history
+        continue
+      }
+
+      if (next.result.done) return undefined
+      const event = next.result.value
+      nextEvent = iterator.next()
+      if (event.type === 'execution_error') {
+        throw new ComfyError(
+          COMFY_ERROR_CODE.EXECUTION_FAILED,
+          event.nodeId
+            ? `ComfyUI execution failed at node ${event.nodeId}`
+            : 'ComfyUI execution failed',
+          { details: event.nodeId ? { nodeId: event.nodeId } : undefined },
+        )
+      }
+      if (event.type === 'progress') {
+        await mustOwn(dependencies.persistProgress({
+          ...owner, promptId, event, value: event.value, max: event.max,
+        }))
+      } else if (event.type === 'executing' || event.type === 'executed') {
+        await mustOwn(dependencies.persistProgress({ ...owner, promptId, event }))
+      }
+      if (event.type === 'status') {
+        const history = await probeCompletedHistory(client, promptId, dependencies)
+        if (history !== null) return history
+      }
+      if (event.type === 'execution_success'
+        || (event.type === 'executing' && event.nodeId === null)) {
+        break
       }
     }
-    if (event.type === 'execution_success'
-      || (event.type === 'executing' && event.nodeId === null)) {
-      break
-    }
+  } finally {
+    watcherController.abort()
+    signal.removeEventListener('abort', abortWatcher)
+    await iterator.return?.()
   }
   return undefined
+}
+
+const COMFY_HISTORY_PROBE_INTERVAL_MS = 2_000
+
+function createHistoryProbeTimer(signal: AbortSignal) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let finish: (() => void) | undefined
+  const promise = new Promise<void>((resolve) => {
+    finish = () => {
+      if (timer) clearTimeout(timer)
+      signal.removeEventListener('abort', finish!)
+      resolve()
+    }
+    if (signal.aborted) {
+      finish()
+      return
+    }
+    timer = setTimeout(finish, COMFY_HISTORY_PROBE_INTERVAL_MS)
+    signal.addEventListener('abort', finish, { once: true })
+  })
+  return {
+    promise,
+    cancel() {
+      if (timer) clearTimeout(timer)
+      if (finish) signal.removeEventListener('abort', finish)
+    },
+  }
+}
+
+async function probeCompletedHistory(
+  client: Pick<ComfyExecutionClient, 'getHistory' | 'getQueue'>,
+  promptId: string,
+  dependencies: Pick<ComfyDispatcherDependencies, 'observation'>,
+) {
+  try {
+    const history = await client.getHistory(promptId)
+    if (hasHistoryEntry(history, promptId) || Object.hasOwn(history, 'outputs')) return history
+    const queue = await client.getQueue()
+    if (!queueContainsPrompt(queue.running, promptId)
+      && !queueContainsPrompt(queue.pending, promptId)) return undefined
+    return null
+  } catch {
+    dependencies.observation?.increment('reconciliation', { outcome: 'history_probe_failed' })
+    return null
+  }
 }
 
 async function readCompletedHistory(

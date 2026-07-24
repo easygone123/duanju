@@ -1,6 +1,5 @@
 import type { CapabilitySelections } from '@/lib/model-config-contract'
 import type { LocationAvailableSlot } from '@/lib/location-available-slots'
-import type { PanelNarrationMode } from '@/lib/novel-promotion/narration/state'
 import type { TaskIntent } from '@/lib/task/intent'
 import type {
   NormalizedCropRect,
@@ -20,8 +19,6 @@ export type {
   GridStoryboardMode,
   StoryboardGridSpec,
 } from '@/lib/novel-promotion/grid-storyboard/spec'
-export type { PanelNarrationMode } from '@/lib/novel-promotion/narration/state'
-
 // ============================================
 // 基础项目类型
 // ============================================
@@ -227,12 +224,6 @@ export interface NovelPromotionPanel {
   dialogueText?: string | null
   dialogueEmotion?: string | null
   includeDialogueInVideoPrompt?: boolean
-  narrationMode?: PanelNarrationMode
-  narrationRecommended?: boolean
-  narrationSuggestedText?: string | null
-  narrationSuggestedEmotion?: string | null
-  narrationText?: string | null
-  narrationEmotion?: string | null
   estimatedDuration?: number | null
   durationOverride?: number | null
   firstFrameSourceMeta?: string | null

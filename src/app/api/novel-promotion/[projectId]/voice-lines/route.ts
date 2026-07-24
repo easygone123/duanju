@@ -6,7 +6,6 @@ import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { resolveMediaRef, resolveMediaRefFromLegacyValue } from '@/lib/media/service'
 import { readJsonObject } from '@/lib/viral-replication/request-json'
-import { narrationSourceKey } from '@/lib/novel-promotion/narration/sync'
 import { requireOwnedNovelPromotionEpisode } from '@/lib/novel-promotion/ownership'
 
 const nullableIdentifier = z.string().trim().min(1).max(200).nullable()
@@ -147,7 +146,6 @@ export const GET = apiHandler(async (
 
     const speakerRows = await prisma.novelPromotionVoiceLine.findMany({
       where: {
-        enabled: true,
         episode: {
           novelPromotionProjectId: novelProject.id
         }
@@ -171,7 +169,6 @@ export const GET = apiHandler(async (
   const voiceLines = await prisma.novelPromotionVoiceLine.findMany({
     where: {
       episodeId,
-      enabled: true,
       episode: { novelPromotionProject: { projectId } },
     },
     orderBy: { lineIndex: 'asc' },
@@ -337,168 +334,10 @@ export const PATCH = apiHandler(async (
       select: {
         id: true,
         episodeId: true,
-        lineType: true,
-        sourceKey: true,
-        speaker: true,
-        matchedPanelId: true,
       },
     })
     if (!currentLine) {
       throw new ApiError('NOT_FOUND')
-    }
-
-    if (currentLine.lineType === 'narration') {
-      const normalizedSpeaker = typeof speaker === 'string' ? speaker.trim() : speaker
-      if (
-        (speaker !== undefined && normalizedSpeaker !== currentLine.speaker)
-        || (matchedPanelId !== undefined && matchedPanelId !== currentLine.matchedPanelId)
-      ) {
-        throw new ApiError('INVALID_PARAMS', {
-          code: 'NARRATION_IDENTITY_IMMUTABLE',
-        })
-      }
-
-      if (!currentLine.matchedPanelId) {
-        throw new ApiError('INVALID_PARAMS', {
-          code: 'NARRATION_PANEL_MISSING',
-        })
-      }
-      const narrationPanelId = currentLine.matchedPanelId
-      if (currentLine.sourceKey !== narrationSourceKey(narrationPanelId)) {
-        throw new ApiError('INVALID_PARAMS', {
-          code: 'NARRATION_SOURCE_KEY_INVALID',
-        })
-      }
-      const currentPanel = await prisma.novelPromotionPanel.findFirst({
-        where: {
-          id: narrationPanelId,
-          storyboard: {
-            episode: {
-              id: currentLine.episodeId,
-              novelPromotionProject: { projectId },
-            },
-          },
-        },
-        select: { id: true, hasDialogue: true },
-      })
-      if (!currentPanel) {
-        throw new ApiError('INVALID_PARAMS', {
-          code: 'NARRATION_PANEL_MISSING',
-        })
-      }
-      if (currentPanel.hasDialogue) {
-        throw new ApiError('INVALID_PARAMS', {
-          code: 'PANEL_NARRATION_DIALOGUE_UNSUPPORTED',
-        })
-      }
-
-      const updateData: Prisma.NovelPromotionVoiceLineUncheckedUpdateInput = {}
-      if (voicePresetId !== undefined) updateData.voicePresetId = voicePresetId
-      if (emotionStrength !== undefined) updateData.emotionStrength = emotionStrength
-      if (content !== undefined) {
-        if (!content.trim()) {
-          throw new ApiError('INVALID_PARAMS', {
-            code: 'PANEL_NARRATION_TEXT_REQUIRED',
-          })
-        }
-        updateData.content = content.trim()
-      }
-      if (emotionPrompt !== undefined) {
-        updateData.emotionPrompt = emotionPrompt?.trim() || null
-      }
-      if (audioUrl !== undefined) {
-        updateData.audioUrl = audioUrl
-        const media = await resolveMediaRefFromLegacyValue(audioUrl)
-        updateData.audioMediaId = media?.id || null
-      }
-      const updatesCanonicalNarration = content !== undefined || emotionPrompt !== undefined
-      if (updatesCanonicalNarration) updateData.enabled = true
-
-      const updated = await prisma.$transaction(async (tx) => {
-        const canonicalVoiceLine = updatesCanonicalNarration
-          ? await tx.novelPromotionVoiceLine.update({
-              where: { id: currentLine.id },
-              data: updateData,
-              select: {
-                content: true,
-                emotionPrompt: true,
-              },
-            })
-          : null
-
-        const matchedPanel = await tx.novelPromotionPanel.findFirst({
-          where: {
-            id: narrationPanelId,
-            storyboard: {
-              episode: {
-                id: currentLine.episodeId,
-                novelPromotionProject: { projectId },
-              },
-            },
-          },
-          select: { id: true, hasDialogue: true },
-        })
-        if (!matchedPanel) {
-          throw new ApiError('INVALID_PARAMS', {
-            code: 'NARRATION_PANEL_MISSING',
-          })
-        }
-        if (matchedPanel.hasDialogue) {
-          throw new ApiError('INVALID_PARAMS', {
-            code: 'PANEL_NARRATION_DIALOGUE_UNSUPPORTED',
-          })
-        }
-
-        if (canonicalVoiceLine) {
-          if (!canonicalVoiceLine.content.trim()) {
-            throw new ApiError('INVALID_PARAMS', {
-              code: 'PANEL_NARRATION_TEXT_REQUIRED',
-            })
-          }
-          await tx.novelPromotionPanel.update({
-            where: { id: matchedPanel.id },
-            data: {
-              narrationMode: 'on',
-              narrationText: canonicalVoiceLine.content,
-              narrationEmotion: canonicalVoiceLine.emotionPrompt,
-            },
-          })
-
-          const canonicalResult = await tx.novelPromotionVoiceLine.findUnique({
-            where: { id: currentLine.id },
-            include: {
-              matchedPanel: {
-                select: {
-                  id: true,
-                  storyboardId: true,
-                  panelIndex: true,
-                },
-              },
-            },
-          })
-          if (!canonicalResult) throw new ApiError('NOT_FOUND')
-          return canonicalResult
-        }
-
-        return tx.novelPromotionVoiceLine.update({
-          where: { id: currentLine.id },
-          data: updateData,
-          include: {
-            matchedPanel: {
-              select: {
-                id: true,
-                storyboardId: true,
-                panelIndex: true,
-              },
-            },
-          },
-        })
-      })
-
-      return NextResponse.json({
-        success: true,
-        voiceLine: await withVoiceLineMedia(updated),
-      })
     }
 
     const updateData: Prisma.NovelPromotionVoiceLineUncheckedUpdateInput = {}
@@ -557,7 +396,6 @@ export const PATCH = apiHandler(async (
       where: {
         episodeId,
         speaker,
-        enabled: true,
         episode: { novelPromotionProject: { projectId } },
       },
       data: { voicePresetId }
@@ -607,12 +445,6 @@ export const DELETE = apiHandler(async (
   if (!lineToDelete) {
     throw new ApiError('NOT_FOUND')
   }
-  if (lineToDelete.lineType === 'narration') {
-    throw new ApiError('INVALID_PARAMS', {
-      code: 'NARRATION_DELETE_UNSUPPORTED',
-    })
-  }
-
   // 删除台词
   await prisma.novelPromotionVoiceLine.delete({
     where: { id: lineId }

@@ -280,8 +280,6 @@ export default function StoryboardGroup({
       )}
 
       <StoryboardPanelList
-        projectId={projectId}
-        episodeId={episodeId}
         storyboard={storyboard}
         textPanels={textPanels}
         storyboardStartIndex={storyboardStartIndex}

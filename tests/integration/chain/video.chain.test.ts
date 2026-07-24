@@ -136,8 +136,6 @@ describe('chain contract - video queue behavior', () => {
     const voiceLine = {
       id: 'line-1',
       audioUrl: 'cos/line-1.mp3',
-      enabled: true,
-      lineType: 'dialogue',
       matchedPanelId: 'panel-1',
     }
     prismaMock.novelPromotionVoiceLine.findFirst.mockResolvedValue(voiceLine)

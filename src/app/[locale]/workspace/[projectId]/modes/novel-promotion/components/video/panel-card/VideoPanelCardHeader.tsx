@@ -1,14 +1,11 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import TaskStatusOverlay from '@/components/task/TaskStatusOverlay'
 import { MediaImageWithLoading } from '@/components/media/MediaImageWithLoading'
 
 import type { VideoPanelRuntime } from './hooks/useVideoPanelActions'
 import { AppIcon } from '@/components/ui/icons'
 import { getAspectRatioConfig } from '@/lib/constants'
-import {
-  selectPanelVideo,
-  shouldIgnoreDisabledNarrationLipSync,
-} from '@/lib/novel-promotion/video/select-panel-video'
+import { selectPanelVideo } from '@/lib/novel-promotion/video/select-panel-video'
 
 interface VideoPanelCardHeaderProps {
   runtime: VideoPanelRuntime
@@ -36,16 +33,10 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
   }, [taskStatus.panelErrorDisplay?.message])
 
   const hasVisibleBaseVideo = !!media.baseVideoUrl
-  const canUseLipSyncVideo = !shouldIgnoreDisabledNarrationLipSync({
-    hasDialogue: panel.hasDialogue,
-    narrationVoiceEnabled: panel.narrationVoiceEnabled,
-  })
   const selectedVideoUrl = selectPanelVideo({
     videoUrl: media.baseVideoUrl,
     lipSyncVideoUrl: panel.lipSyncVideoUrl,
     preferLipSync: media.showLipSyncVideo,
-    hasDialogue: panel.hasDialogue,
-    narrationVoiceEnabled: panel.narrationVoiceEnabled,
   }).videoUrl
   const hasPlayableVideo = !!selectedVideoUrl
   const showFirstLastFrameSwitch = layout.hasNext
@@ -144,7 +135,7 @@ export default function VideoPanelCardHeader({ runtime }: VideoPanelCardHeaderPr
       )}
 
       {/* 口型同步切换 */}
-      {canUseLipSyncVideo && panel.lipSyncVideoUrl && hasVisibleBaseVideo ? (
+      {panel.lipSyncVideoUrl && hasVisibleBaseVideo ? (
         <div
           className="absolute top-2 right-2 flex items-center bg-[var(--glass-overlay)] rounded-full p-0.5 cursor-pointer"
           onClick={(event) => {

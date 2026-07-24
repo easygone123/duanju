@@ -28,11 +28,6 @@ import {
   buildAdjacentPanelContinuityPrompt,
   buildFirstLastFramePrompt,
 } from './first-last-frame-prompt'
-import {
-  parseNarrationMode,
-  resolveNarrationContent,
-  resolveNarrationEnabled,
-} from '../narration/state'
 
 const LEGACY_REMOTE_VIDEO_DEFAULT_DURATION_SECONDS = 5
 
@@ -52,12 +47,6 @@ export type VideoPanelRecord = {
   dialogueText: string | null
   dialogueEmotion: string | null
   includeDialogueInVideoPrompt: boolean
-  narrationMode?: string
-  narrationRecommended?: boolean
-  narrationSuggestedText?: string | null
-  narrationSuggestedEmotion?: string | null
-  narrationText?: string | null
-  narrationEmotion?: string | null
   videoPrompt: string | null
   firstLastFramePrompt: string | null
   firstFrameSourceMeta: string | null
@@ -77,32 +66,11 @@ export type BatchPanelVideoHandoff = {
 export const VIDEO_PANEL_SELECT = {
   id: true, updatedAt: true, hasDialogue: true, dialogueSpeaker: true, dialogueText: true,
   dialogueEmotion: true, includeDialogueInVideoPrompt: true, videoPrompt: true, firstLastFramePrompt: true,
-  narrationMode: true, narrationRecommended: true, narrationSuggestedText: true,
-  narrationSuggestedEmotion: true, narrationText: true, narrationEmotion: true,
   firstFrameSourceMeta: true,
   lastFrameSourceMeta: true,
   storyboard: { select: { episodeId: true } },
   estimatedDuration: true, durationOverride: true, duration: true,
 } as const
-
-function resolvePanelNarrationForVideo(panel: VideoPanelRecord) {
-  const mode = parseNarrationMode(panel.narrationMode ?? 'auto')
-  const content = resolveNarrationContent({
-    mode,
-    suggestedText: panel.narrationSuggestedText ?? null,
-    suggestedEmotion: panel.narrationSuggestedEmotion ?? null,
-    manualText: panel.narrationText ?? null,
-    manualEmotion: panel.narrationEmotion ?? null,
-  })
-  return {
-    narrationEnabled: !panel.hasDialogue && resolveNarrationEnabled({
-      mode,
-      recommended: panel.narrationRecommended === true,
-    }),
-    narrationText: content.text,
-    narrationEmotion: content.emotion,
-  }
-}
 
 function positiveNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
@@ -548,7 +516,6 @@ export async function resolveAuthoritativePanelPayload(input: {
     submission = resolvePanelVideoSubmission({
       panel: {
         ...panel,
-        ...resolvePanelNarrationForVideo(panel),
         videoPrompt: firstLastFramePrompt,
         legacyDuration: panel.duration,
       },

@@ -26,12 +26,6 @@ type PersistenceTransaction = {
   novelPromotionClip: {
     create(args: Record<string, unknown>): Promise<{ id: string }>
   }
-  novelPromotionStoryboard: {
-    create(args: Record<string, unknown>): Promise<{ id: string }>
-  }
-  novelPromotionPanel: {
-    create(args: Record<string, unknown>): Promise<unknown>
-  }
   novelPromotionProject: {
     update(args: Record<string, unknown>): Promise<unknown>
   }
@@ -42,6 +36,29 @@ type PersistenceTransaction = {
 
 type PersistencePrisma = {
   $transaction<T>(callback: (tx: PersistenceTransaction) => Promise<T>): Promise<T>
+}
+
+function uniqueNonEmpty(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+}
+
+function buildViralClipContent(
+  storyboard: ViralStoryboardGenerationV1['storyboards'][number],
+) {
+  return storyboard.panels.map((panel) => {
+    const startSeconds = (panel.startMs / 1_000).toFixed(1)
+    const endSeconds = (panel.endMs / 1_000).toFixed(1)
+    return [
+      `【${startSeconds}-${endSeconds}秒】${panel.description}`,
+      `景别：${panel.shotType}`,
+      `运镜：${panel.cameraMove}`,
+      `场景：${panel.location}`,
+      panel.characters.length > 0 ? `角色：${panel.characters.join('、')}` : null,
+      panel.audioText ? `原声音频：${panel.audioText}` : null,
+      `画面要求：${panel.imagePrompt}`,
+      `动作要求：${panel.videoPrompt}`,
+    ].filter(Boolean).join('\n')
+  }).join('\n\n')
 }
 
 export async function persistViralStoryboardGeneration(
@@ -132,60 +149,31 @@ export async function persistViralStoryboardGeneration(
     }
 
     for (const generatedStoryboard of input.generation.storyboards) {
+      const firstPanel = generatedStoryboard.panels[0]
+      const lastPanel = generatedStoryboard.panels[generatedStoryboard.panels.length - 1]
       const duration = Math.ceil(generatedStoryboard.panels.reduce(
         (total, panel) => total + panel.durationSeconds,
         0,
       ))
-      const clip = await tx.novelPromotionClip.create({
+      const characters = uniqueNonEmpty(
+        generatedStoryboard.panels.flatMap((panel) => panel.characters),
+      )
+      const locations = uniqueNonEmpty(
+        generatedStoryboard.panels.map((panel) => panel.location),
+      )
+      await tx.novelPromotionClip.create({
         data: {
           episodeId: input.episodeId,
+          start: Math.floor(firstPanel.startMs / 1_000),
+          end: Math.ceil(lastPanel.endMs / 1_000),
           summary: generatedStoryboard.summary,
-          content: generatedStoryboard.summary,
+          content: buildViralClipContent(generatedStoryboard),
           duration,
           shotCount: generatedStoryboard.panels.length,
+          characters: characters.length > 0 ? JSON.stringify(characters) : null,
+          location: locations[0] || null,
         },
       })
-      const storyboard = await tx.novelPromotionStoryboard.create({
-        data: {
-          episodeId: input.episodeId,
-          clipId: clip.id,
-          panelCount: generatedStoryboard.panels.length,
-          storyboardTextJson: JSON.stringify({
-            schemaVersion: 1,
-            sequence: generatedStoryboard.sequence,
-            summary: generatedStoryboard.summary,
-            panels: generatedStoryboard.panels,
-          }),
-          layoutMode: 'individual',
-          groupSequence: generatedStoryboard.sequence,
-        },
-      })
-
-      for (const panel of generatedStoryboard.panels) {
-        await tx.novelPromotionPanel.create({
-          data: {
-            storyboardId: storyboard.id,
-            panelIndex: panel.panelIndex,
-            panelNumber: panel.panelIndex + 1,
-            duration: panel.durationSeconds,
-            shotType: panel.shotType,
-            cameraMove: panel.cameraMove,
-            location: panel.location,
-            characters: panel.characters.length > 0 ? JSON.stringify(panel.characters) : null,
-            srtSegment: panel.audioText,
-            srtStart: panel.startMs / 1_000,
-            srtEnd: panel.endMs / 1_000,
-            description: panel.description,
-            imagePrompt: panel.imagePrompt,
-            videoPrompt: panel.videoPrompt,
-            hasDialogue: panel.audioText !== null,
-            dialogueText: panel.audioText,
-            includeDialogueInVideoPrompt: false,
-            estimatedDuration: panel.durationSeconds,
-            durationOverride: panel.durationSeconds,
-          },
-        })
-      }
     }
 
     await tx.novelPromotionProject.update({

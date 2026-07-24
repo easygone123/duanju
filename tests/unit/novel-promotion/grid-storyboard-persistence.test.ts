@@ -81,12 +81,6 @@ const tx = vi.hoisted(() => ({
       if (existing) Object.assign(existing, update)
       else state.panels.push({
         id: `panel-${state.panels.length + 1}`,
-        narrationMode: 'auto',
-        narrationRecommended: false,
-        narrationSuggestedText: null,
-        narrationSuggestedEmotion: null,
-        narrationText: null,
-        narrationEmotion: null,
         ...create,
       })
       const persisted = existing || state.panels[state.panels.length - 1]
@@ -97,22 +91,15 @@ const tx = vi.hoisted(() => ({
         srtSegment: persisted.srtSegment as string | null,
         characters: persisted.characters as string | null,
         props: persisted.props as string | null,
-        narrationMode: persisted.narrationMode as string,
-        narrationRecommended: persisted.narrationRecommended as boolean,
-        narrationSuggestedText: persisted.narrationSuggestedText as string | null,
-        narrationSuggestedEmotion: persisted.narrationSuggestedEmotion as string | null,
-        narrationText: persisted.narrationText as string | null,
-        narrationEmotion: persisted.narrationEmotion as string | null,
       }
     }),
   },
   novelPromotionVoiceLine: {
     findMany: vi.fn(async ({ where }: {
-      where: { episodeId: string; lineType: string; lineIndex: { in: number[] } }
+      where: { episodeId: string; lineIndex: { in: number[] } }
     }) => state.voices
       .filter((row) => (
         row.episodeId === where.episodeId
-        && row.lineType === where.lineType
         && where.lineIndex.in.includes(row.lineIndex as number)
       ))
       .sort((left, right) => (
@@ -122,13 +109,9 @@ const tx = vi.hoisted(() => ({
       .map((row) => ({ id: row.id as string, lineIndex: row.lineIndex as number }))),
     findUnique: vi.fn(async ({ where }: {
       where: {
-        sourceKey?: string
         episodeId_lineIndex?: { episodeId: string; lineIndex: number }
       }
     }) => {
-      if (where.sourceKey) {
-        return state.voices.find((row) => row.sourceKey === where.sourceKey) || null
-      }
       const key = where.episodeId_lineIndex
       return key
         ? state.voices.find((row) => (
@@ -167,7 +150,7 @@ const tx = vi.hoisted(() => ({
       ))) {
         throw { code: 'P2002', meta: { target: ['episodeId', 'lineIndex'] } }
       }
-      const persisted = { id: `voice-${state.voices.length + 1}`, sourceKey: null, ...data }
+      const persisted: Record<string, unknown> = { id: `voice-${state.voices.length + 1}`, ...data }
       state.voices.push(persisted)
       return {
         id: persisted.id,
@@ -181,21 +164,18 @@ const tx = vi.hoisted(() => ({
     }: {
       where: {
         episodeId?: string
-        lineType?: string
         matchedStoryboardId?: { in: string[] }
-        OR?: Array<{ sourceKey?: string; matchedPanelId?: string }>
+        OR?: Array<{ matchedPanelId?: string }>
       }
       data: Record<string, unknown>
     }) => {
       let count = 0
       for (const row of state.voices) {
         const matches = (!where.episodeId || row.episodeId === where.episodeId)
-          && (!where.lineType || row.lineType === where.lineType)
           && (!where.matchedStoryboardId
             || where.matchedStoryboardId.in.includes(row.matchedStoryboardId as string))
           && (!where.OR || where.OR.some((branch) => (
-            (branch.sourceKey && row.sourceKey === branch.sourceKey)
-            || (branch.matchedPanelId && row.matchedPanelId === branch.matchedPanelId)
+            branch.matchedPanelId && row.matchedPanelId === branch.matchedPanelId
           )))
         if (!matches) continue
         Object.assign(row, data)
@@ -204,12 +184,11 @@ const tx = vi.hoisted(() => ({
       return { count }
     }),
     deleteMany: vi.fn(async ({ where }: {
-      where: { episodeId: string; lineType?: string; lineIndex?: { notIn: number[] } }
+      where: { episodeId: string; lineIndex?: { notIn: number[] } }
     }) => {
       const before = state.voices.length
       const retained = state.voices.filter((row) => {
         const matches = row.episodeId === where.episodeId
-          && (!where.lineType || row.lineType === where.lineType)
           && (!where.lineIndex || !where.lineIndex.notIn.includes(row.lineIndex as number))
         return !matches
       })
@@ -407,152 +386,6 @@ describe('grid storyboard persistence', () => {
     const durations = state.panels.map((panel) => panel.estimatedDuration as number)
     expect(new Set(durations).size).toBeGreaterThan(2)
     expect(durations).toEqual([2.6, 7.4, 5.8, 8])
-  })
-
-  it('preserves panel narration identity, config, and audio across grid replanning', async () => {
-    const gridGroup = group('four_grid')
-    const voiceLineRows = Array.from({ length: 4 }, (_, index) => ({
-      lineIndex: index + 1,
-      speaker: 'Ming',
-      content: `line ${index + 1}`,
-      emotionStrength: 0.5,
-      matchedPanel: { storyboardId: gridGroup.groupId, panelIndex: index },
-    }))
-    const persist = async (clipPanels: ReturnType<typeof group>[]) => await persistGridStoryboardOutputs({
-      episodeId: 'episode-1',
-      runId: 'run-1',
-      clipPanels,
-      voiceLineRows,
-      runSnapshot: runSnapshot('four_grid'),
-    })
-
-    await persist([gridGroup])
-    const panel = state.panels[0]
-    const panelId = panel.id as string
-    Object.assign(panel, {
-      narrationMode: 'on',
-      narrationRecommended: true,
-      narrationSuggestedText: 'Original suggestion',
-      narrationSuggestedEmotion: 'reflective',
-      narrationText: 'Manual narration',
-      narrationEmotion: 'solemn',
-      imagePrompt: 'stale image prompt',
-      imageHistory: 'stale history',
-      videoUrl: '/media/stale-video.mp4',
-      videoMediaId: 'stale-video-media',
-      lipSyncVideoUrl: '/media/stale-lipsync.mp4',
-      lipSyncVideoMediaId: 'stale-lipsync-media',
-      linkedToNextPanel: true,
-    })
-    state.voices.push({
-      id: 'narration-1',
-      episodeId: 'episode-1',
-      lineIndex: 5,
-      lineType: 'narration',
-      enabled: true,
-      sourceKey: `panel-narration:${panelId}`,
-      speaker: 'Narrator',
-      content: 'Manual narration',
-      emotionPrompt: 'solemn',
-      matchedPanelId: panelId,
-      matchedStoryboardId: panel.storyboardId,
-      matchedPanelIndex: 0,
-      voicePresetId: 'preset-1',
-      audioUrl: '/media/narration.wav',
-      audioMediaId: 'media-1',
-      audioDuration: 2400,
-    }, {
-      id: 'stale-dialogue',
-      episodeId: 'episode-1',
-      lineIndex: 99,
-      lineType: 'dialogue',
-      enabled: true,
-      sourceKey: null,
-      speaker: 'Stale',
-      content: 'Remove me',
-    })
-
-    const replanned = {
-      ...gridGroup,
-      finalPanels: gridGroup.finalPanels.map((item, index) => (
-        index === 0 ? { ...item, description: 'replanned visual beat' } : item
-      )),
-    }
-    await persist([replanned])
-
-    expect(state.panels).toHaveLength(4)
-    expect(state.panels[0]).toMatchObject({
-      id: panelId,
-      description: 'replanned visual beat',
-      narrationMode: 'on',
-      narrationRecommended: true,
-      narrationSuggestedText: 'Original suggestion',
-      narrationSuggestedEmotion: 'reflective',
-      narrationText: 'Manual narration',
-      narrationEmotion: 'solemn',
-      imagePrompt: null,
-      imageHistory: null,
-      videoUrl: null,
-      videoMediaId: null,
-      lipSyncVideoUrl: null,
-      lipSyncVideoMediaId: null,
-      linkedToNextPanel: false,
-    })
-    expect(state.voices.find((row) => row.id === 'narration-1')).toMatchObject({
-      sourceKey: `panel-narration:${panelId}`,
-      matchedPanelId: panelId,
-      voicePresetId: 'preset-1',
-      audioUrl: '/media/narration.wav',
-      audioMediaId: 'media-1',
-      audioDuration: 2400,
-    })
-    expect(state.voices.some((row) => row.id === 'stale-dialogue')).toBe(false)
-
-    await persist([{
-      ...replanned,
-      finalPanels: replanned.finalPanels.map((item, index) => (
-        index === 0
-          ? { ...item, dialogue: { speaker: 'Ming', text: 'Now this panel has dialogue.' } }
-          : item
-      )),
-    }])
-
-    expect(state.panels[0]).toMatchObject({
-      id: panelId,
-      hasDialogue: true,
-      narrationMode: 'on',
-      narrationText: 'Manual narration',
-    })
-    expect(state.voices.find((row) => row.id === 'narration-1')).toMatchObject({
-      enabled: false,
-      sourceKey: `panel-narration:${panelId}`,
-      voicePresetId: 'preset-1',
-      audioUrl: '/media/narration.wav',
-    })
-
-    await persist([replanned])
-
-    expect(state.panels[0]).toMatchObject({
-      id: panelId,
-      hasDialogue: false,
-      narrationMode: 'on',
-      narrationRecommended: true,
-      narrationText: 'Manual narration',
-      narrationEmotion: 'solemn',
-    })
-    expect(state.voices.find((row) => row.id === 'narration-1')).toMatchObject({
-      enabled: true,
-      sourceKey: `panel-narration:${panelId}`,
-      lineType: 'narration',
-      speaker: 'Narrator',
-      content: 'Manual narration',
-      emotionPrompt: 'solemn',
-      matchedPanelId: panelId,
-      voicePresetId: 'preset-1',
-      audioUrl: '/media/narration.wav',
-      audioMediaId: 'media-1',
-      audioDuration: 2400,
-    })
   })
 
   it('replaces stale six-grid and individual storyboards when rebuilding as four-grid', async () => {

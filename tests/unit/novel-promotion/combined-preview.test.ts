@@ -36,43 +36,14 @@ describe('combined video preview projection', () => {
     expect(buildCombinedPreviewTimeline([withoutLipSync], new Map()).items[0].videoUrl).toBe('base.mp4')
   })
 
-  it('ignores preserved narration lip-sync media after narration is disabled', () => {
-    const disabledNarration = panel({
-      hasDialogue: false,
-      narrationVoiceEnabled: false,
-      lipSyncVideoUrl: 'old-narration-lip.mp4',
-    })
-    const missingBase = panel({
-      panelId: 'missing-base',
-      hasDialogue: false,
-      narrationVoiceEnabled: false,
-      videoUrl: undefined,
-      lipSyncVideoUrl: 'old-narration-lip.mp4',
-    })
-
-    expect(buildCombinedPreviewTimeline([disabledNarration], new Map()).items[0].videoUrl)
-      .toBe('base.mp4')
-    expect(buildCombinedPreviewTimeline([missingBase], new Map()).items[0].videoUrl)
-      .toBeNull()
-  })
-
-  it('keeps normal dialogue lip-sync and re-enabled narration lip-sync selectable', () => {
+  it('keeps dialogue lip-sync selectable', () => {
     const dialogue = panel({
       hasDialogue: true,
-      narrationVoiceEnabled: false,
       lipSyncVideoUrl: 'dialogue-lip.mp4',
-    })
-    const enabledNarration = panel({
-      panelId: 'enabled-narration',
-      hasDialogue: false,
-      narrationVoiceEnabled: true,
-      lipSyncVideoUrl: 'narration-lip.mp4',
     })
 
     expect(buildCombinedPreviewTimeline([dialogue], new Map()).items[0].videoUrl)
       .toBe('dialogue-lip.mp4')
-    expect(buildCombinedPreviewTimeline([enabledNarration], new Map()).items[0].videoUrl)
-      .toBe('narration-lip.mp4')
   })
 
   it('uses the current card preference key while exposing the stable panel key', () => {

@@ -102,7 +102,6 @@ describe('generate voice line with bailian provider', () => {
       content: '你好，世界',
       emotionPrompt: null,
       emotionStrength: null,
-      enabled: true,
       audioUrl: 'voice/storage/previous.wav',
       audioMediaId: null,
       updatedAt: new Date('2026-07-20T00:00:00.000Z'),
@@ -165,7 +164,6 @@ describe('generate voice line with bailian provider', () => {
       where: {
         id: 'line-1',
         episodeId: 'episode-1',
-        enabled: true,
         speaker: 'Narrator',
         content: '你好，世界',
         emotionPrompt: null,
@@ -198,40 +196,6 @@ describe('generate voice line with bailian provider', () => {
     })
   })
 
-  it('does not upload when narration is disabled while the provider is running', async () => {
-    prismaMock.novelPromotionVoiceLine.findUnique
-      .mockResolvedValueOnce({
-        id: 'line-1',
-        episodeId: 'episode-1',
-        speaker: 'Narrator',
-        content: '你好，世界',
-        emotionPrompt: null,
-        emotionStrength: null,
-        enabled: true,
-        audioUrl: 'voice/storage/previous.wav',
-        audioMediaId: null,
-        updatedAt: new Date('2026-07-20T00:00:00.000Z'),
-      })
-      .mockResolvedValueOnce({
-        id: 'line-1',
-        episodeId: 'episode-1',
-        enabled: false,
-        updatedAt: new Date('2026-07-20T00:00:01.000Z'),
-      })
-
-    await expect(generateVoiceLine({
-      projectId: 'project-1',
-      episodeId: 'episode-1',
-      lineId: 'line-1',
-      userId: 'user-1',
-      audioModel: 'bailian::qwen3-tts-vd-2026-01-26',
-    })).rejects.toThrow('VOICE_LINE_DISABLED')
-
-    expect(synthesizeWithBailianTTSMock).toHaveBeenCalledTimes(1)
-    expect(uploadObjectMock).not.toHaveBeenCalled()
-    expect(prismaMock.novelPromotionVoiceLine.updateMany).not.toHaveBeenCalled()
-  })
-
   it('deletes a newly uploaded object when snapshot CAS loses a race', async () => {
     prismaMock.novelPromotionVoiceLine.findUnique.mockResolvedValue({
       id: 'line-1',
@@ -240,7 +204,6 @@ describe('generate voice line with bailian provider', () => {
       content: '你好，世界',
       emotionPrompt: null,
       emotionStrength: null,
-      enabled: true,
       audioUrl: 'voice/storage/previous.wav',
       audioMediaId: 'media-old',
       updatedAt: new Date('2026-07-20T00:00:00.000Z'),
@@ -274,7 +237,6 @@ describe('generate voice line with bailian provider', () => {
       content: '你好，世界',
       emotionPrompt: null,
       emotionStrength: null,
-      enabled: true,
       audioUrl: 'voice/storage/previous.wav',
       audioMediaId: 'media-shared-old',
       updatedAt: new Date('2026-07-20T00:00:00.000Z'),

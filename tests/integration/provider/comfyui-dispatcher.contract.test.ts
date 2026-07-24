@@ -434,6 +434,37 @@ describe('ComfyUI dispatcher contract', () => {
     expect(deps.release).toHaveBeenCalledOnce()
   })
 
+  it('actively polls completed history when a fast prompt finishes before any WebSocket event', async () => {
+    vi.useFakeTimers()
+    let socketAborted = false
+    const deps = dependencies({
+      client: { ...dependencies().client, watchPrompt: async function* (
+        _promptId: string,
+        _clientId: string,
+        signal: AbortSignal,
+      ) {
+        await new Promise<void>((resolve) => {
+          const finish = () => {
+            socketAborted = true
+            resolve()
+          }
+          if (signal.aborted) finish()
+          else signal.addEventListener('abort', finish, { once: true })
+        })
+      } },
+    })
+
+    try {
+      const pending = dispatchComfyRequest('request-1', deps)
+      await vi.advanceTimersByTimeAsync(2_000)
+      await expect(pending).resolves.toMatchObject({ outcome: 'completed' })
+      expect(deps.client.getHistory).toHaveBeenCalledWith('prompt-1')
+      expect(socketAborted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('keeps watching an accepted prompt when an opportunistic history probe fails', async () => {
     const getHistory = vi.fn()
       .mockRejectedValueOnce(new ComfyError(

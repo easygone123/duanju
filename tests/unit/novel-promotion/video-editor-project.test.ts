@@ -68,7 +68,6 @@ describe('createProjectFromPanels', () => {
         speaker: 'B',
         content: 'second dialogue',
         audioUrl: '/m/dialogue-2',
-        lineType: 'dialogue',
         matchedPanelId: 'panel-2',
       },
       {
@@ -76,17 +75,7 @@ describe('createProjectFromPanels', () => {
         speaker: 'A',
         content: 'first dialogue',
         audioUrl: '/m/dialogue-1',
-        lineType: 'dialogue',
         matchedPanelId: 'panel-1',
-      },
-      {
-        id: 'voice-panel-2-narration',
-        speaker: 'Narrator',
-        content: 'second narration',
-        audioUrl: '/m/narration-2',
-        lineType: 'narration',
-        matchedStoryboardId: 'storyboard-1',
-        matchedPanelIndex: 1,
       },
     ])
 
@@ -104,11 +93,11 @@ describe('createProjectFromPanels', () => {
       src: '/m/video-2',
       durationInFrames: 135,
       attachment: {
-        audio: { src: '/m/narration-2', voiceLineId: 'voice-panel-2-narration' },
-        subtitle: { text: 'second dialogue\nsecond narration' },
+        subtitle: { text: 'second dialogue' },
       },
       metadata: { panelId: 'panel-2' },
     })
+    expect(project.timeline[1].attachment?.audio).toBeUndefined()
   })
 
   it('refreshes expired saved media URLs without losing edit decisions', () => {

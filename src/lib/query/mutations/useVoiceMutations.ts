@@ -12,9 +12,6 @@ import { invalidateEpisodeStageQueries } from '../episode-stage-cache'
 type ProjectVoiceLine = {
     id: string
     lineIndex: number
-    lineType: 'dialogue' | 'narration'
-    enabled: boolean
-    sourceKey: string | null
     speaker: string
     content: string
     emotionPrompt: string | null

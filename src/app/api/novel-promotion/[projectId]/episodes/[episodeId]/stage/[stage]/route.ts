@@ -50,12 +50,6 @@ const storyboardPanelSelect = {
   imageUrl: true,
   videoPrompt: true,
   hasDialogue: true,
-  narrationMode: true,
-  narrationRecommended: true,
-  narrationSuggestedText: true,
-  narrationSuggestedEmotion: true,
-  narrationText: true,
-  narrationEmotion: true,
   imageMediaId: true,
   candidateImages: true,
   sketchImageUrl: true,
@@ -104,10 +98,6 @@ const videoPanelSelect = {
   dialogueText: true,
   dialogueEmotion: true,
   includeDialogueInVideoPrompt: true,
-  matchedVoiceLines: {
-    where: { lineType: 'narration' },
-    select: { lineType: true, enabled: true },
-  },
   estimatedDuration: true,
   durationOverride: true,
   gridCellIndex: true,
@@ -241,7 +231,7 @@ async function loadConfigArtifactCounts(episodeId: string): Promise<ConfigArtifa
     prisma.novelPromotionPanel.count({
       where: { storyboard: { episodeId }, videoUrl: { not: null }, NOT: { videoUrl: '' } },
     }),
-    prisma.novelPromotionVoiceLine.count({ where: { episodeId, enabled: true } }),
+    prisma.novelPromotionVoiceLine.count({ where: { episodeId } }),
   ])
   return { scriptCount, storyboardCount, panelCount, videoCount, voiceCount }
 }

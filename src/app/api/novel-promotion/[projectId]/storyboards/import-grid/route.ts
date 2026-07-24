@@ -3,8 +3,7 @@ import { z } from 'zod'
 
 import { isErrorResponse, requireProjectAuthLight } from '@/lib/api-auth'
 import { ApiError, apiHandler } from '@/lib/api-errors'
-import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
-import { writeDialogueVoiceLine } from '@/lib/novel-promotion/narration/sync'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/voice-lines/orphaning'
 import { prisma } from '@/lib/prisma'
 
 const panelSchema = z.object({
@@ -209,17 +208,27 @@ export const POST = apiHandler(async (
         dialogueLineIndex += 1
         const persistedPanel = storyboard.panels[panelIndex]
         if (!persistedPanel) throw new ApiError('INTERNAL_ERROR')
-        await writeDialogueVoiceLine({
-          tx,
-          episodeId: episode.id,
-          lineIndex: dialogueLineIndex,
-          incomingDialogueIndexes,
+        const voiceLineData = {
           speaker: panel.dialogueSpeaker || (body.title ? body.title : '角色'),
           content: panel.dialogueText,
           emotionStrength: 0.6,
           matchedPanelId: persistedPanel.id,
           matchedStoryboardId: storyboard.id,
           matchedPanelIndex: panelIndex,
+        }
+        await tx.novelPromotionVoiceLine.upsert({
+          where: {
+            episodeId_lineIndex: {
+              episodeId: episode.id,
+              lineIndex: dialogueLineIndex,
+            },
+          },
+          create: {
+            episodeId: episode.id,
+            lineIndex: dialogueLineIndex,
+            ...voiceLineData,
+          },
+          update: voiceLineData,
         })
       }
       timelineSeconds += clipDuration
@@ -228,7 +237,6 @@ export const POST = apiHandler(async (
     await tx.novelPromotionVoiceLine.deleteMany({
       where: {
         episodeId: episode.id,
-        lineType: 'dialogue',
         ...(incomingDialogueIndexes.length > 0
           ? { lineIndex: { notIn: incomingDialogueIndexes } }
           : {}),

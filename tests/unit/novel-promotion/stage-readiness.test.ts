@@ -79,15 +79,9 @@ describe('stage readiness', () => {
     })
   })
 
-  it('does not treat disabled narration as a voice artifact', () => {
+  it('treats any persisted voice line as a voice artifact', () => {
     expect(resolveEpisodeStageArtifacts({
-      voiceLines: [{ id: 'narration-1', enabled: false }],
-    })).toMatchObject({ hasVoice: false })
-    expect(resolveEpisodeStageArtifacts({
-      voiceLines: [
-        { id: 'narration-1', enabled: false },
-        { id: 'dialogue-1', enabled: true },
-      ],
+      voiceLines: [{ id: 'dialogue-1' }],
     })).toMatchObject({ hasVoice: true })
   })
 })

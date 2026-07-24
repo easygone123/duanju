@@ -22,7 +22,7 @@
 - 🎬 **AI Script Analysis** — Parse novels, extract characters, scenes & plot automatically
 - 🎨 **Character & Scene Generation** — Consistent AI-generated character and scene images
 - 📽️ **Storyboard Video** — Auto-generate shots and compose into complete videos
-- 🎙️ **AI Voiceover** — Multi-character voice synthesis
+- 🎙️ **AI Dubbing** — Multi-character voice synthesis
 - 🌐 **Bilingual UI** — Chinese / English, switch in the top-right corner
 
 ---

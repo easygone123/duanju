@@ -186,7 +186,7 @@
     },
     "autoCut": {
       "title": "Tell ChatCut how to edit",
-      "description": "AI reads the story, all shots, dialogue or narration, and durations, then applies an edit plan directly to the timeline.",
+      "description": "AI reads the story, all shots, dialogue, and durations, then applies an edit plan directly to the timeline.",
       "placeholder": "Example: preserve story order and all dialogue, keep the opening brisk, pause on punchlines, and use subtle scene transitions. Leave blank for automatic decisions.",
       "start": "Auto Edit Now",
       "running": "Analyzing and editing…",
@@ -226,7 +226,10 @@
       "videoTrack": "Video",
       "emptyHint": "Drag video clips from media library to here",
       "audioTrack": "Voice",
-      "audioBadge": "A"
+      "audioBadge": "A",
+      "originalAudio": "Source audio",
+      "bgmAudio": "Background audio",
+      "noBgm": "No background audio"
     },
     "transition": {
       "title": "Transition",

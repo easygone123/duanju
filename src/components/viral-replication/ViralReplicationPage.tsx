@@ -92,7 +92,7 @@ export default function ViralReplicationPage({
     router.replace({
       pathname: `/workspace/${projectId}`,
       query: {
-        stage: 'storyboard',
+        stage: 'script',
         ...(resolvedEpisodeId ? { episode: resolvedEpisodeId } : {}),
       },
     })

@@ -8,12 +8,11 @@ import {
 const panel = { id: 'panel-1', storyboardId: 'storyboard-1', panelIndex: 2 }
 
 describe('lip-sync voice-line matching', () => {
-  it('supports current panel ids and only the legacy dialogue storyboard/index fallback', () => {
+  it('supports current panel ids and the legacy storyboard/index fallback', () => {
     expect(buildLipSyncVoiceLinePanelMatch(panel)).toEqual({
       OR: [
         { matchedPanelId: 'panel-1' },
         {
-          lineType: 'dialogue',
           matchedPanelId: null,
           matchedStoryboardId: 'storyboard-1',
           matchedPanelIndex: 2,
@@ -31,7 +30,6 @@ describe('lip-sync voice-line matching', () => {
       episodeId: 'episode-1',
     })).toEqual(expect.objectContaining({
       id: 'line-1',
-      enabled: true,
       episodeId: 'episode-1',
       episode: {
         storyboards: { some: { id: 'storyboard-1' } },
@@ -49,7 +47,6 @@ describe('lip-sync voice-line matching', () => {
       panel,
       projectId: 'project-1',
       userId: 'user-1',
-      lineType: 'narration',
       audioUrl: 'cos/line-1.mp3',
     })).toEqual({
       storyboard: {
@@ -61,13 +58,10 @@ describe('lip-sync voice-line matching', () => {
           voiceLines: {
             some: {
               id: 'line-1',
-              enabled: true,
-              lineType: 'narration',
               audioUrl: 'cos/line-1.mp3',
               OR: [
                 { matchedPanelId: 'panel-1' },
                 {
-                  lineType: 'dialogue',
                   matchedPanelId: null,
                   matchedStoryboardId: 'storyboard-1',
                   matchedPanelIndex: 2,

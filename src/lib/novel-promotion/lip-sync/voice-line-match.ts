@@ -9,7 +9,6 @@ export function buildLipSyncVoiceLinePanelMatch(panel: LipSyncPanelIdentity) {
     OR: [
       { matchedPanelId: panel.id },
       {
-        lineType: 'dialogue',
         matchedPanelId: null,
         matchedStoryboardId: panel.storyboardId,
         matchedPanelIndex: panel.panelIndex,
@@ -27,7 +26,6 @@ export function buildOwnedLipSyncVoiceLineWhere(input: {
 }) {
   return {
     id: input.voiceLineId,
-    enabled: true,
     ...(input.episodeId ? { episodeId: input.episodeId } : {}),
     ...buildLipSyncVoiceLinePanelMatch(input.panel),
     episode: {
@@ -45,7 +43,6 @@ export function buildLipSyncPanelPublishVoiceLineWhere(input: {
   panel: LipSyncPanelIdentity
   projectId: string
   userId: string
-  lineType: string
   audioUrl: string
 }) {
   return {
@@ -58,8 +55,6 @@ export function buildLipSyncPanelPublishVoiceLineWhere(input: {
         voiceLines: {
           some: {
             id: input.voiceLineId,
-            enabled: true,
-            lineType: input.lineType,
             audioUrl: input.audioUrl,
             ...buildLipSyncVoiceLinePanelMatch(input.panel),
           },

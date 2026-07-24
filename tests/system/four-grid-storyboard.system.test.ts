@@ -7,9 +7,7 @@ import { computeGridPixelRects } from '@/lib/novel-promotion/grid-storyboard/cro
 import { persistGridStoryboardOutputs } from '@/lib/novel-promotion/grid-storyboard/persistence'
 import { validateGridEpisodePlan } from '@/lib/novel-promotion/grid-storyboard/scene-planner'
 import { resolveStoryboardGridSpec } from '@/lib/novel-promotion/grid-storyboard/spec'
-import { narrationSourceKey } from '@/lib/novel-promotion/narration/sync'
 import { validateAndNormalizeGridUpload } from '@/lib/novel-promotion/six-grid/upload-validation'
-import { commitSixGridCropBatch } from '@/lib/workers/handlers/storyboard-crop-task-handler'
 import {
   buildFrameLinkResolutionIndex,
   type FrameLinkStoryboard,
@@ -108,9 +106,6 @@ vi.mock('@/lib/ai-runtime/client', () => ({
         duration: 2 + index,
         shot_type: '中景',
         camera_move: '固定',
-        narration_recommended: index === 0,
-        narration_text: index === 0 ? 'Years later, Ming returned.' : null,
-        narration_emotion: index === 0 ? 'reflective' : null,
       })),
     }),
     reasoning: '',
@@ -527,227 +522,11 @@ describe('system - four-grid persisted generation chain', () => {
     })
     expect(result.panels.map((panel) => panel.gridCellIndex)).toEqual([0, 1, 2, 3])
     expect(result.panels.every((panel) => panel.imageMediaId === panel.croppedImageMediaId)).toBe(true)
-    expect(result.panels[0]).toMatchObject({
-      narrationRecommended: true,
-      narrationSuggestedText: 'Years later, Ming returned.',
-      narrationSuggestedEmotion: 'reflective',
-    })
-    expect(result.panels.slice(1).every((panel) => (
-      !panel.narrationRecommended
-      && panel.narrationSuggestedText === null
-      && panel.narrationSuggestedEmotion === null
-    ))).toBe(true)
-    expect(await prisma.novelPromotionVoiceLine.findUnique({
-      where: { sourceKey: narrationSourceKey(result.panels[0]!.id) },
-    })).toMatchObject({
-      enabled: true,
-      speaker: 'Narrator',
-      content: 'Years later, Ming returned.',
-      emotionPrompt: 'reflective',
-      matchedPanelId: result.panels[0]!.id,
-      matchedStoryboardId: storyboardId,
-      matchedPanelIndex: 0,
-    })
     const panelMediaIds = result.panels.map((panel) => panel.imageMediaId).filter((id): id is string => !!id)
     expect(panelMediaIds).toHaveLength(4)
     expect(await prisma.mediaObject.count({ where: { id: { in: panelMediaIds } } })).toBe(4)
   })
 
-  it('rolls back crop and narration changes when a later panel has an invalid narration mode', async () => {
-    const user = await createFixtureUser()
-    const project = await createFixtureProject(user.id)
-    const novelProject = await createFixtureNovelProject(project.id)
-    const episode = await createFixtureEpisode(novelProject.id)
-    const source = await prisma.mediaObject.create({
-      data: {
-        publicId: `four-grid-source-${fourGridRuntime.sequence++}`,
-        storageKey: 'four-grid-system/rollback-source.png',
-        sha256: 'rollback-source-sha',
-        mimeType: 'image/png',
-        sizeBytes: BigInt(1),
-      },
-    })
-    const storyboard = await prisma.novelPromotionStoryboard.create({
-      data: {
-        episodeId: episode.id,
-        layoutMode: 'four_grid',
-        panelCount: 4,
-        sheetArtifactVersion: 1,
-        sheetImageMediaId: source.id,
-        panels: {
-          create: Array.from({ length: 4 }, (_, panelIndex) => ({
-            panelIndex,
-            panelNumber: panelIndex + 1,
-            gridCellIndex: panelIndex,
-            narrationMode: panelIndex === 1 ? 'invalid' : 'auto',
-          })),
-        },
-      },
-      include: { panels: { orderBy: { gridCellIndex: 'asc' } } },
-    })
-    const cropMedia = await Promise.all(Array.from({ length: 4 }, (_, index) => prisma.mediaObject.create({
-      data: {
-        publicId: `four-grid-rollback-crop-${index}-${fourGridRuntime.sequence++}`,
-        storageKey: `four-grid-system/rollback-crop-${index}.png`,
-        sha256: `rollback-crop-sha-${index}`,
-        mimeType: 'image/png',
-        sizeBytes: BigInt(1),
-      },
-    })))
-
-    await expect(commitSixGridCropBatch({
-      storyboardId: storyboard.id,
-      sourceMediaId: source.id,
-      expectedSheetArtifactVersion: 1,
-      processingOrder: 'crop_then_panel_upscale',
-      taskLineage: 'four-grid-rollback-lineage',
-      gridSpec: FOUR_GRID_SPEC,
-      userId: user.id,
-      projectId: project.id,
-      episodeId: episode.id,
-      locale: 'en',
-      artifacts: cropMedia.map((media, cellIndex) => ({
-        cellIndex,
-        mediaId: media.id,
-        url: `/m/${media.publicId}`,
-        normalizedCropRect: {
-          x: (cellIndex % 2) / 2,
-          y: Math.floor(cellIndex / 2) / 2,
-          width: 0.5,
-          height: 0.5,
-        },
-        lineage: { sourceMediaId: source.id, artifactVersion: 1 },
-      })),
-      panelAnalysis: Array.from({ length: 4 }, (_, index) => ({
-        panel_number: index + 1,
-        description: `grounded ${index + 1}`,
-        image_prompt: `image ${index + 1}`,
-        video_prompt: `video ${index + 1}`,
-        duration: 2,
-        shot_type: '中景',
-        camera_move: '固定',
-        narration_recommended: true,
-        narration_text: `Narration ${index + 1}`,
-        narration_emotion: 'calm',
-      })),
-    })).rejects.toThrow('PANEL_NARRATION_MODE_INVALID')
-
-    const panels = await prisma.novelPromotionPanel.findMany({
-      where: { storyboardId: storyboard.id },
-      orderBy: { gridCellIndex: 'asc' },
-    })
-    expect(panels.every((panel) => (
-      panel.imageMediaId === null
-      && panel.croppedImageMediaId === null
-      && panel.narrationSuggestedText === null
-      && !panel.narrationRecommended
-    ))).toBe(true)
-    expect(await prisma.novelPromotionVoiceLine.count({
-      where: { matchedStoryboardId: storyboard.id, lineType: 'narration' },
-    })).toBe(0)
-  })
-
-  it('rolls back crop and suggestion changes when the narration voice write exceeds the line-index range', async () => {
-    const user = await createFixtureUser()
-    const project = await createFixtureProject(user.id)
-    const novelProject = await createFixtureNovelProject(project.id)
-    const episode = await createFixtureEpisode(novelProject.id)
-    const source = await prisma.mediaObject.create({
-      data: {
-        publicId: `four-grid-voice-failure-source-${fourGridRuntime.sequence++}`,
-        storageKey: 'four-grid-system/voice-failure-source.png',
-        sha256: 'voice-failure-source-sha',
-        mimeType: 'image/png',
-        sizeBytes: BigInt(1),
-      },
-    })
-    const storyboard = await prisma.novelPromotionStoryboard.create({
-      data: {
-        episodeId: episode.id,
-        layoutMode: 'four_grid',
-        panelCount: 4,
-        sheetArtifactVersion: 1,
-        sheetImageMediaId: source.id,
-        panels: {
-          create: Array.from({ length: 4 }, (_, panelIndex) => ({
-            panelIndex,
-            panelNumber: panelIndex + 1,
-            gridCellIndex: panelIndex,
-            narrationMode: 'auto',
-          })),
-        },
-      },
-    })
-    await prisma.novelPromotionVoiceLine.create({
-      data: {
-        episodeId: episode.id,
-        lineIndex: 2_147_483_647,
-        lineType: 'dialogue',
-        speaker: 'Existing speaker',
-        content: 'Reserves the highest supported line index.',
-      },
-    })
-    const cropMedia = await Promise.all(Array.from({ length: 4 }, (_, index) => prisma.mediaObject.create({
-      data: {
-        publicId: `four-grid-voice-failure-crop-${index}-${fourGridRuntime.sequence++}`,
-        storageKey: `four-grid-system/voice-failure-crop-${index}.png`,
-        sha256: `voice-failure-crop-sha-${index}`,
-        mimeType: 'image/png',
-        sizeBytes: BigInt(1),
-      },
-    })))
-
-    await expect(commitSixGridCropBatch({
-      storyboardId: storyboard.id,
-      sourceMediaId: source.id,
-      expectedSheetArtifactVersion: 1,
-      processingOrder: 'crop_then_panel_upscale',
-      taskLineage: 'four-grid-voice-failure-lineage',
-      gridSpec: FOUR_GRID_SPEC,
-      userId: user.id,
-      projectId: project.id,
-      episodeId: episode.id,
-      locale: 'en',
-      artifacts: cropMedia.map((media, cellIndex) => ({
-        cellIndex,
-        mediaId: media.id,
-        url: `/m/${media.publicId}`,
-        normalizedCropRect: {
-          x: (cellIndex % 2) / 2,
-          y: Math.floor(cellIndex / 2) / 2,
-          width: 0.5,
-          height: 0.5,
-        },
-        lineage: { sourceMediaId: source.id, artifactVersion: 1 },
-      })),
-      panelAnalysis: Array.from({ length: 4 }, (_, index) => ({
-        panel_number: index + 1,
-        description: `grounded ${index + 1}`,
-        image_prompt: `image ${index + 1}`,
-        video_prompt: `video ${index + 1}`,
-        duration: 2,
-        shot_type: '中景',
-        camera_move: '固定',
-        narration_recommended: index === 0,
-        narration_text: index === 0 ? 'Narration that must fail to persist.' : null,
-        narration_emotion: index === 0 ? 'calm' : null,
-      })),
-    })).rejects.toThrow()
-
-    const panels = await prisma.novelPromotionPanel.findMany({
-      where: { storyboardId: storyboard.id },
-      orderBy: { gridCellIndex: 'asc' },
-    })
-    expect(panels.every((panel) => (
-      panel.imageMediaId === null
-      && panel.croppedImageMediaId === null
-      && panel.narrationSuggestedText === null
-      && !panel.narrationRecommended
-    ))).toBe(true)
-    expect(await prisma.novelPromotionVoiceLine.count({
-      where: { matchedStoryboardId: storyboard.id, lineType: 'narration' },
-    })).toBe(0)
-  })
 })
 
 function sceneGroup(clipId: string) {

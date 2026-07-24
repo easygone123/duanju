@@ -16,7 +16,6 @@ export const PANEL_DURATION_FORMULA = Object.freeze({
 
 export type PanelDurationInput = {
   dialogueText?: string | null
-  narrationText?: string | null
   sourceText?: string | null
   description?: string | null
   videoPrompt?: string | null
@@ -72,7 +71,7 @@ export function estimatePanelDuration(input: PanelDurationInput): PanelDuration 
     + (cameraComplexity + inferredCameraComplexity) * PANEL_DURATION_FORMULA.cameraSecondsPerPoint
     + shotHoldSeconds
 
-  const explicitSpeech = joinText(input.dialogueText, input.narrationText)
+  const explicitSpeech = joinText(input.dialogueText)
   const speechText = explicitSpeech || extractSpeechFromSource(input.sourceText)
   const speechSeconds = estimateSpeechSeconds(speechText, input.charactersPerSecond)
   const performanceTail = speechSeconds > 0
@@ -86,7 +85,7 @@ export function estimatePanelDuration(input: PanelDurationInput): PanelDuration 
 /** Normalizes every storyboard persistence path through the same duration rules. */
 export function estimateStoryboardPanelDuration(
   panel: StoryboardPanelLike,
-  options: Pick<PanelDurationInput, 'dialogueText' | 'narrationText' | 'durationOverride'> = {},
+  options: Pick<PanelDurationInput, 'dialogueText' | 'durationOverride'> = {},
 ): PanelDuration {
   const nestedDialogue = isRecord(panel.dialogue) ? panel.dialogue : null
   return estimatePanelDuration({
@@ -95,9 +94,6 @@ export function estimateStoryboardPanelDuration(
       ?? readText(panel.dialogue_text)
       ?? readText(nestedDialogue?.text)
       ?? readText(nestedDialogue?.line),
-    narrationText: options.narrationText
-      ?? readText(panel.narrationText)
-      ?? readText(panel.narration_text),
     sourceText: readText(panel.source_text) ?? readText(panel.sourceText) ?? readText(panel.srtSegment),
     description: readText(panel.description) ?? readText(panel.action),
     videoPrompt: readText(panel.video_prompt) ?? readText(panel.videoPrompt),

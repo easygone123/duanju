@@ -186,7 +186,7 @@
     },
     "autoCut": {
       "title": "告诉 ChatCut 你想怎么剪",
-      "description": "AI 会读取本集剧情、全部分镜、对白/旁白和时长，生成方案并直接应用到时间线。",
+      "description": "AI 会读取本集剧情、全部分镜、对白和时长，生成方案并直接应用到时间线。",
       "placeholder": "例如：保持剧情顺序，保留全部对白，前半段节奏轻快，包袱处停顿 0.5 秒，场景切换自然。留空则由 AI 自动判断。",
       "start": "一键自动剪辑",
       "running": "正在分析并剪辑…",
@@ -226,7 +226,10 @@
       "videoTrack": "视频",
       "emptyHint": "从素材库拖拽视频片段到这里",
       "audioTrack": "配音",
-      "audioBadge": "配"
+      "audioBadge": "配",
+      "originalAudio": "爆款原音频",
+      "bgmAudio": "背景音频",
+      "noBgm": "暂无背景音频"
     },
     "transition": {
       "title": "转场效果",

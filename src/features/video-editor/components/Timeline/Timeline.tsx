@@ -18,11 +18,12 @@ import {
     useSortable
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { VideoClip, TimelineState, EditorConfig } from '../../types/editor.types'
+import { BgmClip, VideoClip, TimelineState, EditorConfig } from '../../types/editor.types'
 import { framesToTime } from '../../utils/time-utils'
 
 interface TimelineProps {
     clips: VideoClip[]
+    bgmTrack: BgmClip[]
     timelineState: TimelineState
     config: EditorConfig
     onReorder: (fromIndex: number, toIndex: number) => void
@@ -37,6 +38,7 @@ interface TimelineProps {
  */
 export const Timeline: React.FC<TimelineProps> = ({
     clips,
+    bgmTrack,
     timelineState,
     config,
     onReorder,
@@ -259,7 +261,7 @@ export const Timeline: React.FC<TimelineProps> = ({
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
-                height: '40px',
+                minHeight: '48px',
                 background: 'var(--glass-bg-surface-strong)',
                 border: '1px solid var(--glass-stroke-base)',
                 borderRadius: '6px',
@@ -273,6 +275,46 @@ export const Timeline: React.FC<TimelineProps> = ({
                 }}>
                     BGM
                 </span>
+                <div style={{ display: 'flex', gap: '8px', flex: 1, overflowX: 'auto', padding: '4px 0' }}>
+                    {bgmTrack.map((track) => {
+                        const isOriginalAudio = track.id === 'source-original-audio'
+                        const label = isOriginalAudio
+                            ? t('editor.timeline.originalAudio')
+                            : t('editor.timeline.bgmAudio')
+                        return (
+                            <div
+                                key={track.id}
+                                style={{
+                                    width: `${Math.max(220, track.durationInFrames * timelineState.zoom * 2)}px`,
+                                    flexShrink: 0,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    background: 'var(--glass-tone-info-bg)',
+                                    color: 'var(--glass-tone-info-fg)',
+                                }}
+                            >
+                                <span style={{ fontSize: '11px', whiteSpace: 'nowrap' }}>
+                                    {label}
+                                </span>
+                                <audio
+                                    controls
+                                    preload="metadata"
+                                    src={track.src}
+                                    aria-label={label}
+                                    style={{ height: '28px', width: '240px', maxWidth: 'calc(100% - 90px)' }}
+                                />
+                            </div>
+                        )
+                    })}
+                    {bgmTrack.length === 0 ? (
+                        <span style={{ fontSize: '12px', color: 'var(--glass-text-tertiary)' }}>
+                            {t('editor.timeline.noBgm')}
+                        </span>
+                    ) : null}
+                </div>
             </div>
         </div>
     )

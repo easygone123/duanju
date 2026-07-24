@@ -83,29 +83,9 @@ describe('worker voice-analyze behavior', () => {
     txState.createdRows = []
     txState.deletedWhereClauses = []
     txState.voiceRows = [{
-      id: 'narration-existing',
-      episodeId: 'episode-1',
-      lineIndex: 1,
-      lineType: 'narration',
-      enabled: true,
-      sourceKey: 'panel-narration:panel-1',
-      speaker: '旁白',
-      content: '保留的旁白',
-      emotionPrompt: '沉静',
-      matchedPanelId: 'panel-1',
-      matchedStoryboardId: 'storyboard-1',
-      matchedPanelIndex: 0,
-      voicePresetId: 'preset-1',
-      audioUrl: '/media/narration.wav',
-      audioMediaId: 'media-1',
-      audioDuration: 2400,
-    }, {
       id: 'stale-dialogue',
       episodeId: 'episode-1',
       lineIndex: 99,
-      lineType: 'dialogue',
-      enabled: true,
-      sourceKey: null,
       speaker: 'Stale',
       content: 'remove me',
     }]
@@ -143,8 +123,8 @@ describe('worker voice-analyze behavior', () => {
       },
       {
         lineIndex: 2,
-        speaker: 'Narrator',
-        content: '第二句旁白',
+        speaker: 'Supporting',
+        content: '第二句台词',
         emotionStrength: 0.5,
       },
     ])
@@ -152,12 +132,33 @@ describe('worker voice-analyze behavior', () => {
     prismaMock.$transaction.mockImplementation(async (fn: (tx: Record<string, unknown>) => Promise<unknown>) => {
       const tx = {
         novelPromotionVoiceLine: {
+          upsert: async ({
+            where,
+            create,
+            update,
+          }: {
+            where: { episodeId_lineIndex: { episodeId: string; lineIndex: number } }
+            create: Record<string, unknown>
+            update: Record<string, unknown>
+          }) => {
+            const key = where.episodeId_lineIndex
+            const existing = txState.voiceRows.find((row) => (
+              row.episodeId === key.episodeId && row.lineIndex === key.lineIndex
+            ))
+            if (existing) {
+              Object.assign(existing, update)
+              return existing
+            }
+            txState.createdRows.push(create)
+            const created = { id: `line-${txState.createdRows.length}`, ...create }
+            txState.voiceRows.push(created)
+            return created
+          },
           findMany: async ({ where }: {
-            where: { episodeId: string; lineType: string; lineIndex: { in: number[] } }
+            where: { episodeId: string; lineIndex: { in: number[] } }
           }) => txState.voiceRows
             .filter((row) => (
               row.episodeId === where.episodeId
-              && row.lineType === where.lineType
               && where.lineIndex.in.includes(row.lineIndex as number)
             ))
             .sort((left, right) => (
@@ -167,13 +168,9 @@ describe('worker voice-analyze behavior', () => {
             .map((row) => ({ id: row.id as string, lineIndex: row.lineIndex as number })),
           findUnique: async ({ where }: {
             where: {
-              sourceKey?: string
               episodeId_lineIndex?: { episodeId: string; lineIndex: number }
             }
           }) => {
-            if (where.sourceKey) {
-              return txState.voiceRows.find((row) => row.sourceKey === where.sourceKey) || null
-            }
             const key = where.episodeId_lineIndex
             return key
               ? txState.voiceRows.find((row) => (
@@ -210,12 +207,10 @@ describe('worker voice-analyze behavior', () => {
             txState.deletedWhereClauses.push(args.where)
             const where = args.where as {
               episodeId: string
-              lineType?: string
               lineIndex?: { notIn: number[] }
             }
             const retained = txState.voiceRows.filter((row) => {
               const matches = row.episodeId === where.episodeId
-                && (!where.lineType || row.lineType === where.lineType)
                 && (!where.lineIndex || !where.lineIndex.notIn.includes(row.lineIndex as number))
               return !matches
             })
@@ -263,15 +258,13 @@ describe('worker voice-analyze behavior', () => {
       matchedCount: 1,
       speakerStats: {
         Hero: 1,
-        Narrator: 1,
+        Supporting: 1,
       },
     })
 
     expect(txState.createdRows[0]).toEqual(expect.objectContaining({
       episodeId: 'episode-1',
       lineIndex: 1,
-      lineType: 'dialogue',
-      enabled: true,
       speaker: 'Hero',
       content: '第一句台词',
       matchedPanelId: 'panel-1',
@@ -280,19 +273,9 @@ describe('worker voice-analyze behavior', () => {
     }))
     expect(txState.deletedWhereClauses[0]).toEqual({
       episodeId: 'episode-1',
-      lineType: 'dialogue',
       lineIndex: {
         notIn: [1, 2],
       },
-    })
-    expect(txState.voiceRows.find((row) => row.id === 'narration-existing')).toMatchObject({
-      lineIndex: 100,
-      lineType: 'narration',
-      sourceKey: 'panel-narration:panel-1',
-      voicePresetId: 'preset-1',
-      audioUrl: '/media/narration.wav',
-      audioMediaId: 'media-1',
-      audioDuration: 2400,
     })
     expect(txState.voiceRows.some((row) => row.id === 'stale-dialogue')).toBe(false)
   })
@@ -312,15 +295,8 @@ describe('worker voice-analyze behavior', () => {
     expect(txState.createdRows).toEqual([])
     expect(txState.deletedWhereClauses[0]).toEqual({
       episodeId: 'episode-1',
-      lineType: 'dialogue',
     })
-    expect(txState.voiceRows).toEqual([
-      expect.objectContaining({
-        id: 'narration-existing',
-        lineType: 'narration',
-        audioUrl: '/media/narration.wav',
-      }),
-    ])
+    expect(txState.voiceRows).toEqual([])
   })
 
   it('line references non-existent storyboard panel -> explicit error', async () => {

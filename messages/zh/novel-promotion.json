@@ -128,10 +128,6 @@
     "currentConfigSummary": "当前配置：{ratio} · {style}，后续生成都会使用此组合",
     "assetLibraryRatioNote": "资产库比例不受影响",
     "moreConfig": "更多配置请点击右上角「 配置」按钮",
-    "narration": {
-      "title": "启用旁白配音",
-      "description": "生成 TTS 语音旁白，为视频添加解说"
-    },
     "creating": "AI 创作中...",
     "ready": "✓ 配置完成，可以进入下一步",
     "pleaseInput": "请先输入剧本内容",

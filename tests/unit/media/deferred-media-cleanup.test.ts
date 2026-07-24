@@ -53,7 +53,7 @@ describe('deferred media cleanup', () => {
     const now = new Date('2026-07-20T00:00:00.000Z')
     prismaMock.mediaCleanupCandidate.upsert.mockImplementationOnce(async (args: {
       create: MediaCleanupCandidateRecord
-    }) => ({ id: 'candidate-1', ...args.create }))
+    }) => ({ ...args.create, id: 'candidate-1' }))
 
     await scheduleMediaCleanupCandidate({
       storageKey: '/voice/legacy-owned.wav',

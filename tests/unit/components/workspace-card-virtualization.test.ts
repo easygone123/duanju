@@ -124,9 +124,6 @@ function voiceLines(count: number): VoiceLine[] {
   return Array.from({ length: count }, (_, index) => ({
     id: `voice-${index}`,
     lineIndex: index,
-    lineType: 'dialogue',
-    enabled: true,
-    sourceKey: null,
     speaker: 'speaker',
     content: `line ${index}`,
     emotionPrompt: null,

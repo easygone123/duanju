@@ -9,8 +9,6 @@ interface UsePanelPlayerParams {
   videoUrl?: string
   lipSyncVideoUrl?: string
   showLipSyncVideo: boolean
-  hasDialogue?: boolean
-  narrationVoiceEnabled?: boolean
   onPreviewImage?: (imageUrl: string) => void
 }
 
@@ -20,8 +18,6 @@ export function usePanelPlayer({
   videoUrl,
   lipSyncVideoUrl,
   showLipSyncVideo,
-  hasDialogue,
-  narrationVoiceEnabled,
   onPreviewImage,
 }: UsePanelPlayerParams) {
   const isStageActive = useWorkspaceStageActivity()
@@ -35,8 +31,6 @@ export function usePanelPlayer({
     videoUrl,
     lipSyncVideoUrl,
     preferLipSync: showLipSyncVideo,
-    hasDialogue,
-    narrationVoiceEnabled,
   }).videoUrl || undefined
 
   const handlePreviewImage = useCallback((event?: MouseEvent) => {

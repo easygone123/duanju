@@ -44,13 +44,6 @@ function isStoryboardLike(value: unknown): value is StoryboardLike {
   return typeof value === 'object' && value !== null
 }
 
-function isEnabledVoiceArtifact(value: unknown) {
-  return typeof value !== 'object'
-    || value === null
-    || !('enabled' in value)
-    || value.enabled !== false
-}
-
 export function hasScriptArtifacts(clips: unknown[] | null | undefined) {
   if (!Array.isArray(clips) || clips.length === 0) return false
   return clips.some((clip) => isEpisodeClipLike(clip) && hasNonEmptyText(clip.screenplay))
@@ -77,6 +70,6 @@ export function resolveEpisodeStageArtifacts(episode: EpisodeLike | null | undef
     hasStoryboard: hasStoryboardArtifacts(episode?.storyboards),
     hasVideo: hasVideoArtifacts(episode?.storyboards),
     hasVoice: Array.isArray(episode?.voiceLines)
-      && episode.voiceLines.some(isEnabledVoiceArtifact),
+      && episode.voiceLines.length > 0,
   }
 }

@@ -99,8 +99,7 @@
         "locatePanelCta": "定位到镜头 {index}",
         "editLine": "编辑台词",
         "deleteLine": "删除台词",
-        "deleteAudio": "删除配音",
-        "narrationBadge": "旁白"
+        "deleteAudio": "删除配音"
     },
     "lineEditor": {
         "addTitle": "添加语音",
@@ -114,7 +113,6 @@
         "bindPanelLabel": "绑定镜头",
         "unboundPanel": "未绑定镜头",
         "panelLabel": "镜头 {index}",
-        "narrationIdentityHint": "旁白的发言人和绑定镜头由故事板管理；可在此编辑内容。",
         "saveAdd": "添加语音",
         "saveEdit": "保存修改"
     },
@@ -219,16 +217,14 @@
             "gentleFemale": "温柔女",
             "matureMale": "成熟男",
             "livelyFemale": "活泼女",
-            "intellectualFemale": "知性女",
-            "narrator": "旁白"
+            "intellectualFemale": "知性女"
         },
         "presetsPrompts": {
             "maleBroadcaster": "沉稳的中年男性播音员，音色低沉浑厚，语速平稳，吐字清晰",
             "gentleFemale": "温柔甜美的年轻女性，声音清脆悦耳，语调轻柔",
             "matureMale": "成熟稳重的男性，声音富有磁性和感染力",
             "livelyFemale": "活泼开朗的少女，声音甜美可爱，充满活力",
-            "intellectualFemale": "知性优雅的女性，声音清晰悦耳，语调平和",
-            "narrator": "富有感情的叙述者，声音温暖有故事感"
+            "intellectualFemale": "知性优雅的女性，声音清晰悦耳，语调平和"
         },
         "defaultPreviewText": "你好，很高兴认识你。这是AI为你专属设计的声音，让我来为你展示它的特点。无论是温柔的对话，还是激动的讲述，我都能完美呈现。希望你喜欢这个声音，让我们一起创造精彩的内容吧。",
         "pleaseSelectStyle": "请输入或选择声音风格",

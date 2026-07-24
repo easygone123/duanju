@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
 import { allowsIndividualStoryboardGroupCreation } from '@/lib/novel-promotion/grid-storyboard/spec'
-import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/voice-lines/orphaning'
 
 /**
  * POST /api/novel-promotion/[projectId]/storyboard-group

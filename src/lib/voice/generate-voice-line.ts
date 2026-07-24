@@ -36,12 +36,11 @@ type VoiceLineGenerationSnapshot = {
 }
 
 function isSameVoiceLineSnapshot(
-  current: VoiceLineGenerationSnapshot & { enabled: boolean } | null,
+  current: VoiceLineGenerationSnapshot | null,
   snapshot: VoiceLineGenerationSnapshot,
 ) {
   return current?.id === snapshot.id
     && current.episodeId === snapshot.episodeId
-    && current.enabled
     && current.speaker === snapshot.speaker
     && current.content === snapshot.content
     && current.emotionPrompt === snapshot.emotionPrompt
@@ -269,7 +268,6 @@ export async function generateVoiceLine(params: {
       content: true,
       emotionPrompt: true,
       emotionStrength: true,
-      enabled: true,
       audioUrl: true,
       audioMediaId: true,
       updatedAt: true,
@@ -278,10 +276,6 @@ export async function generateVoiceLine(params: {
   if (!line) {
     throw new Error('Voice line not found')
   }
-  if (!line.enabled) {
-    throw new Error('VOICE_LINE_DISABLED')
-  }
-
   const episodeId = params.episodeId || line.episodeId
   if (!episodeId) {
     throw new Error('episodeId is required')
@@ -387,7 +381,6 @@ export async function generateVoiceLine(params: {
     select: {
       id: true,
       episodeId: true,
-      enabled: true,
       speaker: true,
       content: true,
       emotionPrompt: true,
@@ -397,9 +390,6 @@ export async function generateVoiceLine(params: {
       updatedAt: true,
     },
   })
-  if (!currentLine?.enabled) {
-    throw new Error('VOICE_LINE_DISABLED')
-  }
   if (!isSameVoiceLineSnapshot(currentLine, generationSnapshot)) {
     throw new Error('VOICE_LINE_STALE')
   }
@@ -419,7 +409,6 @@ export async function generateVoiceLine(params: {
       where: {
         id: generationSnapshot.id,
         episodeId: generationSnapshot.episodeId,
-        enabled: true,
         speaker: generationSnapshot.speaker,
         content: generationSnapshot.content,
         emotionPrompt: generationSnapshot.emotionPrompt,

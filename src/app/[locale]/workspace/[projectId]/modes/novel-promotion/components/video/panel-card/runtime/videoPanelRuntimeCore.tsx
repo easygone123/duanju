@@ -104,8 +104,6 @@ export function useVideoPanelActions({
     videoUrl: visibleBaseVideoUrl,
     lipSyncVideoUrl: panel.lipSyncVideoUrl,
     showLipSyncVideo,
-    hasDialogue: panel.hasDialogue,
-    narrationVoiceEnabled: panel.narrationVoiceEnabled,
     onPreviewImage,
   })
 

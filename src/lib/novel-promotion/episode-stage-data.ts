@@ -34,12 +34,6 @@ type StoryboardPanelFields =
   | 'imageUrl'
   | 'videoPrompt'
   | 'hasDialogue'
-  | 'narrationMode'
-  | 'narrationRecommended'
-  | 'narrationSuggestedText'
-  | 'narrationSuggestedEmotion'
-  | 'narrationText'
-  | 'narrationEmotion'
   | 'candidateImages'
   | 'sketchImageUrl'
   | 'previousImageUrl'
@@ -103,10 +97,6 @@ export type VideoEpisodeStagePanel = Pick<NovelPromotionPanel, VideoPanelFields>
   dialogueText: string | null
   dialogueEmotion: string | null
   includeDialogueInVideoPrompt: boolean
-  matchedVoiceLines?: Array<{
-    lineType: string
-    enabled: boolean
-  }>
   updatedAt: string
 }
 

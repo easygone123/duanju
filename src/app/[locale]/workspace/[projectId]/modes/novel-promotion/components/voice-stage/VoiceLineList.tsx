@@ -41,7 +41,7 @@ export default function VoiceLineList({
   onSaveEmotionSettings,
   onAnalyze,
 }: VoiceLineListProps) {
-  const enabledVoiceLines = voiceLines.filter((line) => line.enabled !== false)
+  const enabledVoiceLines = voiceLines
 
   if (enabledVoiceLines.length === 0) {
     return <EmptyVoiceState onAnalyze={onAnalyze} analyzing={analyzing} />

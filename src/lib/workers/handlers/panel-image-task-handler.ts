@@ -48,6 +48,10 @@ function parseDescriptionList(raw: string | null | undefined): string[] {
   }
 }
 
+function isComfyStoredOutputKey(value: string): boolean {
+  return value.startsWith('comfyui/') && !value.includes('..') && !value.includes('\\')
+}
+
 function pickAppearanceDescription(appearance: {
   descriptions?: string | null
   description?: string | null
@@ -286,10 +290,17 @@ export async function handlePanelImageTask(job: Job<TaskJobData>) {
       },
       // 单个任务内会串行生成多候选，若允许按 task.externalId 续接会复用上一候选外部任务结果。
       allowTaskExternalIdResume: candidateCount === 1,
+      preferComfyStorageKey: isComfyModel,
       pollProgress: { start: 30, end: 90 },
     })
 
-    const cosKey = await uploadImageSourceToCos(source, 'panel-candidate', `${panel.id}-${i}`)
+    // ComfyUI outputs have already been downloaded and persisted by the dispatcher.
+    // Reuse that durable object key instead of fetching its signed URL and uploading
+    // the same image again. The redundant fetch can fail in container deployments
+    // whose public MinIO endpoint is not reachable from the worker.
+    const cosKey = isComfyModel && isComfyStoredOutputKey(source)
+      ? source
+      : await uploadImageSourceToCos(source, 'panel-candidate', `${panel.id}-${i}`)
     candidates.push(cosKey)
   }
 

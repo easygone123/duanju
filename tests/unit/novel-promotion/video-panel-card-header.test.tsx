@@ -27,7 +27,6 @@ afterEach(() => {
 
 function createHeaderRuntime(input: {
   hasDialogue: boolean
-  narrationVoiceEnabled?: boolean
   isPlaying?: boolean
 }) {
   const handlePlayClick = vi.fn(async () => undefined)
@@ -41,7 +40,6 @@ function createHeaderRuntime(input: {
       videoUrl: null,
       lipSyncVideoUrl: 'lip-only.mp4',
       hasDialogue: input.hasDialogue,
-      narrationVoiceEnabled: input.narrationVoiceEnabled,
     },
     panelIndex: 0,
     panelKey: 'storyboard-1-0',
@@ -108,29 +106,4 @@ describe('VideoPanelCardHeader playable media selection', () => {
     expect(container.querySelector('video')?.getAttribute('src')).toBe('lip-only.mp4')
   })
 
-  it('does not expose a disabled narration lip-only result as playable', () => {
-    const { runtime, handlePlayClick } = createHeaderRuntime({
-      hasDialogue: false,
-      narrationVoiceEnabled: false,
-      isPlaying: true,
-    })
-    const { container } = render(<VideoPanelCardHeader runtime={runtime} />)
-
-    expect(container.querySelector('video')).toBeNull()
-    fireEvent.click(screen.getByTestId('panel-thumbnail'))
-    expect(handlePlayClick).not.toHaveBeenCalled()
-  })
-
-  it('still plays the base video when narration is disabled and both variants exist', () => {
-    const { runtime } = createHeaderRuntime({
-      hasDialogue: false,
-      narrationVoiceEnabled: false,
-      isPlaying: true,
-    })
-    runtime.panel.videoUrl = 'base.mp4'
-    runtime.media.baseVideoUrl = 'base.mp4'
-    const { container } = render(<VideoPanelCardHeader runtime={runtime} />)
-
-    expect(container.querySelector('video')?.getAttribute('src')).toBe('base.mp4')
-  })
 })

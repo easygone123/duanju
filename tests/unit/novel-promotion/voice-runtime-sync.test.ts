@@ -29,9 +29,6 @@ function buildVoiceLine(overrides: Partial<VoiceLine>): VoiceLine {
   return {
     id: 'line-1',
     lineIndex: 1,
-    lineType: 'dialogue',
-    enabled: true,
-    sourceKey: null,
     speaker: '旁白',
     content: '测试台词',
     emotionPrompt: null,

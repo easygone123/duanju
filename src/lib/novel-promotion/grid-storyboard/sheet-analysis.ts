@@ -16,9 +16,6 @@ const analysisRowSchema = z.object({
   duration: z.number().finite().positive().max(120),
   shot_type: z.string().trim().min(1).max(200),
   camera_move: z.string().trim().min(1).max(500),
-  narration_recommended: z.boolean(),
-  narration_text: z.string().trim().min(1).max(MAX_PROMPT_LENGTH).nullable(),
-  narration_emotion: z.string().trim().min(1).max(200).nullable(),
 }).strict()
 
 export type FourGridSheetAnalysisRow = z.infer<typeof analysisRowSchema>
@@ -70,13 +67,7 @@ export function parseFourGridSheetAnalysis(
       || Array.from({ length: panelCount }, (_, index) => index + 1)
         .some((panelNumber) => !numbers.has(panelNumber))) invalid()
     const orderedRows = [...rows].sort((left, right) => left.panel_number - right.panel_number)
-    const orderedPanels = orderedPlannedPanels(panels)
-    orderedRows.forEach((row, index) => {
-      const hasNarrationText = Boolean(row.narration_text?.trim())
-      if (row.narration_recommended !== hasNarrationText) invalid()
-      if (orderedPanels[index].dialogueText?.trim() && row.narration_recommended) invalid()
-      if (!row.narration_recommended && row.narration_emotion !== null) invalid()
-    })
+    orderedPlannedPanels(panels)
     return orderedRows
   } catch (error) {
     if (error instanceof Error && error.message === 'FOUR_GRID_SHEET_ANALYSIS_INVALID') throw error
@@ -137,10 +128,8 @@ export function buildFourGridSheetAnalysisPrompt(input: {
     planned_duration: plannedDuration(panel),
   }))
   const language = input.locale === 'zh' ? 'Simplified Chinese' : 'English'
-  const exampleNarrationPanelIndex = orderedPanels.findIndex((panel) => !panel.dialogueText?.trim())
   const jsonExample = {
     panels: Array.from({ length: panelCount }, (_, index) => {
-      const demonstratesNarration = index === exampleNarrationPanelIndex
       const exampleDuration = plotPlan[index]?.planned_duration || 4
       return {
         panel_number: index + 1,
@@ -151,9 +140,6 @@ export function buildFourGridSheetAnalysisPrompt(input: {
         duration: exampleDuration,
         shot_type: '...',
         camera_move: '...',
-        narration_recommended: demonstratesNarration,
-        narration_text: demonstratesNarration ? 'Time passed before they reached the city.' : null,
-        narration_emotion: demonstratesNarration ? 'reflective' : null,
       }
     }),
   }
@@ -172,16 +158,10 @@ export function buildFourGridSheetAnalysisPrompt(input: {
     'Also produce first_last_frame_prompt: lock the opening composition to the visible cell, describe the intended final composition, and explain the natural three-stage transition between them.',
     'For every cell except the last one, inspect the following visible cell as the continuity target. When the plot remains in the same continuous scene, the current final composition must match the following cell opening state: identity, wardrobe, props, screen direction, character placement, gaze, pose, and unfinished action. Do not invent an unrelated ending pose.',
     'When the following cell is a deliberate scene or time change, finish on a clean cut-ready state instead of forcing an impossible physical morph between scenes.',
-    'Narration is allowed only on panels whose authoritative dialogue is empty after trimming; never add narration to a dialogue panel.',
-    'Set narration_recommended to true only for a time/location transition, inner thought, off-screen background information, or necessary causal context not clear from the image or action.',
-    'Evaluate every eligible dialogue-free panel independently against those criteria; never default all eligible panels to narration_recommended false.',
-    'Never use narration to restate visible action.',
-    'When narration_recommended is true, provide non-empty narration_text; otherwise set narration_text and narration_emotion to null.',
-    'Eligible-panel true branch semantics (not a numbered panel recommendation): {"narration_recommended":true,"narration_text":"Time passed before they reached the city.","narration_emotion":"reflective"}.',
-    'Independently decide the final duration for each panel from the visible cell and authoritative plot: natural dialogue length, narration length, sequential action complexity, camera movement, pauses, and reactions. Every duration must be a positive number of seconds.',
+    'Do not invent voiceover or narration that is absent from the authoritative plot plan.',
+    'Independently decide the final duration for each panel from the visible cell and authoritative plot: natural dialogue length, sequential action complexity, camera movement, pauses, and reactions. Every duration must be a positive number of seconds.',
     'planned_duration is context only. Keep it when it is already appropriate, but revise it whenever the image-grounded action or speaking time requires a different duration; the returned duration becomes authoritative.',
     'Never assign every panel a mechanical two seconds or one uniform duration. A spoken line and its reaction must finish before the panel ends.',
-    'Include narration speaking time in duration allocation.',
     'Choose a concise but complete positive duration for every cell; there is no fixed per-panel duration and no required total duration.',
     `Write all natural-language fields in ${language}.`,
     'Return JSON only in this exact shape:',

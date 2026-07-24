@@ -65,10 +65,6 @@ export interface Panel {
   lipSyncErrorCode?: string | null
   updatedAt?: string | Date
   hasDialogue?: boolean | null
-  matchedVoiceLines?: Array<{
-    lineType: string
-    enabled: boolean
-  }>
   dialogueSpeaker?: string | null
   dialogueText?: string | null
   dialogueEmotion?: string | null
@@ -129,7 +125,6 @@ export interface VideoPanel {
   lipSyncErrorCode?: string
   updatedAt?: string
   hasDialogue?: boolean
-  narrationVoiceEnabled?: boolean
   dialogueSpeaker?: string
   dialogueText?: string
   dialogueEmotion?: string
@@ -142,9 +137,6 @@ export interface VideoPanel {
 export interface MatchedVoiceLine {
   id: string
   lineIndex: number
-  lineType: 'dialogue' | 'narration'
-  enabled: boolean
-  sourceKey: string | null
   speaker: string
   content: string
   audioUrl?: string

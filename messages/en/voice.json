@@ -99,8 +99,7 @@
         "locatePanelCta": "Jump to Shot {index}",
         "editLine": "Edit line",
         "deleteLine": "Delete line",
-        "deleteAudio": "Delete audio",
-        "narrationBadge": "Narration"
+        "deleteAudio": "Delete audio"
     },
     "lineEditor": {
         "addTitle": "Add Voice Line",
@@ -114,7 +113,6 @@
         "bindPanelLabel": "Bind Shot",
         "unboundPanel": "Unbound",
         "panelLabel": "Shot {index}",
-        "narrationIdentityHint": "Narration speaker and shot binding are managed in the storyboard. You can edit its content here.",
         "saveAdd": "Add Voice",
         "saveEdit": "Save Changes"
     },
@@ -219,18 +217,16 @@
             "gentleFemale": "Gentle Female",
             "matureMale": "Mature Male",
             "livelyFemale": "Lively Girl",
-            "intellectualFemale": "Intellectual Female",
-            "narrator": "Narrator"
+            "intellectualFemale": "Intellectual Female"
         },
         "presetsPrompts": {
             "maleBroadcaster": "Middle-aged male broadcaster with steady, deep voice, clear pronunciation",
             "gentleFemale": "Gentle and sweet young woman with clear, melodious voice",
             "matureMale": "Mature male with charismatic and expressive voice",
             "livelyFemale": "Lively young girl with sweet, cute, energetic voice",
-            "intellectualFemale": "Elegant intellectual woman with clear, pleasant voice",
-            "narrator": "Emotional narrator with warm, storytelling voice"
+            "intellectualFemale": "Elegant intellectual woman with clear, pleasant voice"
         },
-        "defaultPreviewText": "Hello, nice to meet you. This is your AI-designed exclusive voice. Let me demonstrate its features for you. Whether it's a gentle conversation or an excited narration, I can deliver it perfectly. I hope you enjoy this voice, let's create amazing content together.",
+        "defaultPreviewText": "Hello, nice to meet you. This is your AI-designed exclusive voice. Let me demonstrate its features for you. Whether it's a gentle conversation or an excited delivery, I can present it naturally. I hope you enjoy this voice, let's create amazing content together.",
         "pleaseSelectStyle": "Please enter or select a voice style",
         "designVoiceFor": "Design AI Voice for \"{speaker}\"",
         "hasExistingVoice": "Has voice",

@@ -22,9 +22,7 @@ import {
   persistGridVoiceLines,
   validateGridVoiceLineRows,
 } from '@/lib/novel-promotion/six-grid/persistence-voice'
-import { syncPanelNarrationVoiceLine } from '@/lib/novel-promotion/narration/sync'
-import { parseNarrationMode } from '@/lib/novel-promotion/narration/state'
-import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/voice-lines/orphaning'
 import {
   resolveStoryboardGridSpec,
   type GridStoryboardMode,
@@ -233,27 +231,7 @@ export async function persistGridStoryboardOutputs(params: PersistGridParams) {
             srtSegment: true,
             characters: true,
             props: true,
-            narrationMode: true,
-            narrationRecommended: true,
-            narrationSuggestedText: true,
-            narrationSuggestedEmotion: true,
-            narrationText: true,
-            narrationEmotion: true,
           },
-        })
-        await syncPanelNarrationVoiceLine({
-          tx,
-          episodeId: params.episodeId,
-          panelId: persistedPanel.id,
-          storyboardId: storyboard.id,
-          panelIndex,
-          locale,
-          mode: parseNarrationMode(persistedPanel.narrationMode),
-          recommended: persistedPanel.narrationRecommended,
-          suggestedText: persistedPanel.narrationSuggestedText,
-          suggestedEmotion: persistedPanel.narrationSuggestedEmotion,
-          text: persistedPanel.narrationText,
-          emotion: persistedPanel.narrationEmotion,
         })
         for (const ref of [storyboard.id, group.groupId, group.groupKey]) {
           panelIdByStoryboardRef.set(`${ref}:${panelIndex}`, persistedPanel.id)

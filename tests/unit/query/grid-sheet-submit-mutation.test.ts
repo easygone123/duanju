@@ -113,7 +113,7 @@ describe('grid sheet submit mutation', () => {
     await options.onSuccess(response, variables, context)
 
     expect(errors).toEqual({ 'storyboard-2': 'keep this error' })
-    expect(invalidate.mock.calls.map(([filters]) => filters.queryKey)).toEqual([
+    expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
       sixGridStoryboardQueryKeys.group('project-1', 'episode-1', 'storyboard-1'),
       queryKeys.episodeStages('project-1', 'episode-1'),
       queryKeys.episodeData('project-1', 'episode-1'),

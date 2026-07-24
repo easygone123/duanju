@@ -8,7 +8,7 @@ import { submitTask } from '@/lib/task/submitter'
 import { resolveRequiredTaskLocale } from '@/lib/task/resolve-locale'
 import { TASK_TYPE } from '@/lib/task/types'
 import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
-import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/voice-lines/orphaning'
 
 function createPanelVariantId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {

@@ -34,7 +34,6 @@ export interface EditorVoiceLineData {
     speaker: string
     content: string
     audioUrl?: string | null
-    lineType?: 'dialogue' | 'narration'
     matchedPanelId?: string | null
     matchedStoryboardId?: string | null
     matchedPanelIndex?: number | null
@@ -71,7 +70,7 @@ export function createProjectFromPanels(
             .join('\n')
         const attachedVoice = matchedVoices.find((voiceLine) => (
             !!voiceLine.audioUrl
-            && (voiceLine.lineType === 'narration' || !panel.hasEmbeddedDialogueAudio)
+            && !panel.hasEmbeddedDialogueAudio
         ))
 
         return {

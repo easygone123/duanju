@@ -6,7 +6,6 @@ import { queryKeys } from '@/lib/query/keys'
 import { NovelPromotionStoryboard, NovelPromotionClip, NovelPromotionPanel } from '@/types/project'
 import { PanelEditData } from '../../PanelEditForm'
 import type { TaskPresentationState } from '@/lib/task/presentation'
-import type { PanelNarrationMode } from '@/lib/novel-promotion/narration/state'
 import {
   computeStoryboardStartIndex,
   computeTotalPanels,
@@ -37,12 +36,6 @@ export interface StoryboardPanel {
   upscaledImageUrl?: string | null
   gridCellIndex?: number | null
   hasDialogue?: boolean
-  narrationMode: PanelNarrationMode
-  narrationRecommended: boolean
-  narrationSuggestedText: string | null
-  narrationSuggestedEmotion: string | null
-  narrationText: string | null
-  narrationEmotion: string | null
   updatedAt: string | null
   photographyRules?: string | null  // 单镜头摄影规则JSON
   actingNotes?: string | null       // 演技指导数据JSON
@@ -195,12 +188,6 @@ export function useStoryboardState({
         upscaledImageUrl: p.upscaledImageUrl,
         gridCellIndex: p.gridCellIndex,
         hasDialogue: p.hasDialogue,
-        narrationMode: p.narrationMode ?? 'auto',
-        narrationRecommended: p.narrationRecommended ?? false,
-        narrationSuggestedText: p.narrationSuggestedText ?? null,
-        narrationSuggestedEmotion: p.narrationSuggestedEmotion ?? null,
-        narrationText: p.narrationText ?? null,
-        narrationEmotion: p.narrationEmotion ?? null,
         updatedAt,
         photographyRules: p.photographyRules,
         actingNotes: p.actingNotes,

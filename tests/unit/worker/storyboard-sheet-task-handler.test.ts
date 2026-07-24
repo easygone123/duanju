@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Job } from 'bullmq'
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
-import { narrationSourceKey } from '@/lib/novel-promotion/narration/sync'
 
 const prismaMock = vi.hoisted(() => ({
   novelPromotionStoryboard: { findFirst: vi.fn(), updateMany: vi.fn(async () => ({ count: 1 })) },
@@ -969,7 +968,7 @@ describe('six-grid crop atomic persistence', () => {
       version: 1 as const, mode: 'four_grid' as const, columns: 2 as const, rows: 2 as const,
       panelCount: 4 as const, cellAspectRatio: '16:9' as const, sheetAspectRatio: '16:9' as const,
     }
-    const fixture = createAtomicNarrationCropFixture()
+    const fixture = createAtomicCropFixture()
     const artifacts = Array.from({ length: 4 }, (_, cellIndex) => ({
       cellIndex,
       mediaId: `crop-${cellIndex}`,
@@ -987,9 +986,6 @@ describe('six-grid crop atomic persistence', () => {
       duration: index + 1.5,
       shot_type: '中景',
       camera_move: '固定',
-      narration_recommended: index === 0,
-      narration_text: index === 0 ? 'A year passed.' : null,
-      narration_emotion: index === 0 ? 'reflective' : null,
     }))
 
     await commitSixGridCropBatch({
@@ -999,8 +995,6 @@ describe('six-grid crop atomic persistence', () => {
       processingOrder: 'crop_then_panel_upscale',
       taskLineage: 'crop-task-lineage',
       gridSpec: fourGridSpec,
-      episodeId: 'episode-1',
-      locale: 'en',
       artifacts,
       panelAnalysis,
     }, { transaction: fixture.transaction as never })
@@ -1015,207 +1009,12 @@ describe('six-grid crop atomic persistence', () => {
         videoPrompt: 'video 1',
         duration: 1.5,
         estimatedDuration: 1.5,
-        narrationRecommended: true,
-        narrationSuggestedText: 'A year passed.',
-        narrationSuggestedEmotion: 'reflective',
       }),
     }))
     expect(fixture.update).toHaveBeenNthCalledWith(4, expect.objectContaining({
       where: { id: 'panel-3' },
       data: expect.objectContaining({ imageMediaId: 'crop-3', videoPrompt: 'video 4', duration: 4.5 }),
     }))
-    expect(fixture.state.voiceLines).toEqual([
-      expect.objectContaining({
-        sourceKey: narrationSourceKey('panel-0'),
-        enabled: true,
-        speaker: 'Narrator',
-        content: 'A year passed.',
-        emotionPrompt: 'reflective',
-      }),
-    ])
-  })
-
-  it('disables an existing automatic narration when analysis no longer recommends it without replacing its projection', async () => {
-    const fixture = createAtomicNarrationCropFixture({
-      voiceLines: [narrationVoice({
-        sourceKey: narrationSourceKey('panel-0'),
-        content: 'Earlier automatic narration',
-        emotionPrompt: 'calm',
-        audioUrl: '/m/narration.wav',
-      })],
-    })
-
-    await commitFourGridNarrationFixture(fixture, [analysisNarration(false), ...Array.from({ length: 3 }, () => analysisNarration(false))])
-
-    expect(fixture.state.panels[0]).toMatchObject({
-      narrationRecommended: false,
-      narrationSuggestedText: null,
-      narrationSuggestedEmotion: null,
-    })
-    expect(fixture.state.voiceLines[0]).toMatchObject({
-      enabled: false,
-      content: 'Earlier automatic narration',
-      emotionPrompt: 'calm',
-      audioUrl: '/m/narration.wav',
-    })
-  })
-
-  it('preserves manual narration fields and resolves on/off modes from the manual projection', async () => {
-    const fixture = createAtomicNarrationCropFixture({
-      panels: [
-        cropPanel({ id: 'panel-0', panelIndex: 0, gridCellIndex: 0, narrationMode: 'on', narrationText: 'Manual on', narrationEmotion: 'urgent' }),
-        cropPanel({ id: 'panel-1', panelIndex: 1, gridCellIndex: 1, narrationMode: 'off', narrationText: 'Manual off', narrationEmotion: 'solemn' }),
-        cropPanel({ id: 'panel-2', panelIndex: 2, gridCellIndex: 2 }),
-        cropPanel({ id: 'panel-3', panelIndex: 3, gridCellIndex: 3 }),
-      ],
-      voiceLines: [narrationVoice({
-        sourceKey: narrationSourceKey('panel-1'),
-        matchedPanelId: 'panel-1',
-        matchedPanelIndex: 1,
-        content: 'Existing disabled projection',
-        emotionPrompt: 'existing',
-      })],
-    })
-
-    await commitFourGridNarrationFixture(fixture, Array.from({ length: 4 }, () => analysisNarration(false)))
-
-    expect(fixture.state.panels[0]).toMatchObject({ narrationText: 'Manual on', narrationEmotion: 'urgent' })
-    expect(fixture.state.panels[1]).toMatchObject({ narrationText: 'Manual off', narrationEmotion: 'solemn' })
-    expect(fixture.state.voiceLines.find((line) => line.sourceKey === narrationSourceKey('panel-0'))).toMatchObject({
-      enabled: true,
-      content: 'Manual on',
-      emotionPrompt: 'urgent',
-    })
-    expect(fixture.state.voiceLines.find((line) => line.sourceKey === narrationSourceKey('panel-1'))).toMatchObject({
-      enabled: false,
-      content: 'Existing disabled projection',
-      emotionPrompt: 'existing',
-    })
-  })
-
-  it('uses the canonical manual narration returned after an interleaving edit and projects a Chinese speaker', async () => {
-    const fixture = createAtomicNarrationCropFixture({
-      beforePanelUpdate: (panel) => {
-        if (panel.id !== 'panel-0') return
-        panel.narrationMode = 'on'
-        panel.narrationText = '手动保留的旁白'
-        panel.narrationEmotion = '坚定'
-      },
-    })
-    const input = fourGridNarrationCommitInput([
-      analysisNarration(true),
-      ...Array.from({ length: 3 }, () => analysisNarration(false)),
-    ])
-
-    await commitSixGridCropBatch(
-      { ...input, locale: 'zh' },
-      { transaction: fixture.transaction as never },
-    )
-
-    expect(fixture.update).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      select: expect.objectContaining({
-        hasDialogue: true,
-        narrationMode: true,
-        narrationText: true,
-        narrationEmotion: true,
-      }),
-    }))
-    expect(fixture.state.panels[0]).toMatchObject({
-      narrationMode: 'on',
-      narrationText: '手动保留的旁白',
-      narrationEmotion: '坚定',
-      narrationSuggestedText: 'Suggested narration',
-    })
-    expect(fixture.state.voiceLines).toEqual([
-      expect.objectContaining({
-        sourceKey: narrationSourceKey('panel-0'),
-        enabled: true,
-        speaker: '旁白',
-        content: '手动保留的旁白',
-        emotionPrompt: '坚定',
-      }),
-    ])
-  })
-
-  it('keeps narration disabled when the canonical panel has dialogue', async () => {
-    const fixture = createAtomicNarrationCropFixture({
-      panels: [
-        cropPanel({ id: 'panel-0', panelIndex: 0, gridCellIndex: 0, hasDialogue: true, narrationMode: 'on', narrationText: 'Manual narration' }),
-        cropPanel({ id: 'panel-1', panelIndex: 1, gridCellIndex: 1 }),
-        cropPanel({ id: 'panel-2', panelIndex: 2, gridCellIndex: 2 }),
-        cropPanel({ id: 'panel-3', panelIndex: 3, gridCellIndex: 3 }),
-      ],
-    })
-
-    await commitFourGridNarrationFixture(fixture, Array.from({ length: 4 }, () => analysisNarration(false)))
-
-    expect(fixture.state.voiceLines.find((line) => line.sourceKey === narrationSourceKey('panel-0')))
-      .toMatchObject({ enabled: false, content: 'Manual narration' })
-  })
-
-  it('rejects an AI narration recommendation when the canonical returned panel has dialogue and rolls back the panel update', async () => {
-    const fixture = createAtomicNarrationCropFixture({
-      beforePanelUpdate: (panel) => {
-        if (panel.id === 'panel-0') panel.hasDialogue = true
-      },
-    })
-
-    await expect(commitFourGridNarrationFixture(fixture, [
-      analysisNarration(true),
-      ...Array.from({ length: 3 }, () => analysisNarration(false)),
-    ])).rejects.toThrow('FOUR_GRID_SHEET_ANALYSIS_INVALID')
-
-    expect(fixture.state.panels[0]).toMatchObject({
-      hasDialogue: false,
-      imageMediaId: null,
-      narrationRecommended: false,
-      narrationSuggestedText: null,
-    })
-    expect(fixture.state.voiceLines).toEqual([])
-  })
-
-  it.each([
-    ['panel update', { failPanelId: 'panel-2' }],
-    ['narration sync', { failVoicePanelId: 'panel-2' }],
-  ])('rolls back every crop and narration mutation when a %s fails', async (_label, options) => {
-    const fixture = createAtomicNarrationCropFixture(options)
-
-    await expect(commitFourGridNarrationFixture(
-      fixture,
-      Array.from({ length: 4 }, () => analysisNarration(true)),
-    )).rejects.toThrow(options.failPanelId ? 'PANEL_WRITE_FAILED' : 'VOICE_SYNC_FAILED')
-
-    expect(fixture.state.panels.every((panel) => panel.imageMediaId === null)).toBe(true)
-    expect(fixture.state.panels.every((panel) => panel.narrationSuggestedText === null)).toBe(true)
-    expect(fixture.state.voiceLines).toEqual([])
-  })
-
-  it('requires locale only when four-grid analysis is supplied', async () => {
-    const fixture = createAtomicNarrationCropFixture()
-    const input = fourGridNarrationCommitInput(Array.from({ length: 4 }, () => analysisNarration(false)))
-
-    await expect(commitSixGridCropBatch({ ...input, locale: undefined }, { transaction: fixture.transaction as never }))
-      .rejects.toThrow('FOUR_GRID_NARRATION_LOCALE_REQUIRED')
-    expect(fixture.transaction).not.toHaveBeenCalled()
-
-    await expect(commitSixGridCropBatch(
-      { ...input, episodeId: undefined },
-      { transaction: fixture.transaction as never },
-    )).resolves.toBeUndefined()
-
-    const sixGridFixture = createAtomicNarrationCropFixture({
-      panels: Array.from({ length: 6 }, (_, index) => cropPanel({ id: `panel-${index}`, panelIndex: index, gridCellIndex: index })),
-    })
-    await commitSixGridCropBatch({
-      storyboardId: 'storyboard-1',
-      sourceMediaId: 'media-sheet-1',
-      expectedSheetArtifactVersion: 3,
-      processingOrder: 'crop_then_panel_upscale',
-      taskLineage: 'crop-task-lineage',
-      artifacts: sixGridArtifacts(),
-    }, { transaction: sixGridFixture.transaction as never })
-    expect(sixGridFixture.voiceCreate).not.toHaveBeenCalled()
-    expect(sixGridFixture.voiceUpdate).not.toHaveBeenCalled()
   })
 
   it('does not open the panel transaction when crop production fails', async () => {
@@ -1299,29 +1098,6 @@ type CropPanelFixtureRow = {
   imageMediaId: string | null
   imageUrl: string | null
   hasDialogue: boolean
-  narrationMode: string
-  narrationRecommended: boolean
-  narrationSuggestedText: string | null
-  narrationSuggestedEmotion: string | null
-  narrationText: string | null
-  narrationEmotion: string | null
-  [key: string]: unknown
-}
-
-type NarrationVoiceFixtureRow = {
-  id: string
-  episodeId: string
-  lineIndex: number
-  lineType: string
-  enabled: boolean
-  sourceKey: string | null
-  speaker: string
-  content: string
-  emotionPrompt: string | null
-  matchedPanelId: string | null
-  matchedStoryboardId: string | null
-  matchedPanelIndex: number | null
-  audioUrl: string | null
   [key: string]: unknown
 }
 
@@ -1335,139 +1111,23 @@ function cropPanel(overrides: Partial<CropPanelFixtureRow> = {}): CropPanelFixtu
     imageMediaId: null,
     imageUrl: null,
     hasDialogue: false,
-    narrationMode: 'auto',
-    narrationRecommended: false,
-    narrationSuggestedText: null,
-    narrationSuggestedEmotion: null,
-    narrationText: null,
-    narrationEmotion: null,
     ...overrides,
   }
 }
 
-function narrationVoice(overrides: Partial<NarrationVoiceFixtureRow> = {}): NarrationVoiceFixtureRow {
-  return {
-    id: 'voice-1',
-    episodeId: 'episode-1',
-    lineIndex: 1,
-    lineType: 'narration',
-    enabled: true,
-    sourceKey: narrationSourceKey('panel-0'),
-    speaker: 'Narrator',
-    content: 'Existing narration',
-    emotionPrompt: null,
-    matchedPanelId: 'panel-0',
-    matchedStoryboardId: 'storyboard-1',
-    matchedPanelIndex: 0,
-    audioUrl: null,
-    ...overrides,
-  }
-}
-
-function analysisNarration(recommended: boolean) {
-  return {
-    description: 'actual cell',
-    image_prompt: 'grounded image',
-    video_prompt: 'grounded video',
-    duration: 2,
-    shot_type: '中景',
-    camera_move: '固定',
-    narration_recommended: recommended,
-    narration_text: recommended ? 'Suggested narration' : null,
-    narration_emotion: recommended ? 'reflective' : null,
-  }
-}
-
-function fourGridNarrationCommitInput(rows: ReturnType<typeof analysisNarration>[]) {
-  return {
-    storyboardId: 'storyboard-1',
-    sourceMediaId: 'media-sheet-1',
-    expectedSheetArtifactVersion: 3,
-    processingOrder: 'crop_then_panel_upscale' as const,
-    taskLineage: 'crop-task-lineage',
-    gridSpec: {
-      version: 1 as const,
-      mode: 'four_grid' as const,
-      columns: 2 as const,
-      rows: 2 as const,
-      panelCount: 4 as const,
-      cellAspectRatio: '16:9' as const,
-      sheetAspectRatio: '16:9' as const,
-    },
-    episodeId: 'episode-1',
-    locale: 'en' as const,
-    artifacts: sixGridArtifacts(4),
-    panelAnalysis: rows.map((row, index) => ({ panel_number: index + 1, ...row })),
-  }
-}
-
-async function commitFourGridNarrationFixture(
-  fixture: ReturnType<typeof createAtomicNarrationCropFixture>,
-  rows: ReturnType<typeof analysisNarration>[],
-) {
-  return await commitSixGridCropBatch(
-    fourGridNarrationCommitInput(rows),
-    { transaction: fixture.transaction as never },
-  )
-}
-
-function sixGridArtifacts(panelCount = 6) {
-  return Array.from({ length: panelCount }, (_, cellIndex) => ({
-    cellIndex,
-    mediaId: `crop-${cellIndex}`,
-    url: `/m/crop-${cellIndex}`,
-    normalizedCropRect: panelCount === 4
-      ? { x: (cellIndex % 2) / 2, y: Math.floor(cellIndex / 2) / 2, width: 0.5, height: 0.5 }
-      : snapshot().cropRects![cellIndex]!.normalizedCropRect,
-    lineage: { sourceMediaId: 'media-sheet-1', artifactVersion: 1 },
-  }))
-}
-
-function createAtomicNarrationCropFixture(options: {
-  panels?: CropPanelFixtureRow[]
-  voiceLines?: NarrationVoiceFixtureRow[]
-  failPanelId?: string
-  failVoicePanelId?: string
-  beforePanelUpdate?: (panel: CropPanelFixtureRow) => void
-} = {}) {
+function createAtomicCropFixture() {
   const state = {
-    panels: structuredClone(options.panels ?? Array.from({ length: 4 }, (_, index) => cropPanel({
+    panels: structuredClone(Array.from({ length: 4 }, (_, index) => cropPanel({
       id: `panel-${index}`,
       panelIndex: index,
       gridCellIndex: index,
     }))),
-    voiceLines: structuredClone(options.voiceLines ?? []),
   }
-  let nextVoiceId = state.voiceLines.length + 1
   const update = vi.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-    if (where.id === options.failPanelId) throw new Error('PANEL_WRITE_FAILED')
     const panel = state.panels.find((row) => row.id === where.id)
     if (!panel) throw new Error('PANEL_NOT_FOUND')
-    options.beforePanelUpdate?.(panel)
     Object.assign(panel, data)
     return structuredClone(panel)
-  })
-  const voiceCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-    if (data.matchedPanelId === options.failVoicePanelId) throw new Error('VOICE_SYNC_FAILED')
-    const created = narrationVoice({
-      ...(data as Partial<NarrationVoiceFixtureRow>),
-      id: `voice-${nextVoiceId++}`,
-    })
-    state.voiceLines.push(created)
-    return { id: created.id }
-  })
-  const voiceUpdate = vi.fn(async ({ where, data }: {
-    where: { id?: string; sourceKey?: string }
-    data: Record<string, unknown>
-  }) => {
-    const row = state.voiceLines.find((candidate) => (
-      (where.id && candidate.id === where.id)
-      || (where.sourceKey && candidate.sourceKey === where.sourceKey)
-    ))
-    if (!row) throw { code: 'P2025' }
-    if (row.matchedPanelId === options.failVoicePanelId) throw new Error('VOICE_SYNC_FAILED')
-    Object.assign(row, data)
-    return { id: row.id }
   })
   const transaction = vi.fn(async (callback: (tx: unknown) => Promise<void>) => {
     const before = structuredClone(state)
@@ -1476,35 +1136,15 @@ function createAtomicNarrationCropFixture(options: {
         lockStoryboard: vi.fn(async () => true),
         novelPromotionPanel: {
           findMany: vi.fn(async () => structuredClone(state.panels)),
-          findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
-            const panel = state.panels.find((row) => row.id === where.id)
-            return panel ? { hasDialogue: panel.hasDialogue } : null
-          }),
           update,
-        },
-        novelPromotionVoiceLine: {
-          findUnique: vi.fn(async ({ where }: { where: { sourceKey: string } }) => {
-            const row = state.voiceLines.find((candidate) => candidate.sourceKey === where.sourceKey)
-            return row ? { id: row.id } : null
-          }),
-          aggregate: vi.fn(async ({ where }: { where: { episodeId: string } }) => ({
-            _max: {
-              lineIndex: state.voiceLines
-                .filter((row) => row.episodeId === where.episodeId)
-                .reduce<number | null>((max, row) => max === null ? row.lineIndex : Math.max(max, row.lineIndex), null),
-            },
-          })),
-          create: voiceCreate,
-          update: voiceUpdate,
         },
       })
     } catch (error) {
       state.panels = before.panels
-      state.voiceLines = before.voiceLines
       throw error
     }
   })
-  return { state, transaction, update, voiceCreate, voiceUpdate }
+  return { state, transaction, update }
 }
 
 function job(payload: SixGridImageTaskSnapshot, type: TaskJobData['type']): Job<TaskJobData> {

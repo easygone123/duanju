@@ -5,8 +5,8 @@
     "loading": "正在加载分析任务…",
     "uploading": "正在接收视频",
     "uploadingValidation": "视频上传完成后会先进行格式与完整性校验，再开始内容分析。",
-    "completed": "分镜已生成",
-    "redirecting": "正在进入可编辑分镜工作台…"
+    "completed": "原创剧本与剧中资产已生成",
+    "redirecting": "正在进入剧本与剧中资产确认页面…"
   },
   "progress": {
     "analyzing": "正在分析参考视频",

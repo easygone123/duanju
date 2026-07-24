@@ -2,18 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireProjectAuthLight, isErrorResponse } from '@/lib/api-auth'
 import { apiHandler, ApiError } from '@/lib/api-errors'
-import {
-    resolveNarrationVoiceEnabled,
-    selectPanelVideo,
-} from '@/lib/novel-promotion/video/select-panel-video'
+import { selectPanelVideo } from '@/lib/novel-promotion/video/select-panel-video'
 
 interface PanelData {
     panelIndex: number | null
     description: string | null
     videoUrl: string | null
     lipSyncVideoUrl: string | null
-    hasDialogue: boolean | null
-    matchedVoiceLines?: Array<{ lineType: string; enabled: boolean }>
 }
 
 interface StoryboardData {
@@ -65,12 +60,6 @@ export const POST = apiHandler(async (
                     include: {
                         panels: {
                             orderBy: { panelIndex: 'asc' },
-                            include: {
-                                matchedVoiceLines: {
-                                    where: { lineType: 'narration' },
-                                    select: { lineType: true, enabled: true }
-                                }
-                            }
                         }
                     },
                     orderBy: { createdAt: 'asc' }
@@ -94,12 +83,6 @@ export const POST = apiHandler(async (
                             include: {
                                 panels: {
                                     orderBy: { panelIndex: 'asc' },
-                                    include: {
-                                        matchedVoiceLines: {
-                                            where: { lineType: 'narration' },
-                                            select: { lineType: true, enabled: true }
-                                        }
-                                    }
                                 }
                             },
                             orderBy: { createdAt: 'asc' }
@@ -154,8 +137,6 @@ export const POST = apiHandler(async (
                 videoUrl: panel.videoUrl,
                 lipSyncVideoUrl: panel.lipSyncVideoUrl,
                 preferLipSync,
-                hasDialogue: panel.hasDialogue,
-                narrationVoiceEnabled: resolveNarrationVoiceEnabled(panel.matchedVoiceLines),
             })
 
             if (videoKey) {

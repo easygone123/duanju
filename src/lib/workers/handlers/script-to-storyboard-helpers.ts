@@ -2,7 +2,7 @@ import { safeParseJson, safeParseJsonArray } from '@/lib/json-repair'
 import { prisma } from '@/lib/prisma'
 import type { StoryboardPanel } from '@/lib/storyboard-phases'
 import { persistGridStoryboardOutputs } from '@/lib/novel-promotion/grid-storyboard/persistence'
-import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/voice-lines/orphaning'
 import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
 import type { ResolvedStoryboardRunSnapshot } from '@/lib/novel-promotion/six-grid/run-snapshot'
 import { getRunIdentitySnapshot } from '@/lib/run-runtime/service'
@@ -505,14 +505,12 @@ export async function persistStoryboardOutputs(params: {
       await voiceLineModel.deleteMany({
         where: {
           episodeId: params.episodeId,
-          lineType: 'dialogue',
         },
       })
     } else {
       await voiceLineModel.deleteMany({
         where: {
           episodeId: params.episodeId,
-          lineType: 'dialogue',
           lineIndex: {
             notIn: nextLineIndexes,
           },

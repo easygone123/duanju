@@ -202,7 +202,7 @@ describe('ViralReplicationPage', () => {
     await waitFor(() => expect(state.replace).toHaveBeenCalledTimes(1))
     expect(state.replace).toHaveBeenCalledWith({
       pathname: '/workspace/project-1',
-      query: { stage: 'storyboard', episode: 'episode-1' },
+      query: { stage: 'script', episode: 'episode-1' },
     })
     view.rerender(createElement(ViralReplicationPage, {
       projectId: 'project-1', replicationId: 'rep-1',

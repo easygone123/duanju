@@ -60,8 +60,7 @@ export function buildPanelLipTargets(storyboards: Storyboard[]): VideoTaskTarget
 export function buildVoiceLineTargets(voiceLines: VoiceLine[]): VoiceTaskTarget[] {
   return voiceLines
     .filter((line) => (
-      line.enabled !== false
-      && line.matchedStoryboardId
+      line.matchedStoryboardId
       && line.matchedPanelIndex !== null
     ))
     .map((line) => ({

@@ -23,7 +23,6 @@ export const GET = apiHandler(async (
 
   // 获取配音台词
   const whereClause: Record<string, unknown> = {
-    enabled: true,
     audioUrl: { not: null },
     episode: { novelPromotionProject: { projectId } },
   }

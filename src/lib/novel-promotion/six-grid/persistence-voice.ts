@@ -1,8 +1,4 @@
 import type { Prisma } from '@prisma/client'
-import {
-  relocateNarrationIndexConflicts,
-  writeDialogueVoiceLine,
-} from '@/lib/novel-promotion/narration/sync'
 import type { JsonRecord } from './persistence-contract'
 
 export async function persistSixGridVoiceLines(params: {
@@ -27,11 +23,6 @@ export async function persistGridVoiceLines(params: {
   const lineIndexes = params.voiceLineRows.map((row, index) => (
     readPositiveInt(row.lineIndex, `voice line ${index + 1} has invalid lineIndex`)
   ))
-  await relocateNarrationIndexConflicts({
-    tx: params.tx,
-    episodeId: params.episodeId,
-    incomingDialogueIndexes: lineIndexes,
-  })
 
   for (let index = 0; index < params.voiceLineRows.length; index += 1) {
     const row = params.voiceLineRows[index]
@@ -58,23 +49,37 @@ export async function persistGridVoiceLines(params: {
       throw new Error(`voice line ${index + 1} is missing valid emotionStrength`)
     }
     const emotionStrength = Math.min(1, Math.max(0.1, row.emotionStrength))
-    created.push(await writeDialogueVoiceLine({
-      tx: params.tx,
-      episodeId: params.episodeId,
-      lineIndex,
-      incomingDialogueIndexes: lineIndexes,
-      speaker,
-      content,
-      emotionStrength,
-      matchedPanelId,
-      matchedStoryboardId,
-      matchedPanelIndex,
+    created.push(await params.tx.novelPromotionVoiceLine.upsert({
+      where: {
+        episodeId_lineIndex: {
+          episodeId: params.episodeId,
+          lineIndex,
+        },
+      },
+      create: {
+        episodeId: params.episodeId,
+        lineIndex,
+        speaker,
+        content,
+        emotionStrength,
+        matchedPanelId,
+        matchedStoryboardId,
+        matchedPanelIndex,
+      },
+      update: {
+        speaker,
+        content,
+        emotionStrength,
+        matchedPanelId,
+        matchedStoryboardId,
+        matchedPanelIndex,
+      },
+      select: { id: true },
     }))
   }
   await params.tx.novelPromotionVoiceLine.deleteMany({
     where: {
       episodeId: params.episodeId,
-      lineType: 'dialogue',
       ...(lineIndexes.length > 0 ? { lineIndex: { notIn: lineIndexes } } : {}),
     },
   })

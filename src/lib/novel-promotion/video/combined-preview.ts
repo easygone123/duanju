@@ -140,8 +140,6 @@ export function buildCombinedPreviewTimeline(
       videoUrl: panel.videoUrl,
       lipSyncVideoUrl: panel.lipSyncVideoUrl,
       preferLipSync,
-      hasDialogue: panel.hasDialogue,
-      narrationVoiceEnabled: panel.narrationVoiceEnabled,
     })
     const imageUrl = panel.imageUrl || null
     const durationInFrames = resolveDurationInFrames(panel, resolvedFps)

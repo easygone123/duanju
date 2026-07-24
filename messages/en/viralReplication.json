@@ -5,8 +5,8 @@
     "loading": "Loading the analysis task…",
     "uploading": "Receiving video",
     "uploadingValidation": "After upload, the video is checked for format and integrity before content analysis begins.",
-    "completed": "Storyboards generated",
-    "redirecting": "Opening the editable storyboard workspace…"
+    "completed": "Original script and production assets generated",
+    "redirecting": "Opening script and production asset review…"
   },
   "progress": {
     "analyzing": "Analyzing the reference video",

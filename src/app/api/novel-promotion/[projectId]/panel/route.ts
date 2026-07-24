@@ -5,7 +5,7 @@ import { apiHandler, ApiError } from '@/lib/api-errors'
 import { serializeStructuredJsonField } from '@/lib/novel-promotion/panel-ai-data-sync'
 import { toPanelUndoApiError, undoSixGridPanelImage, type PanelUndoClient } from '@/lib/novel-promotion/six-grid/panel-undo'
 import { isGridStoryboardMode } from '@/lib/novel-promotion/grid-storyboard/spec'
-import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/narration/orphaning'
+import { detachVoiceLinesBeforePanelRemoval } from '@/lib/novel-promotion/voice-lines/orphaning'
 
 function parseNullableNumberField(value: unknown): number | null {
   if (value === null || value === '') return null

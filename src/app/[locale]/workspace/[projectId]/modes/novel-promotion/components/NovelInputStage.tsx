@@ -38,9 +38,6 @@ interface NovelInputStageProps {
   // 状态
   isSubmittingTask?: boolean
   isSwitchingStage?: boolean
-  // 旁白开关
-  enableNarration?: boolean
-  onEnableNarrationChange?: (enabled: boolean) => void
   // 配置项 - 比例与风格
   videoRatio?: string
   artStyle?: string
@@ -56,8 +53,6 @@ export default function NovelInputStage({
   onSmartSplit,
   isSubmittingTask = false,
   isSwitchingStage = false,
-  enableNarration = false,
-  onEnableNarrationChange,
   videoRatio = '9:16',
   artStyle = 'american-comic',
   onVideoRatioChange,
@@ -258,33 +253,6 @@ export default function NovelInputStage({
           </div>
         </div>
       </div>
-
-      {/* 旁白开关 */}
-      {onEnableNarrationChange && (
-        <div className="glass-surface p-6">
-          <div className="glass-surface-soft flex items-center justify-between p-4 rounded-xl">
-            <div className="flex items-center gap-3">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--glass-tone-info-bg)] text-[var(--glass-tone-info-fg)] font-semibold text-sm">VO</span>
-              <div>
-                <div className="font-medium text-[var(--glass-text-primary)]">{t("storyInput.narration.title")}</div>
-                <div className="text-xs text-[var(--glass-text-tertiary)]">{t("storyInput.narration.description")}</div>
-              </div>
-            </div>
-            <button
-              onClick={() => onEnableNarrationChange(!enableNarration)}
-              className={`relative w-14 h-8 rounded-full transition-colors ${enableNarration
-                ? 'bg-[var(--glass-accent-from)]'
-                : 'bg-[var(--glass-stroke-strong)]'
-                }`}
-            >
-              <span
-                className={`absolute top-1 left-1 w-6 h-6 bg-[var(--glass-bg-surface)] rounded-full shadow-sm transition-transform ${enableNarration ? 'translate-x-6' : 'translate-x-0'
-                  }`}
-              />
-            </button>
-          </div>
-        </div>
-      )}
 
       <LongTextDetectionPrompt
         open={showLongTextPrompt}

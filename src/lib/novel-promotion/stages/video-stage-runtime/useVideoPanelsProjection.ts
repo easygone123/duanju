@@ -6,7 +6,6 @@ import type {
   Storyboard,
   VideoPanel,
 } from '@/app/[locale]/workspace/[projectId]/modes/novel-promotion/components/video'
-import { resolveNarrationVoiceEnabled } from '@/lib/novel-promotion/video/select-panel-video'
 
 interface TaskStateLike {
   phase?: string | null
@@ -108,7 +107,6 @@ export function useVideoPanelsProjection({
               : panel.lipSyncErrorMessage || undefined,
           updatedAt: panel.updatedAt instanceof Date ? panel.updatedAt.toISOString() : panel.updatedAt,
           hasDialogue: panel.hasDialogue ?? false,
-          narrationVoiceEnabled: resolveNarrationVoiceEnabled(panel.matchedVoiceLines),
           dialogueSpeaker: panel.dialogueSpeaker ?? undefined,
           dialogueText: panel.dialogueText ?? undefined,
           dialogueEmotion: panel.dialogueEmotion ?? undefined,

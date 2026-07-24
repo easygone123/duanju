@@ -180,8 +180,38 @@ describe('worker panel-image-task-handler behavior', () => {
         modelId: 'comfyui::workflow-image',
         comfyReferenceImages: [source],
         options: expect.not.objectContaining({ referenceImages: expect.anything() }),
+        preferComfyStorageKey: true,
       }),
     )
+  })
+
+  it('reuses the persisted ComfyUI output key without downloading and uploading it again', async () => {
+    utilsMock.getProjectModels.mockResolvedValueOnce({
+      storyboardModel: 'comfyui::workflow-image',
+      artStyle: 'realistic',
+    })
+    utilsMock.resolveImageSourceFromGeneration.mockReset()
+    utilsMock.resolveImageSourceFromGeneration.mockResolvedValueOnce(
+      'comfyui/user-1/project-1/request-1/output.png',
+    )
+
+    const result = await handlePanelImageTask(buildJob({ candidateCount: 1 }))
+
+    expect(utilsMock.resolveImageSourceFromGeneration).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        preferComfyStorageKey: true,
+      }),
+    )
+    expect(utilsMock.uploadImageSourceToCos).not.toHaveBeenCalled()
+    expect(prismaMock.novelPromotionPanel.update).toHaveBeenCalledWith({
+      where: { id: 'panel-1' },
+      data: {
+        imageUrl: 'comfyui/user-1/project-1/request-1/output.png',
+        candidateImages: null,
+      },
+    })
+    expect(result.imageUrl).toBe('comfyui/user-1/project-1/request-1/output.png')
   })
 
   it('still normalizes browser references to data URLs for cloud image providers', async () => {

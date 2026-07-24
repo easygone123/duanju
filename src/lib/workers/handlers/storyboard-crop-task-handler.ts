@@ -12,11 +12,6 @@ import {
   type FourGridPlannedPanel,
   type FourGridSheetAnalysisRow,
 } from '@/lib/novel-promotion/grid-storyboard/sheet-analysis'
-import {
-  syncPanelNarrationVoiceLine,
-  type NarrationTransactionClient,
-} from '@/lib/novel-promotion/narration/sync'
-import { parseNarrationMode } from '@/lib/novel-promotion/narration/state'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { estimatePanelDuration } from '@/lib/novel-promotion/six-grid/duration'
 
@@ -29,21 +24,14 @@ const currentCropPanelSelect = {
   gridCellIndex: true,
   imageMediaId: true,
   imageUrl: true,
-  hasDialogue: true,
   dialogueText: true,
   srtSegment: true,
-  narrationMode: true,
-  narrationRecommended: true,
-  narrationSuggestedText: true,
-  narrationSuggestedEmotion: true,
-  narrationText: true,
-  narrationEmotion: true,
 } satisfies Prisma.NovelPromotionPanelSelect
 type CurrentCropPanel = Prisma.NovelPromotionPanelGetPayload<{
   select: typeof currentCropPanelSelect
 }>
 
-type CropTransactionClient = NarrationTransactionClient & {
+type CropTransactionClient = {
   lockStoryboard: (input: {
     storyboardId: string
     sourceMediaId: string
@@ -54,10 +42,7 @@ type CropTransactionClient = NarrationTransactionClient & {
     projectId?: string
     episodeId?: string
   }) => Promise<boolean>
-  novelPromotionPanel: NarrationTransactionClient['novelPromotionPanel'] & Pick<
-    Prisma.TransactionClient['novelPromotionPanel'],
-    'findMany' | 'update'
-  >
+  novelPromotionPanel: Pick<Prisma.TransactionClient['novelPromotionPanel'], 'findMany' | 'update'>
 }
 type Transaction = (callback: (tx: CropTransactionClient) => Promise<void>) => Promise<unknown>
 
@@ -71,7 +56,6 @@ export async function commitSixGridCropBatch(input: {
   userId?: string
   projectId?: string
   episodeId?: string
-  locale?: 'zh' | 'en'
   artifacts: CropArtifact[]
   panelAnalysis?: FourGridSheetAnalysisRow[]
 }, dependencies: { transaction?: Transaction } = {}) {
@@ -86,7 +70,6 @@ export async function commitSixGridCropBatch(input: {
       || input.panelAnalysis.some((row, index) => row.panel_number !== index + 1))) {
     throw new Error('FOUR_GRID_SHEET_ANALYSIS_INVALID')
   }
-  if (input.panelAnalysis && !input.locale) throw new Error('FOUR_GRID_NARRATION_LOCALE_REQUIRED')
   const runTransaction = dependencies.transaction ?? defaultCropTransaction
   await runTransaction(async (tx) => {
     const locked = await tx.lockStoryboard({
@@ -112,7 +95,6 @@ export async function commitSixGridCropBatch(input: {
       const analysis = input.panelAnalysis?.[artifact.cellIndex]
       const analyzedDuration = analysis ? estimatePanelDuration({
         dialogueText: previous.dialogueText,
-        narrationText: analysis.narration_text,
         sourceText: previous.srtSegment,
         description: analysis.description,
         videoPrompt: analysis.video_prompt,
@@ -120,7 +102,7 @@ export async function commitSixGridCropBatch(input: {
         shotType: analysis.shot_type,
         plannerDuration: analysis.duration,
       }).estimatedDuration : null
-      const persistedPanel: CurrentCropPanel = await tx.novelPromotionPanel.update({
+      await tx.novelPromotionPanel.update({
         where: { id: previous.id },
         data: {
           previousImageMediaId: previous.imageMediaId,
@@ -144,32 +126,10 @@ export async function commitSixGridCropBatch(input: {
             duration: analyzedDuration,
             estimatedDuration: analyzedDuration,
             durationOverride: null,
-            narrationRecommended: analysis.narration_recommended,
-            narrationSuggestedText: analysis.narration_text,
-            narrationSuggestedEmotion: analysis.narration_emotion,
           } : {}),
         },
         select: currentCropPanelSelect,
       })
-      if (analysis) {
-        if (persistedPanel.hasDialogue && persistedPanel.narrationRecommended) {
-          throw new Error('FOUR_GRID_SHEET_ANALYSIS_INVALID')
-        }
-        await syncPanelNarrationVoiceLine({
-          tx,
-          episodeId: persistedPanel.storyboard.episodeId,
-          panelId: persistedPanel.id,
-          storyboardId: persistedPanel.storyboardId,
-          panelIndex: persistedPanel.panelIndex,
-          locale: input.locale!,
-          mode: parseNarrationMode(persistedPanel.narrationMode),
-          recommended: persistedPanel.narrationRecommended,
-          suggestedText: persistedPanel.narrationSuggestedText,
-          suggestedEmotion: persistedPanel.narrationSuggestedEmotion,
-          text: persistedPanel.narrationText,
-          emotion: persistedPanel.narrationEmotion,
-        })
-      }
     }
   })
 }
@@ -224,7 +184,6 @@ const defaultCropTransaction: Transaction = async (callback) => prisma.$transact
       return rows.length === 1
     },
     novelPromotionPanel: tx.novelPromotionPanel,
-    novelPromotionVoiceLine: tx.novelPromotionVoiceLine,
   })
 })
 
@@ -315,7 +274,6 @@ export async function handleStoryboardCropTask(job: Job<TaskJobData>) {
     userId: job.data.userId,
     projectId: snapshot.projectId,
     episodeId: snapshot.episodeId,
-    locale: snapshot.locale,
     artifacts,
     panelAnalysis,
   })

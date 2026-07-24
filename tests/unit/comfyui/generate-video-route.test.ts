@@ -457,32 +457,6 @@ describe('generate-video ComfyUI first-last-frame routing', () => {
     }))
   })
 
-  it('adds the authoritative enabled panel narration to the queued video prompt', async () => {
-    capabilityMock.mockReturnValue({ video: { durationOptions: [5, 10] } })
-    panelFindFirstMock.mockResolvedValue({
-      id: 'panel-1', updatedAt: new Date('2026-07-13T01:02:03.000Z'),
-      hasDialogue: false, dialogueSpeaker: null, dialogueText: null, dialogueEmotion: null,
-      includeDialogueInVideoPrompt: true, videoPrompt: '空镜扫过十年后的旧城',
-      narrationMode: 'auto', narrationRecommended: true,
-      narrationSuggestedText: '十年后，她终于回到了故乡。',
-      narrationSuggestedEmotion: '克制而怀念', narrationText: null, narrationEmotion: null,
-      estimatedDuration: 5, durationOverride: null, duration: 5,
-    })
-
-    const response = await POST(request({}), {
-      params: Promise.resolve({ projectId: 'project-1' }),
-    })
-
-    expect(response.status).toBe(200)
-    expect(submitTaskMock).toHaveBeenCalledWith(expect.objectContaining({
-      payload: expect.objectContaining({
-        videoPrompt: expect.stringContaining(
-          '[NARRATION_DATA] {"speaker":"旁白","emotion":"克制而怀念","delivery":"natural off-screen voice-over narration","text":"十年后，她终于回到了故乡。"}',
-        ),
-      }),
-    }))
-  })
-
   it('builds an authoritative first-last-frame prompt and removes forged client prompts', async () => {
     panelFindFirstMock
       .mockResolvedValueOnce({

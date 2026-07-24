@@ -436,6 +436,7 @@ export function VideoEditorStage({
             }}>
                 <Timeline
                     clips={project.timeline}
+                    bgmTrack={project.bgmTrack}
                     timelineState={timelineState}
                     config={project.config}
                     onReorder={reorderClips}

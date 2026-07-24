@@ -43,7 +43,7 @@ export function useVoiceStageDataLoader({
     try {
       const data = await fetchVoiceStageDataRef.current.mutateAsync({ episodeId })
       const payload = (data || {}) as VoiceStageDataPayload
-      setVoiceLines((payload.voiceLines || []).filter((line) => line.enabled !== false))
+      setVoiceLines(payload.voiceLines || [])
       setSpeakerVoices(payload.speakerVoices || {})
       setProjectSpeakers(payload.speakers || [])
     } catch (error) {
