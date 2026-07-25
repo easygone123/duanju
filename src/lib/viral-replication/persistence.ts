@@ -98,7 +98,7 @@ export async function persistViralStoryboardGeneration(
         description: input.generation.synopsis,
         novelText: input.generation.novelText,
         srtContent: input.transcriptText || null,
-        audioMediaId: input.sourceAudioMediaId || undefined,
+        audioMediaId: input.sourceAudioMediaId || null,
       },
     })
 

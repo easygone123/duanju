@@ -83,6 +83,7 @@ const viralAnalysisReportV1Schema = z
   .strict()
 
 export type ViralAnalysisReportV1 = z.infer<typeof viralAnalysisReportV1Schema>
+export type ViralSourceStoryV1 = NonNullable<ViralAnalysisReportV1['sourceStory']>
 
 const viralStoryboardPanelV1Schema = z
   .object({
@@ -143,6 +144,40 @@ const viralStoryboardGenerationV1Schema = z
   .strict()
 
 export type ViralStoryboardGenerationV1 = z.infer<typeof viralStoryboardGenerationV1Schema>
+
+function boundedText(value: string, maximumLength: number): string {
+  const normalized = value.trim()
+  if (normalized.length <= maximumLength) return normalized
+  return normalized.slice(0, maximumLength).trimEnd()
+}
+
+function joinBoundedText(values: Array<string | null | undefined>, maximumLength = 2_000): string {
+  return boundedText(values.filter((value): value is string => Boolean(value?.trim())).join('\n'), maximumLength)
+}
+
+export function deriveViralSourceStoryFromTranscript(
+  report: ViralAnalysisReportV1,
+  transcriptText: string | null | undefined,
+): ViralSourceStoryV1 | null {
+  const cues = parseViralAudioCues(transcriptText)
+  if (cues.length === 0) return null
+  const transcript = joinBoundedText(cues.map((cue) => cue.text))
+  if (!transcript) return null
+
+  return {
+    summary: transcript,
+    premise: boundedText(cues[0]!.text, 2_000),
+    characterRelations: [],
+    storyBeats: report.shots.map((shot) => ({
+      shotIndexes: [shot.shotIndex],
+      beat: audioTextForRange(cues, shot.startMs, shot.endMs)
+        || shot.plotBeat
+        || shot.actionBeat,
+      cause: null,
+      effect: null,
+    })),
+  }
+}
 
 function throwValidationIssue(path: Array<string | number>, message: string): never {
   throw new z.ZodError([
@@ -208,6 +243,7 @@ export function parseViralStoryboardGeneration(
   timeline?: {
     report: ViralAnalysisReportV1
     transcriptText?: string | null
+    artStyle?: string | null
   },
 ): ViralStoryboardGenerationV1 {
   const parsedGeneration = viralStoryboardGenerationV1Schema.parse(value)
@@ -250,8 +286,17 @@ export function parseViralStoryboardGeneration(
     }
     const cues = parseViralAudioCues(timeline.transcriptText)
     if (cues.length > 0) {
-      generation.novelText = cues.map((cue) => cue.text).join('\n')
+      const transcript = cues.map((cue) => cue.text).join('\n')
+      generation.title = boundedText(cues[0]!.text, 200)
+      generation.synopsis = boundedText(transcript, 2_000)
+      generation.novelText = boundedText(transcript, 100_000)
     }
+    const characterDesigns = new Map(
+      generation.characters.map((character) => [character.name, character.description]),
+    )
+    const locationDesigns = new Map(
+      generation.locations.map((location) => [location.name, location.description]),
+    )
     const seenShotIndexes = new Set<number>()
     for (const [panelOrder, panel] of panels.entries()) {
       const shot = timeline.report.shots[panel.sourceShotIndex]
@@ -266,6 +311,46 @@ export function parseViralStoryboardGeneration(
       panel.endMs = shot.endMs
       panel.durationSeconds = (shot.endMs - shot.startMs) / 1_000
       panel.audioText = audioTextForRange(cues, shot.startMs, shot.endMs)
+      panel.shotType = shot.shotType
+      panel.cameraMove = shot.cameraMove
+      panel.sourceNarrativeFunction = shot.narrativeFunction
+
+      const authoritativePlot = shot.plotBeat || shot.actionBeat
+      const audioContract = panel.audioText
+        ? `原声台词（逐字保持）：${panel.audioText}`
+        : null
+      const visualCharacters = panel.characters.map((name) => {
+        const design = characterDesigns.get(name)
+        return design ? `${name}：${design}` : name
+      })
+      const locationDesign = locationDesigns.get(panel.location)
+      panel.description = joinBoundedText([
+        audioContract,
+        `原剧情画面事实：${authoritativePlot}`,
+      ])
+      panel.imagePrompt = joinBoundedText([
+        audioContract,
+        `必须忠实绘制的原剧情事件：${authoritativePlot}`,
+        `镜头：${shot.shotType}，${shot.cameraAngle}，${shot.composition}`,
+        locationDesign ? `场景设计：${panel.location}，${locationDesign}` : `场景：${panel.location}`,
+        visualCharacters.length > 0 ? `角色设计：${visualCharacters.join('；')}` : null,
+        timeline.artStyle?.trim() ? `艺术风格：${timeline.artStyle.trim()}` : null,
+        '不得改编剧情、替换事件或改变原声含义。',
+      ])
+      panel.videoPrompt = joinBoundedText([
+        audioContract,
+        `在${panel.durationSeconds}秒内与原声音频严格同步表演：${authoritativePlot}`,
+        `动作事实：${shot.actionBeat}`,
+        `运镜：${shot.cameraMove}`,
+        shot.causalLink ? `前后承接：${shot.causalLink}` : null,
+        '不得增加字幕和原声中不存在的对白、冲突、动机或结局。',
+      ])
+    }
+    for (const storyboard of generation.storyboards) {
+      storyboard.summary = joinBoundedText(storyboard.panels.map((panel) =>
+        panel.audioText || timeline.report.shots[panel.sourceShotIndex]?.plotBeat
+        || timeline.report.shots[panel.sourceShotIndex]?.actionBeat,
+      ))
     }
   }
 

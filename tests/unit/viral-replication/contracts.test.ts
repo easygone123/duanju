@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
 import {
+  deriveViralSourceStoryFromTranscript,
   parseViralAnalysisReport,
   parseViralStoryboardGeneration,
 } from '@/lib/viral-replication/contracts'
@@ -212,6 +213,39 @@ describe('parseViralAnalysisReport', () => {
     expect(() => parseViralAnalysisReport(report, 4_000)).toThrow(/cover every shot/i)
   })
 
+  it('derives the authoritative source story directly from subtitle cues', () => {
+    const report = parseViralAnalysisReport(validReport(), 4_000)
+    const transcriptText = [
+      '1',
+      '00:00:00,100 --> 00:00:01,200',
+      '第一句原声',
+      '',
+      '2',
+      '00:00:02,000 --> 00:00:03,500',
+      '第二句原声',
+    ].join('\n')
+
+    expect(deriveViralSourceStoryFromTranscript(report, transcriptText)).toEqual({
+      summary: '第一句原声\n第二句原声',
+      premise: '第一句原声',
+      characterRelations: [],
+      storyBeats: [
+        {
+          shotIndexes: [0],
+          beat: '第一句原声',
+          cause: null,
+          effect: null,
+        },
+        {
+          shotIndexes: [1],
+          beat: '第二句原声',
+          cause: null,
+          effect: null,
+        },
+      ],
+    })
+  })
+
   it('rejects reports without shots', () => {
     expect(() => parseViralAnalysisReport({ ...validReport(), shots: [] }, 4_000)).toThrow()
   })
@@ -339,6 +373,8 @@ describe('parseViralStoryboardGeneration', () => {
 
   it('derives dialogue text, timing, and episode text from the authoritative source transcript', () => {
     const generation = validGeneration()
+    generation.title = '模型改编标题'
+    generation.synopsis = '模型改编剧情'
     generation.novelText = '模型擅自改写的台词'
     const modelGeneration = {
       ...generation,
@@ -375,6 +411,8 @@ describe('parseViralStoryboardGeneration', () => {
     const panels = parsed.storyboards[0].panels
 
     expect(parsed.novelText).toBe('第一句原声\n第二句原声')
+    expect(parsed.title).toBe('第一句原声')
+    expect(parsed.synopsis).toBe('第一句原声\n第二句原声')
     expect(panels.map((panel) => ({
       startMs: panel.startMs,
       endMs: panel.endMs,
@@ -384,6 +422,11 @@ describe('parseViralStoryboardGeneration', () => {
       { startMs: 0, endMs: 1_500, durationSeconds: 1.5, audioText: '第一句原声' },
       { startMs: 1_500, endMs: 4_000, durationSeconds: 2.5, audioText: '第二句原声' },
     ])
+    expect(panels[0].description).toContain('原声台词（逐字保持）：第一句原声')
+    expect(panels[0].imagePrompt).toContain('必须忠实绘制的原剧情事件')
+    expect(panels[0].videoPrompt).toContain('与原声音频严格同步表演')
+    expect(panels[0].imagePrompt).not.toContain('glowing parcel')
+    expect(parsed.storyboards[0].summary).toBe('第一句原声\n第二句原声')
   })
 
   it('accepts exactly 72 generated panels across storyboards', () => {

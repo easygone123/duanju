@@ -34,9 +34,23 @@ describe('viral storyboard persistence', () => {
     const db = { $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)) }
 
     await persistViralStoryboardGeneration({
-      replicationId: 'rep-1', userId: 'user-1', projectId: 'project-1', episodeId: 'episode-1', generation,
+      replicationId: 'rep-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      episodeId: 'episode-1',
+      generation,
+      transcriptText: '1\n00:00:00,000 --> 00:00:02,000\n原声对白',
+      sourceAudioMediaId: 'source-video-media-1',
     }, db as never)
 
+    expect(tx.novelPromotionEpisode.update).toHaveBeenCalledWith({
+      where: { id: 'episode-1' },
+      data: expect.objectContaining({
+        novelText: '原创正文',
+        srtContent: '1\n00:00:00,000 --> 00:00:02,000\n原声对白',
+        audioMediaId: 'source-video-media-1',
+      }),
+    })
     expect(clipCreate).toHaveBeenCalledWith({ data: expect.objectContaining({
       start: 0,
       end: 2,

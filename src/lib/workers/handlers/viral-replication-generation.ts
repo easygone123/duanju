@@ -120,7 +120,7 @@ export function createViralReplicationGenerationHandler(
 
       await dependencies.reportProgress(job, 10, {
         stage: 'viral_storyboard_generation',
-        stageLabel: '生成原创分镜',
+        stageLabel: '按原声字幕生成重绘分镜',
         displayMode: 'detail',
       })
       const completion = await dependencies.runText({
@@ -148,11 +148,12 @@ export function createViralReplicationGenerationHandler(
         {
           report,
           transcriptText: replication.transcriptText,
+          artStyle: replication.artStyle,
         },
       )
       await dependencies.reportProgress(job, 90, {
         stage: 'viral_storyboard_persistence',
-        stageLabel: '保存原创分镜',
+        stageLabel: '保存原声剧情分镜',
         displayMode: 'detail',
       })
       await dependencies.persist({

@@ -30,7 +30,11 @@ import {
   VIRAL_MAX_ADAPTIVE_REVIEW_SHOTS,
   VIRAL_REPLICATION_STATUS,
 } from '@/lib/viral-replication/constants'
-import { parseViralAnalysisReport, type ViralAnalysisReportV1 } from '@/lib/viral-replication/contracts'
+import {
+  deriveViralSourceStoryFromTranscript,
+  parseViralAnalysisReport,
+  type ViralAnalysisReportV1,
+} from '@/lib/viral-replication/contracts'
 import { MAX_FRAME_JPEG_BYTES } from '@/lib/viral-replication/ffmpeg'
 import {
   audioTextForRange,
@@ -914,12 +918,14 @@ export function createViralReplicationAnalysisHandler(
         safeParseJson(getCompletionContent(aggregation)),
         preprocessed.metadata.durationMs,
       )
-      if (!report.sourceStory) {
-        throw new Error('Aggregated viral report is missing factual source story analysis')
-      }
       assertAggregatedTimeline(report, batchResults)
       report.shots = batchResults.flatMap((batch) => batch.shots)
       applyTranscriptToShots(report.shots, transcriptText)
+      report.sourceStory = deriveViralSourceStoryFromTranscript(report, transcriptText)
+        ?? report.sourceStory
+      if (!report.sourceStory) {
+        throw new Error('Aggregated viral report is missing factual source story analysis')
+      }
       const updated = await dependencies.prisma.viralReplication.updateMany({
         where: executionWhere(execution),
         data: {
