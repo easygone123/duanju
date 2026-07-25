@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const resolveMediaRefMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/media/service', () => ({
+  createReadOnlyMediaResolver: vi.fn(async () => ({
+    resolve: resolveMediaRefMock,
+    resolveLegacy: vi.fn(async () => null),
+  })),
   resolveMediaRef: resolveMediaRefMock,
   resolveMediaRefFromLegacyValue: vi.fn(async () => null),
 }))

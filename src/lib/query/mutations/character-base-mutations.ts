@@ -1,9 +1,10 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type QueryKey } from '@tanstack/react-query'
 import { logError as _ulogError } from '@/lib/logging/core'
 import { useRef } from 'react'
 import type { Character, Project } from '@/types/project'
 import { queryKeys } from '../keys'
 import type { ProjectAssetsData } from '../hooks/useProjectAssets'
+import type { AssetSummary } from '@/lib/assets/contracts'
 import { apiFetch } from '@/lib/api-fetch'
 import {
     clearTaskTargetOverlay,
@@ -16,7 +17,7 @@ import {
 } from './mutation-shared'
 
 interface SelectProjectCharacterImageContext {
-    previousAssets: ProjectAssetsData | undefined
+    previousAssetQueries: Array<[QueryKey, AssetSummary[] | undefined]>
     previousProject: Project | undefined
     targetKey: string
     requestId: number
@@ -53,17 +54,33 @@ function applyCharacterSelectionToCharacters(
     })
 }
 
-function applyCharacterSelectionToAssets(
-    previous: ProjectAssetsData | undefined,
+function applyCharacterSelectionToAssetSummaries(
+    assets: AssetSummary[] | undefined,
     characterId: string,
     appearanceId: string,
     selectedIndex: number | null,
-): ProjectAssetsData | undefined {
-    if (!previous) return previous
-    return {
-        ...previous,
-        characters: applyCharacterSelectionToCharacters(previous.characters || [], characterId, appearanceId, selectedIndex),
-    }
+): AssetSummary[] | undefined {
+    if (!assets) return assets
+    return assets.map((asset) => {
+        if (asset.kind !== 'character' || asset.id !== characterId) return asset
+        return {
+            ...asset,
+            variants: asset.variants.map((variant) => {
+                if (variant.id !== appearanceId) return variant
+                return {
+                    ...variant,
+                    selectionState: {
+                        ...variant.selectionState,
+                        selectedRenderIndex: selectedIndex,
+                    },
+                    renders: variant.renders.map((render) => ({
+                        ...render,
+                        isSelected: selectedIndex !== null && render.index === selectedIndex,
+                    })),
+                }
+            }),
+        }
+    })
 }
 
 function applyCharacterSelectionToProject(
@@ -227,24 +244,32 @@ export function useSelectProjectCharacterImage(projectId: string) {
             const requestId = (latestRequestIdByTargetRef.current[targetKey] ?? 0) + 1
             latestRequestIdByTargetRef.current[targetKey] = requestId
 
-            const assetsQueryKey = queryKeys.projectAssets.all(projectId)
+            const assetsQueryKey = queryKeys.assets.all('project', projectId)
             const projectQueryKey = queryKeys.projectData(projectId)
 
             await queryClient.cancelQueries({ queryKey: assetsQueryKey })
             await queryClient.cancelQueries({ queryKey: projectQueryKey })
 
-            const previousAssets = queryClient.getQueryData<ProjectAssetsData>(assetsQueryKey)
+            const previousAssetQueries = queryClient.getQueriesData<AssetSummary[]>({
+                queryKey: assetsQueryKey,
+            })
             const previousProject = queryClient.getQueryData<Project>(projectQueryKey)
 
-            queryClient.setQueryData<ProjectAssetsData | undefined>(assetsQueryKey, (previous) =>
-                applyCharacterSelectionToAssets(previous, variables.characterId, variables.appearanceId, variables.imageIndex),
+            queryClient.setQueriesData<AssetSummary[]>(
+                { queryKey: assetsQueryKey },
+                (previous) => applyCharacterSelectionToAssetSummaries(
+                    previous,
+                    variables.characterId,
+                    variables.appearanceId,
+                    variables.imageIndex,
+                ),
             )
             queryClient.setQueryData<Project | undefined>(projectQueryKey, (previous) =>
                 applyCharacterSelectionToProject(previous, variables.characterId, variables.appearanceId, variables.imageIndex),
             )
 
             return {
-                previousAssets,
+                previousAssetQueries,
                 previousProject,
                 targetKey,
                 requestId,
@@ -254,13 +279,13 @@ export function useSelectProjectCharacterImage(projectId: string) {
             if (!context) return
             const latestRequestId = latestRequestIdByTargetRef.current[context.targetKey]
             if (latestRequestId !== context.requestId) return
-            queryClient.setQueryData(queryKeys.projectAssets.all(projectId), context.previousAssets)
+            for (const [queryKey, previous] of context.previousAssetQueries) {
+                queryClient.setQueryData(queryKey, previous)
+            }
             queryClient.setQueryData(queryKeys.projectData(projectId), context.previousProject)
         },
-        onSettled: (_data, _error, variables) => {
-            if (variables.confirm) {
-                void invalidateProjectAssets()
-            }
+        onSettled: () => {
+            void invalidateProjectAssets()
         },
     })
 }

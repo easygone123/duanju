@@ -28,6 +28,9 @@ export function decodeImageUrlsStrict(raw: string, fieldName = 'imageUrls'): str
 }
 
 export function decodeImageUrlsFromDb(raw: string | null | undefined, fieldName = 'imageUrls'): string[] {
+  // The columns are nullable for legacy compatibility. Treat the historical
+  // empty state as an empty array while continuing to reject malformed values.
+  if (raw === null || raw === undefined) return []
   if (typeof raw !== 'string') {
     throw new ImageUrlsContractError(`${fieldName} must be a JSON string in DB`)
   }

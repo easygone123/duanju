@@ -11,6 +11,7 @@ import {
   uploadImageSourceToCos,
 } from '../utils'
 import { normalizeReferenceImagesForGeneration } from '@/lib/media/outbound-image'
+import { ensureMediaObjectFromStorageKey } from '@/lib/media/service'
 import {
   formatLocationAvailableSlotsText,
   parseLocationAvailableSlots,
@@ -282,16 +283,21 @@ export async function handlePanelVariantTask(job: Job<TaskJobData>) {
   })
 
   const cosKey = await uploadImageSourceToCos(source, 'panel-variant', newPanel.id)
+  const imageMedia = await ensureMediaObjectFromStorageKey(cosKey)
 
   await assertTaskActive(job, 'persist_panel_variant')
   await prisma.novelPromotionPanel.update({
     where: { id: newPanel.id },
-    data: { imageUrl: cosKey },
+    data: {
+      imageUrl: cosKey,
+      imageMediaId: imageMedia.id,
+    },
   })
 
   return {
     panelId: newPanel.id,
     storyboardId: newPanel.storyboardId,
-    imageUrl: cosKey,
+    imageUrl: imageMedia.url,
+    imageMediaId: imageMedia.id,
   }
 }

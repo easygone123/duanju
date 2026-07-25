@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { encodeImageUrls } from '@/lib/contracts/image-urls-contract'
 import { VIRAL_REPLICATION_STATUS } from './constants'
 import type { ViralStoryboardGenerationV1 } from './contracts'
 
@@ -125,6 +126,8 @@ export async function persistViralStoryboardGeneration(
           changeReason: '爆款原声重绘初始形象',
           description: character.description,
           descriptions: JSON.stringify([character.description]),
+          imageUrls: encodeImageUrls([]),
+          previousImageUrls: encodeImageUrls([]),
         },
       })
     }

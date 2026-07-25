@@ -20,20 +20,67 @@ function parseStringArray(value: unknown): string[] {
   }
 }
 
-async function resolveAppearanceImageArray(raw: unknown, fieldName: string): Promise<{ urls: string[]; medias: MediaRef[] }> {
-  const values = decodeImageUrlsFromDb(raw as string | null | undefined, fieldName)
-  const refs = await Promise.all(values.map((value) => resolveMediaRefFromLegacyValue(value)))
+const defaultMediaResolver: ReadOnlyMediaResolver = {
+  resolve: resolveMediaRef,
+  resolveLegacy: resolveMediaRefFromLegacyValue,
+}
+
+async function createLegacyCompatibleMediaResolver(
+  candidates: MediaResolveCandidate[],
+): Promise<ReadOnlyMediaResolver> {
+  const resolver = await createReadOnlyMediaResolver(candidates)
+  const resolved = await Promise.all(candidates.map((candidate) => (
+    resolver.resolve(candidate.mediaId, candidate.legacyValue)
+  )))
+  const missingLegacyValues = [...new Set(candidates.flatMap((candidate, index) => {
+    if (resolved[index]) return []
+    return typeof candidate.legacyValue === 'string' && candidate.legacyValue.trim()
+      ? [candidate.legacyValue]
+      : []
+  }))]
+  if (missingLegacyValues.length === 0) return resolver
+
+  const backfilled = await Promise.all(
+    missingLegacyValues.map((value) => resolveMediaRefFromLegacyValue(value)),
+  )
+  return backfilled.some(Boolean)
+    ? createReadOnlyMediaResolver(candidates)
+    : resolver
+}
+
+function decodeAppearanceImageArray(raw: unknown, fieldName: string): string[] {
+  // Legacy rows and early viral-replication drafts may contain NULL even though
+  // every current write path stores a JSON array string. Keep malformed
+  // non-null values strict while treating the nullable legacy state as empty.
+  if (raw === null || raw === undefined) return []
+  return decodeImageUrlsFromDb(raw as string, fieldName)
+}
+
+async function resolveAppearanceImageArray(
+  raw: unknown,
+  fieldName: string,
+  resolver: ReadOnlyMediaResolver = defaultMediaResolver,
+): Promise<{ urls: string[]; medias: MediaRef[] }> {
+  const values = decodeAppearanceImageArray(raw, fieldName)
+  const refs = await Promise.all(values.map((value) => resolver.resolveLegacy(value)))
   return {
     urls: values.map((value, index) => refs[index]?.url || value),
     medias: refs.filter((ref): ref is MediaRef => !!ref),
   }
 }
 
-async function attachMediaFieldsToAppearance<T extends Record<string, unknown>>(appearance: T) {
-  const imageMedia = await resolveMediaRef(appearance.imageMediaId, appearance.imageUrl)
-  const previousImageMedia = await resolveMediaRef(appearance.previousImageMediaId, appearance.previousImageUrl)
-  const imageResult = await resolveAppearanceImageArray(appearance.imageUrls, 'appearance.imageUrls')
-  const previousImageResult = await resolveAppearanceImageArray(appearance.previousImageUrls, 'appearance.previousImageUrls')
+async function attachMediaFieldsToAppearance<T extends Record<string, unknown>>(
+  appearance: T,
+  resolver: ReadOnlyMediaResolver = defaultMediaResolver,
+) {
+  const imageMedia = await resolver.resolve(appearance.imageMediaId, appearance.imageUrl)
+  const previousImageMedia = await resolver.resolve(appearance.previousImageMediaId, appearance.previousImageUrl)
+  const imageResult = await resolveAppearanceImageArray(appearance.imageUrls, 'appearance.imageUrls', resolver)
+  const previousImageResult = await resolveAppearanceImageArray(
+    appearance.previousImageUrls,
+    'appearance.previousImageUrls',
+    resolver,
+  )
 
   return {
     ...appearance,
@@ -49,10 +96,43 @@ async function attachMediaFieldsToAppearance<T extends Record<string, unknown>>(
   }
 }
 
+function collectAppearanceMediaCandidates(
+  appearance: Record<string, unknown>,
+): MediaResolveCandidate[] {
+  return [
+    { mediaId: appearance.imageMediaId, legacyValue: appearance.imageUrl },
+    { mediaId: appearance.previousImageMediaId, legacyValue: appearance.previousImageUrl },
+    ...parseStringArray(appearance.imageUrls).map((legacyValue) => ({ legacyValue })),
+    ...parseStringArray(appearance.previousImageUrls).map((legacyValue) => ({ legacyValue })),
+  ]
+}
+
+function collectCharacterMediaCandidates(
+  character: Record<string, unknown>,
+): MediaResolveCandidate[] {
+  return [
+    { mediaId: character.customVoiceMediaId, legacyValue: character.customVoiceUrl },
+    ...((character.appearances as Array<Record<string, unknown>>) || [])
+      .flatMap(collectAppearanceMediaCandidates),
+  ]
+}
+
+function collectLocationMediaCandidates(
+  location: Record<string, unknown>,
+): MediaResolveCandidate[] {
+  return ((location.images as Array<Record<string, unknown>>) || []).flatMap((image) => [
+    { mediaId: image.imageMediaId, legacyValue: image.imageUrl },
+    { mediaId: image.previousImageMediaId, legacyValue: image.previousImageUrl },
+  ])
+}
+
 export async function attachMediaFieldsToGlobalCharacter<T extends Record<string, unknown>>(character: T) {
-  const customVoiceMedia = await resolveMediaRef(character.customVoiceMediaId, character.customVoiceUrl)
+  const resolver = await createLegacyCompatibleMediaResolver(collectCharacterMediaCandidates(character))
+  const customVoiceMedia = await resolver.resolve(character.customVoiceMediaId, character.customVoiceUrl)
   const appearances = await Promise.all(
-    ((character.appearances as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToAppearance),
+    ((character.appearances as Array<Record<string, unknown>>) || []).map((appearance) => (
+      attachMediaFieldsToAppearance(appearance, resolver)
+    )),
   )
 
   return {
@@ -65,10 +145,11 @@ export async function attachMediaFieldsToGlobalCharacter<T extends Record<string
 }
 
 export async function attachMediaFieldsToGlobalLocation<T extends Record<string, unknown>>(location: T) {
+  const resolver = await createLegacyCompatibleMediaResolver(collectLocationMediaCandidates(location))
   const images = await Promise.all(
     ((location.images as Array<Record<string, unknown>>) || []).map(async (img) => {
-    const imageMedia = await resolveMediaRef(img.imageMediaId, img.imageUrl)
-    const previousImageMedia = await resolveMediaRef(img.previousImageMediaId, img.previousImageUrl)
+    const imageMedia = await resolver.resolve(img.imageMediaId, img.imageUrl)
+    const previousImageMedia = await resolver.resolve(img.previousImageMediaId, img.previousImageUrl)
     return {
       ...img,
       media: imageMedia,
@@ -87,18 +168,16 @@ export async function attachMediaFieldsToGlobalLocation<T extends Record<string,
 }
 
 export async function attachMediaFieldsToGlobalVoice<T extends Record<string, unknown>>(voice: T) {
-  const customVoiceMedia = await resolveMediaRef(voice.customVoiceMediaId, voice.customVoiceUrl)
+  const resolver = await createLegacyCompatibleMediaResolver([
+    { mediaId: voice.customVoiceMediaId, legacyValue: voice.customVoiceUrl },
+  ])
+  const customVoiceMedia = await resolver.resolve(voice.customVoiceMediaId, voice.customVoiceUrl)
   return {
     ...voice,
     media: customVoiceMedia,
     customVoiceMedia,
     customVoiceUrl: customVoiceMedia?.url || voice.customVoiceUrl || null,
   }
-}
-
-const defaultMediaResolver: ReadOnlyMediaResolver = {
-  resolve: resolveMediaRef,
-  resolveLegacy: resolveMediaRefFromLegacyValue,
 }
 
 async function attachMediaFieldsToPanel<T extends Record<string, unknown>>(
@@ -211,7 +290,7 @@ function collectStageMediaCandidates(projectLike: Record<string, unknown>): Medi
 }
 
 export async function attachMediaFieldsToStagePayload<T extends Record<string, unknown>>(projectLike: T) {
-  const resolver = await createReadOnlyMediaResolver(collectStageMediaCandidates(projectLike))
+  const resolver = await createLegacyCompatibleMediaResolver(collectStageMediaCandidates(projectLike))
   const audioMedia = await resolver.resolve(projectLike.audioMediaId, projectLike.audioUrl)
   const storyboards = await Promise.all(
     ((projectLike.storyboards as Array<Record<string, unknown>>) || []).map((storyboard) => (
@@ -227,10 +306,15 @@ export async function attachMediaFieldsToStagePayload<T extends Record<string, u
   }
 }
 
-async function attachMediaFieldsToProjectCharacter<T extends Record<string, unknown>>(character: T) {
-  const customVoiceMedia = await resolveMediaRef(character.customVoiceMediaId, character.customVoiceUrl)
+async function attachMediaFieldsToProjectCharacter<T extends Record<string, unknown>>(
+  character: T,
+  resolver: ReadOnlyMediaResolver = defaultMediaResolver,
+) {
+  const customVoiceMedia = await resolver.resolve(character.customVoiceMediaId, character.customVoiceUrl)
   const appearances = await Promise.all(
-    ((character.appearances as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToAppearance),
+    ((character.appearances as Array<Record<string, unknown>>) || []).map((appearance) => (
+      attachMediaFieldsToAppearance(appearance, resolver)
+    )),
   )
   return {
     ...character,
@@ -241,11 +325,14 @@ async function attachMediaFieldsToProjectCharacter<T extends Record<string, unkn
   }
 }
 
-async function attachMediaFieldsToProjectLocation<T extends Record<string, unknown>>(location: T) {
+async function attachMediaFieldsToProjectLocation<T extends Record<string, unknown>>(
+  location: T,
+  resolver: ReadOnlyMediaResolver = defaultMediaResolver,
+) {
   const images = await Promise.all(
     ((location.images as Array<Record<string, unknown>>) || []).map(async (img) => {
-    const imageMedia = await resolveMediaRef(img.imageMediaId, img.imageUrl)
-    const previousImageMedia = await resolveMediaRef(img.previousImageMediaId, img.previousImageUrl)
+    const imageMedia = await resolver.resolve(img.imageMediaId, img.imageUrl)
+    const previousImageMedia = await resolver.resolve(img.previousImageMediaId, img.previousImageUrl)
     return {
       ...img,
       media: imageMedia,
@@ -263,13 +350,19 @@ async function attachMediaFieldsToProjectLocation<T extends Record<string, unkno
   }
 }
 
-async function attachMediaFieldsToProjectProp<T extends Record<string, unknown>>(prop: T) {
-  return await attachMediaFieldsToProjectLocation(prop)
+async function attachMediaFieldsToProjectProp<T extends Record<string, unknown>>(
+  prop: T,
+  resolver: ReadOnlyMediaResolver = defaultMediaResolver,
+) {
+  return await attachMediaFieldsToProjectLocation(prop, resolver)
 }
 
-async function attachMediaFieldsToShot<T extends Record<string, unknown>>(shot: T) {
-  const imageMedia = await resolveMediaRef(shot.imageMediaId, shot.imageUrl)
-  const videoMedia = await resolveMediaRefFromLegacyValue(shot.videoUrl)
+async function attachMediaFieldsToShot<T extends Record<string, unknown>>(
+  shot: T,
+  resolver: ReadOnlyMediaResolver = defaultMediaResolver,
+) {
+  const imageMedia = await resolver.resolve(shot.imageMediaId, shot.imageUrl)
+  const videoMedia = await resolver.resolveLegacy(shot.videoUrl)
   return {
     ...shot,
     media: imageMedia,
@@ -280,8 +373,11 @@ async function attachMediaFieldsToShot<T extends Record<string, unknown>>(shot: 
   }
 }
 
-async function attachMediaFieldsToVoiceLine<T extends Record<string, unknown>>(line: T) {
-  const audioMedia = await resolveMediaRef(line.audioMediaId, line.audioUrl)
+async function attachMediaFieldsToVoiceLine<T extends Record<string, unknown>>(
+  line: T,
+  resolver: ReadOnlyMediaResolver = defaultMediaResolver,
+) {
+  const audioMedia = await resolver.resolve(line.audioMediaId, line.audioUrl)
   return {
     ...line,
     media: audioMedia,
@@ -290,27 +386,64 @@ async function attachMediaFieldsToVoiceLine<T extends Record<string, unknown>>(l
   }
 }
 
+function collectProjectMediaCandidates(projectLike: Record<string, unknown>): MediaResolveCandidate[] {
+  const candidates: MediaResolveCandidate[] = [
+    { mediaId: projectLike.audioMediaId, legacyValue: projectLike.audioUrl },
+  ]
+  for (const character of (projectLike.characters as Array<Record<string, unknown>>) || []) {
+    candidates.push(...collectCharacterMediaCandidates(character))
+  }
+  for (const location of (projectLike.locations as Array<Record<string, unknown>>) || []) {
+    candidates.push(...collectLocationMediaCandidates(location))
+  }
+  for (const prop of (projectLike.props as Array<Record<string, unknown>>) || []) {
+    candidates.push(...collectLocationMediaCandidates(prop))
+  }
+  for (const shot of (projectLike.shots as Array<Record<string, unknown>>) || []) {
+    candidates.push(
+      { mediaId: shot.imageMediaId, legacyValue: shot.imageUrl },
+      { legacyValue: shot.videoUrl },
+    )
+  }
+  candidates.push(...collectStageMediaCandidates(projectLike))
+  for (const line of (projectLike.voiceLines as Array<Record<string, unknown>>) || []) {
+    candidates.push({ mediaId: line.audioMediaId, legacyValue: line.audioUrl })
+  }
+  return candidates
+}
+
 export async function attachMediaFieldsToProject<T extends Record<string, unknown>>(projectLike: T) {
-  const audioMedia = await resolveMediaRef(projectLike.audioMediaId, projectLike.audioUrl)
+  const resolver = await createLegacyCompatibleMediaResolver(collectProjectMediaCandidates(projectLike))
+  const audioMedia = await resolver.resolve(projectLike.audioMediaId, projectLike.audioUrl)
   const characters = await Promise.all(
-    ((projectLike.characters as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToProjectCharacter),
+    ((projectLike.characters as Array<Record<string, unknown>>) || []).map((character) => (
+      attachMediaFieldsToProjectCharacter(character, resolver)
+    )),
   )
   const locations = await Promise.all(
-    ((projectLike.locations as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToProjectLocation),
+    ((projectLike.locations as Array<Record<string, unknown>>) || []).map((location) => (
+      attachMediaFieldsToProjectLocation(location, resolver)
+    )),
   )
   const props = await Promise.all(
-    ((projectLike.props as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToProjectProp),
+    ((projectLike.props as Array<Record<string, unknown>>) || []).map((prop) => (
+      attachMediaFieldsToProjectProp(prop, resolver)
+    )),
   )
   const shots = await Promise.all(
-    ((projectLike.shots as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToShot),
+    ((projectLike.shots as Array<Record<string, unknown>>) || []).map((shot) => (
+      attachMediaFieldsToShot(shot, resolver)
+    )),
   )
   const storyboards = await Promise.all(
     ((projectLike.storyboards as Array<Record<string, unknown>>) || []).map((storyboard) => (
-      attachMediaFieldsToStoryboard(storyboard)
+      attachMediaFieldsToStoryboard(storyboard, resolver)
     )),
   )
   const voiceLines = await Promise.all(
-    ((projectLike.voiceLines as Array<Record<string, unknown>>) || []).map(attachMediaFieldsToVoiceLine),
+    ((projectLike.voiceLines as Array<Record<string, unknown>>) || []).map((line) => (
+      attachMediaFieldsToVoiceLine(line, resolver)
+    )),
   )
 
   return {

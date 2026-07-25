@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api-fetch'
 import { resolveTaskResponse } from '@/lib/task/client'
@@ -161,6 +161,31 @@ export function useAssets(input: AssetQueryInput) {
   const taskStatesQuery = useTaskTargetStateMap(taskProjectId, taskTargets, {
     enabled: taskProjectId.length > 0 && taskTargets.length > 0,
   })
+  const previousTaskPhasesRef = useRef(new Map<string, string>())
+  const refetchAssets = assetsQuery.refetch
+
+  // SSE normally invalidates assets when a generation task completes. Keep a
+  // polling-derived recovery path as well so a dropped completion event cannot
+  // leave the finished image hidden until the next window focus/refetch.
+  useEffect(() => {
+    const nextPhases = new Map<string, string>()
+    let completedAfterRunning = false
+    for (const state of taskStatesQuery.data || []) {
+      const key = `${state.targetType}:${state.targetId}`
+      const previousPhase = previousTaskPhasesRef.current.get(key)
+      if (
+        state.phase === 'completed'
+        && (previousPhase === 'queued' || previousPhase === 'processing')
+      ) {
+        completedAfterRunning = true
+      }
+      nextPhases.set(key, state.phase)
+    }
+    previousTaskPhasesRef.current = nextPhases
+    if (completedAfterRunning) {
+      void refetchAssets()
+    }
+  }, [refetchAssets, taskStatesQuery.data])
 
   const data = useMemo(() => {
     const assets = assetsQuery.data ?? []

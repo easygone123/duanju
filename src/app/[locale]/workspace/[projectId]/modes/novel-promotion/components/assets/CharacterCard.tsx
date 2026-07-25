@@ -43,7 +43,7 @@ interface CharacterCardProps {
   isPrimaryAppearance?: boolean
   primaryAppearanceSelected?: boolean
   projectId: string
-  onConfirmSelection?: (characterId: string, appearanceId: string) => void  // 确认选择
+  onConfirmSelection?: (characterId: string, appearanceId: string) => Promise<void> | void  // 确认选择
   // 音色相关
   onVoiceChange?: (characterId: string, customVoiceUrl?: string) => void
   onVoiceDesign?: (characterId: string, characterName: string) => void  // AI 声音设计
@@ -328,7 +328,9 @@ export default function CharacterCard({
           confirmSelectionState={confirmSelectionState}
           onConfirmSelection={() => {
             setIsConfirmingSelection(true)
-            onConfirmSelection?.(character.id, appearance.id)
+            void Promise.resolve(onConfirmSelection?.(character.id, appearance.id)).finally(() => {
+              setIsConfirmingSelection(false)
+            })
           }}
           isPrimaryAppearance={isPrimaryAppearance}
           voiceSettings={selectionVoiceSettings}

@@ -51,9 +51,20 @@ const promptMock = vi.hoisted(() => ({
   buildPrompt: vi.fn(() => 'panel-variant-prompt'),
 }))
 
+const mediaMock = vi.hoisted(() => ({
+  ensureMediaObjectFromStorageKey: vi.fn(async () => ({
+    id: 'media-panel-variant',
+    publicId: 'public-panel-variant',
+    storageKey: 'cos/panel-variant-new.png',
+    url: '/m/public-panel-variant',
+    mimeType: 'image/png',
+  })),
+}))
+
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }))
 vi.mock('@/lib/workers/utils', () => utilsMock)
 vi.mock('@/lib/media/outbound-image', () => outboundMock)
+vi.mock('@/lib/media/service', () => mediaMock)
 vi.mock('@/lib/logging/core', () => ({ logInfo: vi.fn() }))
 vi.mock('@/lib/workers/handlers/image-task-handler-shared', async () => {
   const actual = await vi.importActual<typeof import('@/lib/workers/handlers/image-task-handler-shared')>(
@@ -156,7 +167,10 @@ describe('worker panel-variant-task-handler behavior', () => {
 
     expect(prismaMock.novelPromotionPanel.update).toHaveBeenCalledWith({
       where: { id: 'panel-new' },
-      data: { imageUrl: 'cos/panel-variant-new.png' },
+      data: {
+        imageUrl: 'cos/panel-variant-new.png',
+        imageMediaId: 'media-panel-variant',
+      },
     })
     expect(promptMock.buildPrompt).toHaveBeenCalledWith(expect.objectContaining({
       variables: expect.objectContaining({
@@ -168,7 +182,8 @@ describe('worker panel-variant-task-handler behavior', () => {
     expect(result).toEqual({
       panelId: 'panel-new',
       storyboardId: 'storyboard-1',
-      imageUrl: 'cos/panel-variant-new.png',
+      imageUrl: '/m/public-panel-variant',
+      imageMediaId: 'media-panel-variant',
     })
   })
 

@@ -28,6 +28,7 @@ test('decodeImageUrlsStrict throws on non-string array entry', () => {
   expect(() => decodeImageUrlsStrict('["a",1]')).toThrow(ImageUrlsContractError)
 })
 
-test('decodeImageUrlsFromDb throws on null', () => {
-  expect(() => decodeImageUrlsFromDb(null)).toThrow(ImageUrlsContractError)
+test('decodeImageUrlsFromDb treats legacy null as an empty image array', () => {
+  expect(decodeImageUrlsFromDb(null)).toEqual([])
+  expect(decodeImageUrlsFromDb(undefined)).toEqual([])
 })
