@@ -16,6 +16,7 @@ import {
   type ComfyHealthState,
   type ComfyRequestStatus,
 } from './types'
+import { COMFY_ERROR_CODE } from './errors'
 
 const SCHEDULABLE_STATUSES = ['waiting_capacity', 'blocked_no_compatible_instance'] as const
 const ACTIVE_PARENT_TASK_STATUSES = [TASK_STATUS.QUEUED, TASK_STATUS.PROCESSING] as const
@@ -61,6 +62,7 @@ export interface ComfySchedulerDependencies {
     assignedAt: Date
   }): Promise<ComfyAssignmentOutcome>
   markBlockedIfEligible(requestId: string, userId: string): Promise<boolean>
+  failIncompatibleIfEligible(requestId: string, userId: string): Promise<boolean>
 }
 
 export type ComfyAssignmentOutcome = 'assigned' | 'request_lost' | 'connection_busy'
@@ -92,6 +94,7 @@ export type ComfyScheduleResult =
   | { outcome: 'empty' }
   | { outcome: 'waiting_capacity'; requestId: string }
   | { outcome: 'blocked_no_compatible_instance'; requestId: string }
+  | { outcome: 'failed_incompatible'; requestId: string }
   | { outcome: 'lost_race'; requestId: string }
   | { outcome: 'leased'; requestId: string; connectionId: string; leaseId: string }
 
@@ -134,11 +137,10 @@ export async function scheduleNextComfyRequest(
     if (compatibilityUnknown) {
       return { outcome: 'waiting_capacity', requestId: request.id }
     }
-    if (request.status === 'waiting_capacity'
-      && !await dependencies.markBlockedIfEligible(request.id, userId)) {
+    if (!await dependencies.failIncompatibleIfEligible(request.id, userId)) {
       return { outcome: 'lost_race', requestId: request.id }
     }
-    return { outcome: 'blocked_no_compatible_instance', requestId: request.id }
+    return { outcome: 'failed_incompatible', requestId: request.id }
   }
 
   if (!await dependencies.makeWaitingIfBlocked(request.id, userId, request.status)) {
@@ -249,6 +251,26 @@ export function createDefaultComfySchedulerDependencies(
       const result = await prisma.comfyGenerationRequest.updateMany({
         where: { id: requestId, userId, status: 'waiting_capacity' },
         data: { status: 'blocked_no_compatible_instance' },
+      })
+      return result.count === 1
+    },
+    failIncompatibleIfEligible: async (requestId, userId) => {
+      const result = await prisma.comfyGenerationRequest.updateMany({
+        where: {
+          id: requestId,
+          userId,
+          status: { in: [...SCHEDULABLE_STATUSES] },
+          task: { status: { in: [...ACTIVE_PARENT_TASK_STATUSES] } },
+        },
+        data: {
+          status: 'failed',
+          failedAt: new Date(),
+          connectionId: null,
+          leaseId: null,
+          leaseExpiresAt: null,
+          errorCode: COMFY_ERROR_CODE.NO_COMPATIBLE_INSTANCE,
+          errorMessage: 'No online ComfyUI instance is compatible with this workflow',
+        },
       })
       return result.count === 1
     },

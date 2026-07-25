@@ -174,6 +174,7 @@ function schedulerFixture(overrides: Partial<ComfySchedulerDependencies> = {}) {
     makeWaitingIfBlocked: vi.fn().mockResolvedValue(true),
     assignIfEligible: vi.fn().mockResolvedValue('assigned'),
     markBlockedIfEligible: vi.fn().mockResolvedValue(true),
+    failIncompatibleIfEligible: vi.fn().mockResolvedValue(true),
     ...overrides,
   }
   return { deps, requests, connections }
@@ -222,22 +223,35 @@ describe('idle-first ComfyUI scheduler', () => {
     expect(deps.acquireLease).not.toHaveBeenCalled()
   })
 
-  it('blocks only when no enabled connection is compatible', async () => {
+  it('fails terminally when every online idle connection is incompatible', async () => {
     const { deps } = schedulerFixture({ checkCachedCompatibility: vi.fn().mockResolvedValue(false) })
     await expect(scheduleNextComfyRequest('user-1', deps)).resolves.toEqual({
-      outcome: 'blocked_no_compatible_instance', requestId: 'request-old',
+      outcome: 'failed_incompatible', requestId: 'request-old',
     })
-    expect(deps.markBlockedIfEligible).toHaveBeenCalledWith('request-old', 'user-1')
+    expect(deps.failIncompatibleIfEligible).toHaveBeenCalledWith('request-old', 'user-1')
+    expect(deps.markBlockedIfEligible).not.toHaveBeenCalled()
   })
 
-  it('reports a lost race when another scheduler changes the request before blocking', async () => {
+  it('reports a lost race when another scheduler changes the request before failing it', async () => {
     const { deps } = schedulerFixture({
       checkCachedCompatibility: vi.fn().mockResolvedValue(false),
-      markBlockedIfEligible: vi.fn().mockResolvedValue(false),
+      failIncompatibleIfEligible: vi.fn().mockResolvedValue(false),
     })
     await expect(scheduleNextComfyRequest('user-1', deps)).resolves.toEqual({
       outcome: 'lost_race', requestId: 'request-old',
     })
+  })
+
+  it('terminalizes a previously blocked request after compatibility becomes known', async () => {
+    const { deps, requests } = schedulerFixture({
+      checkCachedCompatibility: vi.fn().mockResolvedValue(false),
+    })
+    requests[0].status = 'blocked_no_compatible_instance'
+
+    await expect(scheduleNextComfyRequest('user-1', deps)).resolves.toEqual({
+      outcome: 'failed_incompatible', requestId: 'request-old',
+    })
+    expect(deps.failIncompatibleIfEligible).toHaveBeenCalledWith('request-old', 'user-1')
   })
 
   it('waits rather than falsely blocking while compatibility is not cached', async () => {

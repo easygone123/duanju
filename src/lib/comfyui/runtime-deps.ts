@@ -13,7 +13,14 @@ export interface ComfyRuntimeOperationLimits {
 }
 
 type ScheduleResult =
-  | { outcome: 'empty' | 'waiting_capacity' | 'blocked_no_compatible_instance' | 'lost_race' }
+  | {
+    outcome:
+      | 'empty'
+      | 'waiting_capacity'
+      | 'blocked_no_compatible_instance'
+      | 'failed_incompatible'
+      | 'lost_race'
+  }
   | { outcome: 'leased'; requestId: string; connectionId: string; leaseId: string; mediaType: 'image' | 'video' }
 
 export interface ComfyCursorPageInput {

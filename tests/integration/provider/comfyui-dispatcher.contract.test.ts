@@ -295,13 +295,16 @@ describe('ComfyUI dispatcher contract', () => {
     })
 
     await expect(dispatchComfyRequest('request-1', deps)).resolves.toMatchObject({
-      outcome: 'blocked_no_compatible_instance',
+      outcome: 'failed',
+      code: 'COMFY_WORKFLOW_INCOMPATIBLE',
     })
     expect(deps.client.submitPrompt).not.toHaveBeenCalled()
     expect(deps.claimSubmissionFence).not.toHaveBeenCalled()
-    expect(deps.blockIncompatible).toHaveBeenCalledWith(expect.objectContaining({
+    expect(deps.markFailed).toHaveBeenCalledWith(expect.objectContaining({
       requestId: 'request-1', connectionId: 'connection-1', leaseId: 'lease-1',
+      errorCode: 'COMFY_WORKFLOW_INCOMPATIBLE',
     }))
+    expect(deps.blockIncompatible).not.toHaveBeenCalled()
     expect(deps.release).toHaveBeenCalledOnce()
   })
 

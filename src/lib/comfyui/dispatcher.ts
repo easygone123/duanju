@@ -244,9 +244,11 @@ export async function dispatchComfyRequest(
       return { outcome: 'waiting_capacity' }
     }
     if (gate === 'incompatible') {
-      await mustOwn(dependencies.blockIncompatible(owner))
-      terminal = true
-      return { outcome: 'blocked_no_compatible_instance' }
+      throw new ComfyError(
+        COMFY_ERROR_CODE.WORKFLOW_INCOMPATIBLE,
+        'The selected ComfyUI instance is incompatible with this workflow',
+        { retryable: false },
+      )
     }
     if (gate === 'lost') throw lostLease()
     if (!await dependencies.recheckClaim(context, owner)) {

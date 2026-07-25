@@ -304,6 +304,7 @@ describe('system - ComfyUI executable acceptance evidence', () => {
       },
       releaseLease: async ({ connectionId }) => leases.delete(connectionId),
       makeWaitingIfBlocked: async () => true, markBlockedIfEligible: async () => true,
+      failIncompatibleIfEligible: async () => true,
       assignIfEligible: (input) => assignComfyRequestWithStore(input, assignmentStore),
     }
     await expect(scheduleNextComfyRequest('user-a', dependencies, { newLeaseId: () => 'lease-1' }))
@@ -335,6 +336,7 @@ describe('system - ComfyUI executable acceptance evidence', () => {
         checkCachedCompatibility: async () => true,
         acquireLease: async () => true, releaseLease: async () => true,
         makeWaitingIfBlocked: async () => true, markBlockedIfEligible: async () => true,
+        failIncompatibleIfEligible: async () => true,
         assignIfEligible: async () => { assignments += 1; return 'assigned' },
       })
       expect(result).toEqual({ outcome: 'waiting_capacity', requestId: 'waiting-request' })
@@ -374,6 +376,7 @@ describe('system - ComfyUI executable acceptance evidence', () => {
         checkCachedCompatibility: async () => true,
         acquireLease: async () => true, releaseLease: async () => true,
         makeWaitingIfBlocked: async () => true, markBlockedIfEligible: async () => true,
+        failIncompatibleIfEligible: async () => true,
         assignIfEligible: async () => { assignments += 1; return 'assigned' },
       })
       expect(result.outcome).toBe('waiting_capacity')
@@ -568,6 +571,7 @@ describe('system - ComfyUI executable acceptance evidence', () => {
         acquireLease: async () => { leaseAttempts += 1; return true },
         releaseLease: async () => true, makeWaitingIfBlocked: async () => true,
         assignIfEligible: async () => 'assigned', markBlockedIfEligible: async () => true,
+        failIncompatibleIfEligible: async () => true,
       })
       expect(connectionResult.outcome).toBe('blocked_no_compatible_instance')
       expect(leaseAttempts).toBe(0)
