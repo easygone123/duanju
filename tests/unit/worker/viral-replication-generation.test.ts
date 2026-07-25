@@ -23,6 +23,7 @@ describe('viral replication generation worker', () => {
     const replication = {
       id: 'rep-1', userId: 'user-1', projectId: 'project-1', episodeId: 'episode-1',
       sourceVideoMediaId: 'source-media-1',
+      episode: { audioMediaId: 'source-audio-media-1' },
       status: 'generating', brief: '最新原创方向', videoRatio: '9:16', artStyle: 'realistic',
       analysisModelSnapshot: 'provider::pinned', durationMs: 15_000,
       transcriptText: null,
@@ -40,6 +41,8 @@ describe('viral replication generation worker', () => {
 
     expect(runText).toHaveBeenCalledWith(expect.objectContaining({ model: 'provider::pinned' }))
     expect(JSON.stringify(runText.mock.calls[0][0])).toContain('最新原创方向')
-    expect(persist).toHaveBeenCalledWith(expect.objectContaining({ generation }))
+    expect(persist).toHaveBeenCalledWith(expect.objectContaining({
+      sourceAudioMediaId: 'source-audio-media-1',
+    }))
   })
 })

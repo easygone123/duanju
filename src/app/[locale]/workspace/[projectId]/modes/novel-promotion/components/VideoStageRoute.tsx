@@ -23,6 +23,9 @@ export default function VideoStageRoute() {
   if (stageQuery.data === undefined) {
     return <StageDataBoundary data={stageQuery.data} status={stageQuery.status} error={stageQuery.error} refetch={stageQuery.refetch}>{null}</StageDataBoundary>
   }
+  const episodeAudioMedia = stageQuery.data.stage === 'videos'
+    ? stageQuery.data.episode.audioMedia
+    : null
 
   return (
     <VideoStage
@@ -34,6 +37,16 @@ export default function VideoStageRoute() {
       dialogueVideoModel={runtime.dialogueVideoModel}
       capabilityOverrides={runtime.capabilityOverrides}
       videoRatio={runtime.videoRatio ?? undefined}
+      episodeDirectorAudio={episodeAudioMedia?.mimeType?.startsWith('audio/')
+        ? {
+            mediaId: episodeAudioMedia.id,
+            url: episodeAudioMedia.url,
+            mimeType: episodeAudioMedia.mimeType,
+            ...(episodeAudioMedia.durationMs
+              ? { durationSeconds: episodeAudioMedia.durationMs / 1_000 }
+              : {}),
+          }
+        : undefined}
       userVideoModels={runtime.userVideoModels}
       onGenerateVideo={runtime.onGenerateVideo}
       onGenerateAllVideos={runtime.onGenerateAllVideos}

@@ -24,7 +24,6 @@ export default function ConnectionCard({ connection, status, busy, onEdit, onPro
   const state = status?.state ?? (connection.enabled ? 'checking' : 'disabled')
   const devices = status?.devices?.length ? status.devices : connection.deviceSummary
   const owned = status?.ownedTask != null
-  const statusPending = status === undefined
   const checkedAt = status?.checkedAt ?? connection.lastHealthAt
 
   return (
@@ -58,7 +57,7 @@ export default function ConnectionCard({ connection, status, busy, onEdit, onPro
         <button type="button" onClick={() => void onToggle()} disabled={busy}
           aria-label={connection.enabled ? t('disableConnection', { name: connection.name }) : t('enableConnection', { name: connection.name })}
           className="glass-btn-base px-3 py-2 text-sm">{connection.enabled ? t('disable') : t('enable')}</button>
-        <button type="button" onClick={() => void onDelete()} disabled={busy || owned || statusPending}
+        <button type="button" onClick={() => void onDelete()} disabled={busy}
           aria-label={t('deleteConnection', { name: connection.name })}
           title={owned ? t('deleteBlockedOwned') : undefined} className="glass-btn-base glass-btn-tone-danger px-3 py-2 text-sm">{t('delete')}</button>
       </div>

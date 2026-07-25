@@ -40,6 +40,7 @@ async function loadOwnedStoryboard(projectId: string, userId: string, storyboard
       directorConfigJson: true,
       episode: {
         select: {
+          audioMediaId: true,
           novelPromotionProject: { select: { videoRatio: true } },
           storyboards: {
             orderBy: [{ groupSequence: 'asc' }, { createdAt: 'asc' }],
@@ -167,8 +168,10 @@ async function normalizeTimelineSpec(input: {
   ) => segments.map((segment) => {
     const media = mediaById.get(segment.sourceMediaId)
     const expectedType = mediaType === 'mixed' ? (segment.sourceType ?? 'video') : mediaType
+    const isEpisodeAudio = expectedType === 'audio'
+      && media?.id === storyboard.episode.audioMediaId
     if (!media || !media.mimeType?.startsWith(`${expectedType}/`)
-      || !isOwnedDirectorUploadStorageKey(media.storageKey, userId, projectId)) {
+      || (!isEpisodeAudio && !isOwnedDirectorUploadStorageKey(media.storageKey, userId, projectId))) {
       throw new ApiError('INVALID_PARAMS', { code: 'STORYBOARD_DIRECTOR_SOURCE_INVALID' })
     }
     return { ...segment, sourceUrl: `/m/${encodeURIComponent(media.publicId)}` }

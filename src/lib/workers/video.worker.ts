@@ -559,8 +559,11 @@ async function handleStoryboardDirectorVideoTask(job: Job<TaskJobData>) {
     mediaType: 'image' | 'video' | 'audio',
   ) => ids.map((mediaId) => {
     const media = sourceMediaById.get(mediaId)
+    const isEpisodeAudio = mediaType === 'audio'
+      && media?.id === storyboard.episode.audioMediaId
     if (!media?.storageKey || !media.mimeType?.startsWith(`${mediaType}/`)
-      || !isOwnedDirectorUploadStorageKey(media.storageKey, job.data.userId, job.data.projectId)) {
+      || (!isEpisodeAudio
+        && !isOwnedDirectorUploadStorageKey(media.storageKey, job.data.userId, job.data.projectId))) {
       throw new Error('STORYBOARD_DIRECTOR_SOURCE_INVALID')
     }
     return {

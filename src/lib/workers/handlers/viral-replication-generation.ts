@@ -24,6 +24,7 @@ type GenerationRecord = {
   projectId: string | null
   episodeId: string | null
   sourceVideoMediaId: string | null
+  episode: { audioMediaId: string | null } | null
   status: string
   brief: string
   videoRatio: string
@@ -98,6 +99,7 @@ export function createViralReplicationGenerationHandler(
           projectId: true,
           episodeId: true,
           sourceVideoMediaId: true,
+          episode: { select: { audioMediaId: true } },
           status: true,
           brief: true,
           videoRatio: true,
@@ -163,7 +165,7 @@ export function createViralReplicationGenerationHandler(
         episodeId: replication.episodeId,
         generation,
         transcriptText: replication.transcriptText,
-        sourceAudioMediaId: replication.sourceVideoMediaId,
+        sourceAudioMediaId: replication.episode?.audioMediaId ?? null,
       })
       return { replicationId: replication.id }
     } catch (error: unknown) {

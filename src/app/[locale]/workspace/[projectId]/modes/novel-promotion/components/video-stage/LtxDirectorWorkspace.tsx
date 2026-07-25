@@ -36,6 +36,7 @@ import {
   type LtxDirectorTimelineSpec,
 } from '@/lib/comfyui/ltx-director'
 import { checkApiResponse } from '@/lib/error-handler'
+import type { EpisodeDirectorAudio } from '@/lib/novel-promotion/stages/video-stage-runtime/types'
 import { invalidateEpisodeStageQueries } from '@/lib/query/episode-stage-cache'
 import { useStoryboardTaskPresentation } from '@/lib/query/hooks/useTaskPresentation'
 import { queryKeys } from '@/lib/query/keys'
@@ -68,6 +69,7 @@ interface LtxDirectorWorkspaceProps {
   clips: Clip[]
   videoModels: VideoModelOption[]
   videoRatio?: string
+  episodeAudio?: EpisodeDirectorAudio
 }
 
 interface DirectorSource {
@@ -118,6 +120,41 @@ function panelPrompt(panel: NonNullable<Storyboard['panels']>[number]) {
   return panel.videoPrompt?.trim() || panel.description?.trim() || panel.imagePrompt?.trim() || ''
 }
 
+export function withEpisodeAudio(
+  spec: LtxDirectorTimelineSpec,
+  episodeAudio?: EpisodeDirectorAudio,
+): LtxDirectorTimelineSpec {
+  if (!episodeAudio?.mimeType.startsWith('audio/')
+    || (spec.audioSegments?.length ?? 0) > 0
+    || spec.audioTrackEnabled === false
+    || spec.useCustomAudio === false) {
+    return spec
+  }
+  const mainDuration = spec.segments.reduce((latest, segment) => Math.max(
+    latest,
+    (segment.startSeconds ?? 0) + segment.durationSeconds,
+  ), 0)
+  const durationSeconds = episodeAudio.durationSeconds && episodeAudio.durationSeconds > 0
+    ? episodeAudio.durationSeconds
+    : mainDuration
+  if (!(durationSeconds > 0)) return spec
+  return {
+    ...spec,
+    audioTrackEnabled: true,
+    useCustomAudio: true,
+    overrideAudio: true,
+    audioSegments: [{
+      id: `episode-audio-${episodeAudio.mediaId}`,
+      sourceMediaId: episodeAudio.mediaId,
+      sourceUrl: episodeAudio.url,
+      filename: 'original-audio.mp3',
+      startSeconds: 0,
+      durationSeconds,
+      trimStartSeconds: 0,
+    }],
+  }
+}
+
 function createSegment(source?: DirectorSource, startSeconds = 0): LtxDirectorTimelineSegmentSpec {
   return {
     id: nextSegmentId(),
@@ -154,6 +191,7 @@ function buildDefaultSpec(
   clips: Clip[],
   defaultModel: string,
   videoRatio: string,
+  episodeAudio?: EpisodeDirectorAudio,
 ): LtxDirectorTimelineSpec {
   const saved = parseLtxDirectorTimelineSpec(storyboard.directorConfigJson)
   if (saved) {
@@ -180,7 +218,7 @@ function buildDefaultSpec(
       cursor += durationSeconds
       return [segment]
     })
-    return {
+    return withEpisodeAudio({
       ...saved,
       videoModel: saved.videoModel || defaultModel,
       aspectRatio: saved.aspectRatio || videoRatio,
@@ -188,12 +226,12 @@ function buildDefaultSpec(
       audioTrackEnabled: saved.audioTrackEnabled ?? true,
       motionTrackEnabled: saved.motionTrackEnabled ?? true,
       segments: [...savedSegments, ...missingPanelSegments],
-    }
+    }, episodeAudio)
   }
   const panels = (storyboard.panels || []).filter((panel) => panel.id && panel.imageUrl)
   const clip = clips.find((candidate) => candidate.id === storyboard.clipId)
   let cursor = 0
-  return {
+  return withEpisodeAudio({
     version: LTX_DIRECTOR_TIMELINE_VERSION,
     fps: 24,
     globalPrompt: normalizeLtxDirectorGlobalPrompt([storyboard.continuityAnchor, clip?.summary]
@@ -217,7 +255,7 @@ function buildDefaultSpec(
       cursor += durationSeconds
       return segment
     }),
-  }
+  }, episodeAudio)
 }
 
 function startOfSegment(segments: LtxDirectorTimelineSegmentSpec[], index: number) {
@@ -347,6 +385,7 @@ export function DirectorStoryboardEditor({
   models,
   allStoryboards,
   videoRatio,
+  episodeAudio,
 }: {
   projectId: string
   episodeId: string
@@ -357,6 +396,7 @@ export function DirectorStoryboardEditor({
   models: VideoModelOption[]
   allStoryboards: Storyboard[]
   videoRatio: string
+  episodeAudio?: EpisodeDirectorAudio
 }) {
   const t = useTranslations('video.director')
   const queryClient = useQueryClient()
@@ -412,8 +452,8 @@ export function DirectorStoryboardEditor({
     originDuration: number
   } | null>(null)
   const defaultSpec = useMemo(
-    () => buildDefaultSpec(storyboard, clips, models[0]?.value || '', videoRatio),
-    [clips, models, storyboard, videoRatio],
+    () => buildDefaultSpec(storyboard, clips, models[0]?.value || '', videoRatio, episodeAudio),
+    [clips, episodeAudio, models, storyboard, videoRatio],
   )
   const sources = useMemo(
     () => storyboardSources(allStoryboards, storyboardIndex),
@@ -1676,6 +1716,7 @@ export function DirectorStoryboardEditor({
                 clips,
                 models[0]?.value || '',
                 videoRatio,
+                episodeAudio,
               ))
               setSelectedIndex(0)
               setDirty(true)
@@ -2942,6 +2983,7 @@ function OriginalDirectorStoryboardEditor({
   models,
   allStoryboards,
   videoRatio,
+  episodeAudio,
 }: {
   projectId: string
   episodeId: string
@@ -2950,12 +2992,13 @@ function OriginalDirectorStoryboardEditor({
   models: VideoModelOption[]
   allStoryboards: Storyboard[]
   videoRatio: string
+  episodeAudio?: EpisodeDirectorAudio
 }) {
   const t = useTranslations('video.director')
   const queryClient = useQueryClient()
   const defaultSpec = useMemo(
-    () => buildDefaultSpec(storyboard, clips, models[0]?.value || '', videoRatio),
-    [clips, models, storyboard, videoRatio],
+    () => buildDefaultSpec(storyboard, clips, models[0]?.value || '', videoRatio, episodeAudio),
+    [clips, episodeAudio, models, storyboard, videoRatio],
   )
   const sources = useMemo<LtxDirectorOriginalSource[]>(() => (
     storyboardSources(allStoryboards, Math.max(0, allStoryboards.length - 1)).map((source) => ({
@@ -3039,6 +3082,7 @@ function OriginalDirectorStoryboardEditor({
                 clips,
                 models[0]?.value || '',
                 videoRatio,
+                episodeAudio,
               ))
               setDirty(true)
               setHostRevision((current) => current + 1)
@@ -3171,6 +3215,7 @@ export default function LtxDirectorWorkspace({
   clips,
   videoModels,
   videoRatio = '16:9',
+  episodeAudio,
 }: LtxDirectorWorkspaceProps) {
   const t = useTranslations('video.director')
   const directorModels = useMemo(
@@ -3200,6 +3245,7 @@ export default function LtxDirectorWorkspace({
           models={directorModels}
           allStoryboards={storyboards}
           videoRatio={videoRatio}
+          episodeAudio={episodeAudio}
         />
       )}
     </div>

@@ -6,13 +6,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { prisma } from '../../../helpers/prisma'
 
 const probeVideoMock = vi.hoisted(() => vi.fn())
+const extractSourceAudioMock = vi.hoisted(() => vi.fn())
 const uploadObjectStreamMock = vi.hoisted(() => vi.fn())
 const deleteObjectMock = vi.hoisted(() => vi.fn())
 const submitTaskMock = vi.hoisted(() => vi.fn())
 const storageState = vi.hoisted(() => ({ key: '' }))
 
 vi.mock('@/lib/viral-replication/ffmpeg', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/viral-replication/ffmpeg')>()), probeVideo: probeVideoMock,
+  ...(await importOriginal<typeof import('@/lib/viral-replication/ffmpeg')>()),
+  probeVideo: probeVideoMock,
+  extractSourceAudio: extractSourceAudioMock,
 }))
 vi.mock('@/lib/storage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/storage')>()),
@@ -178,6 +181,50 @@ describe('viral replication streamed upload with real database', () => {
       type: 'viral_video_analysis', targetType: 'ViralReplication', targetId: replicationId, maxAttempts: 1,
       payload: { sourceVideoMediaId: result.sourceVideoMediaId, analysisModelSnapshot: 'openai::analysis-v1' },
     }))
+    expect(await fs.readdir(tempRoot)).toEqual([])
+  })
+
+  it('extracts embedded audio into an owned episode audio asset', async () => {
+    probeVideoMock.mockResolvedValueOnce({
+      durationMs: 30_000, formatName: 'mov,mp4,m4a,3gp,3g2,mj2', majorBrand: 'isom',
+      videoStreamIndex: 0, width: 1080, height: 1920, hasVideo: true, hasAudio: true, hasSubtitles: false,
+      videoStreams: [], audioStreams: [{ index: 1, codecName: 'aac', channels: 2, sampleRate: 48_000 }],
+      subtitleStreams: [],
+    })
+    extractSourceAudioMock.mockImplementationOnce(async (_sourcePath: string, outputPath: string) => {
+      await fs.writeFile(outputPath, 'director source audio')
+    })
+    uploadObjectStreamMock.mockImplementation(async (
+      _streamFactory: unknown,
+      requestedKey: string,
+    ) => requestedKey.endsWith('.mp3') ? `${storagePrefix}source.mp3` : storageState.key)
+
+    const { uploadViralReplicationVideo } = await import('@/lib/viral-replication/service')
+    const result = await uploadViralReplicationVideo({
+      id: replicationId, userId, request: videoRequest(mp4Bytes()), mimeType: 'video/mp4', locale: 'zh', tempRoot,
+    })
+
+    expect(result).toMatchObject({
+      sourceVideoMediaId: expect.any(String),
+      sourceAudioMediaId: expect.any(String),
+    })
+    const episode = await prisma.novelPromotionEpisode.findUniqueOrThrow({
+      where: { id: result.episodeId },
+      include: { audioMedia: true },
+    })
+    expect(episode.audioMedia).toMatchObject({
+      id: result.sourceAudioMediaId,
+      storageKey: `${storagePrefix}source.mp3`,
+      mimeType: 'audio/mpeg',
+      durationMs: 30_000,
+    })
+    expect(episode.audioMediaId).not.toBe(result.sourceVideoMediaId)
+    expect(extractSourceAudioMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining('source-audio.mp3'),
+      1,
+    )
+    expect(await artifactCounts()).toEqual({ projects: 1, episodes: 1, media: 2 })
     expect(await fs.readdir(tempRoot)).toEqual([])
   })
 

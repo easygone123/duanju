@@ -39,6 +39,7 @@ describe('ComfyUI media ownership resolver', () => {
       expect.objectContaining({ novelPromotionPanelUpscaledImages: expect.any(Object) }),
       expect.objectContaining({ novelPromotionStoryboardSheetImages: expect.any(Object) }),
       expect.objectContaining({ novelPromotionStoryboardUpscaledSheetImages: expect.any(Object) }),
+      expect.objectContaining({ novelPromotionEpisodeAudios: expect.any(Object) }),
     ]))
   })
 

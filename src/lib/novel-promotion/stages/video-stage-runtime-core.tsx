@@ -75,6 +75,7 @@ export function useVideoStageRuntime({
   dialogueVideoModel,
   capabilityOverrides,
   videoRatio = '16:9',
+  episodeDirectorAudio,
   userVideoModels,
   onGenerateVideo,
   onGenerateAllVideos,
@@ -674,6 +675,7 @@ export function useVideoStageRuntime({
           clips={clips}
           videoModels={allVideoModelOptions}
           videoRatio={videoRatio}
+          episodeAudio={episodeDirectorAudio}
         />
       ) : (
         <BerniniDirectorWorkspace

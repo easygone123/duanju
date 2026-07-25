@@ -175,7 +175,7 @@ describe('ComfyUI connection settings', () => {
     expect(statusPollingInterval('hidden')).toBe(false)
   })
 
-  it('shows owned work and disables deletion while waoowaoo owns the instance', () => {
+  it('shows owned work but leaves deletion to the server-side live lease check', () => {
     const html = render(createElement(ConnectionCard, {
       connection,
       status: {
@@ -189,18 +189,18 @@ describe('ComfyUI connection settings', () => {
     expect(html).toContain('task-42')
     expect(html).toContain('running')
     expect(html).toContain('0.3.50')
-    expect(html).toMatch(/disabled=""[^>]*aria-label="Delete Studio GPU"/)
+    expect(html).toMatch(/aria-label="Delete Studio GPU"(?![^>]*disabled)/)
     expect(html).toMatch(/aria-label="Disable Studio GPU"(?![^>]*disabled)/)
   })
 
-  it('uses only fresh ownedTask data for disabled-node deletion eligibility', () => {
+  it('allows deletion attempts even when node status is missing or stale', () => {
     const disabled = { ...connection, enabled: false, lastHealthCode: 'online_busy_owned' }
     const missing = render(createElement(ConnectionCard, {
       connection: disabled, onEdit: () => undefined, onProbe: async () => undefined,
       onToggle: async () => undefined, onDelete: async () => undefined,
     }))
     expect(missing).toContain('Disabled')
-    expect(missing).toMatch(/disabled=""[^>]*aria-label="Delete Studio GPU"/)
+    expect(missing).toMatch(/aria-label="Delete Studio GPU"(?![^>]*disabled)/)
 
     const activeStatus: ComfyStatusView = {
       connectionId: disabled.id, state: 'disabled', checkedAt: null,
@@ -212,7 +212,7 @@ describe('ComfyUI connection settings', () => {
       onProbe: async () => undefined, onToggle: async () => undefined, onDelete: async () => undefined,
     }))
     expect(active).toContain('task-42 · running')
-    expect(active).toMatch(/disabled=""[^>]*aria-label="Delete Studio GPU"/)
+    expect(active).toMatch(/aria-label="Delete Studio GPU"(?![^>]*disabled)/)
 
     const completed = render(createElement(ConnectionCard, {
       connection: disabled, status: { ...activeStatus, ownedTask: null }, onEdit: () => undefined,
@@ -230,6 +230,16 @@ describe('ComfyUI connection settings', () => {
     )).resolves.toBeUndefined()
     expect(errors).toEqual([null, 'requestFailed'])
     expect(JSON.stringify(errors)).not.toContain('top-secret')
+  })
+
+  it('shows the owned-work message when delete hits a live connection lease', async () => {
+    const errors: Array<string | null> = []
+    await safelyRunConnectionAction(
+      () => Promise.reject({ status: 409, code: 'CONFLICT' }),
+      (error) => errors.push(error),
+      { conflictError: 'deleteBlockedOwned' },
+    )
+    expect(errors).toEqual([null, 'deleteBlockedOwned'])
   })
 
   it('maps connection request failures to specific safe messages without exposing server details', () => {

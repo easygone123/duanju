@@ -36,6 +36,13 @@ export interface EpisodeVideoUrlsResponse {
   projectName?: string
 }
 
+export interface EpisodeDirectorAudio {
+  mediaId: string
+  url: string
+  mimeType: string
+  durationSeconds?: number
+}
+
 export interface VideoStageShellProps {
   projectId: string
   episodeId: string
@@ -45,6 +52,7 @@ export interface VideoStageShellProps {
   dialogueVideoModel?: string | null
   capabilityOverrides: CapabilitySelections
   videoRatio?: string
+  episodeDirectorAudio?: EpisodeDirectorAudio
   userVideoModels?: VideoModelOption[]
   onGenerateVideo: (
     storyboardId: string,

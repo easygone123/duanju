@@ -13,6 +13,7 @@ import {
   useComfyConnectionActions,
   useComfyConnections,
   useComfyStatuses,
+  type ConnectionActionError,
   type ComfyConnectionView,
   type ConnectionFormValues,
 } from './hooks'
@@ -23,7 +24,7 @@ export default function ConnectionPoolPanel() {
   const statusesQuery = useComfyStatuses(!connectionsQuery.isLoading)
   const actions = useComfyConnectionActions()
   const [editing, setEditing] = useState<ComfyConnectionView | 'new' | null>(null)
-  const [actionError, setActionError] = useState<'requestFailed' | null>(null)
+  const [actionError, setActionError] = useState<ConnectionActionError | null>(null)
   const connections = connectionsQuery.data?.connections ?? []
   const statuses = new Map((statusesQuery.data?.statuses ?? []).map((status) => [status.connectionId, status]))
   const mutating = actions.create.isPending || actions.update.isPending
@@ -68,7 +69,11 @@ export default function ConnectionPoolPanel() {
               () => actions.update.mutateAsync({ id: connection.id, payload: { enabled: !connection.enabled } }),
               setActionError,
             )}
-            onDelete={() => safelyRunConnectionAction(() => remove(connection), setActionError)} />)}
+            onDelete={() => safelyRunConnectionAction(
+              () => remove(connection),
+              setActionError,
+              { conflictError: 'deleteBlockedOwned' },
+            )} />)}
         </div>
         {statusesQuery.isError && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t('statusFailed')}</p>}
         {actionError && <p role="alert" className="text-sm text-[var(--glass-danger)]">{t(actionError)}</p>}

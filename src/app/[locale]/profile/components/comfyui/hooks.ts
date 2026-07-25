@@ -58,6 +58,7 @@ export type ConnectionRequestError =
   | 'connectionInvalid'
   | 'serverUnavailable'
   | 'requestFailed'
+export type ConnectionActionError = ConnectionRequestError | 'deleteBlockedOwned'
 
 type ConnectionRequestFailure = Error & { status?: number; code?: string }
 
@@ -137,13 +138,17 @@ export function statusPollingInterval(visibility: DocumentVisibilityState | unde
 
 export async function safelyRunConnectionAction(
   action: () => Promise<unknown>,
-  setError: (error: 'requestFailed' | null) => void,
+  setError: (error: ConnectionActionError | null) => void,
+  options?: { conflictError?: ConnectionActionError },
 ): Promise<void> {
   setError(null)
   try {
     await action()
-  } catch {
-    setError('requestFailed')
+  } catch (error) {
+    const resolved = resolveConnectionRequestError(error)
+    setError(resolved === 'connectionConflict' && options?.conflictError
+      ? options.conflictError
+      : resolved)
   }
 }
 

@@ -341,14 +341,27 @@ async function deleteOwnedConnectionOnce(userId: string, connectionId: string) {
   await prisma.$transaction(async (tx) => {
     const existing = await tx.comfyConnection.findFirst({ where: { id: connectionId, userId } })
     if (!existing) throw new ApiError('NOT_FOUND')
-    const activeCount = await tx.comfyGenerationRequest.count({
+    const canceledAt = new Date()
+    await tx.comfySubmissionAttempt.deleteMany({
+      where: { connectionId: existing.id, userId },
+    })
+    await tx.comfyGenerationRequest.updateMany({
       where: {
         connectionId: existing.id,
         userId,
         status: { notIn: [...TERMINAL_REQUEST_STATUSES] },
       },
+      data: {
+        status: 'canceled',
+        connectionId: null,
+        leaseId: null,
+        leaseExpiresAt: null,
+        cancelRequestedAt: canceledAt,
+        canceledAt,
+        errorCode: 'COMFY_CONNECTION_DELETED',
+        errorMessage: 'ComfyUI connection deleted',
+      },
     })
-    if (activeCount > 0) throw new ApiError('CONFLICT')
     await tx.comfyGenerationRequest.updateMany({
       where: {
         connectionId: existing.id,

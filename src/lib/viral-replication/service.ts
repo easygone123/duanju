@@ -15,7 +15,7 @@ import {
   VIRAL_REPLICATION_STATUS,
   VIRAL_STORYBOARD_GENERATION_FAILED,
 } from './constants'
-import { FfmpegBoundaryError, probeVideo } from './ffmpeg'
+import { extractSourceAudio, FfmpegBoundaryError, probeVideo } from './ffmpeg'
 import { readOwnedViralReplication } from './ownership'
 import { writeRequestBodyToTempFile } from './temp-file'
 import { cleanupUploadTempFile } from './temp-cleanup'
@@ -390,7 +390,7 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
   }
 
   let tempFile: Awaited<ReturnType<typeof writeRequestBodyToTempFile>> | null = null
-  let compensationStorageKey: string | null = null
+  const compensationStorageKeys = new Set<string>()
   let committed = false
   let primaryFailure: unknown
 
@@ -441,14 +441,40 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
     const normalizedMime = input.mimeType.split(';', 1)[0].trim().toLowerCase()
     const extension = normalizedMime.includes('quicktime') || normalizedMime.endsWith('/mov') ? 'mov' : 'mp4'
     const requestedStorageKey = `viral-replications/${input.id}/${randomUUID()}.${extension}`
-    compensationStorageKey = requestedStorageKey
+    compensationStorageKeys.add(requestedStorageKey)
     const storageKey = await uploadObjectStream(
       () => createReadStream(tempFile!.filePath),
       requestedStorageKey,
       tempFile.sizeBytes,
       normalizedMime,
     )
-    compensationStorageKey = storageKey
+    compensationStorageKeys.add(storageKey)
+
+    let audioStorage: {
+      storageKey: string
+      sizeBytes: number
+      publicId: string
+    } | null = null
+    const audioStream = metadata.audioStreams[0]
+    if (audioStream) {
+      const audioTempPath = `${tempFile.filePath}.source-audio.mp3`
+      await extractSourceAudio(tempFile.filePath, audioTempPath, audioStream.index)
+      const audioArtifact = await fs.stat(audioTempPath)
+      const requestedAudioStorageKey = `viral-replications/${input.id}/${randomUUID()}.mp3`
+      compensationStorageKeys.add(requestedAudioStorageKey)
+      const audioStorageKey = await uploadObjectStream(
+        () => createReadStream(audioTempPath),
+        requestedAudioStorageKey,
+        audioArtifact.size,
+        'audio/mpeg',
+      )
+      compensationStorageKeys.add(audioStorageKey)
+      audioStorage = {
+        storageKey: audioStorageKey,
+        sizeBytes: audioArtifact.size,
+        publicId: stablePublicIdFromStorageKey(audioStorageKey),
+      }
+    }
 
     const publicId = stablePublicIdFromStorageKey(storageKey)
     const created = await prisma.$transaction(async (tx) => {
@@ -470,6 +496,17 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
           durationMs: metadata.durationMs,
         },
       })
+      const audioMedia = audioStorage
+        ? await tx.mediaObject.create({
+            data: {
+              publicId: audioStorage.publicId,
+              storageKey: audioStorage.storageKey,
+              mimeType: 'audio/mpeg',
+              sizeBytes: BigInt(audioStorage.sizeBytes),
+              durationMs: metadata.durationMs,
+            },
+          })
+        : null
       const project = await tx.project.create({
         data: {
           name: `爆款复刻-${formatTimestamp(uploadNow)}`,
@@ -499,7 +536,7 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
           novelPromotionProjectId: novelProject.id,
           episodeNumber: 1,
           name: '第 1 集',
-          audioMediaId: metadata.hasAudio ? media.id : null,
+          audioMediaId: audioMedia?.id ?? null,
         },
       })
       const linked = await tx.viralReplication.updateMany({
@@ -526,7 +563,13 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
       if (linked.count !== 1) {
         throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_UPLOAD_CONFLICT' })
       }
-      return { project, episode, media, analysisModelSnapshot: transactionPreference.analysisModel }
+      return {
+        project,
+        episode,
+        media,
+        audioMedia,
+        analysisModelSnapshot: transactionPreference.analysisModel,
+      }
     })
     committed = true
 
@@ -535,6 +578,7 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
       projectId: created.project.id,
       episodeId: created.episode.id,
       sourceVideoMediaId: created.media.id,
+      sourceAudioMediaId: created.audioMedia?.id ?? null,
     }
     try {
       const task = await submitTask({
@@ -561,11 +605,13 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
     }
   } catch (error: unknown) {
     primaryFailure = error
-    if (compensationStorageKey && !committed) {
-      try {
-        await deleteObject(compensationStorageKey)
-      } catch {
-        // Best-effort compensation must not mask the database/upload error.
+    if (!committed) {
+      for (const storageKey of compensationStorageKeys) {
+        try {
+          await deleteObject(storageKey)
+        } catch {
+          // Best-effort compensation must not mask the database/upload error.
+        }
       }
     }
     if (!committed) await releaseUploadLock(input.id, input.userId, lockToken)

@@ -18,6 +18,9 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
     updateMany: vi.fn(),
   },
+  comfySubmissionAttempt: {
+    deleteMany: vi.fn(),
+  },
 }))
 
 const encryptApiKeyMock = vi.hoisted(() => vi.fn((value: string) => `encrypted:${value}`))
@@ -96,6 +99,7 @@ describe('ComfyUI private connection routes', () => {
     prismaMock.comfyGenerationRequest.count.mockResolvedValue(0)
     prismaMock.comfyGenerationRequest.findFirst.mockResolvedValue(null)
     prismaMock.comfyGenerationRequest.updateMany.mockResolvedValue({ count: 0 })
+    prismaMock.comfySubmissionAttempt.deleteMany.mockResolvedValue({ count: 0 })
     getSystemStatsMock.mockResolvedValue({ system: { comfyui_version: '0.3.50' }, devices: [] })
     getQueueMock.mockResolvedValue({ running: [], pending: [] })
     prismaMock.$transaction.mockImplementation(async (operation: (tx: unknown) => Promise<unknown>) =>
@@ -453,29 +457,37 @@ describe('ComfyUI private connection routes', () => {
     expect(prismaMock.comfyConnection.update).not.toHaveBeenCalled()
   })
 
-  it('rejects deletion while owned nonterminal work exists but permits it after completion', async () => {
+  it('cancels stale nonterminal work and removes attempt references before deleting', async () => {
     installAuthMocks()
     mockAuthenticated('user-1')
     prismaMock.comfyConnection.findFirst.mockResolvedValue(connection())
-    prismaMock.comfyGenerationRequest.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0)
     prismaMock.comfyConnection.delete.mockResolvedValue(connection())
     const route = await import('@/app/api/comfyui/connections/[connectionId]/route')
-    const request = () => buildMockRequest({
+    const response = await route.DELETE(buildMockRequest({
       path: '/api/comfyui/connections/connection-1', method: 'DELETE',
+    }), connectionContext('connection-1'))
+
+    expect(response.status).toBe(200)
+    expect(prismaMock.comfySubmissionAttempt.deleteMany).toHaveBeenCalledWith({
+      where: { connectionId: 'connection-1', userId: 'user-1' },
     })
-
-    const blocked = await route.DELETE(request(), connectionContext('connection-1'))
-    expect(blocked.status).toBe(409)
-    expect(prismaMock.comfyConnection.delete).not.toHaveBeenCalled()
-
-    const deleted = await route.DELETE(request(), connectionContext('connection-1'))
-    expect(deleted.status).toBe(200)
-    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2)
-    expect(prismaMock.comfyGenerationRequest.count).toHaveBeenLastCalledWith({ where: {
-      connectionId: 'connection-1',
-      userId: 'user-1',
-      status: { notIn: ['completed', 'failed', 'canceled'] },
-    } })
+    expect(prismaMock.comfyGenerationRequest.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        connectionId: 'connection-1',
+        userId: 'user-1',
+        status: { notIn: ['completed', 'failed', 'canceled'] },
+      },
+      data: {
+        status: 'canceled',
+        connectionId: null,
+        leaseId: null,
+        leaseExpiresAt: null,
+        cancelRequestedAt: expect.any(Date),
+        canceledAt: expect.any(Date),
+        errorCode: 'COMFY_CONNECTION_DELETED',
+        errorMessage: 'ComfyUI connection deleted',
+      },
+    })
     expect(prismaMock.comfyGenerationRequest.updateMany).toHaveBeenCalledWith({
       where: {
         connectionId: 'connection-1',
@@ -484,6 +496,7 @@ describe('ComfyUI private connection routes', () => {
       },
       data: { connectionId: null, leaseId: null, leaseExpiresAt: null },
     })
+    expect(prismaMock.comfyConnection.delete).toHaveBeenCalled()
   })
 
   it('returns 409 when a live-test lease owns the connection and never deletes it', async () => {

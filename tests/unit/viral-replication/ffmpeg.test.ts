@@ -19,6 +19,7 @@ import {
   extractAnalysisAudioSegment,
   extractEmbeddedSubtitles,
   extractFrame,
+  extractSourceAudio,
   probeVideo,
   type CommandRunner,
 } from '@/lib/viral-replication/ffmpeg'
@@ -658,6 +659,31 @@ describe('FFmpeg command boundary', () => {
         '-map', '0:1',
       ]))
       await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('audio')
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('extracts a full-quality source audio artifact for Director timelines', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'viral-source-audio-test-'))
+    const outputPath = path.join(tempRoot, 'source.mp3')
+    const calls: string[][] = []
+    const runner: CommandRunner = async (_binary, args) => {
+      calls.push(args)
+      await fs.writeFile(args.at(-1)!, 'source audio')
+      return { stdout: '', stderr: '' }
+    }
+
+    try {
+      await extractSourceAudio(sourcePath, outputPath, 1, runner)
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toEqual(expect.arrayContaining([
+        '-map', '0:1',
+        '-ac', '2',
+        '-ar', '48000',
+        '-b:a', '192k',
+      ]))
+      await expect(fs.readFile(outputPath, 'utf8')).resolves.toBe('source audio')
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true })
     }

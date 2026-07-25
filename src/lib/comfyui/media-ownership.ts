@@ -278,7 +278,8 @@ function parseInternalSignedStorageRoute(value: string): string | null {
 function ownedMediaWhere(input: OwnedComfyMediaInput): Prisma.MediaObjectWhereInput {
   const project = { project: { is: { id: input.projectId, userId: input.userId } } }
   const promotion = { novelPromotionProject: { is: project } }
-  const episode = { episode: { is: { novelPromotionProject: { is: project } } } }
+  const ownedEpisode = { novelPromotionProject: { is: project } }
+  const episode = { episode: { is: ownedEpisode } }
   const storyboard = { storyboard: { is: episode } }
   return {
     storageKey: input.storageKey,
@@ -295,6 +296,7 @@ function ownedMediaWhere(input: OwnedComfyMediaInput): Prisma.MediaObjectWhereIn
       { novelPromotionPanelUpscaledImages: { some: storyboard } },
       { novelPromotionStoryboardSheetImages: { some: episode } },
       { novelPromotionStoryboardUpscaledSheetImages: { some: episode } },
+      { novelPromotionEpisodeAudios: { some: ownedEpisode } },
       { novelPromotionShotImages: { some: episode } },
       { supplementaryPanelImages: { some: storyboard } },
       { globalCharacterAppearanceImages: { some: { character: { is: { userId: input.userId } } } } },
