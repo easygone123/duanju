@@ -177,6 +177,31 @@ Back up the database and run `npx prisma migrate deploy` before deploying the ne
 
 ---
 
+## Remote Codex MCP endpoint
+
+The app includes a disabled-by-default Streamable HTTP MCP endpoint at `/api/mcp`. Duanju remains on the remote server; no local Duanju deployment is required. Codex connects to the remote project over HTTP.
+
+Configure the remote deployment:
+
+```env
+DUANJU_MCP_ENABLED=true
+DUANJU_MCP_TOKEN=replace-with-at-least-32-random-characters
+DUANJU_MCP_USER=easygone
+```
+
+Generate a token with `openssl rand -hex 32`, recreate the remote app container, then register the endpoint on the Codex machine:
+
+```bash
+export DUANJU_MCP_TOKEN='the-same-remote-server-token'
+codex mcp add duanju \
+  --url http://110.81.0.150:13000/api/mcp \
+  --bearer-token-env-var DUANJU_MCP_TOKEN
+```
+
+The endpoint does not reuse browser cookies or accept account passwords. Every tool is scoped to the configured user. It can create projects and episodes, maintain character/location/prop assets, read storyboard plans, import 2x2 or 3x2 grid storyboards, and inspect task status. `duanju_import_grid_storyboards` replaces existing storyboards for its target episode and is declared as a destructive tool.
+
+---
+
 ## ⚡ Workspace performance acceptance
 
 Run `npm run perf:workspace -- --compare` for a reproducible workspace performance comparison. The command validates architecture budgets with fixed clocks and fixtures, independent of machine load. The repository does not currently bundle an authenticated browser fixture, so this table is not a real-browser benchmark; browser measurements are supporting evidence only.

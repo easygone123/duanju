@@ -96,6 +96,12 @@ services:
       CRON_SECRET: "waoowaoo-docker-cron-secret"
       INTERNAL_TASK_TOKEN: "waoowaoo-docker-task-token"
       API_ENCRYPTION_KEY: "waoowaoo-opensource-fixed-key-2026"
+      # Codex / MCP（默认关闭；令牌和用户必须显式配置）
+      DUANJU_MCP_ENABLED: "${DUANJU_MCP_ENABLED:-false}"
+      DUANJU_MCP_TOKEN: "${DUANJU_MCP_TOKEN:-}"
+      DUANJU_MCP_USER_ID: "${DUANJU_MCP_USER_ID:-}"
+      DUANJU_MCP_USER: "${DUANJU_MCP_USER:-}"
+      DUANJU_MCP_ALLOWED_ORIGINS: "${DUANJU_MCP_ALLOWED_ORIGINS:-}"
       # Worker 配置
       WATCHDOG_INTERVAL_MS: "30000"
       TASK_HEARTBEAT_TIMEOUT_MS: "90000"

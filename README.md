@@ -189,6 +189,31 @@ SIX_GRID_CROP_MAX_SOURCE_PIXELS=32000000
 
 ---
 
+## 🤖 远程 Codex MCP 接口
+
+项目内置了一个默认关闭的远程 MCP 端点：`/api/mcp`。duanju 继续运行在远程服务器，本机不需要部署 duanju；Codex 直接通过网络读写远程项目。
+
+在远程服务器部署使用的 `.env` 中配置：
+
+```env
+DUANJU_MCP_ENABLED=true
+DUANJU_MCP_TOKEN=请替换为至少32字符的随机令牌
+DUANJU_MCP_USER=easygone
+```
+
+令牌可通过 `openssl rand -hex 32` 生成。也可以用更稳定的 `DUANJU_MCP_USER_ID` 代替用户名。修改后重新创建远程 app 容器，再在运行 Codex 的机器上配置同一个令牌：
+
+```bash
+export DUANJU_MCP_TOKEN='与远程服务器相同的令牌'
+codex mcp add duanju \
+  --url http://110.81.0.150:13000/api/mcp \
+  --bearer-token-env-var DUANJU_MCP_TOKEN
+```
+
+MCP 不复用网页 Cookie，也不会接收登录密码。所有工具都按绑定用户校验项目归属；它可以创建项目和剧集、维护人物/场景/道具资产、读取完整分镜、导入四宫格或六宫格规划，并查看生成任务状态。`duanju_import_grid_storyboards` 会替换目标剧集已有分镜，因此被声明为破坏性操作。
+
+---
+
 ## ⚡ 工作区性能验收
 
 运行 `npm run perf:workspace -- --compare` 可生成可重复的工作区性能对比报告。该命令使用固定时钟和固定数据夹具验证架构预算，不受执行机器负载影响；仓库目前没有包含已登录状态的真实浏览器夹具，因此下表不是实机浏览器跑分，浏览器测量只作为额外证据。
