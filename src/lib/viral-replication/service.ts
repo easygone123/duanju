@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
+import { Readable } from 'node:stream'
 import { Prisma } from '@prisma/client'
 import type { Locale } from '@/i18n/routing'
 import { ApiError } from '@/lib/api-errors'
@@ -24,6 +25,10 @@ import {
   validateViralUploadPrefix,
   validateViralVideoMetadata,
 } from './upload-validation'
+import {
+  downloadViralVideoFromShareText,
+  ViralRemoteVideoError,
+} from './remote-video'
 
 const BRIEF_MUTABLE_STATUSES = [
   VIRAL_REPLICATION_STATUS.UPLOADING,
@@ -625,6 +630,65 @@ export async function uploadViralReplicationVideo(input: UploadVideoInput) {
           outcome: committed ? 'committed' : 'primary_failure',
         },
       })
+    }
+  }
+}
+
+export async function importViralReplicationVideoFromLink(input: {
+  id: string
+  userId: string
+  shareText: string
+  locale: Locale
+  signal?: AbortSignal
+}) {
+  const replication = await readOwnedViralReplication(input.id, input.userId)
+  if (
+    replication.status !== VIRAL_REPLICATION_STATUS.UPLOADING
+    || replication.project
+    || replication.sourceVideoMedia
+  ) {
+    throw new ApiError('INVALID_PARAMS', { code: 'VIRAL_UPLOAD_NOT_ALLOWED' })
+  }
+  const preference = await prisma.userPreference.findUnique({ where: { userId: input.userId } })
+  if (!preference?.analysisModel) {
+    throw new ApiError('INVALID_PARAMS', {
+      code: 'ANALYSIS_MODEL_REQUIRED',
+      field: 'analysisModel',
+    })
+  }
+
+  let downloaded: Awaited<ReturnType<typeof downloadViralVideoFromShareText>>
+  try {
+    downloaded = await downloadViralVideoFromShareText(input.shareText, { signal: input.signal })
+  } catch (error: unknown) {
+    if (error instanceof ViralRemoteVideoError) {
+      throw new ApiError('INVALID_PARAMS', { code: error.code, field: 'shareText' })
+    }
+    throw error
+  }
+  try {
+    const body = Readable.toWeb(createReadStream(downloaded.filePath)) as ReadableStream<Uint8Array>
+    const request = new Request('http://internal/viral-replications/video-link', {
+      method: 'PUT',
+      headers: {
+        'content-type': downloaded.mimeType,
+        'content-length': String(downloaded.sizeBytes),
+      },
+      body,
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' })
+    return await uploadViralReplicationVideo({
+      id: input.id,
+      userId: input.userId,
+      request,
+      mimeType: downloaded.mimeType,
+      locale: input.locale,
+    })
+  } finally {
+    try {
+      await downloaded.cleanup()
+    } catch {
+      // Temporary cleanup must not turn a committed import into a client-visible failure.
     }
   }
 }

@@ -13,9 +13,18 @@
     "title": "上传参考视频，识别原剧情并重绘分镜",
     "subtitle": "AI 从字幕和画面还原原剧情，保留原声音轨，只重新设计人物外观、场景与镜头画面",
     "close": "关闭",
+    "sourceModeLabel": "视频来源",
+    "sourceModes": {
+      "upload": "上传本地视频",
+      "link": "粘贴分享链接"
+    },
     "videoLabel": "参考视频",
     "chooseVideo": "选择或拖入视频",
     "videoHint": "支持 MP4、MOV，5 秒至 3 分钟，最大 500 MB",
+    "linkLabel": "抖音分享链接",
+    "linkPlaceholder": "粘贴抖音分享文本或 https://v.douyin.com/... 链接",
+    "linkHint": "支持无需登录即可观看的公开视频；私密、已删除或受登录限制的视频无法导入",
+    "linkImportProgress": "正在从分享链接获取视频，请勿关闭窗口…",
     "formatError": "仅支持 MP4 或 MOV 视频",
     "sizeError": "视频不能超过 500 MB",
     "briefLabel": "视觉重绘方向",
@@ -53,7 +62,11 @@
       "format": "视频容器或编码格式不受支持，请转换为标准 MP4（H.264）后重试",
       "conflict": "该上传任务状态已变化，请关闭窗口后重新开始",
       "unauthorized": "登录状态已失效，请重新登录后上传",
-      "network": "上传连接中断，请检查网络或服务器地址后重试"
+      "network": "上传连接中断，请检查网络或服务器地址后重试",
+      "linkInvalid": "没有识别到有效的抖音分享链接",
+      "linkDomain": "目前仅支持抖音官方分享链接",
+      "linkRuntime": "服务器尚未安装链接下载组件，请更新并重新构建容器",
+      "linkDownload": "无法获取该视频，请确认视频公开可访问且链接未失效"
     },
     "retry": "重试",
     "cancel": "取消",

@@ -31,8 +31,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Install process supervision and the video analysis runtime.
-RUN apk add --no-cache tini ffmpeg
+# Install process supervision, video analysis, and public share-link import.
+RUN apk add --no-cache tini ffmpeg yt-dlp
 
 # node_modules（含 devDeps，因为 npm run start 需要 concurrently + tsx）
 COPY --from=builder /app/node_modules ./node_modules

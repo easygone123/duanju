@@ -12,6 +12,7 @@ import type { ViralTranscriptionMode } from '@/lib/viral-replication/transcripti
 import {
   createViralReplicationSession,
   getViralReplicationAvailability,
+  importViralReplicationVideoFromLinkClient,
   uploadViralReplicationVideo,
 } from '@/lib/viral-replication/client'
 
@@ -39,6 +40,10 @@ function resolveUploadErrorKey(error: unknown) {
   if (code === 'VIRAL_UPLOAD_CONFLICT' || code === 'VIRAL_UPLOAD_NOT_ALLOWED') return 'uploadErrors.conflict'
   if (code === 'UNAUTHORIZED') return 'uploadErrors.unauthorized'
   if (code === 'VIRAL_VIDEO_UPLOAD_NETWORK_FAILED') return 'uploadErrors.network'
+  if (code === 'VIRAL_LINK_INVALID') return 'uploadErrors.linkInvalid'
+  if (code === 'VIRAL_LINK_DOMAIN_UNSUPPORTED') return 'uploadErrors.linkDomain'
+  if (code === 'VIRAL_LINK_DOWNLOADER_UNAVAILABLE') return 'uploadErrors.linkRuntime'
+  if (code === 'VIRAL_LINK_DOWNLOAD_FAILED') return 'uploadErrors.linkDownload'
   return 'genericError'
 }
 
@@ -48,7 +53,9 @@ export default function ViralReplicationLauncher() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const [available, setAvailable] = useState<boolean | null>(null)
   const [open, setOpen] = useState(false)
+  const [sourceMode, setSourceMode] = useState<'upload' | 'link'>('upload')
   const [file, setFile] = useState<File | null>(null)
+  const [shareText, setShareText] = useState('')
   const [brief, setBrief] = useState('')
   const [videoRatio, setVideoRatio] = useState('9:16')
   const [artStyle, setArtStyle] = useState('realistic')
@@ -73,7 +80,9 @@ export default function ViralReplicationLauncher() {
   const reset = () => {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
+    setSourceMode('upload')
     setFile(null)
+    setShareText('')
     setBrief('')
     setVideoRatio('9:16')
     setArtStyle('realistic')
@@ -105,7 +114,9 @@ export default function ViralReplicationLauncher() {
 
   const submit = async () => {
     const normalizedBrief = brief.trim()
-    if (!file || !normalizedBrief || !storyboardGenerationMode || submitting) return
+    const normalizedShareText = shareText.trim()
+    const hasSource = sourceMode === 'upload' ? Boolean(file) : Boolean(normalizedShareText)
+    if (!hasSource || !normalizedBrief || !storyboardGenerationMode || submitting) return
     setSubmitting(true)
     setSubmitErrorKey(null)
     setProgress(0)
@@ -119,10 +130,14 @@ export default function ViralReplicationLauncher() {
         storyboardGenerationMode,
         transcriptionMode,
       })
-      const uploaded = await uploadViralReplicationVideo(session.id, file, {
-        signal: controller.signal,
-        onProgress: setProgress,
-      })
+      const uploaded = sourceMode === 'upload'
+        ? await uploadViralReplicationVideo(session.id, file!, {
+            signal: controller.signal,
+            onProgress: setProgress,
+          })
+        : await importViralReplicationVideoFromLinkClient(session.id, normalizedShareText, {
+            signal: controller.signal,
+          })
       if (!uploaded.projectId) throw new Error('VIRAL_PROJECT_ID_MISSING')
       router.push({
         pathname: `/workspace/${uploaded.projectId}/viral-replication/${session.id}`,
@@ -169,8 +184,60 @@ export default function ViralReplicationLauncher() {
             </div>
 
             <div className="space-y-4">
-              <ViralReplicationUploadField file={file} disabled={submitting} onFileChange={selectFile} />
-              {validationError ? <p className="text-sm text-red-600">{t(validationError)}</p> : null}
+              <div>
+                <span className="mb-2 block text-sm font-medium text-[var(--glass-text-secondary)]">
+                  {t('sourceModeLabel')}
+                </span>
+                <div className="grid grid-cols-2 rounded-xl bg-[var(--glass-bg-muted)] p-1">
+                  {(['upload', 'link'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      disabled={submitting}
+                      aria-pressed={sourceMode === mode}
+                      onClick={() => {
+                        setSourceMode(mode)
+                        setSubmitErrorKey(null)
+                      }}
+                      className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                        sourceMode === mode
+                          ? 'bg-[var(--glass-bg-strong)] text-[var(--glass-text-primary)] shadow-sm'
+                          : 'text-[var(--glass-text-tertiary)]'
+                      }`}
+                    >
+                      {t(`sourceModes.${mode}`)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {sourceMode === 'upload' ? (
+                <>
+                  <ViralReplicationUploadField file={file} disabled={submitting} onFileChange={selectFile} />
+                  {validationError ? <p className="text-sm text-red-600">{t(validationError)}</p> : null}
+                </>
+              ) : (
+                <label htmlFor="viral-share-link" className="block text-sm text-[var(--glass-text-secondary)]">
+                  <span className="mb-2 block font-medium">{t('linkLabel')}</span>
+                  <textarea
+                    id="viral-share-link"
+                    aria-label={t('linkLabel')}
+                    value={shareText}
+                    maxLength={4_000}
+                    rows={3}
+                    disabled={submitting}
+                    onChange={(event) => {
+                      setShareText(event.target.value)
+                      setSubmitErrorKey(null)
+                    }}
+                    placeholder={t('linkPlaceholder')}
+                    className="glass-input-base w-full resize-none px-4 py-3 text-sm"
+                  />
+                  <span className="mt-1 block text-xs text-[var(--glass-text-tertiary)]">
+                    {t('linkHint')}
+                  </span>
+                </label>
+              )}
 
               <div>
                 <label htmlFor="viral-brief" className="mb-2 block text-sm font-medium text-[var(--glass-text-secondary)]">{t('briefLabel')}</label>
@@ -245,9 +312,16 @@ export default function ViralReplicationLauncher() {
 
               {submitting ? (
                 <div data-testid="viral-upload-progress" className="text-sm text-[var(--glass-text-secondary)]">
-                  {t('uploadProgress')} {progress}%
+                  {sourceMode === 'upload'
+                    ? `${t('uploadProgress')} ${progress}%`
+                    : t('linkImportProgress')}
                   <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--glass-bg-muted)]">
-                    <div className="h-full bg-gradient-to-r from-blue-500 to-fuchsia-500 transition-[width]" style={{ width: `${progress}%` }} />
+                    <div
+                      className={`h-full bg-gradient-to-r from-blue-500 to-fuchsia-500 transition-[width] ${
+                        sourceMode === 'link' ? 'animate-pulse' : ''
+                      }`}
+                      style={{ width: sourceMode === 'link' ? '100%' : `${progress}%` }}
+                    />
                   </div>
                 </div>
               ) : null}
@@ -262,7 +336,13 @@ export default function ViralReplicationLauncher() {
                 <button type="button" disabled={submitting} onClick={close} className="glass-btn-base glass-btn-secondary px-4 py-2 text-sm">{t('cancel')}</button>
                 <button
                   type="button"
-                  disabled={!file || !brief.trim() || !storyboardGenerationMode || !!validationError || submitting}
+                  disabled={
+                    !(sourceMode === 'upload' ? file : shareText.trim())
+                    || !brief.trim()
+                    || !storyboardGenerationMode
+                    || (sourceMode === 'upload' && !!validationError)
+                    || submitting
+                  }
                   onClick={() => void submit()}
                   className="glass-btn-base glass-btn-primary px-5 py-2 text-sm disabled:opacity-50"
                 >

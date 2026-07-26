@@ -9,6 +9,7 @@ const serviceMock = vi.hoisted(() => ({
   getOwnedViralReplicationDetail: vi.fn(),
   updateViralReplicationBrief: vi.fn(),
   uploadViralReplicationVideo: vi.fn(),
+  importViralReplicationVideoFromLink: vi.fn(),
   retryViralReplication: vi.fn(),
   generateViralReplication: vi.fn(),
 }))
@@ -49,6 +50,9 @@ describe('api contract - viral replication routes', () => {
     })
     serviceMock.uploadViralReplicationVideo.mockResolvedValue({
       id: 'rep-1', status: 'analyzing', projectId: 'project-1', episodeId: 'episode-1', sourceVideoMediaId: 'media-1', taskId: 'task-1',
+    })
+    serviceMock.importViralReplicationVideoFromLink.mockResolvedValue({
+      id: 'rep-1', status: 'analyzing', projectId: 'project-1', episodeId: 'episode-1', sourceVideoMediaId: 'media-1', taskId: 'task-link-1',
     })
     serviceMock.retryViralReplication.mockResolvedValue({
       id: 'rep-1', status: 'analyzing', taskId: 'task-retry-1',
@@ -93,6 +97,7 @@ describe('api contract - viral replication routes', () => {
     ['GET', '/api/viral-replications/rep-1'],
     ['PATCH', '/api/viral-replications/rep-1'],
     ['PUT', '/api/viral-replications/rep-1/video'],
+    ['POST_LINK', '/api/viral-replications/rep-1/video-link'],
     ['POST_RETRY', '/api/viral-replications/rep-1/retry'],
     ['POST_GENERATE', '/api/viral-replications/rep-1/generate'],
   ] as const)('requires authentication for %s %s', async (method, path) => {
@@ -110,6 +115,13 @@ describe('api contract - viral replication routes', () => {
       response = await PUT(new NextRequest(`http://localhost:3000${path}`, {
         method, headers: { 'content-type': 'video/mp4' }, body: Buffer.from('video'),
       }), context)
+    } else if (method === 'POST_LINK') {
+      const { POST } = await import('@/app/api/viral-replications/[id]/video-link/route')
+      response = await POST(buildMockRequest({
+        path,
+        method: 'POST',
+        body: { shareText: 'https://v.douyin.com/abc/' },
+      }), context)
     } else if (method === 'POST_RETRY') {
       const { POST } = await import('@/app/api/viral-replications/[id]/retry/route')
       response = await POST(buildMockRequest({ path, method: 'POST' }), context)
@@ -121,6 +133,7 @@ describe('api contract - viral replication routes', () => {
     expect(serviceMock.getOwnedViralReplicationDetail).not.toHaveBeenCalled()
     expect(serviceMock.updateViralReplicationBrief).not.toHaveBeenCalled()
     expect(serviceMock.uploadViralReplicationVideo).not.toHaveBeenCalled()
+    expect(serviceMock.importViralReplicationVideoFromLink).not.toHaveBeenCalled()
     expect(serviceMock.retryViralReplication).not.toHaveBeenCalled()
     expect(serviceMock.generateViralReplication).not.toHaveBeenCalled()
   })
@@ -241,6 +254,43 @@ describe('api contract - viral replication routes', () => {
       id: 'rep-1', userId: 'user-1', request, mimeType: 'video/mp4', locale: 'zh',
     }))
     expect(await response.json()).toMatchObject({ replication: { status: 'analyzing', taskId: 'task-1' } })
+  })
+
+  it('imports a Douyin share link through the owner-scoped link service', async () => {
+    const { POST } = await import('@/app/api/viral-replications/[id]/video-link/route')
+    const request = buildMockRequest({
+      path: '/api/viral-replications/rep-1/video-link',
+      method: 'POST',
+      headers: { 'accept-language': 'zh-CN' },
+      body: { shareText: ' 复制打开抖音 https://v.douyin.com/abc/ ' },
+    })
+    const response = await POST(request, { params: Promise.resolve({ id: 'rep-1' }) })
+    expect(response.status).toBe(202)
+    expect(serviceMock.importViralReplicationVideoFromLink).toHaveBeenCalledWith({
+      id: 'rep-1',
+      userId: 'user-1',
+      shareText: '复制打开抖音 https://v.douyin.com/abc/',
+      locale: 'zh',
+      signal: request.signal,
+    })
+    expect(await response.json()).toMatchObject({
+      replication: { status: 'analyzing', taskId: 'task-link-1' },
+    })
+  })
+
+  it.each([
+    ['empty', { shareText: '' }],
+    ['missing', {}],
+    ['extra long', { shareText: 'x'.repeat(4_001) }],
+  ])('rejects %s share-link input before calling the service', async (_label, body) => {
+    const { POST } = await import('@/app/api/viral-replications/[id]/video-link/route')
+    const response = await POST(buildMockRequest({
+      path: '/api/viral-replications/rep-1/video-link',
+      method: 'POST',
+      body,
+    }), { params: Promise.resolve({ id: 'rep-1' }) })
+    expect(response.status).toBe(400)
+    expect(serviceMock.importViralReplicationVideoFromLink).not.toHaveBeenCalled()
   })
 
   it('retries a failed analysis using the owner-scoped lifecycle service', async () => {

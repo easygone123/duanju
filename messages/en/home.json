@@ -13,9 +13,18 @@
     "title": "Upload a reference, reconstruct its story, and redraw the storyboard",
     "subtitle": "AI reconstructs the source story from subtitles and visuals, retains the original audio, and redesigns only appearances, locations, and shot imagery",
     "close": "Close",
+    "sourceModeLabel": "Video source",
+    "sourceModes": {
+      "upload": "Upload a local video",
+      "link": "Paste a share link"
+    },
     "videoLabel": "Reference video",
     "chooseVideo": "Choose or drop a video",
     "videoHint": "MP4 or MOV, 5 seconds to 3 minutes, up to 500 MB",
+    "linkLabel": "Douyin share link",
+    "linkPlaceholder": "Paste Douyin share text or a https://v.douyin.com/... link",
+    "linkHint": "Only public videos viewable without signing in can be imported",
+    "linkImportProgress": "Fetching the video from the share link. Keep this window open…",
     "formatError": "Only MP4 and MOV videos are supported",
     "sizeError": "The video must not exceed 500 MB",
     "briefLabel": "Visual redraw direction",
@@ -53,7 +62,11 @@
       "format": "This video container or codec is unsupported. Convert it to a standard H.264 MP4 and try again",
       "conflict": "The upload state has changed. Close this dialog and start again",
       "unauthorized": "Your session has expired. Sign in again before uploading",
-      "network": "The upload connection was interrupted. Check the network or server address and try again"
+      "network": "The upload connection was interrupted. Check the network or server address and try again",
+      "linkInvalid": "No valid Douyin share link was found",
+      "linkDomain": "Only official Douyin share links are currently supported",
+      "linkRuntime": "The server link downloader is not installed. Update and rebuild the container",
+      "linkDownload": "The video could not be fetched. Make sure it is public and the link has not expired"
     },
     "retry": "Retry",
     "cancel": "Cancel",

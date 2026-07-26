@@ -232,3 +232,39 @@ export function uploadViralReplicationVideo(
     xhr.send(file)
   })
 }
+
+export async function importViralReplicationVideoFromLinkClient(
+  id: string,
+  shareText: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ViralReplicationDetail> {
+  const response = await apiFetch(`/api/viral-replications/${encodeURIComponent(id)}/video-link`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ shareText }),
+    signal: options.signal,
+  })
+  const payload = await response.json().catch(() => null) as {
+    replication?: ViralReplicationDetail
+    requestId?: string
+    code?: string
+    message?: string
+    error?: {
+      message?: string
+      code?: string
+      details?: { code?: string; requestId?: string }
+    }
+  } | null
+  if (response.ok && payload?.replication) return payload.replication
+
+  const code = payload?.error?.details?.code
+    || payload?.code
+    || payload?.error?.code
+    || (response.status === 401 ? 'UNAUTHORIZED' : 'VIRAL_LINK_DOWNLOAD_FAILED')
+  throw new ViralReplicationUploadError({
+    code,
+    message: payload?.error?.message || payload?.message || code,
+    requestId: payload?.requestId || payload?.error?.details?.requestId,
+    status: response.status,
+  })
+}

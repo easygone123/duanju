@@ -12,6 +12,7 @@ const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 const client = vi.hoisted(() => ({
   createViralReplicationSession: vi.fn(),
   uploadViralReplicationVideo: vi.fn(),
+  importViralReplicationVideoFromLinkClient: vi.fn(),
   getViralReplicationAvailability: vi.fn(),
 }))
 
@@ -29,6 +30,9 @@ describe('viral replication homepage launcher', () => {
     client.getViralReplicationAvailability.mockResolvedValue({ available: true })
     client.uploadViralReplicationVideo.mockResolvedValue({
       id: 'rep-1', status: 'analyzing', projectId: 'project-1',
+    })
+    client.importViralReplicationVideoFromLinkClient.mockResolvedValue({
+      id: 'rep-1', status: 'analyzing', projectId: 'project-link',
     })
   })
 
@@ -114,5 +118,26 @@ describe('viral replication homepage launcher', () => {
     fireEvent.click(view.getByRole('button', { name: 'start' }))
 
     await waitFor(() => expect(view.getByText('uploadErrors.analysisModelRequired')).toBeTruthy())
+  })
+
+  it('accepts full Douyin share text without requiring a local file', async () => {
+    const view = await openLauncher()
+    fireEvent.click(view.getByRole('button', { name: 'sourceModes.link' }))
+    fireEvent.change(view.getByLabelText('briefLabel'), { target: { value: '保持原剧情，重绘人物' } })
+    fireEvent.change(view.getByLabelText('linkLabel'), {
+      target: { value: '复制打开抖音 https://v.douyin.com/abc/' },
+    })
+    fireEvent.change(view.getByLabelText('storyboardModeLabel'), { target: { value: 'four_grid' } })
+    fireEvent.click(view.getByRole('button', { name: 'start' }))
+
+    await waitFor(() => expect(client.importViralReplicationVideoFromLinkClient).toHaveBeenCalledWith(
+      'rep-1',
+      '复制打开抖音 https://v.douyin.com/abc/',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ))
+    expect(client.uploadViralReplicationVideo).not.toHaveBeenCalled()
+    await waitFor(() => expect(navigation.push).toHaveBeenCalledWith({
+      pathname: '/workspace/project-link/viral-replication/rep-1',
+    }))
   })
 })
