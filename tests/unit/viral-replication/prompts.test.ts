@@ -7,6 +7,7 @@ import {
   buildViralShotReviewPrompt,
   buildViralStoryboardGenerationPrompt,
   parseViralAudioTranscription,
+  parseViralShotAnalysisBatch,
 } from '@/lib/viral-replication/prompts'
 
 const analyzedShot = {
@@ -141,6 +142,52 @@ describe('viral replication prompt boundaries', () => {
     expect(prompt).toContain('"frameTimestampsMs":[400,1000,1600]')
     expect(prompt).toContain('"analysisConfidence":0.9')
     expect(prompt).toContain('needsVisualReview 必须为 false')
+  })
+
+  it('restores server-owned shot identity and timeline when a model changes or omits them', () => {
+    const first = { ...analyzedShot, actionBeat: 'first reviewed action' }
+    const second = {
+      ...analyzedShot,
+      shotIndex: undefined,
+      startMs: undefined,
+      endMs: undefined,
+      actionBeat: 'second reviewed action',
+    }
+    const parsed = parseViralShotAnalysisBatch(JSON.stringify({
+      shots: [
+        { ...first, shotIndex: 0, startMs: 0, endMs: 999 },
+        second,
+      ],
+    }), [
+      { shotIndex: 2, startMs: 1_240, endMs: 2_080, representativeMs: 1_660, framePath: '/tmp/2.jpg' },
+      { shotIndex: 7, startMs: 4_920, endMs: 6_100, representativeMs: 5_510, framePath: '/tmp/7.jpg' },
+    ])
+
+    expect(parsed.shots.map(({ shotIndex, startMs, endMs, actionBeat }) => ({
+      shotIndex, startMs, endMs, actionBeat,
+    }))).toEqual([
+      { shotIndex: 2, startMs: 1_240, endMs: 2_080, actionBeat: 'first reviewed action' },
+      { shotIndex: 7, startMs: 4_920, endMs: 6_100, actionBeat: 'second reviewed action' },
+    ])
+  })
+
+  it('reorders model results by valid shot identity before restoring canonical timing', () => {
+    const parsed = parseViralShotAnalysisBatch(JSON.stringify({
+      shots: [
+        { ...analyzedShot, shotIndex: 7, startMs: 5_000, endMs: 6_000, actionBeat: 'shot seven' },
+        { ...analyzedShot, shotIndex: 2, startMs: 1_000, endMs: 2_000, actionBeat: 'shot two' },
+      ],
+    }), [
+      { shotIndex: 2, startMs: 1_240, endMs: 2_080, representativeMs: 1_660, framePath: '/tmp/2.jpg' },
+      { shotIndex: 7, startMs: 4_920, endMs: 6_100, representativeMs: 5_510, framePath: '/tmp/7.jpg' },
+    ])
+
+    expect(parsed.shots.map(({ shotIndex, startMs, endMs, actionBeat }) => ({
+      shotIndex, startMs, endMs, actionBeat,
+    }))).toEqual([
+      { shotIndex: 2, startMs: 1_240, endMs: 2_080, actionBeat: 'shot two' },
+      { shotIndex: 7, startMs: 4_920, endMs: 6_100, actionBeat: 'shot seven' },
+    ])
   })
 
   it('delimits the creator brief and analysis report for original storyboard generation', () => {

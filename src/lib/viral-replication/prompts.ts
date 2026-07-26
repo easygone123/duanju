@@ -34,6 +34,19 @@ const shotBatchSchema = z.object({
   shots: z.array(analyzedShotSchema).min(1).max(10),
 }).strict()
 
+const modelAnalyzedShotSchema = analyzedShotSchema.extend({
+  // These fields belong to the server-owned frame timeline. Models may echo
+  // them incorrectly (especially for non-contiguous adaptive-review shots),
+  // so accept an optional echo and restore the canonical values below.
+  shotIndex: analyzedShotSchema.shape.shotIndex.optional(),
+  startMs: analyzedShotSchema.shape.startMs.optional(),
+  endMs: analyzedShotSchema.shape.endMs.optional(),
+}).strict()
+
+const modelShotBatchSchema = z.object({
+  shots: z.array(modelAnalyzedShotSchema).min(1).max(10),
+}).strict()
+
 export type ViralShotAnalysisBatch = z.infer<typeof shotBatchSchema>
 
 const audioTranscriptSchema = z.object({
@@ -283,7 +296,7 @@ export function parseViralShotAnalysisBatch(
   completionText: string,
   expectedShots: PreprocessedViralShot[],
 ): ViralShotAnalysisBatch {
-  const result = shotBatchSchema.parse(safeParseJson(completionText))
+  const result = modelShotBatchSchema.parse(safeParseJson(completionText))
   if (result.shots.length !== expectedShots.length) {
     throw new z.ZodError([{
       code: z.ZodIssueCode.custom,
@@ -291,20 +304,35 @@ export function parseViralShotAnalysisBatch(
       message: `Expected ${expectedShots.length} analyzed shots, received ${result.shots.length}`,
     }])
   }
-  result.shots.forEach((shot, index) => {
-    const expected = expectedShots[index]
+
+  const expectedIndexes = new Set(expectedShots.map((shot) => shot.shotIndex))
+  const returnedByIndex = new Map<number, (typeof result.shots)[number]>()
+  let canRestoreReturnedOrder = true
+  for (const shot of result.shots) {
     if (
-      !expected
-      || shot.shotIndex !== expected.shotIndex
-      || shot.startMs !== expected.startMs
-      || shot.endMs !== expected.endMs
+      shot.shotIndex === undefined
+      || !expectedIndexes.has(shot.shotIndex)
+      || returnedByIndex.has(shot.shotIndex)
     ) {
-      throw new z.ZodError([{
-        code: z.ZodIssueCode.custom,
-        path: ['shots', index],
-        message: 'Analyzed shot identity and timeline must match the requested frame order',
-      }])
+      canRestoreReturnedOrder = false
+      break
     }
+    returnedByIndex.set(shot.shotIndex, shot)
+  }
+
+  const orderedShots = canRestoreReturnedOrder
+    ? expectedShots.map((expected) => returnedByIndex.get(expected.shotIndex)!)
+    : result.shots
+
+  return shotBatchSchema.parse({
+    shots: orderedShots.map((shot, index) => {
+      const expected = expectedShots[index]
+      return {
+        ...shot,
+        shotIndex: expected.shotIndex,
+        startMs: expected.startMs,
+        endMs: expected.endMs,
+      }
+    }),
   })
-  return result
 }
