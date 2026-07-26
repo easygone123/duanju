@@ -183,6 +183,14 @@ describe('ViralReplicationPage', () => {
       projectId: 'project-1', replicationId: 'rep-1',
     }))
     expect(view.getByText('errors.analysis')).toBeTruthy()
+    expect(view.getByText('VIRAL_ANALYSIS_FAILED')).toBeTruthy()
+
+    state.detail = detail('failed', { errorMessage: 'VIRAL_ANALYSIS_MODEL_RESPONSE_INVALID' })
+    view.rerender(createElement(ViralReplicationPage, {
+      projectId: 'project-1', replicationId: 'rep-1',
+    }))
+    expect(view.getByText('errors.modelResponseInvalid')).toBeTruthy()
+    expect(view.getByText('VIRAL_ANALYSIS_MODEL_RESPONSE_INVALID')).toBeTruthy()
   })
 
   it('rejects project ownership mismatch and navigates a completed result exactly once', async () => {

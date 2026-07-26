@@ -784,7 +784,7 @@ describe('viral replication analysis handler', () => {
     expect(harness.runText).not.toHaveBeenCalled()
     expect(harness.updates.filter((update) => update.status === 'failed')).toEqual([{
       status: 'failed',
-      errorMessage: 'VIRAL_ANALYSIS_FAILED',
+      errorMessage: 'VIRAL_ANALYSIS_MODEL_RESPONSE_INVALID',
       analysisExecutionTaskId: null,
       analysisExecutionToken: null,
       analysisExecutionExpiresAt: null,

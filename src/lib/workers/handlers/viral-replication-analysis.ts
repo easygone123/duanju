@@ -26,9 +26,16 @@ import {
   VIRAL_ADAPTIVE_REVIEW_BATCH_SIZE,
   VIRAL_ADAPTIVE_REVIEW_CONFIDENCE_THRESHOLD,
   VIRAL_ANALYSIS_FAILED,
+  VIRAL_ANALYSIS_MODEL_REQUEST_FAILED,
+  VIRAL_ANALYSIS_MODEL_RESPONSE_INVALID,
+  VIRAL_ANALYSIS_REPORT_FAILED,
   VIRAL_AUDIO_TRANSCRIPTION_FAILED,
+  VIRAL_AUDIO_TRANSCRIPTION_MODEL_UNSUPPORTED,
+  VIRAL_FRAME_PROCESSING_FAILED,
   VIRAL_MAX_ADAPTIVE_REVIEW_SHOTS,
   VIRAL_REPLICATION_STATUS,
+  VIRAL_VIDEO_PREPROCESS_FAILED,
+  type ViralAnalysisFailureCode,
 } from '@/lib/viral-replication/constants'
 import {
   deriveViralSourceStoryFromTranscript,
@@ -171,11 +178,16 @@ export class ViralAnalysisSupersededError extends Error {
 }
 
 export class ViralAudioTranscriptionError extends Error {
-  readonly code = VIRAL_AUDIO_TRANSCRIPTION_FAILED
+  readonly code: typeof VIRAL_AUDIO_TRANSCRIPTION_FAILED
+    | typeof VIRAL_AUDIO_TRANSCRIPTION_MODEL_UNSUPPORTED
 
   constructor(message = VIRAL_AUDIO_TRANSCRIPTION_FAILED, options?: ErrorOptions) {
     super(message, options)
     this.name = 'ViralAudioTranscriptionError'
+    this.code = options?.cause instanceof Error
+      && options.cause.message === VIRAL_AUDIO_TRANSCRIPTION_MODEL_UNSUPPORTED
+      ? VIRAL_AUDIO_TRANSCRIPTION_MODEL_UNSUPPORTED
+      : VIRAL_AUDIO_TRANSCRIPTION_FAILED
   }
 }
 
@@ -355,6 +367,7 @@ async function markFailed(
   dependencies: ViralReplicationAnalysisDependencies,
   execution: Parameters<typeof executionWhere>[0],
   error: unknown,
+  fallbackCode: ViralAnalysisFailureCode,
 ): Promise<void> {
   try {
     await dependencies.prisma.viralReplication.updateMany({
@@ -362,8 +375,8 @@ async function markFailed(
       data: {
         status: VIRAL_REPLICATION_STATUS.FAILED,
         errorMessage: error instanceof ViralAudioTranscriptionError
-          ? VIRAL_AUDIO_TRANSCRIPTION_FAILED
-          : VIRAL_ANALYSIS_FAILED,
+          ? error.code
+          : fallbackCode,
         analysisExecutionTaskId: null,
         analysisExecutionToken: null,
         analysisExecutionExpiresAt: null,
@@ -640,6 +653,7 @@ export function createViralReplicationAnalysisHandler(
   return async function viralReplicationAnalysisHandler(job: Job<TaskJobData>) {
     let tempDirectory: string | null = null
     let execution: Parameters<typeof executionWhere>[0] | null = null
+    let failureCode: ViralAnalysisFailureCode = VIRAL_ANALYSIS_FAILED
     try {
       if (job.data.targetType !== 'ViralReplication') {
         throw new Error('Viral analysis task target type is invalid')
@@ -681,6 +695,7 @@ export function createViralReplicationAnalysisHandler(
       tempDirectory = await dependencies.makeTempDirectory()
       const sourcePath = path.join(tempDirectory, 'source-video')
       const outputDirectory = path.join(tempDirectory, 'frames')
+      failureCode = VIRAL_VIDEO_PREPROCESS_FAILED
       await dependencies.reportProgress(job, 10, {
         stage: 'viral_preprocess', stageLabel: '预处理参考视频', displayMode: 'detail',
       })
@@ -694,6 +709,7 @@ export function createViralReplicationAnalysisHandler(
       let transcriptText = preprocessed.transcriptText
       const audioSegments = preprocessedAudioSegments(preprocessed)
       if (audioSegments.length > 0) {
+        failureCode = VIRAL_AUDIO_TRANSCRIPTION_FAILED
         await dependencies.reportProgress(job, 38, {
           stage: 'viral_audio_transcription',
           stageLabel: '识别原声音频内容',
@@ -715,7 +731,7 @@ export function createViralReplicationAnalysisHandler(
               continue
             }
             if (!supportsInlineAudioTranscription(model)) {
-              throw new Error('VIRAL_AUDIO_TRANSCRIPTION_MODEL_UNSUPPORTED')
+              throw new Error(VIRAL_AUDIO_TRANSCRIPTION_MODEL_UNSUPPORTED)
             }
             const transcription = await dependencies.runVision({
               userId: job.data.userId,
@@ -758,6 +774,7 @@ export function createViralReplicationAnalysisHandler(
         frameCount: preprocessed.shots.length,
       })
 
+      failureCode = VIRAL_FRAME_PROCESSING_FAILED
       for (const shot of preprocessed.shots) {
         await persistFrame({ dependencies, execution, replicationId: replication.id, shot })
       }
@@ -779,6 +796,7 @@ export function createViralReplicationAnalysisHandler(
           assertFrameSize(bytes)
           return `data:image/jpeg;base64,${bytes.toString('base64')}`
         }))
+        failureCode = VIRAL_ANALYSIS_MODEL_REQUEST_FAILED
         const completion = await dependencies.runVision({
           userId: job.data.userId,
           model,
@@ -796,6 +814,7 @@ export function createViralReplicationAnalysisHandler(
             action: 'viral_shot_analysis',
           },
         })
+        failureCode = VIRAL_ANALYSIS_MODEL_RESPONSE_INVALID
         const batch = parseViralShotAnalysisBatch(getCompletionContent(completion), shots)
         applyTranscriptToShots(batch.shots, transcriptText)
         batchResults.push(batch)
@@ -803,6 +822,7 @@ export function createViralReplicationAnalysisHandler(
 
       const adaptiveCandidates = selectShotsForAdaptiveReview(batchResults)
       if (adaptiveCandidates.length > 0) {
+        failureCode = VIRAL_FRAME_PROCESSING_FAILED
         await dependencies.reportProgress(job, 81, {
           stage: 'viral_plot_review',
           stageLabel: '复核低置信度剧情镜头',
@@ -857,6 +877,7 @@ export function createViralReplicationAnalysisHandler(
               return `data:image/jpeg;base64,${bytes.toString('base64')}`
             }),
           ))
+          failureCode = VIRAL_ANALYSIS_MODEL_REQUEST_FAILED
           const completion = await dependencies.runVision({
             userId: job.data.userId,
             model,
@@ -883,6 +904,7 @@ export function createViralReplicationAnalysisHandler(
               action: 'viral_shot_review',
             },
           })
+          failureCode = VIRAL_ANALYSIS_MODEL_RESPONSE_INVALID
           const reviewed = parseViralShotAnalysisBatch(
             getCompletionContent(completion),
             shotBatch,
@@ -897,6 +919,7 @@ export function createViralReplicationAnalysisHandler(
         stage: 'viral_report_aggregation', stageLabel: '汇总视频分析', displayMode: 'detail',
       })
       await extendExecutionLease(dependencies.prisma, dependencies, execution)
+      failureCode = VIRAL_ANALYSIS_MODEL_REQUEST_FAILED
       const aggregation = await dependencies.runText({
         userId: job.data.userId,
         model,
@@ -914,10 +937,12 @@ export function createViralReplicationAnalysisHandler(
           action: 'viral_report_aggregation',
         },
       })
+      failureCode = VIRAL_ANALYSIS_MODEL_RESPONSE_INVALID
       const report = parseViralAnalysisReport(
         safeParseJson(getCompletionContent(aggregation)),
         preprocessed.metadata.durationMs,
       )
+      failureCode = VIRAL_ANALYSIS_REPORT_FAILED
       assertAggregatedTimeline(report, batchResults)
       report.shots = batchResults.flatMap((batch) => batch.shots)
       applyTranscriptToShots(report.shots, transcriptText)
@@ -946,7 +971,7 @@ export function createViralReplicationAnalysisHandler(
       const delayed = error instanceof DelayedError
         || (error instanceof Error && error.name === 'DelayedError')
       if (execution && !delayed && !(error instanceof ViralAnalysisSupersededError)) {
-        await markFailed(dependencies, execution, error)
+        await markFailed(dependencies, execution, error, failureCode)
       }
       throw error
     } finally {

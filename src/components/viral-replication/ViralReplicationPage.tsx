@@ -14,8 +14,14 @@ import {
 import type { SSEEvent } from '@/lib/task/types'
 import {
   VIRAL_ANALYSIS_FAILED,
+  VIRAL_ANALYSIS_MODEL_REQUEST_FAILED,
+  VIRAL_ANALYSIS_MODEL_RESPONSE_INVALID,
+  VIRAL_ANALYSIS_REPORT_FAILED,
   VIRAL_AUDIO_TRANSCRIPTION_FAILED,
+  VIRAL_AUDIO_TRANSCRIPTION_MODEL_UNSUPPORTED,
+  VIRAL_FRAME_PROCESSING_FAILED,
   VIRAL_STORYBOARD_GENERATION_FAILED,
+  VIRAL_VIDEO_PREPROCESS_FAILED,
 } from '@/lib/viral-replication/constants'
 import {
   parseViralAnalysisReportForView,
@@ -57,13 +63,19 @@ export default function ViralReplicationPage({
   const resolvedProjectId = replication?.project?.id || replication?.projectId || null
   const resolvedEpisodeId = replication?.episode?.id || replication?.episodeId || null
   const projectMatches = resolvedProjectId === projectId
-  const failureMessage = replication?.errorMessage === VIRAL_STORYBOARD_GENERATION_FAILED
-    ? t('errors.storyboardGeneration')
-    : replication?.errorMessage === VIRAL_AUDIO_TRANSCRIPTION_FAILED
-      ? t('errors.audioTranscription')
-      : replication?.errorMessage === VIRAL_ANALYSIS_FAILED
-        ? t('errors.analysis')
-        : t('errors.generic')
+  const failureMessages: Record<string, string> = {
+    [VIRAL_STORYBOARD_GENERATION_FAILED]: t('errors.storyboardGeneration'),
+    [VIRAL_AUDIO_TRANSCRIPTION_FAILED]: t('errors.audioTranscription'),
+    [VIRAL_AUDIO_TRANSCRIPTION_MODEL_UNSUPPORTED]: t('errors.audioModelUnsupported'),
+    [VIRAL_VIDEO_PREPROCESS_FAILED]: t('errors.videoPreprocess'),
+    [VIRAL_FRAME_PROCESSING_FAILED]: t('errors.frameProcessing'),
+    [VIRAL_ANALYSIS_MODEL_REQUEST_FAILED]: t('errors.modelRequest'),
+    [VIRAL_ANALYSIS_MODEL_RESPONSE_INVALID]: t('errors.modelResponseInvalid'),
+    [VIRAL_ANALYSIS_REPORT_FAILED]: t('errors.reportAggregation'),
+    [VIRAL_ANALYSIS_FAILED]: t('errors.analysis'),
+  }
+  const failureCode = replication?.errorMessage || null
+  const failureMessage = failureCode ? failureMessages[failureCode] || t('errors.generic') : t('errors.generic')
 
   useEffect(() => {
     if (typeof replicationBrief === 'string') setBrief(replicationBrief)
@@ -121,7 +133,10 @@ export default function ViralReplicationPage({
       ) : null}
 
       {viewState?.kind === 'failed' ? (
-        <ErrorCard message={failureMessage}>
+        <ErrorCard
+          message={failureMessage}
+          diagnosticCode={failureCode && failureMessages[failureCode] ? failureCode : null}
+        >
           <button
             type="button"
             disabled={retry.isPending}
@@ -204,10 +219,23 @@ function StatusCard({ title, message }: { title: string; message: string }) {
   )
 }
 
-function ErrorCard({ message, children }: { message: string; children?: React.ReactNode }) {
+function ErrorCard({
+  message,
+  diagnosticCode,
+  children,
+}: {
+  message: string
+  diagnosticCode?: string | null
+  children?: React.ReactNode
+}) {
   return (
     <section role="alert" className="rounded-2xl border border-[var(--glass-tone-danger-fg)]/30 bg-[var(--glass-tone-danger-bg)] p-6">
       <p className="text-sm text-[var(--glass-tone-danger-fg)]">{message}</p>
+      {diagnosticCode ? (
+        <p className="mt-2 break-all font-mono text-xs text-[var(--glass-text-secondary)]">
+          {diagnosticCode}
+        </p>
+      ) : null}
       {children}
     </section>
   )

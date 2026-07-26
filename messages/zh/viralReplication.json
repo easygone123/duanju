@@ -70,7 +70,13 @@
   "errors": {
     "generic": "任务暂时未能完成，请重试。",
     "analysis": "视频分析失败，请重试。若持续失败，请检查分析模型连接。",
+    "videoPreprocess": "无法读取或预处理原视频。请确认视频文件完整、编码受支持，并检查对象存储与 FFmpeg 是否可用。",
     "audioTranscription": "原视频台词提取失败，请重试。系统不会使用不完整字幕继续生成。",
+    "audioModelUnsupported": "当前没有可用的音频转写能力。请配置 ASR 服务，或改用支持音频输入的 Gemini 分析模型。",
+    "frameProcessing": "关键帧提取或保存失败。请检查 FFmpeg、对象存储连接和存储空间。",
+    "modelRequest": "请求分析模型失败。请检查分析模型配置、接口地址、密钥、额度和网络连接。",
+    "modelResponseInvalid": "分析模型已返回结果，但结果格式不符合视频分析协议。请重试，或更换指令遵循能力更强的多模态模型。",
+    "reportAggregation": "镜头已分析，但汇总报告的时间线或剧情结构无效。请重试分析。",
     "storyboardGeneration": "原剧情重绘分镜生成失败，请重试。重试时会保留分析结果，不会重新分析视频。",
     "invalidReport": "分析报告格式无效，请重试分析。",
     "projectMismatch": "该分析任务不属于当前项目。"

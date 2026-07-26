@@ -70,7 +70,13 @@
   "errors": {
     "generic": "The task could not be completed. Please retry.",
     "analysis": "Video analysis failed. Retry, and check the analysis model connection if the problem continues.",
+    "videoPreprocess": "The source video could not be read or preprocessed. Verify the file, codec support, object storage, and FFmpeg.",
     "audioTranscription": "Source dialogue transcription failed. Retry; generation will not continue with incomplete subtitles.",
+    "audioModelUnsupported": "No audio transcription capability is available. Configure ASR or use a Gemini analysis model that supports audio input.",
+    "frameProcessing": "Key-frame extraction or storage failed. Check FFmpeg, object storage connectivity, and free storage space.",
+    "modelRequest": "The analysis-model request failed. Check the model configuration, endpoint, credentials, quota, and network.",
+    "modelResponseInvalid": "The model responded, but its output did not match the video-analysis contract. Retry or choose a stronger multimodal instruction-following model.",
+    "reportAggregation": "Shot analysis completed, but the combined timeline or source-story report was invalid. Retry the analysis.",
     "storyboardGeneration": "Source-story visual redraw failed. Retry will keep the analysis result instead of analyzing the video again.",
     "invalidReport": "The analysis report is invalid. Please retry the analysis.",
     "projectMismatch": "This analysis task does not belong to the current project."
