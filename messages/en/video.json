@@ -181,12 +181,22 @@
       "saveDirty": "Save *",
       "saved": "Saved",
       "export": "Export Video",
+      "exportVideo": "Download Merged Video",
+      "rendering": "Merging…",
+      "clearTransitions": "Remove All Transitions",
       "exportProject": "Download Edit Project JSON",
       "brand": "ChatCut AI Auto Edit",
       "autoArrange": "AI Auto Edit",
       "autoCutting": "AI editing…",
       "autoArrangeConfirm": "AI auto editing will replace unsaved timeline changes. Continue?",
       "importedCount": "Timeline {current}/{total} shots"
+    },
+    "render": {
+      "preparing": "Submitting the merge job…",
+      "rendering": "Merging all storyboard clips. The download will start automatically.",
+      "completed": "The merged video is ready and downloading.",
+      "failed": "Failed to create the merged video",
+      "timeout": "The merge job timed out. Please try again later."
     },
     "autoCut": {
       "title": "Tell ChatCut how to edit",

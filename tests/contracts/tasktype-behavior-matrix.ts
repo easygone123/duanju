@@ -13,7 +13,12 @@ function resolveChainTestByTaskType(taskType: TaskType): string {
   if (taskType === 'viral_video_analysis' || taskType === 'viral_storyboard_generation') {
     return 'tests/integration/chain/viral-replication.chain.test.ts'
   }
-  if (taskType === 'video_panel' || taskType === 'lip_sync') {
+  if (
+    taskType === 'video_panel'
+    || taskType === 'storyboard_director_video'
+    || taskType === 'lip_sync'
+    || taskType === 'editor_render'
+  ) {
     return 'tests/integration/chain/video.chain.test.ts'
   }
   if (taskType === 'voice_line' || taskType === 'voice_design' || taskType === 'asset_hub_voice_design') {

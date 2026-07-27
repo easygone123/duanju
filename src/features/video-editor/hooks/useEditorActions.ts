@@ -56,7 +56,6 @@ export function createProjectFromPanels(
 
     // 创建视频片段
     const timeline: VideoClip[] = videoPanels.map((panel, index) => {
-        const nextPanel = videoPanels[index + 1]
         const matchedVoices = voiceLines?.filter((voiceLine) => {
             if (panel.id && voiceLine.matchedPanelId) {
                 return voiceLine.matchedPanelId === panel.id
@@ -89,10 +88,6 @@ export function createProjectFromPanels(
                     style: 'default' as const
                 } : undefined
             },
-            transition: nextPanel ? {
-                type: nextPanel.storyboardId === panel.storyboardId ? 'dissolve' as const : 'fade' as const,
-                durationInFrames: 15 // 0.5s @ 30fps
-            } : undefined,
             metadata: {
                 panelId: panel.id || `${panel.storyboardId}-${panel.panelIndex ?? index}`,
                 storyboardId: panel.storyboardId,
@@ -264,14 +259,12 @@ export function useEditorActions({ projectId, episodeId }: UseEditorActionsProps
     /**
      * 发起渲染导出
      */
-    const startRender = useCallback(async (editorProjectId: string) => {
+    const startRender = useCallback(async () => {
         const response = await apiFetch(`/api/novel-promotion/${projectId}/editor/render`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                editorProjectId,
-                format: 'mp4',
-                quality: 'high'
+                episodeId,
             })
         })
 
@@ -280,14 +273,14 @@ export function useEditorActions({ projectId, episodeId }: UseEditorActionsProps
         }
 
         return response.json()
-    }, [projectId])
+    }, [episodeId, projectId])
 
     /**
      * 获取渲染状态
      */
-    const getRenderStatus = useCallback(async (editorProjectId: string) => {
+    const getRenderStatus = useCallback(async () => {
         const response = await apiFetch(
-            `/api/novel-promotion/${projectId}/editor/render?id=${editorProjectId}`
+            `/api/novel-promotion/${projectId}/editor/render?episodeId=${encodeURIComponent(episodeId)}`
         )
 
         if (!response.ok) {
@@ -295,7 +288,7 @@ export function useEditorActions({ projectId, episodeId }: UseEditorActionsProps
         }
 
         return response.json()
-    }, [projectId])
+    }, [episodeId, projectId])
 
     return {
         autoCutProject,

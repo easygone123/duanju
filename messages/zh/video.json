@@ -181,12 +181,22 @@
       "saveDirty": "保存 *",
       "saved": "已保存",
       "export": "导出视频",
+      "exportVideo": "下载合并视频",
+      "rendering": "正在合并…",
+      "clearTransitions": "取消全部转场",
       "exportProject": "下载剪辑工程 JSON",
       "brand": "ChatCut AI 自动剪辑",
       "autoArrange": "AI 自动剪辑",
       "autoCutting": "AI 剪辑中…",
       "autoArrangeConfirm": "AI 自动剪辑会覆盖当前未保存的时间线，是否继续？",
       "importedCount": "时间线 {current}/{total} 个分镜"
+    },
+    "render": {
+      "preparing": "正在提交合并任务…",
+      "rendering": "正在合并全部分镜，完成后会自动下载。",
+      "completed": "合并视频已生成并开始下载。",
+      "failed": "合并视频生成失败",
+      "timeout": "合并任务等待超时，请稍后重试。"
     },
     "autoCut": {
       "title": "告诉 ChatCut 你想怎么剪",

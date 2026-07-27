@@ -77,6 +77,16 @@ export function useEditorState({ episodeId, initialProject }: UseEditorStateProp
         setIsDirty(true)
     }, [])
 
+    const clearAllTransitions = useCallback(() => {
+        setProject(prev => ({
+            ...prev,
+            timeline: prev.timeline.map(clip => (
+                clip.transition ? { ...clip, transition: undefined } : clip
+            ))
+        }))
+        setIsDirty(true)
+    }, [])
+
     // ========================================
     // BGM 操作
     // ========================================
@@ -154,6 +164,7 @@ export function useEditorState({ episodeId, initialProject }: UseEditorStateProp
         removeClip,
         updateClip,
         reorderClips,
+        clearAllTransitions,
 
         // BGM actions
         addBgm,

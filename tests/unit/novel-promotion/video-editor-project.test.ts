@@ -80,6 +80,7 @@ describe('createProjectFromPanels', () => {
     ])
 
     expect(project.timeline).toHaveLength(2)
+    expect(project.timeline.every((clip) => clip.transition === undefined)).toBe(true)
     expect(project.timeline[0]).toMatchObject({
       src: '/m/video-1',
       durationInFrames: 60,

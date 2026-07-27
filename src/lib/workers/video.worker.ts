@@ -43,6 +43,7 @@ import {
   buildLipSyncPanelPublishVoiceLineWhere,
   buildOwnedLipSyncVoiceLineWhere,
 } from '@/lib/novel-promotion/lip-sync/voice-line-match'
+import { handleEditorRenderTask } from './handlers/editor-render'
 
 type AnyObj = Record<string, unknown>
 type VideoOptionValue = string | number | boolean
@@ -834,6 +835,8 @@ async function processVideoTask(job: Job<TaskJobData>) {
       return await handleStoryboardDirectorVideoTask(job)
     case TASK_TYPE.LIP_SYNC:
       return await handleLipSyncTask(job)
+    case TASK_TYPE.EDITOR_RENDER:
+      return await handleEditorRenderTask(job)
     default:
       throw new Error(`Unsupported video task type: ${job.data.type}`)
   }

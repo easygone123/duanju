@@ -11,6 +11,7 @@ import { calculateTimelineDuration, framesToTime } from '../utils/time-utils'
 import { RemotionPreview } from './Preview'
 import { Timeline } from './Timeline'
 import { TransitionPicker, TransitionType } from './TransitionPicker'
+import { EditorExportControls } from './EditorExportControls'
 
 interface VideoEditorStageProps {
     projectId: string
@@ -51,6 +52,7 @@ export function VideoEditorStage({
         removeClip,
         updateClip,
         reorderClips,
+        clearAllTransitions,
         play,
         pause,
         seek,
@@ -60,7 +62,7 @@ export function VideoEditorStage({
         loadProject
     } = useEditorState({ episodeId, initialProject })
 
-    const { saveProject, autoCutProject } = useEditorActions({ projectId, episodeId })
+    const { saveProject, autoCutProject, startRender, getRenderStatus } = useEditorActions({ projectId, episodeId })
     const [autoCutInstruction, setAutoCutInstruction] = useState('')
     const [autoCutLoading, setAutoCutLoading] = useState(false)
     const [autoCutError, setAutoCutError] = useState<string | null>(null)
@@ -78,26 +80,6 @@ export function VideoEditorStage({
         } catch (error) {
             _ulogError('Save failed:', error)
             alert(t('editor.alert.saveFailed'))
-        }
-    }
-
-    const handleExport = async () => {
-        try {
-            await saveProject(project)
-            markSaved()
-            const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' })
-            const url = URL.createObjectURL(blob)
-            const anchor = document.createElement('a')
-            anchor.href = url
-            anchor.download = `waoowaoo-edit-${episodeId}.json`
-            document.body.appendChild(anchor)
-            anchor.click()
-            anchor.remove()
-            URL.revokeObjectURL(url)
-            alert(t('editor.alert.exportSuccess'))
-        } catch (error) {
-            _ulogError('Export failed:', error)
-            alert(t('editor.alert.exportFailed'))
         }
     }
 
@@ -149,6 +131,7 @@ export function VideoEditorStage({
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
+                flexWrap: 'wrap',
                 gap: '12px',
                 padding: '12px 16px',
                 borderBottom: '1px solid var(--glass-stroke-base)',
@@ -186,12 +169,16 @@ export function VideoEditorStage({
                     {isDirty ? t('editor.toolbar.saveDirty') : t('editor.toolbar.saved')}
                 </button>
 
-                <button
-                    onClick={handleExport}
-                    className="glass-btn-base glass-btn-tone-success px-4 py-2"
-                >
-                    {t('editor.toolbar.exportProject')}
-                </button>
+                <EditorExportControls
+                    project={project}
+                    episodeId={episodeId}
+                    hasTransitions={project.timeline.some((clip) => !!clip.transition)}
+                    clearAllTransitions={clearAllTransitions}
+                    saveProject={saveProject}
+                    markSaved={markSaved}
+                    startRender={startRender}
+                    getRenderStatus={getRenderStatus}
+                />
             </div>
 
             <div className="flex flex-wrap items-center gap-3 border-b border-[var(--glass-stroke-base)] bg-[var(--glass-bg-surface-strong)] px-4 py-3">
