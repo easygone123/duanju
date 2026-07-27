@@ -323,22 +323,34 @@ function loadOriginalDirector() {
   const bridge = getBridge()
   if (bridge.extension) return Promise.resolve()
   if (bridge.scriptPromise) return bridge.scriptPromise
-  bridge.scriptPromise = new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(`script[src="${ORIGINAL_SCRIPT_SRC}"]`)
-    if (existing) {
-      existing.addEventListener('load', () => resolve(), { once: true })
-      existing.addEventListener('error', () => reject(new Error('LTX Director script failed to load')), { once: true })
-      return
-    }
+  const existing = document.querySelector<HTMLScriptElement>(`script[src="${ORIGINAL_SCRIPT_SRC}"]`)
+  // A failed script element remains in the document after a deployment and
+  // will never emit load/error again. Remove it so reopening the Director tab
+  // can recover without requiring the user to clear browser state.
+  existing?.remove()
+  const promise = new Promise<void>((resolve, reject) => {
     const script = document.createElement('script')
     script.src = ORIGINAL_SCRIPT_SRC
     script.async = true
     script.dataset.waooLtxDirector = 'true'
-    script.onload = () => resolve()
-    script.onerror = () => reject(new Error('LTX Director script failed to load'))
+    script.onload = () => {
+      if (bridge.extension) {
+        resolve()
+        return
+      }
+      script.remove()
+      bridge.scriptPromise = undefined
+      reject(new Error('LTX Director extension registration was not captured'))
+    }
+    script.onerror = () => {
+      script.remove()
+      bridge.scriptPromise = undefined
+      reject(new Error('LTX Director script failed to load'))
+    }
     document.head.appendChild(script)
   })
-  return bridge.scriptPromise
+  bridge.scriptPromise = promise
+  return promise
 }
 
 function presetFromDimensions(width: number, height: number): LtxDirectorResolutionPreset {
